@@ -179,3 +179,31 @@ func parseSize(text string) (int64, bool) {
 	}
 	return n << shift, true
 }
+
+// parseBandwidth converts a bandwidth such as 256KiB into bytes per second and reports whether the text is valid.
+func parseBandwidth(text string) (int64, bool) {
+	if len(text) < 4 || len(text) > 8 {
+		return 0, false
+	}
+	digits, unit := text[:len(text)-3], text[len(text)-3:]
+	var shift uint
+	switch unit {
+	case "KiB":
+		shift = 10
+	case "MiB":
+		shift = 20
+	default:
+		return 0, false
+	}
+	if len(digits) > 5 || (len(digits) > 1 && digits[0] == '0') {
+		return 0, false
+	}
+	var n int64
+	for i := range len(digits) {
+		if digits[i] < '0' || digits[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int64(digits[i]-'0')
+	}
+	return n << shift, true
+}

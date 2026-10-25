@@ -2,7 +2,7 @@
 # Smoke test of the backend container started from deploy/backend/docker-compose.yml (record 0060).
 # Usage: smoke-test-backend.sh <image>   (the image must exist locally, for example vandox:local)
 #
-# Checks the health check, the login (the hash comes from the image's own hash-password), the web UI's static files and security policy, the port bindings, the resource limits, the owner and mode of /data in the image
+# Checks the health check, the login (the hash comes from the image's own hash-password), the web UI's static files and security policy, the port bindings, the ingest endpoint (accepts the golden batch, refuses a wrong token, serves nothing else, and compose refuses to start without INGEST_BIND_ADDRESS), the resource limits, the owner and mode of /data in the image
 # (65532:65532, 0700; /data is the only entry the image adds that is owned by the container user, apart from
 # the base image's /home/nonroot), the graceful stop and that the database survives re-creating the container.
 # Reads no repository secret, pushes nothing and uses no network beyond
@@ -12,6 +12,8 @@ set -euo pipefail
 
 image="${1:?usage: smoke-test-backend.sh <image>}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# The curl write-out format that prints only the HTTP status code of a request.
+readonly status_format='%{http_code}'
 
 fail() {
   echo "::error::$*" >&2
@@ -37,8 +39,14 @@ cleanup() {
 trap cleanup EXIT
 
 cp "$repo/deploy/backend/docker-compose.yml" "$repo/deploy/backend/vandoxd.yaml" "$dir/"
+# The ingest endpoint needs the agent ID of the golden batch: replace the commented line of the existing
+# ingest block, so the file never holds a second ingest key.
+sed -i 's/^  # agent_id: web-1$/  agent_id: agent-1/' "$dir/vandoxd.yaml"
+grep -qx '  agent_id: agent-1' "$dir/vandoxd.yaml" || fail "could not set ingest.agent_id in the copy of vandoxd.yaml"
+cmp -s "$repo/deploy/backend/vandoxd.yaml" "$dir/vandoxd.yaml" && fail "the copy of vandoxd.yaml did not change"
 mkdir "$dir/secrets" "$dir/import"
-openssl rand -hex 32 >"$dir/secrets/vandox_agent_token"
+token="$(openssl rand -hex 32)"
+printf '%s\n' "$token" >"$dir/secrets/vandox_agent_token"
 sudo chown 65532:65532 "$dir/secrets/vandox_agent_token"
 sudo chmod 0400 "$dir/secrets/vandox_agent_token"
 # The web password: the hash is created by the image itself, as the README tells the operator.
@@ -55,6 +63,7 @@ services:
 OVERRIDE
 
 export WEB_BIND_ADDRESS=127.0.0.1
+export INGEST_BIND_ADDRESS=127.0.0.1
 compose() { (cd "$dir" && docker compose -p "$project" "$@"); }
 
 # Prints the container ID of the service.
@@ -81,6 +90,12 @@ inspect() {
 
 compose config --quiet || fail "docker compose config failed"
 
+# The ingest port has no default binding: compose must refuse a configuration without the variable and name it.
+if config_out="$(cd "$dir" && env -u INGEST_BIND_ADDRESS docker compose -p "$project" config --quiet 2>&1)"; then
+  fail "docker compose config succeeded without INGEST_BIND_ADDRESS, want a failure"
+fi
+grep -q 'INGEST_BIND_ADDRESS' <<<"$config_out" || fail "the compose error does not name INGEST_BIND_ADDRESS: $config_out"
+
 compose up -d
 wait_healthy
 
@@ -105,7 +120,7 @@ check_web_ui() {
   local path code headers got
   local -a found
   for path in /_framework/blazor.web.js /app.css /lib/uplot/uPlot.esm.js; do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080$path")"
+    code="$(curl -sS -o /dev/null -w "$status_format" "http://127.0.0.1:8080$path")"
     [[ "$code" == "200" ]] || fail "GET $path on the web port answered $code, want 200"
   done
   headers="$(curl -fsS -D - -o /dev/null http://127.0.0.1:8080/login | tr -d '\r')"
@@ -129,9 +144,9 @@ check_login() {
   html="$(curl -fsS -c "$jar" "$base/login")"
   token="$(grep -oE 'name="__RequestVerificationToken"[^>]*value="[^"]*"' <<<"$html" | head -n 1 | sed -E 's/.*value="([^"]*)"/\1/')"
   [[ -n "$token" ]] || fail "the login page has no antiforgery token"
-  code="$(curl -sS -b "$jar" -c "$jar" -o /dev/null -w '%{http_code}' --data-urlencode "__RequestVerificationToken=$token" --data-urlencode "_handler=login" --data-urlencode "password=$pass" "$base/login")"
+  code="$(curl -sS -b "$jar" -c "$jar" -o /dev/null -w "$status_format" --data-urlencode "__RequestVerificationToken=$token" --data-urlencode "_handler=login" --data-urlencode "password=$pass" "$base/login")"
   [[ "$code" == "302" ]] || fail "POST /login with the right password answered $code, want 302"
-  code="$(curl -sS -b "$jar" -o /dev/null -w '%{http_code}' "$base_url")"
+  code="$(curl -sS -b "$jar" -o /dev/null -w "$status_format" "$base_url")"
   [[ "$code" == "200" ]] || fail "GET / with the session answered $code, want 200"
 }
 
@@ -140,11 +155,32 @@ policy="$(read_policy)"
 check_web_ui "$policy"
 check_login "$password"
 
-ingest="$(inspect '{{json (index .NetworkSettings.Ports "8081/tcp")}}')"
-case "$ingest" in
-  null | "[]" | "") ;;
-  *) fail "ingest port 8081 has a host binding: $ingest" ;;
-esac
+# The ingest port is published on exactly 127.0.0.1 (IPv4 only, one binding).
+ingest="$(inspect '{{range (index .NetworkSettings.Ports "8081/tcp")}}{{.HostIp}} {{end}}')"
+[[ "$ingest" = "127.0.0.1 " ]] || fail "ingest port 8081 is bound to '$ingest', want exactly 127.0.0.1"
+
+# Posts a file to the ingest endpoint with the given Authorization value and prints the status code.
+post_batch() {
+  local auth="$1" file="$2"
+  curl -sS -o /dev/null -w "$status_format" -X POST --data-binary "@$file" \
+    -H "Authorization: Bearer $auth" -H 'Content-Type: application/gzip' http://127.0.0.1:8081/v1/batches
+}
+
+check_ingest() {
+  local golden="$repo/testdata/wire/all-kinds.jsonl.gz"
+  local code
+  [[ -s "$golden" ]] || fail "missing golden batch $golden"
+  code="$(post_batch "$token" "$golden")"
+  [[ "$code" == "204" ]] || fail "POST of the golden batch on the ingest port answered $code, want 204"
+  code="$(post_batch "$token" "$golden")"
+  [[ "$code" == "204" ]] || fail "repeated POST of the golden batch answered $code, want 204"
+  code="$(post_batch "wrong-$token" "$golden")"
+  [[ "$code" == "401" ]] || fail "POST with a wrong token answered $code, want 401"
+  code="$(curl -sS -o /dev/null -w "$status_format" http://127.0.0.1:8081/healthz)"
+  [[ "$code" == "404" ]] || fail "GET /healthz on the ingest port answered $code, want 404"
+}
+
+check_ingest
 
 exposed="$(docker image inspect --format '{{json .Config.ExposedPorts}}' "$image")"
 case "$exposed" in

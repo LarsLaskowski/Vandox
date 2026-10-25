@@ -8,7 +8,19 @@ host area; the agent's own rights are in the agent area; secrets are in [Configu
 
 ## Agent to backend
 
-Planned with the agent and the ingest API (v0.2.0); v0.1.0 has no agent-to-backend traffic.
+Part of v0.2.0; v0.1.0 has no agent-to-backend traffic. The agent's sender posts the batches to `backend.url`
+([Agent](agent.md), *Connection*, *Sending*), and the backend's ingest endpoint stores them; the compose file publishes the ingest port
+on the address in `INGEST_BIND_ADDRESS`, the backend host's tailnet address. The request, the answers and the endpoint's limits are in
+the backend host area (*Ingest endpoint*, *Compose file*).
+
+- **The backend host runs Tailscale in TUN mode.** Only there is the tailnet address a host interface Docker can bind. In
+  userspace-networking mode (the default of the Synology package) it is not, and Tailscale forwards inbound tailnet connections to
+  `127.0.0.1`, where the web port is published, which would leave only the ACL between the tailnet and the web UI; that mode is not
+  supported. The userspace behavior is as reported in issue #40 and record 0060, not verified on a host (backend host area,
+  *Exposure and trust*).
+- **The binding is defense in depth.** Docker matches a published port by its destination address only, so a host on the LAN that
+  routes packets to the tailnet address may reach the ingest port as it may the web port. The token, bound to the one agent ID in
+  `ingest.agent_id`, is the boundary of ingest.
 
 - Agent and backend communicate **only over Tailscale**. The tailnet ACL allows the monitored server to reach **only the ingest port on
   the backend host** and nothing else, so a compromised server cannot reach the rest of the home network. The ACL is part of the
@@ -16,6 +28,15 @@ Planned with the agent and the ingest API (v0.2.0); v0.1.0 has no agent-to-backe
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).
+- The agent sends its token only in the `Authorization` header of its requests to `backend.url`, connects only to that URL's host and
+  port (no proxy from the environment, no redirect followed), verifies the certificate of an `https` URL and never switches the check
+  off. Plain `http` is meant only for the backend host's tailnet address or MagicDNS name, where Tailscale encrypts and authenticates
+  the transport. The agent treats every answer as untrusted: it reads at most 4,096 bytes of the body, discards them and looks only
+  at the status and the exact value of the header `Vandox-Refused`.
+- The ingest endpoint checks the token before it reads or decodes a request's body, so a peer without the token costs the backend no
+  decoding, and it marks a refused batch (`Vandox-Refused: batch`) only on an authenticated request. A token holder (the monitored
+  server, or whoever has taken it over) can write batches of its own agent ID only, bounded per request in memory and time, and
+  only until the free space of the data volume falls to `ingest.min_free`.
 
 ## Web UI
 
@@ -66,6 +87,12 @@ agent's installation instructions.
 ## Related decisions
 
 - [0010](../decisions/0010-tailscale-with-strict-acl.md) — why Tailscale with a strict ACL.
+- [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the agent sends one batch per
+  request with a bearer token and judges the answer by its status and one fixed header value.
+- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
+  token is bound to one agent ID and a free-space floor bounds what a token holder can write.
+- [0127](../decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) — why TUN mode and a
+  required bind address.
 - [0016](../decisions/0016-web-ui-in-home-lan-with-login.md) — why the web UI is LAN-only with a login.
 - [0013](../decisions/0013-mariadb-access-via-unix-socket-process-privilege.md) — why a `unix_socket` user with only `PROCESS`.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the

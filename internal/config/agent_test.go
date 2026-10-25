@@ -96,7 +96,7 @@ func TestDefaultAgent(t *testing.T) {
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	old := []string{"agent_id", "backend.url", "spool.directory", "spool.max_size", "spool.min_free", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
+	old := []string{"agent_id", "backend.url", "backend.backfill_bandwidth", "spool.directory", "spool.max_size", "spool.min_free", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
 	shipping := []string{"log_shipping.journal", "log_shipping.min_priority", "log_shipping.files", "log_shipping.drop"}
 	var rest []string
 	for _, key := range got {
@@ -179,6 +179,9 @@ func requireExampleValues(t *testing.T, got *Agent) {
 	if got.Backend.URL != "http://100.64.0.1:8081" {
 		t.Errorf("Backend.URL = %q, want %q", got.Backend.URL, "http://100.64.0.1:8081")
 	}
+	if got.Backend.BackfillBandwidth != defaultBackfillBandwidth || got.Backend.BackfillBytes != defaultBackfillBytes {
+		t.Errorf("Backend backfill = %q (%d bytes), want %q (%d bytes)", got.Backend.BackfillBandwidth, got.Backend.BackfillBytes, defaultBackfillBandwidth, defaultBackfillBytes)
+	}
 	if got.Spool.Directory != "/var/lib/vandox/spool" {
 		t.Errorf("Spool.Directory = %q, want %q", got.Spool.Directory, "/var/lib/vandox/spool")
 	}
@@ -204,6 +207,9 @@ func requireExampleSetsEveryKey(t *testing.T) {
 	lines, err := decodeStrict(agentExample, data, &probe)
 	if err != nil {
 		t.Fatalf("decodeStrict(%q) error = %v, want nil", agentExample, err)
+	}
+	if lines[keyBackfillBandwidth] <= 0 {
+		t.Errorf("example %q does not set %q explicitly (line %d)", agentExample, keyBackfillBandwidth, lines[keyBackfillBandwidth])
 	}
 	for _, key := range append(AgentKeys(), "log_shipping.journal", "log_shipping.min_priority", "log_shipping.files", "log_shipping.drop") {
 		if lines[key] <= 0 {
@@ -1580,5 +1586,144 @@ func TestLoadAgent_SpoolSizeForms(t *testing.T) {
 				t.Errorf("LoadAgent(%q) error = %v, want %q", doc, err, want)
 			}
 		})
+	}
+}
+
+const (
+	keyBackfillBandwidth     = "backend.backfill_bandwidth"
+	defaultBackfillBandwidth = "256KiB"
+	defaultBackfillBytes     = 256 << 10
+	backfillReason           = "must be a whole number of KiB or MiB from 16KiB to 1024MiB, such as 256KiB or 4MiB"
+	backfillLine             = 4
+)
+
+// backfillDoc builds a valid agent file whose backend section sets backfill_bandwidth (line 4) to the raw YAML text
+// given; an empty text leaves the key out.
+func backfillDoc(value string) string {
+	doc := validAgent
+	if value != "" {
+		doc += "  backfill_bandwidth: " + value + "\n"
+	}
+	return doc
+}
+
+func TestLoadAgent_BackfillBandwidth(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		if got := DefaultAgent().Backend.BackfillBandwidth; got != defaultBackfillBandwidth {
+			t.Errorf("DefaultAgent().Backend.BackfillBandwidth = %q, want %q", got, defaultBackfillBandwidth)
+		}
+		got, err := LoadAgent(writeTemp(t, validAgent), agentEnv())
+		if err != nil {
+			t.Fatalf("LoadAgent(%q) error = %v, want nil", validAgent, err)
+		}
+		if got.Backend.BackfillBandwidth != defaultBackfillBandwidth || got.Backend.BackfillBytes != defaultBackfillBytes {
+			t.Errorf("LoadAgent(%q).Backend backfill = %q (%d bytes), want %q (%d bytes)", validAgent, got.Backend.BackfillBandwidth, got.Backend.BackfillBytes, defaultBackfillBandwidth, int64(defaultBackfillBytes))
+		}
+	})
+	t.Run("valid values", testBackfillValid)
+	t.Run("refused values", testBackfillRefused)
+	t.Run("forms", testBackfillForms)
+	t.Run("is checked right after backend.url", testBackfillOrder)
+	t.Run("is in AgentKeys after backend.url", func(t *testing.T) {
+		keys := AgentKeys()
+		i := slices.Index(keys, keyBackendURL)
+		if i < 0 || i+1 >= len(keys) || keys[i+1] != keyBackfillBandwidth {
+			t.Errorf("AgentKeys() = %v, want %q directly after %q", keys, keyBackfillBandwidth, keyBackendURL)
+		}
+	})
+}
+
+func testBackfillValid(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  int64
+	}{
+		{"smallest", "16KiB", 16 << 10},
+		{"default spelled out", "256KiB", 256 << 10},
+		{"one MiB", "1MiB", 1 << 20},
+		{"KiB above one MiB", "4096KiB", 4096 << 10},
+		{"five digits of KiB", "99999KiB", 99999 << 10},
+		{"largest", "1024MiB", 1024 << 20},
+		{"quoted", "'512KiB'", 512 << 10},
+		{"double quoted", "\"2MiB\"", 2 << 20},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := backfillDoc(tt.value)
+			got, err := LoadAgent(writeTemp(t, doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", doc, err)
+			}
+			if got.Backend.BackfillBytes != tt.want {
+				t.Errorf("LoadAgent(%q).Backend.BackfillBytes = %d, want %d", doc, got.Backend.BackfillBytes, tt.want)
+			}
+		})
+	}
+}
+
+func testBackfillRefused(t *testing.T) {
+	values := []string{
+		"8KiB", "15KiB", "0KiB", "0MiB", "'0'", "0", "1025MiB", "2GiB", "99999MiB", "1048576KiB", "123456KiB",
+		"1.5MiB", "256kb", "256KB", "256kib", "256KIB", "256MB", "256", "'256 KiB'", "' 256KiB'", "'256KiB '",
+		"+256KiB", "-256KiB", "0256KiB", "'1_0KiB'", "0x10KiB", "KiB", "''", "'256KiB\\n'", "7" + sentinel + "KiB",
+	}
+	for _, value := range values {
+		doc := backfillDoc(value)
+		path := writeTemp(t, doc)
+		got, err := LoadAgent(path, agentEnv())
+		if got != nil {
+			t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+		}
+		if err == nil {
+			t.Errorf("LoadAgent(%q) error = nil, want an error for %s", doc, keyBackfillBandwidth)
+			continue
+		}
+		want := "config: " + path + ":" + strconv.Itoa(backfillLine) + ": " + keyBackfillBandwidth + ": " + backfillReason
+		if err.Error() != want {
+			t.Errorf("LoadAgent(%q) error = %q, want %q", doc, err.Error(), want)
+		}
+		requireNoLeakBesidesFile(t, err, path, sentinel)
+	}
+}
+
+func testBackfillForms(t *testing.T) {
+	tests := []struct {
+		name, value, reason string
+	}{
+		{"list", "[256KiB]", "invalid value, want a string"},
+		{"block list", "\n    - 256KiB", "invalid value, want a string"},
+		{"tilde", "~", "has no value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := backfillDoc(tt.value)
+			path := writeTemp(t, doc)
+			got, err := LoadAgent(path, agentEnv())
+			if got != nil {
+				t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+			}
+			want := "config: " + path + ":" + strconv.Itoa(backfillLine) + ": " + keyBackfillBandwidth + ": " + tt.reason
+			if err == nil || err.Error() != want {
+				t.Errorf("LoadAgent(%q) error = %v, want %q", doc, err, want)
+			}
+		})
+	}
+}
+
+func testBackfillOrder(t *testing.T) {
+	badURL := "agent_id: web-1\nbackend:\n  url: ftp://100.64.0.1\n  backfill_bandwidth: 8KiB\n"
+	path := writeTemp(t, badURL)
+	_, err := LoadAgent(path, agentEnv())
+	if err == nil || !strings.Contains(err.Error(), ": "+keyBackendURL+": ") {
+		t.Errorf("LoadAgent(%q) error = %v, want the error of %s first", badURL, err, keyBackendURL)
+	}
+
+	both := validAgent + "  backfill_bandwidth: 8KiB\nspool:\n  max_size: 32MiB\n"
+	path = writeTemp(t, both)
+	_, err = LoadAgent(path, agentEnv())
+	want := "config: " + path + ":4: " + keyBackfillBandwidth + ": " + backfillReason
+	if err == nil || err.Error() != want {
+		t.Errorf("LoadAgent(%q) error = %v, want %q", both, err, want)
 	}
 }

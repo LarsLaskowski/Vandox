@@ -463,7 +463,7 @@ public class WireContractTests
         }
 
         // Act
-        var (records, formatMinor, failure) = await ReadSharedCaseAsync(lines, latin1);
+        var (records, formatMinor, failure) = await ReadSharedCaseAsync(lines, latin1, matches[0].TryGetProperty("gzip", out var gzip) ? gzip : null);
 
         // Assert
         Assert.AreSequenceEqual(want.TryGetProperty("records", out var wanted) ? wanted.EnumerateArray().Select(DescribeWanted).ToList() : [], records, $"{name}: records before the end or the error");
@@ -501,7 +501,8 @@ public class WireContractTests
                          ("X", 4),
                          ("M", 5),
                          ("U", 2),
-                         ("S", 57)
+                         ("S", 57),
+                         ("G", 13)
                      };
         var required = groups.SelectMany(pair => Enumerable.Range(1, pair.Count).Select(number => $"{pair.Prefix}{number}"));
 
@@ -511,6 +512,33 @@ public class WireContractTests
         // Assert
         Assert.HasCount(names.Count, names.Distinct(StringComparer.Ordinal).ToList(), "case names are unique");
         Assert.IsEmpty(missing, $"cases missing from the fixture: {string.Join(", ", missing)}");
+    }
+
+    /// <summary>
+    /// Gzip files of the golden batch, one written by Go's encoder, one by Go's gzip writer in two members and one by gzip(1) with a file name, decode to the records of the plaintext golden file and are read to their last byte.
+    /// </summary>
+    /// <param name="file">The name of the gzip file in <c>testdata/wire</c></param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("all-kinds.jsonl.gz")]
+    [DataRow("all-kinds-two-members.jsonl.gz")]
+    [DataRow("all-kinds-gzip1.jsonl.gz")]
+    public async Task WireContractGoGzipDecodesToGoldenRecords(string file)
+    {
+        // Arrange
+        var plain = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/all-kinds.jsonl"), CancellationToken.None);
+        var sample = await File.ReadAllBytesAsync(RepositoryFiles.Path($"testdata/wire/{file}"), CancellationToken.None);
+        using var expectedInput = GzipOf(plain);
+        using var sampleInput = new MemoryStream(sample);
+
+        // Act
+        var expected = await DescribeAllAsync(expectedInput);
+        var actual = await DescribeAllAsync(sampleInput);
+
+        // Assert
+        Assert.IsGreaterThan(0, expected.Count, "the golden file holds records");
+        Assert.AreSequenceEqual(expected, actual, $"{file}: records equal the plaintext golden file");
+        Assert.AreEqual(sampleInput.Length, sampleInput.Position, $"{file}: every input byte was consumed");
     }
 
     /// <summary>
@@ -539,12 +567,13 @@ public class WireContractTests
     /// </summary>
     /// <param name="lines">The lines of the batch</param>
     /// <param name="latin1"><c>true</c> to write every character of the lines as one byte, <c>false</c> to encode the lines as UTF-8</param>
+    /// <param name="gzip">The <c>gzip</c> object of the case that frames the lines by hand, or <c>null</c> for a plain gzip stream</param>
     /// <returns>The descriptions of the records, the minor version of the header and the error, if any</returns>
-    private static async Task<(List<string> Records, long FormatMinor, WireException? Failure)> ReadSharedCaseAsync(string[] lines, bool latin1)
+    private static async Task<(List<string> Records, long FormatMinor, WireException? Failure)> ReadSharedCaseAsync(string[] lines, bool latin1, JsonElement? gzip)
     {
         var records = new List<string>();
         long formatMinor = 0;
-        using var input = latin1 ? BatchBuilder.Gzip(Encoding.Latin1.GetBytes(string.Concat(lines.Select(line => line + "\n")))) : BatchBuilder.Gzip(lines);
+        using var input = OpenSharedCaseInput(lines, latin1, gzip);
 
         try
         {
@@ -563,6 +592,68 @@ public class WireContractTests
         }
 
         return (records, formatMinor, null);
+    }
+
+    /// <summary>
+    /// Compresses the lines of a case in the way the case asks for.
+    /// </summary>
+    /// <param name="lines">The lines of the batch</param>
+    /// <param name="latin1"><c>true</c> to write every character of the lines as one byte</param>
+    /// <param name="gzip">The <c>gzip</c> object of the case, or <c>null</c></param>
+    /// <returns>The stream, positioned at its start</returns>
+    private static MemoryStream OpenSharedCaseInput(string[] lines, bool latin1, JsonElement? gzip)
+    {
+        if (gzip is not null)
+        {
+            return FrameSharedCase(lines, gzip.Value);
+        }
+
+        return latin1 ? BatchBuilder.Gzip(Encoding.Latin1.GetBytes(string.Concat(lines.Select(line => line + "\n")))) : BatchBuilder.Gzip(lines);
+    }
+
+    /// <summary>
+    /// Frames the lines of a case as the <c>gzip</c> object of the case describes.
+    /// </summary>
+    /// <param name="lines">The lines of the batch</param>
+    /// <param name="gzip">The <c>gzip</c> object of the case</param>
+    /// <returns>The stream, positioned at its start</returns>
+    private static MemoryStream FrameSharedCase(string[] lines, JsonElement gzip)
+    {
+        var trailing = Convert.FromHexString(gzip.TryGetProperty("trailing_hex", out var hex) ? hex.GetString() ?? string.Empty : string.Empty);
+        var headerCrc = gzip.TryGetProperty("header_crc", out var crc) ? crc.GetString() : null;
+
+        return GzipFixture.Frame(lines, GzipNumber(gzip, "members"), trailing, GzipNumber(gzip, "name_bytes"), GzipNumber(gzip, "comment_bytes"), GzipNumber(gzip, "extra_bytes"), headerCrc);
+    }
+
+    /// <summary>
+    /// Reads a number of the <c>gzip</c> object of a case.
+    /// </summary>
+    /// <param name="gzip">The <c>gzip</c> object of the case</param>
+    /// <param name="key">The key</param>
+    /// <returns>The number, 0 when the key is absent</returns>
+    private static int GzipNumber(JsonElement gzip, string key)
+    {
+        return gzip.TryGetProperty(key, out var value) ? value.GetInt32() : 0;
+    }
+
+    /// <summary>
+    /// Decodes a batch to its end and describes every record by its envelope and its serialized payload.
+    /// </summary>
+    /// <param name="input">The compressed batch</param>
+    /// <returns>The descriptions in order</returns>
+    private static async Task<List<string>> DescribeAllAsync(Stream input)
+    {
+        var records = new List<string>();
+        using var decoder = await BatchDecoder.OpenAsync(input, null, CancellationToken.None);
+
+        for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
+        {
+            var payload = record.Data is null ? string.Empty : JsonSerializer.Serialize(record.Data, record.Data.GetType());
+
+            records.Add($"{record.Kind}:{record.Seq}:{record.Source}:{record.CapturedAt:O}:{payload}");
+        }
+
+        return records;
     }
 
     /// <summary>

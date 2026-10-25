@@ -7,7 +7,10 @@ fields, limits, versioning, batch validation and the duties of the consumer. The
 language; names such as `MaxLineBytes` or `ErrLimitExceeded` are the identifiers of the Go agent and the C# decoder for the same
 rules (see *Implementation*). A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`, and a second one, `testdata/wire/replaced-text.jsonl`, with texts at their limits that held
 invalid UTF-8 before encoding, are written by the Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed; a shared fixture of decoder cases,
-`testdata/wire/decoder-cases.json`, is run by both decoders and pins the JSON-level rules below. How the backend stores the records
+`testdata/wire/decoder-cases.json`, is run by both decoders and pins the JSON-level rules and the gzip framing below (cases `G1`-`G13` build
+their gzip stream from the case's `gzip` field). Three gzip samples of the golden batch, two written by Go's `compress/gzip`
+(`all-kinds.jsonl.gz`, `all-kinds-two-members.jsonl.gz`) and one by `gzip -9 -c` with a file name (`all-kinds-gzip1.jsonl.gz`), are
+decoded by the C# contract test to the golden records with every input byte consumed. How the backend stores the records
 is in [Storage](storage.md).
 
 ## Stream layout
@@ -31,7 +34,7 @@ added by the backend and cannot be supplied by the agent.
 | `agent_id` | string | `^[A-Za-z0-9][A-Za-z0-9._-]*$`, 1 to 64 bytes |
 | `boot_id` | string | lower-case UUID, `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` |
 | `clock_offset_ns` | integer, optional | agent clock minus the reference time of its time synchronization, in nanoseconds; positive means the agent is ahead; omitted means unknown |
-| `mode` | string | `live` or `backfill`; a hint only, the backend classifies records itself (0022) |
+| `mode` | string | `live` or `backfill`; a hint only, the backend classifies records itself (0022). The agent's sender sets `live` on the stream that sends current records and `backfill` on the throttled stream that sends the spool's older ones ([Agent](agent.md), *Sending*) |
 
 ### Capture context (0046)
 
@@ -148,7 +151,7 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `agent_goroutines` | — | — | number of goroutines of the agent |
 | `agent_spool_bytes` | `bytes` | — | size of the agent's spool files on disk (its data files and its meta file) |
 | `agent_spool_age_seconds` | `seconds` | — | the sample's start minus the capture time of the oldest record the spool holds unacknowledged; 0 when it holds none or that time lies after the start |
-| `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
+| `agent_send_lag_seconds` | `seconds` | — | the sample's time minus the capture time of the newest record the sender has had acknowledged since the agent started (before the first acknowledgement: minus the start), never negative; it stays high while the backend does not accept batches |
 | `mariadb_memory_max_bytes` | `bytes` | — | MariaDB's theoretical maximum memory: its global buffers plus `max_connections` times its per-connection buffers |
 | `mariadb_memory_max_ram_percent` | `percent` | — | that maximum as a share of `MemTotal` |
 | `mariadb_questions_per_second` | `per_second` | — | increase of the status value `Questions` / seconds between two samples |
@@ -422,9 +425,11 @@ What the decoder does with unusual input; each row is a test case.
 | Input | Result |
 | ----- | ------ |
 | Not gzip (plain JSON Lines, zstd, empty input) | rejected, `ErrMalformed`, line 1 |
-| gzip name/comment/extra fields | accepted; name or comment over 511 bytes rejected, `ErrMalformed` |
-| gzip concatenated members | accepted |
-| Truncated stream, bad CRC or size, trailing non-gzip bytes | rejected at the end of the stream, `ErrMalformed` |
+| gzip name/comment/extra fields | accepted; name or comment over 511 bytes rejected, `ErrMalformed` (shared cases `G7`-`G11`) |
+| gzip header checksum (`FHCRC`) | accepted when it equals the low 16 bits of the header's CRC-32, otherwise rejected, `ErrMalformed` (`G12`, `G13`) |
+| gzip concatenated members | accepted (`G5`) |
+| Truncated stream, bad CRC or size | rejected at the end of the stream, `ErrMalformed` |
+| Any byte after the last complete member: garbage, one zero byte, zero padding, the start of a second header (`1f 8b` alone), also after two members | rejected at the end of the stream, `ErrMalformed`, after the records before it (`G1`-`G4`, `G6`) |
 | More decompressed bytes than `MaxBatchBytes` | rejected, `ErrLimitExceeded` |
 | Line longer than `MaxLineBytes`, also an unterminated last line | rejected, `ErrLimitExceeded` |
 | `\n` or `\r\n` line ends; last line without `\n` | accepted |
@@ -472,20 +477,43 @@ appears the same way. **Wrapped parser errors are different**: the `time`, `neti
 (including the raw map keys in a type error) can carry agent text of up to `MaxLineBytes`. A consumer logs or
 displays decode errors only through the display sanitization of the project's area 12.
 
-Duties of the ingest API (#40, planned), which this package cannot take over. They are written for the Go decoder; the
-.NET ingest of the backend has the same duties with its own reader, timeouts and memory peak, which #40 has to work out:
+Duties of the ingest API, which this package cannot take over, and how the backend's endpoint (`Vandox.Backend.Ingest`, [Backend
+host](backend-host.md), *Ingest endpoint*) meets them:
 
-- wrap the request body in `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder
-  bounds only the decompressed bytes);
-- set the server's read, read-header, write and idle timeouts, so a slow reader cannot block;
-- check the header's `agent_id` against the agent the token belongs to;
-- deduplicate by (agent ID, `seq`);
-- commit only after `Next` returned `io.EOF`;
-- run one concurrent decoder per agent and cap the total, sized from the per-decoder peak and the backend
-  container memory: a hostile line at the default 1 MiB `MaxLineBytes` can make one decoder allocate about
-  270 MiB with a heap peak of about 160-170 MB (roughly 160 x `MaxLineBytes`), from a body of about 1 KB
-  compressed, so `http.MaxBytesReader` does not bound it;
-- map `ErrUnsupportedVersion`, `ErrLimitExceeded` and the other errors to HTTP responses.
+- **Bound the compressed bytes before decoding** (the decoder bounds only the decompressed bytes): the endpoint answers a
+  `Content-Length` over 2 MiB (2,097,152 bytes) with `413` before it reads the body, reads a body without a length into its slot's
+  buffer only up to that limit, and sets the server's request body limit to the same value as a backstop.
+- **Bound the time**: the server's header timeout (5 s), header size (16 KiB) and keep-alive (120 s), plus 30 seconds for waiting,
+  reading and decoding one request from its arrival, so a slow sender cannot hold a slot.
+- **Check the header's `agent_id`** against `ingest.agent_id`, the agent the token belongs to, ordinally, before any record is read
+  (`403` otherwise).
+- **Deduplicate** by (agent ID, `seq`): the store's partial unique index ([Storage](storage.md), *Writing*).
+- **Commit only after the end**: the endpoint reads `NextAsync` to the end into a list and writes nothing when any read fails.
+- **Lower the limits and cap the decoders** from the measured peak: the endpoint decodes with `MaxBatchBytes` 2 MiB (instead of the
+  16 MiB default), `MaxLineBytes` 1 MiB and `MaxRecords` 20,000, which every batch of the agent's sender fits, and lets at most two
+  requests hold a slot at once, from the body read through the commit or rollback.
+- **Map the errors** to statuses: `ErrMalformed` → `400`, `ErrLimitExceeded` → `413`, `ErrUnknownKind`, `ErrSequence`,
+  `ErrEmptyBatch` and a field error → `422`, each with `Vandox-Refused: batch`; `ErrUnsupportedVersion` → `415` without it. The same
+  mapping applies to an error of the header line. The log line carries a fixed reason, the line number and the field path with
+  every quoted map key reduced to `[]` (`data.labels[]`); never the error's text, which can wrap parser text.
+
+Measured peak memory of one request at these limits in the backend (C# decoder and a real `SqliteStore` write, one request after a
+warm-up, the live heap sampled by a second thread during the request; Debug and Release builds gave the same figures, development
+host):
+
+| Input | Live heap | SQLite native high-water | Peak |
+| ----- | --------- | ------------------------ | ---- |
+| Hostile record line of 1,000,119 bytes, distinct keys (#175), body of a few KB | 9.7 MB | — | 9.7 MB |
+| Hostile line of 1.0 MB of 24-key objects | 7.2 MB | — | 7.2 MB |
+| Hostile line of 1.0 MB of small objects | 9.1 MB | — | 9.1 MB |
+| 17,936 distinct log lines (the batch limit) | 8.6 MB | 6.2 MB | 14.8 MB |
+| Two connection snapshots of 1,034,749 bytes each | 14.3 MB | 4.5 MB | 18.8 MB |
+
+The 17,936-line batch allocates about 123 MB in total, but that is garbage the runtime collects during the request: the bound is on
+live memory. The two slots at the worst case (2 × 18.8 MB) plus their two 2 MiB body buffers come to about 42 MB, within the 128 MiB
+budget the endpoint may use of the container's 512 MiB; `IngestEndpointHostileLineStaysWithinMemoryBound` and
+`IngestEndpointMaximalBatchStaysWithinMemoryBound` assert that bound. The Go decoder's figure for the hostile 1 MiB line (about 160-170
+MB of heap, roughly 160 × `MaxLineBytes`) was measured on the Go decoder alone and does not describe the backend.
 
 ## Example
 
@@ -510,6 +538,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why `log_line` gets an optional `event`.
 - [0075](../decisions/0075-wire-contract-pinned-by-golden-fixtures.md) — why golden fixtures pin the contract between the two languages.
 - [0076](../decisions/0076-strict-gzip-validation-in-the-backend.md) — why the backend decodes gzip strictly.
+- [0128](../decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md) — why the C# decoder reads the gzip
+  framing itself, so trailing bytes and the header rules match the Go decoder (amends 0076).
 - [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md) — why a JSON `null` reads as an absent key in both decoders.
 - [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) — why both decoders check
   keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
@@ -528,13 +558,16 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 
 - How records are stored, deduplicated and searched: [Storage](storage.md).
 - How the agent spools, batches and sends: the agent area.
-- The ingest endpoint and its responses: the [Backend host](backend-host.md) area (the ingest API is planned, #40).
+- The ingest endpoint, its statuses, limits and log lines: the [Backend host](backend-host.md) area (*Ingest endpoint*).
 
 ## Implementation
 
 Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder with the line check
 in `decode.go`; golden test `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixtures `all-kinds.jsonl` and `replaced-text.jsonl`; the shared decoder cases run in
 `internal/wire/decode_test.go`). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`, `WireKeyCheck` and
-`WireTextCheck` for the line check; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`),
-contract test `WireContractTests` (both golden batches and shared decoder cases).
+`WireTextCheck` for the line check; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `GzipMemberReader` with `GzipMemberInput` and `Crc32` for the gzip framing
+(record 0128: a raw `DeflateStream` per member fed one byte per read, so the reader sees where a member ends), `Vandox.Core.IO`
+(`StrictGzip`, still required by `BatchDecoder.OpenAsync` and used by the log import's own `GZipStream`), contract test
+`WireContractTests` (both golden batches, the gzip samples and shared decoder cases). `internal/wire/golden_test.go` also writes or checks
+the two Go gzip samples under `VANDOX_UPDATE_GOLDEN=1`.
 

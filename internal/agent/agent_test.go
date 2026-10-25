@@ -8,7 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,9 +36,11 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/sender"
 	"github.com/LarsLaskowski/Vandox/internal/spool"
 	"github.com/LarsLaskowski/Vandox/internal/svcstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
+	"github.com/LarsLaskowski/Vandox/internal/wire"
 )
 
 const (
@@ -1708,9 +1713,83 @@ func spoolRunOptions(t *testing.T, config string) (Options, *syncBuffer) {
 	opts := lowMemoryOptions(t, 0)
 	opts.ConfigPath = writeConfig(t, config)
 	opts.Environ = []string{"VANDOX_AGENT_TOKEN=" + testToken}
+	opts.Transport = &fakeTransport{hang: true}
 	stderr := &syncBuffer{}
 	opts.Stderr = stderr
 	return opts, stderr
+}
+
+// fakeTransport is a sender.BatchSender that never touches the network. With hang it holds every request until the request's
+// context ends (and then, with linger, a further span of fake time) and answers like the real transport does; else it answers
+// every request with res.
+type fakeTransport struct {
+	hang   bool
+	res    sender.Result
+	linger time.Duration
+
+	mu       sync.Mutex
+	sends    int
+	inflight int
+	requests []sentRequest
+}
+
+// sentRequest is what the fake transport saw of one request: the mode of its batch, its size and the time it came.
+type sentRequest struct {
+	mode wire.Mode
+	size int
+	at   time.Time
+}
+
+// Send implements sender.BatchSender.
+func (f *fakeTransport) Send(ctx context.Context, body []byte) sender.Result {
+	req := sentRequest{size: len(body), at: time.Now()}
+	if dec, err := wire.NewDecoder(bytes.NewReader(body), wire.DefaultLimits()); err == nil {
+		req.mode = dec.Header().Mode
+		_ = dec.Close()
+	}
+	f.mu.Lock()
+	f.sends++
+	f.inflight++
+	f.requests = append(f.requests, req)
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.inflight--
+		f.mu.Unlock()
+	}()
+	if f.hang {
+		return f.hold(ctx)
+	}
+
+	return f.res
+}
+
+// hold waits for the end of ctx and answers as the real transport does.
+func (f *fakeTransport) hold(ctx context.Context) sender.Result {
+	<-ctx.Done()
+	if f.linger > 0 {
+		time.Sleep(f.linger)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return sender.Result{Reason: "timeout"}
+	}
+	return sender.Result{}
+}
+
+// ofMode returns the requests of batches of the mode, in the order they came.
+func (f *fakeTransport) ofMode(mode wire.Mode) []sentRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.DeleteFunc(slices.Clone(f.requests), func(r sentRequest) bool { return r.mode != mode })
+}
+
+// counts returns the requests made so far and the requests in flight.
+func (f *fakeTransport) counts() (sends, inflight int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.sends, f.inflight
 }
 
 // runInBubble runs the agent for d of fake time, stops it and returns its exit code.
@@ -2195,4 +2274,326 @@ func TestRun_SpoolHoldsNoSecret(t *testing.T) {
 	if spoolFiles < 2 {
 		t.Errorf("spool files in the directory = %d, want a data file and the meta file, so that the search covers the spool", spoolFiles)
 	}
+}
+
+func TestRun_StartsWithUnreachableBackend(t *testing.T) {
+	opts, stderr := spoolRunOptions(t, validConfig)
+	transport := &fakeTransport{res: sender.Result{Reason: "connection failed"}}
+	opts.Transport = transport
+
+	code := runInBubble(t, opts, 65*time.Second)
+
+	out := stderr.String()
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0 (an unreachable backend does not stop the agent); log:\n%s", code, out)
+	}
+	if n := countLines(out, `msg="agent cannot start"`); n != 0 {
+		t.Errorf("lines %q = %d, want 0; log:\n%s", "agent cannot start", n, out)
+	}
+	if n := countLines(out, `level=WARN`, `msg="backend not accepting batches"`, `component=sender`, `reason="connection failed"`); n != 1 {
+		t.Errorf("warning lines %q from the sender = %d, want 1 for the whole episode; log:\n%s", "backend not accepting batches", n, out)
+	}
+	if sends, _ := transport.counts(); sends < 2 {
+		t.Errorf("requests to the unreachable backend = %d, want at least 2 (the sender tries again after its waits)", sends)
+	}
+	records := readSpool(t, opts.StateDir).Records
+	if len(records) == 0 {
+		t.Errorf("records in the spool = %d, want the agent's records kept while the backend is down", len(records))
+	}
+}
+
+func TestNewScheduler_PressureReachesSender(t *testing.T) {
+	opts := lowMemoryOptions(t, 0)
+	cfg := config.DefaultAgent()
+	var (
+		mu    sync.Mutex
+		first []bool
+		other []bool
+	)
+	record := func(into *[]bool) func(bool) {
+		return func(high bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			*into = append(*into, high)
+		}
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler), record(&first), record(&other))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, 35*time.Second)
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(first, []bool{true}) {
+		t.Errorf("states passed to the first callback = %v, want [true] (the low memory fixture switches the mode on once)", first)
+	}
+	if !slices.Equal(other, []bool{true}) {
+		t.Errorf("states passed to the second callback = %v, want [true]", other)
+	}
+}
+
+func TestRun_SenderStopsBeforeSpoolCloses(t *testing.T) {
+	oldClose := spoolClose
+	t.Cleanup(func() { spoolClose = oldClose })
+	// the request outlives the cancel by one second of fake time, so only a Run that waits for the sender sees it end
+	transport := &fakeTransport{hang: true, linger: time.Second}
+	opts, stderr := spoolRunOptions(t, validConfig)
+	opts.Transport = transport
+	var sendsAtClose, inflightAtClose int
+	spoolClose = func(ctx context.Context, sp *spool.Spool) error {
+		sendsAtClose, inflightAtClose = transport.counts()
+
+		return sp.Close(ctx)
+	}
+	var (
+		code           int
+		sendsBeforeEnd int
+	)
+
+	synctest.Test(t, func(*testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() { done <- Run(ctx, opts) }()
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		sendsBeforeEnd, _ = transport.counts()
+		cancel()
+		code = <-done
+	})
+
+	out := stderr.String()
+	if code != 0 {
+		t.Fatalf("Run() = %d after the cancel, want 0; log:\n%s", code, out)
+	}
+	if sendsBeforeEnd < 1 {
+		t.Fatalf("requests before the cancel = %d, want at least 1 (a send in flight at the stop)", sendsBeforeEnd)
+	}
+	if inflightAtClose != 0 {
+		t.Errorf("requests in flight when the spool closed = %d, want 0 (the sender stops before the spool closes)", inflightAtClose)
+	}
+	if sends, _ := transport.counts(); sends != sendsAtClose {
+		t.Errorf("requests after the spool closed = %d, want 0", sends-sendsAtClose)
+	}
+	if n := countLines(out, `msg="spool not closed"`); n != 0 {
+		t.Errorf("lines %q = %d, want 0; log:\n%s", "spool not closed", n, out)
+	}
+	if n := countLines(out, `level=WARN`, `component=sender`); n != 0 {
+		t.Errorf("sender warnings = %d, want 0 (a stop is not a failure); log:\n%s", n, out)
+	}
+}
+
+// agentRequest is what the backend double of TestRun_SendsToTheBackendWithTheToken saw of the request.
+type agentRequest struct {
+	method, path, authorization string
+}
+
+func TestRun_SendsToTheBackendWithTheToken(t *testing.T) {
+	got := make(chan agentRequest, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case got <- agentRequest{method: r.Method, path: r.URL.Path, authorization: r.Header.Get("Authorization")}:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backend.Close)
+	opts, stderr := spoolRunOptions(t, "agent_id: web-1\nbackend:\n  url: "+backend.URL+"\n")
+	opts.Transport = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() { done <- Run(ctx, opts) }()
+
+	var req agentRequest
+	select {
+	case req = <-got:
+	case <-time.After(waitLimit):
+		t.Error("no request reached the backend, want the agent to send its spooled records")
+	}
+	cancel()
+	code := <-done
+
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0; log:\n%s", code, stderr.String())
+	}
+	want := agentRequest{method: http.MethodPost, path: sender.IngestPath, authorization: "Bearer " + testToken}
+	if req != want {
+		t.Errorf("request = %+v, want %+v", req, want)
+	}
+	if strings.Contains(stderr.String(), testToken) {
+		t.Errorf("the log holds the agent token, want none; log:\n%s", stderr.String())
+	}
+}
+
+func TestRun_MemoryPressureHoldsBackTheBackfill(t *testing.T) {
+	// the first run leaves its records unacknowledged: they are the backlog of the second
+	first, _ := spoolRunOptions(t, validConfig)
+	if code := runInBubble(t, first, 5*time.Second); code != 0 {
+		t.Fatalf("first Run() = %d, want 0", code)
+	}
+	opts, stderr := spoolRunOptions(t, validConfig)
+	opts.StateDir = first.StateDir
+	transport := &fakeTransport{res: sender.Result{Status: http.StatusOK}}
+	opts.Transport = transport
+
+	code := runInBubble(t, opts, 30*time.Second)
+
+	out := stderr.String()
+	if code != 0 {
+		t.Fatalf("second Run() = %d, want 0; log:\n%s", code, out)
+	}
+	if n := len(transport.ofMode(wire.ModeLive)); n == 0 {
+		t.Fatalf("live requests = %d, want the live stream to go on under memory pressure; log:\n%s", n, out)
+	}
+	if n := len(transport.ofMode(wire.ModeBackfill)); n != 0 {
+		t.Errorf("backfill requests = %d, want none while memory pressure is on; log:\n%s", n, out)
+	}
+	if n := countLines(out, `msg="backfill paused"`, `component=sender`, `reason=memory_pressure`); n != 1 {
+		t.Errorf("lines %q = %d, want 1; log:\n%s", "backfill paused", n, out)
+	}
+}
+
+func TestRun_SelfMetricsHoldTheSendLag(t *testing.T) {
+	opts, _ := spoolRunOptions(t, validConfig)
+
+	if code := runInBubble(t, opts, 5*time.Second); code != 0 {
+		t.Fatalf("Run() = %d, want 0", code)
+	}
+
+	if got := len(metricRecords(readSpool(t, opts.StateDir).Records, selfstats.MetricSendLag)); got == 0 {
+		t.Errorf("records of %s in the spool = %d, want the sender's lag in the self metrics", selfstats.MetricSendLag, got)
+	}
+}
+
+// backlogRecord returns a log line record of size bytes of text that hardly compresses.
+func backlogRecord(rng *rand.Rand, size int) model.Record {
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	text := make([]byte, size)
+	for i := range text {
+		text[i] = alphabet[rng.IntN(len(alphabet))]
+	}
+
+	return model.Record{
+		Meta: model.Meta{Origin: model.OriginAgent, Source: "logs", CapturedAt: time.Now().UTC()},
+		Data: &model.LogLine{Log: "app.log", Message: string(text)},
+	}
+}
+
+// openBackfillSpool opens the spool of the backfill bandwidth test in dir and closes it at the end of the test.
+func openBackfillSpool(t *testing.T, dir string) *spool.Spool {
+	t.Helper()
+
+	sp, err := spool.Open(spool.Options{
+		Dir: dir, AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30, SyncInterval: 10000 * time.Hour,
+		Available: func(string) (uint64, error) { return 1 << 50, nil },
+	}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("spool.Open() error = %v, want nil", err)
+	}
+	t.Cleanup(func() { _ = sp.Close(context.Background()) })
+
+	return sp
+}
+
+// backfillBacklog returns n log line records of size bytes of text that hardly compresses.
+func backfillBacklog(rng *rand.Rand, n, size int) []model.Record {
+	backlog := make([]model.Record, 0, n)
+	for range n {
+		backlog = append(backlog, backlogRecord(rng, size))
+	}
+
+	return backlog
+}
+
+// waitForBackfillRequests advances fake time until the transport has seen n backfill requests and fails after two minutes.
+func waitForBackfillRequests(t *testing.T, transport *fakeTransport, n int) {
+	t.Helper()
+
+	for waited := time.Duration(0); len(transport.ofMode(wire.ModeBackfill)) < n; waited += time.Second {
+		if waited > 2*time.Minute {
+			t.Fatalf("backfill requests = %d after %v, want %d (the second waits for the configured rate)", len(transport.ofMode(wire.ModeBackfill)), waited, n)
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+	}
+}
+
+// requireBackfillPace checks that the second backfill request waits for the first one at the configured bandwidth.
+func requireBackfillPace(t *testing.T, batches []sentRequest, bandwidth int) {
+	t.Helper()
+
+	want := time.Duration(batches[0].size) * time.Second / time.Duration(bandwidth)
+	if gap := batches[1].at.Sub(batches[0].at); gap < want-time.Millisecond || gap > 2*want {
+		t.Errorf("gap between the first two backfill requests = %v, want about %v for %d bytes at %d bytes per second", gap, want, batches[0].size, bandwidth)
+	}
+}
+
+func TestNewSender_BackfillBandwidthFromConfiguration(t *testing.T) {
+	const bandwidth = 16 << 10
+	cfg := config.DefaultAgent()
+	cfg.Backend.BackfillBytes = bandwidth
+	rng := rand.New(rand.NewPCG(3, 4))
+	dir := t.TempDir()
+
+	synctest.Test(t, func(t *testing.T) {
+		sp := openBackfillSpool(t, dir)
+		if err := sp.Put(context.Background(), backfillBacklog(rng, 150, 15000)); err != nil {
+			t.Fatalf("Put() error = %v, want nil", err)
+		}
+		transport := &fakeTransport{res: sender.Result{Status: http.StatusOK}}
+		opts := Options{Transport: transport}
+		snd, err := newSender(opts, &cfg, sp, slog.New(slog.DiscardHandler))
+		if err != nil || snd == nil {
+			t.Fatalf("newSender() = %v, %v, want a sender", snd, err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			snd.Run(ctx)
+		}()
+		defer func() {
+			cancel()
+			<-done
+		}()
+		synctest.Wait()
+		// a live record releases the backfill of the backlog
+		if err := sp.Put(context.Background(), []model.Record{backlogRecord(rng, 200)}); err != nil {
+			t.Fatalf("Put() error = %v, want nil", err)
+		}
+
+		waitForBackfillRequests(t, transport, 2)
+		requireBackfillPace(t, transport.ofMode(wire.ModeBackfill), bandwidth)
+	})
+}
+
+func TestNewSender_UnusableBackendURLAndNoSpool(t *testing.T) {
+	t.Run("a URL the transport cannot use", func(t *testing.T) {
+		cfg := config.DefaultAgent()
+		cfg.Backend.URL = "ftp://100.64.0.1:8081"
+		sp, err := spool.Open(spool.Options{Dir: t.TempDir(), AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("spool.Open() error = %v, want nil", err)
+		}
+		t.Cleanup(func() { _ = sp.Close(context.Background()) })
+
+		snd, err := newSender(Options{}, &cfg, sp, slog.New(slog.DiscardHandler))
+
+		if snd != nil || err == nil || err.Error() != "sender: backend url: not usable" {
+			t.Errorf("newSender() = %v, %v, want no sender and the error %q", snd, err, "sender: backend url: not usable")
+		}
+	})
+	t.Run("no spool, no sender", func(t *testing.T) {
+		cfg := config.DefaultAgent()
+
+		snd, err := newSender(Options{}, &cfg, nil, slog.New(slog.DiscardHandler))
+
+		if snd != nil || err != nil {
+			t.Errorf("newSender() = %v, %v, want nil, nil without a spool", snd, err)
+		}
+	})
 }

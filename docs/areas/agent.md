@@ -8,9 +8,10 @@ sends is in the [wire format](wire-format.md); its configuration file is in [Con
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
 switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the log shipping collector (the journal and configured `syslog` files), the backup run check, the agent's state file, the on-disk spool and the notification of systemd exist, as do
-the shared data model and the wire encoder. The other collectors, the sender and the systemd unit are **not implemented yet**: the
-agent keeps every record it produces in its spool, but nothing reads the spool yet, so it fills up to `spool.max_size` and then drops
-its oldest records with recorded gaps (it is not released in that state; v0.2.0 waits for the sender). The
+the shared data model and the wire encoder, and the sender (*Spool and sending*, *Sending*). The other collectors and the systemd unit are **not implemented
+yet**. The backend's ingest endpoint accepts the sender's batches ([Backend host](backend-host.md), *Ingest endpoint*); while the
+backend is unreachable or not accepting, the sender waits and tries again (*Sending*), and the spool fills up to `spool.max_size` and
+then drops its oldest records with recorded gaps. The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
 
 ## Command line and start-up
@@ -44,6 +45,16 @@ rules below for the parts not implemented are the target the implementation is h
 
 - The agent only opens **outbound** connections to the backend's ingest port and **never listens on a port**. The monitored server
   needs no inbound firewall rule for Vandox.
+- The sender (*Sending*) is the one part that dials the backend: one `POST` of one batch to `<backend.url>/v1/batches` with the header
+  `Authorization: Bearer <token>`. The agent token goes to `backend.url` only and nowhere else. The client uses **no proxy** (the
+  environment's `HTTP_PROXY` and the like are not read), follows **no redirect** (a `3xx` is an answer that is not accepted, and the
+  request, with the token, is never repeated at the `Location`), verifies the certificate of an `https` URL against the system roots
+  (never skipped, TLS 1.2 at least), ends a request after 30 seconds, reads the header of an answer up to 16 KiB and at most 4,096 bytes
+  of its body, which it discards.
+- Plain `http` is meant only for the backend host's tailnet address or its MagicDNS name, because the tailnet encrypts and
+  authenticates the transport; every other address is `https`. The scheme must match the listener: an `https` URL at a plain-http
+  listener fails as `connection failed`, and an `http` URL at a TLS port gets a `400` without the refusal header (*Sending*), which
+  counts as a backend that does not accept batches, so the agent only waits and gives no record up.
 - Commands for the server (a later feature) are fetched by the agent from the backend, never pushed to it, so they reach the server
   only at the agent's next poll.
 - The agent never contacts Telegram or any other service; all notification goes through the backend.
@@ -137,7 +148,7 @@ rules below for the parts not implemented are the target the implementation is h
 The collector `self` (interval 60 seconds, timeout 10 seconds) records the agent's own resource use as ordinary `metric` records with
 source `agent`, through the scheduler like every collector: its resident memory, its CPU time, its number of goroutines, the size of
 the spool's files (`agent_spool_bytes`), the age of the oldest record the spool holds unacknowledged (`agent_spool_age_seconds`), and —
-once the sender exists — how far sending lags behind capture. The names, units and values are in the
+how far sending lags behind capture (`agent_send_lag_seconds`, from the sender). The names, units and values are in the
 [wire format](wire-format.md) (*Metric names*, the `agent_*` rows).
 
 The resident memory is read from at most 64 KiB of the agent's own `/proc` status file, and its line must be `VmRSS:`, spaces or tabs,
@@ -1471,7 +1482,7 @@ it has just read:
 - otherwise it keeps its mode. The products are computed exactly (128 bits, no overflow, no floating point). The thresholds are fixed, not
   options, until the parallel run of #45 shows a reason (record 0113, option 4).
 
-The collector calls the switch (`Scheduler.SetPressure`, which the agent connects when it builds the scheduler) only when the mode changes;
+The collector calls the switch (`Scheduler.SetPressure` and `Sender.SetPressure`, which the agent connects when it builds the scheduler) only when the mode changes;
 it starts off. A change logs one info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`,
 `mem_available_bytes` and, when the pressure file was read, `memory_some_avg10`. A failed sample changes nothing. The effect: the `system`
 (10 seconds), `processes` (15 seconds), `connections` (15 seconds), `systemd` (10 seconds) and `mariadb` (10 seconds) collectors run at their pressure intervals, `processes` lists every process, `connections` records a full snapshot and `mariadb` records the thread snapshot of the server's process list (*MariaDB*). An extra run of `processes` or `connections` for an OOM kill then takes the place of the collector's next regular run (*Scheduling*), so a storm of kills costs no more snapshots than the mode already takes.
@@ -1511,8 +1522,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 ## Spool and sending
 
 - The agent keeps collecting while the backend is unreachable and keeps **at least 7 days** of records in an on-disk spool. When the
-  backend is reachable again it sends current data first, then backfills the spool chronologically and throttled (the sender, #39, is
-  not implemented yet; until it is, only the tests read and acknowledge the spool).
+  backend is reachable again it sends current data first, then backfills the spool chronologically and throttled (*Sending*).
 - Every record carries a sequence number from one counter per agent that increases strictly, survives restarts and reboots and is never
   reused. A batch has no identity of its own (see the wire format). Losing the counter would make new records collide with stored
   ones; the clock bound below keeps a fresh spool's numbers above them.
@@ -1691,7 +1701,9 @@ restarts the agent.
 **Memory.** The spool's live memory stays below 4 MiB, apart from the records of a read or hand-over in progress, at every
 `spool.max_size` up to 64 GiB, with 1,024 data files, 64 acknowledged ranges and 100,000 foreign entries: under 256 bytes per data file
 (numbers, size, context, summary times), a sparse index (a number every file size / 64 bytes) for at most the two files the two read
-positions are in, and one frame buffer; it does not grow with the number of records (`TestSpool_MemoryBound`). Opening a spool filled
+positions are in, and one frame buffer; it does not grow with the number of records (`TestSpool_MemoryBound`). The two read positions are one for each
+sender stream; the age read of the self-metrics (once a minute) takes a position as well, so it can replace one, and the stream whose
+position was replaced then finds its place again through the sparse index, which costs reading time and never correctness. Opening a spool filled
 to the default cap takes 26.2 ms and one of 1,024 files 15.9 ms on the development host, against a bound of 5 seconds
 ([BENCHMARKS](../BENCHMARKS.md), *Spool open*); the server is not measured (#44).
 
@@ -1713,6 +1725,78 @@ drops the oldest with gaps (*Memory pressure mode*).
 error text other than an `errno` text: info `spool created`; warning `spool data dropped` and info `spool data no longer dropped`;
 warning `spool write failed` and info `spool writes again`; warning `spool data damaged`; warning `spool records of another agent
 dropped`; warning `spool not closed`.
+
+## Sending
+
+The sender (`internal/sender`) runs in the agent's process beside the scheduler, only with a spool (not with the test sink), and
+reads the spool through `Read`, `Ack`, `Put`, `LastSeq` and `AckRanges`. Its transport is `sender.HTTPTransport`; the transport is a
+seam, `agent.Options.Transport`, so tests send to a fake. The agent stops it with the scheduler, before the state file's last save and
+the close of the spool. The agent starts without a reachable backend: a transport that cannot be built (a `backend.url` the transport
+refuses; the loader has checked it, so this cannot happen with a loaded configuration) is the one start error, `agent cannot start`
+with `sender: backend url: not usable`, never the URL.
+
+**Two streams.** A **live** stream sends every 4 seconds the records the spool took since its previous send (`mode: live`, batches of
+at most 20,000 records and 1 MiB of lines, one batch per request, batch after batch until nothing is left), and a **backfill** stream
+sends the older, unacknowledged records oldest first (`mode: backfill`, the same limits). Only the backfill is throttled, to
+`backend.backfill_bandwidth` of compressed request body bytes a second (the bodies of any span sum to at most the bandwidth times the
+span plus one batch), and it pauses (info `backfill paused`, `reason=memory_pressure`, and `backfill resumed`) while the memory
+pressure mode is on (*Memory pressure mode*) — the lines are logged only when records wait to be backfilled, also before a pass's
+first batch, never when there is nothing to backfill; the live stream is never throttled. At the start the live stream begins after the newest
+record, unless the spool already holds 32 acknowledged ranges (below), when it begins at the oldest unacknowledged record; the backfill
+waits for the first acknowledgement of the live stream and then sends everything below that stream's first record (info `backfill
+started` before its first batch and `backfill finished` with `records`, the number of records acknowledged, after the pass, both only when the pass found records to send). A request carries one
+batch with the header `mode` as a hint (the backend classifies by lateness, [wire format](wire-format.md)). The batch is the capture
+context of its records (agent ID, boot ID, clock offset), so a batch never mixes contexts.
+
+**Acknowledgement.** A record is acknowledged in the spool only after a `2xx` answer, and a stream's position moves only after the
+spool kept the acknowledgement (`Ack` returned). When the spool did not keep it (more than 64 ranges, the warning `acknowledgement not
+kept` with `err`, once until an `Ack` succeeds, or a gap it could not take), the stream waits one wait of its own schedule and sends
+the same records again; the backend stores a resent record once ([wire format](wire-format.md), *Batch identity*). A read the spool
+refuses logs the warning `spool not readable` (`err`) once for the failure and retries after the same wait.
+
+**Not accepting, one shared backoff.** An answer that is not `2xx` and not a refusal, and every failure without an answer (`timeout`,
+`connection failed`, `tls failed`), is a backend that does not accept batches. The first one starts an **episode** that both streams
+share: warning `backend not accepting batches` with `reason` (`timeout`, `connection failed`, `tls failed`, `token refused` for `401`
+and `403`, `status` for any other status) once, and again only when the reason or the status changes; the backfill
+sends nothing during the episode; the live stream makes one attempt after each wait, so an unreachable backend costs one request per
+wait. The wait is drawn uniformly from half to the whole of 1 second, doubled after each failed attempt to at most 60 seconds. An
+attempt sends the records the spool took since the previous attempt began, so current data is not held up by the old data; when the spool
+holds 32 acknowledged ranges the attempt reads from the live position instead (no jump), which leaves no new hole. The first
+acknowledged batch ends the episode (info `backend accepting batches again`, `seconds` the length) and releases the backfill. The
+records between the live position and the jump stay unacknowledged until the backfill covers them: the **holes** are bounded at 32 so
+the spool, which keeps at most 64 acknowledged ranges, never refuses an acknowledgement and deletes acknowledged files. A request that
+hangs is ended after 30 seconds; once 4,096 bytes of an answer's body were read the request's context is cancelled so the transport closes the
+connection instead of reading on. A failed delivery inside a backfill pass (an acknowledgement the spool did not keep, a wait for a free
+give-up slot) does not end the pass: after its wait the pass reads again from its position, so it never moves past an unacknowledged
+record.
+
+**Refused batches and give-ups.** A `400`, `413` or `422` that carries the header `Vandox-Refused: batch` (exactly this value, compared
+case-sensitively) refuses the batch itself ([0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md)):
+it is not an episode. The sender halves the batch recursively and sends the halves in order; a record that is refused alone is
+**given up**: the sender hands the spool a `gap` record (cause `unknown`, source `agent`, `first_seq` and `last_seq` the record's number,
+`from` its capture time, `to` one second later, captured now), acknowledges the record, and logs the warning `record refused` (`status`,
+`seq`, `kind`). A batch the wire encoder refuses is split the same way and gives its single record up with `status` 0. A `400` or `413`
+without the header (a TLS listener reached with `http`, a proxy's size limit) is an ordinary `status` answer and gives nothing up. At
+most **10 records are given up in an hour**, counted in the agent's memory (after a restart 10 more are allowed, a stated residual): at
+the bound the stream waits until the oldest give-up is an hour old, logs the warning `backend not accepting batches` with
+`reason=refused` and `status` once for the wait, and then sends the refused records again; the other stream goes on and no
+acknowledgement of it ends that wait. A backend that refuses everything thus costs at most 10 records and a bounded number of requests an hour.
+
+**Send lag.** `agent_send_lag_seconds` is the time since the capture of the newest record acknowledged since the start (before the first
+acknowledgement, since the start), never negative.
+
+**Memory and rate.** The sender holds one encoded batch for each stream, at most 1 MiB of lines compressed, independent of the backlog.
+`TestSender_MemoryBound` measured, with a full batch in flight on both streams, 4.4 to 4.6 MB of heap held and a sampled peak of 8.3 to
+8.6 MB under the race detector (7.5 to 7.8 MB without), the same at 600 and at 2,400 records of backlog, against the limit of 16 MiB.
+`TestReferenceStream_BackfillRate` took 6,807 records of the reference stream (*Capacity*), 2,630,490 bytes of lines, to 556,335 bytes
+compressed (gzip ratio 4.73), which at the default `256KiB` a second is 3,207 records a second, inside the band of 1,000 to 8,500
+the test pins (on the development host; the real rate is measured in #44). At that rate the backlog of a day (544,560 records) takes about 3 minutes
+of sending beside the live stream.
+
+**Logging.** Through the agent's logger with `component=sender`, never the URL, the token, a host or an answer's text, only the fixed
+lines above: warning `backend not accepting batches`, info `backend accepting batches again`, info `backfill started`, `backfill
+finished`, `backfill paused`, `backfill resumed`, warning `record refused`, `acknowledgement not kept` and `spool not readable`. A stop
+by the agent logs nothing.
 
 ## Rights
 
@@ -1751,6 +1835,11 @@ dropped`; warning `spool not closed`.
   records no owners. The unit gives the agent **no network namespace of its own** (no `PrivateNetwork=`, no `NetworkNamespacePath=`, or
   `/proc/net` would show another namespace's sockets), does not set `ProcSubset=pid` (it hides `/proc/net`) and leaves `ProtectProc=` at
   `default` (a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`).
+- **Sender.** The sender needs no group and no capability: it dials the backend's ingest port as the agent's user. The unit must allow
+  it: `RestrictAddressFamilies=` keeps **`AF_INET` and `AF_INET6`** beside `AF_UNIX`, and a system-call filter must not deny `socket` and
+  `connect` for them, or every request fails as `connection failed`. (A restriction of the addresses the agent may reach, such as
+  `IPAddressAllow=` for the backend, is left to the unit, #42.)
+  With a host name in `backend.url` the agent also queries the name server of `/etc/resolv.conf` (port 53), which an `IPAddressAllow=` must include.
 - **Systemd collector.** Reading unit states over the system bus needs no group and no capability: systemd's bus policy lets every user
   call `Properties.Get`, `ListUnitsByPatterns`, `ListUnitsByNames` and `LoadUnit` (the server capture was taken with every call made
   as `nobody`). The unit must keep the bus reachable: `RestrictAddressFamilies=` keeps `AF_UNIX` (also for this connection) and
@@ -1942,6 +2031,11 @@ dropped`; warning `spool not closed`.
   uncompressed segment files of checksummed frames, takes a fresh spool's numbers from the clock bound, keeps at most 64 acknowledged
   ranges, bounds its file size and count, reaches its files only relative to the directory's descriptor, and makes the state file wait
   for the spool's sync.
+- [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why a request carries one batch,
+  is acknowledged by its status alone and marks a refusal of the batch itself with a header.
+- [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the sender has a live and a
+  backfill stream with one shared backoff, gives refused records up with a recorded gap at most 10 an hour, bounds the holes at 32 and
+  pauses the backfill under memory pressure.
 
 ## Not here
 
@@ -1965,7 +2059,8 @@ under `testdata/journal/compact/`, and under `testdata/journal/systemd-255/` two
 collector and boot check), `internal/logship` (log shipping collector: journal, configured files with the link-free open, filter,
 positions; fixtures `testdata/logs/mail.log`, `kern.log-oom`), `internal/syslogline` (the syslog line rules, the year-less time and
 `/etc/localtime`), `internal/zstdfield` (the bounded zstd decoder over `github.com/klauspost/compress`), `internal/backups` (backup run
-check), `internal/agentstate` (the state file, the `state` job and the save at the stop), `internal/spool` (the spool: data and meta
+check), `internal/agentstate` (the state file, the `state` job and the save at the stop), `internal/sender` (the sender, its HTTP transport and the backfill throttle; tests use a fake transport and `net/http/httptest`; the
+measurements `TestSender_MemoryBound` and, in `internal/spool`, `TestReferenceStream_BackfillRate`), `internal/spool` (the spool: data and meta
 files, sequence numbers, reading, acknowledgements, drops and damage; its tests generate the reference stream and run the hard-kill and
 7-day tests; it uses `wire.MarshalRecord` and `wire.UnmarshalRecord`),
 `internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration, `mariadb-user.sql`; the unit and install

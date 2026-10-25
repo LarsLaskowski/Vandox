@@ -20,7 +20,8 @@
 #                                Give it the same owner and mode as the token file. The service refuses to
 #                                start without a valid hash (docs/areas/web-login.md).
 #   import/                      directory for the log import (mounted read-only)
-#   .env (optional)              WEB_BIND_ADDRESS=<address of this host the reverse proxy reaches>
+#   .env                         INGEST_BIND_ADDRESS=<this host's tailnet address, `tailscale ip -4`> (required)
+#                                WEB_BIND_ADDRESS=<address of this host the reverse proxy reaches> (optional)
 #
 # The web UI needs a login and runs behind a TLS-terminating reverse proxy (docs/REVERSE_PROXY.md). Set
 # web.trusted_proxies in vandoxd.yaml to the proxy's address, so the client address and the HTTPS scheme it
@@ -30,13 +31,23 @@
 # for a proxy on another host. The binding is defense in depth, not the access control: depending on the
 # Docker Engine version and the host firewall, hosts on the LAN may reach a published port directly.
 #
-# The ingest port (8081) is deliberately not published: the ingest API arrives with issue #40, which adds
-# the binding on this host's tailnet address (record 0017). Until then the ingest listener serves nothing.
+# The ingest port (8081) is published on the address in INGEST_BIND_ADDRESS, which has no default: compose
+# refuses to start without it (record 0127). Set it to this host's tailnet address (`tailscale ip -4`), or to
+# 127.0.0.1 while no agent sends yet. The ingest API needs the agent ID of the one agent the token belongs to:
+# set ingest.agent_id in vandoxd.yaml (it has no default; ingest stays disabled until it and the token are set).
+# The token, not the binding, is the boundary of the ingest endpoint: depending on the Docker Engine version
+# and the host firewall, hosts on the LAN may reach the published ingest port on the tailnet address, too.
+#
+# Tailscale prerequisite: the backend host runs Tailscale in TUN mode, so the tailnet address is a host
+# interface Docker can bind. In userspace-networking mode it is not. On Synology the package is switched to
+# TUN mode with `tailscale configure-host` and a restart of the package, repeated at boot by a triggered task.
+# Possible symptom in userspace mode (reported, not verified): the container does not start, or is not
+# restarted after a reboot, because the bind fails while the address is missing; run `docker compose up -d`
+# once Tailscale is up.
 #
 # A bind-mounted data directory (instead of the named volume) must be owned by the container's user (65532,
 # or the IDs set in `user:`), and so must the secret files.
 # Prefer an SSD for the data (every committed batch waits for the disk); a hard disk works, too, with slower writes.
-# The Docker image has no Tailscale prerequisite yet.
 name: vandox
 
 services:
@@ -57,6 +68,7 @@ services:
     stop_grace_period: 30s
     ports:
       - "${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080"
+      - "${INGEST_BIND_ADDRESS:?set INGEST_BIND_ADDRESS to this host's tailnet address (tailscale ip -4), or 127.0.0.1 without agents}:8081:8081"
     volumes:
       # A new named volume takes over the owner (65532) of /data in the image. With `user:` above, use a
       # data directory owned by that user instead: replace this line with `- ./data:/data`.

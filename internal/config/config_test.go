@@ -333,3 +333,41 @@ func TestCheckLogLevel(t *testing.T) {
 		})
 	}
 }
+
+func TestParseBandwidth(t *testing.T) {
+	valid := []struct {
+		text string
+		want int64
+	}{
+		{"16KiB", 16 << 10},
+		{"256KiB", 256 << 10},
+		{"1MiB", 1 << 20},
+		{"4MiB", 4 << 20},
+		{"4096KiB", 4096 << 10},
+		{"99999KiB", 99999 << 10},
+		{"1024MiB", 1024 << 20},
+		{"99999MiB", 99999 << 20},
+	}
+	for _, tt := range valid {
+		t.Run("valid "+tt.text, func(t *testing.T) {
+			got, ok := parseBandwidth(tt.text)
+			if !ok || got != tt.want {
+				t.Errorf("parseBandwidth(%q) = %d, %v, want %d, true", tt.text, got, ok, tt.want)
+			}
+		})
+	}
+
+	invalid := []string{
+		"", "KiB", "MiB", "256", "256kb", "256KB", "256kib", "256KIB", "256MB", "256GiB", "2GiB", "256 KiB", " 256KiB",
+		"256KiB ", "256KiB\n", "1.5MiB", "-1MiB", "+1MiB", "0256KiB", "00KiB", "1_0KiB", "0x10KiB", "1e3KiB",
+		"123456KiB", "123456MiB", "99999999999999999999MiB", "\u0663KiB", "256KiBKiB", "256MiBKiB",
+	}
+	for _, text := range invalid {
+		t.Run("invalid "+text, func(t *testing.T) {
+			got, ok := parseBandwidth(text)
+			if ok || got != 0 {
+				t.Errorf("parseBandwidth(%q) = %d, %v, want 0, false", text, got, ok)
+			}
+		})
+	}
+}

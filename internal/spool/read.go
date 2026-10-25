@@ -84,7 +84,7 @@ func (s *Spool) Read(ctx context.Context, after uint64, maxRecords int, maxBytes
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
-		return Batch{}, errClosed
+		return Batch{}, ErrClosed
 	}
 	job := &readJob{after: after, maxRecords: maxRecords, maxBytes: maxBytes}
 	if maxRecords <= 0 || maxBytes <= 0 {
@@ -553,7 +553,7 @@ func (s *Spool) OldestCapture(ctx context.Context) (time.Time, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
-		return time.Time{}, false, errClosed
+		return time.Time{}, false, ErrClosed
 	}
 	seq, ok := s.oldestUnacked()
 	if !ok {

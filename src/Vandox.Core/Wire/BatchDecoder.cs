@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Text.Json;
 
 using Vandox.Core.IO;
@@ -20,7 +19,7 @@ public sealed class BatchDecoder : IDisposable
                                                                     MaxDepth = WireFormat.MaxDepth
                                                                 };
 
-    private readonly GZipStream _gzip;
+    private readonly GzipMemberReader _gzip;
     private readonly WireLineReader _lines;
     private readonly WireLimits _limits;
     private readonly WireKeyCheck _keyCheck = new();
@@ -39,7 +38,7 @@ public sealed class BatchDecoder : IDisposable
     /// </summary>
     /// <param name="gzip">The decompressing stream</param>
     /// <param name="limits">The limits, with defaults filled in</param>
-    private BatchDecoder(GZipStream gzip, WireLimits limits)
+    private BatchDecoder(GzipMemberReader gzip, WireLimits limits)
     {
         _gzip = gzip;
         _limits = limits;
@@ -80,7 +79,7 @@ public sealed class BatchDecoder : IDisposable
                             MaxBatchBytes = limits is { MaxBatchBytes: > 0 } ? limits.MaxBatchBytes : defaults.MaxBatchBytes,
                             MaxRecords = limits is { MaxRecords: > 0 } ? limits.MaxRecords : defaults.MaxRecords
                         };
-        var gzip = new GZipStream(input, CompressionMode.Decompress, leaveOpen: true);
+        var gzip = new GzipMemberReader(input);
         var decoder = new BatchDecoder(gzip, effective);
 
         try

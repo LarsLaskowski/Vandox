@@ -376,6 +376,31 @@ public class BatchDecoderTests
     }
 
     /// <summary>
+    /// A second member that ends inside its header, after the magic and a few header bytes, is malformed.
+    /// </summary>
+    /// <param name="partial">The number of bytes of the second header that are present</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(1)]
+    [DataRow(2)]
+    [DataRow(3)]
+    [DataRow(6)]
+    [DataRow(9)]
+    public async Task BatchDecoderRefusesSecondMemberCutInsideItsHeader(int partial)
+    {
+        // Arrange
+        using var whole = BatchBuilder.Gzip(BatchBuilder.Header, BatchBuilder.Metric(1));
+        byte[] second = [0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0xff];
+        using var input = new MemoryStream([.. whole.ToArray(), .. second.Take(partial)]);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), "second member cut inside its header");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+    }
+
+    /// <summary>
     /// A stream whose last bytes were cut off (the trailer) is refused, and so is one with a damaged checksum.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

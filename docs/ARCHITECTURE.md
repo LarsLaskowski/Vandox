@@ -8,11 +8,11 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
 `Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; `vandoxd incidents` uses it, the running service does not apply it to live data yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`) and as a page of the web UI with its Markdown download, the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
-exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
-web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
+exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes the notes of incidents and the agent's batches, `vandoxd import` writes through it), listens on the
+web and ingest ports, accepts the agent's batches on its ingest endpoint (`POST /v1/batches`: the token bound to one configured agent ID, bounded body, batch and time, two slots through the commit, a free-space floor; `Vandox.Backend` `Ingest`), protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
-collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services, the state of the local MariaDB server, the kernel's OOM kills and the boots, the lines of the journal and of configured `syslog` files, and the backup runs), keeps every record in its on-disk spool, keeps its small state file and notifies systemd; nothing sends the spool yet, so it fills up to its size bound and then drops its oldest records with recorded gaps.
-Everything else described here — the agent's other collectors and sender, the ingest API, retention, alerting, Telegram, the nightly
+collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services, the state of the local MariaDB server, the kernel's OOM kills and the boots, the lines of the journal and of configured `syslog` files, and the backup runs), keeps every record in its on-disk spool, keeps its small state file and notifies systemd, and its sender sends the spool to the ingest endpoint, current data first and the backlog throttled beside it, and the backend acknowledges each batch after its commit.
+Everything else described here — the agent's other collectors, the classification of live and backfilled data, retention, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -71,6 +71,12 @@ way, and agents of the hosting provider are never disabled or changed
   bound; the state file and the spool's files are the agent's only file writes, and every state save first makes the spool durable, so
   no saved position covers a record a crash can still lose
   ([0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md));
+  the sender (`internal/sender`) reads the spool in a live and a throttled backfill stream that share one backoff, posts one gzip
+  batch per request to the ingest endpoint under `backend.url` with the agent token as a bearer token, through a client that uses no
+  proxy and follows no redirect, acknowledges records in the spool only after a `2xx` answer, and gives a record the backend refuses
+  on its own up only with a recorded gap
+  ([0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
+  [0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md));
   the agent records its own resource use as metrics
   (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
   time) and stopping (`internal/sdnotify`, `internal/agent`)
@@ -87,7 +93,14 @@ way, and agents of the hosting provider are never disabled or changed
   writes the forensics report of the stored data as Markdown to standard output
   ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md)). Two Kestrel listeners serve
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
-  lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The web UI loads only its own
+  lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The ingest listener hands only
+  `POST /v1/batches` to the ingest endpoint (`Vandox.Backend.Ingest`), which checks the bearer token before it reads the body and the
+  header's agent ID against `ingest.agent_id`, decodes the batch with the C# decoder (which reads the gzip framing itself, as the Go
+  decoder does), holds one of two slots from the body read through the commit, writes nothing below the free-space floor
+  `ingest.min_free`, and answers `204` only after the commit; at shutdown no write starts after the stop signal and the store closes
+  only after the started writes ended ([0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md),
+  [0128](decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md); rules: [Backend host](areas/backend-host.md),
+  *Ingest endpoint*). The web UI loads only its own
   static assets and sends one self-only Content-Security-Policy ([0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md),
   [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)). The logs view (`/logs`, `/logs/templates`) searches the
   stored log lines, shows the context of a hit and the templates with their hourly chart, takes every filter from the address and reads
@@ -119,7 +132,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
   [wire format](areas/wire-format.md)), version information, agent configuration loading (see
-  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`), the MariaDB collector with its protocol client (`internal/mariadb`), the journal file reader (`internal/journal`) with its test-only writer of journal files (`internal/journal/journaltest`), the kernel event collector (`internal/kernevents`), the log shipping collector (`internal/logship`) with its syslog line parser (`internal/syslogline`) and its bounded zstd decoder (`internal/zstdfield`), the agent's state file and its `state` job (`internal/agentstate`), the on-disk spool (`internal/spool`), the backup run check (`internal/backups`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
+  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`), the MariaDB collector with its protocol client (`internal/mariadb`), the journal file reader (`internal/journal`) with its test-only writer of journal files (`internal/journal/journaltest`), the kernel event collector (`internal/kernevents`), the log shipping collector (`internal/logship`) with its syslog line parser (`internal/syslogline`) and its bounded zstd decoder (`internal/zstdfield`), the agent's state file and its `state` job (`internal/agentstate`), the on-disk spool (`internal/spool`), the sender with its HTTP transport (`internal/sender`), the backup run check (`internal/backups`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 
@@ -166,7 +179,12 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0119](decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md),
 [0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md),
 [0121](decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md),
-[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md).
+[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md),
+[0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
+[0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md),
+[0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md),
+[0127](decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md),
+[0128](decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md).
 
 ## Data flow
 
@@ -257,9 +275,12 @@ web login is the boundary. The login uses one administrator password stored as a
 service's memory, and a cookie that carries just a protected reference to its session; failed sign-ins are limited per client and
 overall. The service trusts `X-Forwarded-For` and `X-Forwarded-Proto` only from the addresses in `web.trusted_proxies` (default:
 none) and never takes the peer address as proof of having passed the proxy; the operator guide for the proxy is
-[REVERSE_PROXY.md](REVERSE_PROXY.md) and the rules are in [Web login](areas/web-login.md). The ingest port is not published until the ingest API exists (issue #40), which
-binds it to the backend host's tailnet address as described above
-([0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)).
+[REVERSE_PROXY.md](REVERSE_PROXY.md) and the rules are in [Web login](areas/web-login.md). The compose file publishes the ingest port
+on the address in the required variable `INGEST_BIND_ADDRESS`, the backend host's tailnet address; the backend host therefore runs
+Tailscale in TUN mode, where that address is a host interface (userspace-networking mode is not supported). That binding is defense in
+depth as well: LAN hosts may reach the ingest port on the tailnet address, and the token is the boundary
+([0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md),
+[0127](decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md)).
 
 ```mermaid
 flowchart LR
@@ -285,7 +306,8 @@ Records: [0010](decisions/0010-tailscale-with-strict-acl.md),
 [0023](decisions/0023-tls-through-a-reverse-proxy.md),
 [0103](decisions/0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md),
 [0104](decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md),
-[0105](decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md).
+[0105](decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md),
+[0127](decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md).
 
 ## Offline behavior and backfill
 
@@ -293,7 +315,11 @@ The rules for live data, alerts and the nightly report are in [Detection, alerts
 
 The backend host runs 24/7 but is sometimes switched off at night (typically 22:00–09:00) a few times a year. While
 the backend is unreachable the agent keeps collecting and spools at least 7 days on disk. When the backend
-is reachable again it sends current data first, then backfills the spool chronologically and throttled.
+is reachable again it sends current data first, then backfills the spool chronologically and throttled: a live and a backfill
+stream share one backoff, so current data never waits behind the backlog, and only the backfill is limited to
+`backend.backfill_bandwidth` ([Agent](areas/agent.md), *Sending*). The spool counts a record as delivered only after a `2xx` answer,
+which the backend sends after its commit ([Backend host](areas/backend-host.md), *Ingest endpoint*), or once a record the backend
+refused on its own was replaced by a recorded gap.
 Every agent record carries a sequence number from a persistent per-agent counter, and every batch the
 agent's ID; a batch is identified by the agent ID and the sequence numbers of its records, so a resend is
 idempotent (the backend stores each agent ID and sequence number once) and the backend can detect gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
@@ -308,7 +334,9 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
 [0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md),
 [0046](decisions/0046-batch-header-describes-the-capture-context.md),
-[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md).
+[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md),
+[0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
+[0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md).
 
 ## Storage and retention
 
@@ -415,7 +443,10 @@ error behavior are in [Configuration and secrets](areas/configuration-and-secret
 
 The agent and the backend communicate only over a private Tailscale network. The agent connects outbound
 only and never listens on a port, and the Tailscale ACL lets the monitored server reach only the ingest port
-on the backend host. The web UI is protected by a login (argon2id password hash, server-side sessions, antiforgery tokens, limited
+on the backend host. The ingest endpoint accepts only the agent token, compared in constant time, for the one agent ID in
+`ingest.agent_id`; it bounds what one request costs in memory and time and stops writing below the free-space floor, so a token holder
+cannot exhaust the backend's memory or fill its data volume
+([0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md)). The web UI is protected by a login (argon2id password hash, server-side sessions, antiforgery tokens, limited
 failed sign-ins) and runs behind a reverse proxy whose forwarded headers are trusted only from `web.trusted_proxies`
 ([Web login](areas/web-login.md)). The Telegram token
 exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
