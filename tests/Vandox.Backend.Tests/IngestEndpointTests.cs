@@ -1139,6 +1139,47 @@ public class IngestEndpointTests
     }
 
     /// <summary>
+    /// A body read that fails with an I/O error while the connection is still there is answered 503 and writes nothing, never with a 2xx; when the request is
+    /// aborted, nothing is answered.
+    /// </summary>
+    /// <param name="aborted">Whether the request is aborted before the read fails</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task IngestEndpointBodyReadIoErrorAnswers503UnlessAborted(bool aborted)
+    {
+        // Arrange
+        await using var rig = IngestRig.Create();
+
+        var body = new CountingBodyStream(IngestSamples.Valid(1, 3)[..10])
+                   {
+                       FailAtEnd = new IOException("connection broke")
+                   };
+
+        using var call = IngestCall.Chunked(body);
+
+        if (aborted)
+        {
+            await call.AbortAsync();
+        }
+
+        // Act
+        await Finish(rig.RunAsync(call));
+
+        // Assert
+        Assert.IsFalse(call.Status is >= 200 and < 300 && aborted == false, $"status {call.Status} is not a 2xx for a request that is still there");
+
+        if (aborted == false)
+        {
+            Assert.AreEqual(503, call.Status, "status");
+            Assert.IsNull(call.Refused, "no refusal header");
+        }
+
+        Assert.AreEqual(0, rig.Writer.Calls, "nothing is written");
+    }
+
+    /// <summary>
     /// One request with a record line of 1 MB of a hostile shape (a body of a few kilobytes) keeps a live heap that, for the two slots together, stays within
     /// 128 MiB together with the two body buffers.
     /// </summary>
