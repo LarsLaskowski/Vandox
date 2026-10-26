@@ -49,11 +49,11 @@ through `AgentReplay` (*Test files*).
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
 | AC1 | `LiveRulesMetricWithinNinetySecondsIsLive`, `LiveRulesMetricNinetyOneSecondsLateIsBackfilled`, `LiveRulesLogLineNineMinutesLateIsLive`, `LiveRulesKernelEventElevenMinutesLateIsBackfilled`, `LiveRulesEarlyBeyondAllowanceIsBackfilled`, `LiveRulesOpenGapBelowIsBackfilled`, `LiveRulesExtremeTimesDoNotOverflow`; `SqliteStoreTimelineClockSteppedForwardFreshRecordsBackfilled`; `IngestEndpointTimelineBackfillModeFreshRecordsStoredLive`, `IngestEndpointTimelineLiveModeOldRecordsStoredBackfilled` | `tests/Vandox.Storage.Tests/LiveRulesTests.cs`; T; `tests/Vandox.Backend.Tests/IngestEndpointTimelineTests.cs` |
-| AC2 | `SqliteStoreTimelineThirteenHourOutageNeverStoresOutageRecordLive` (one sequence and one time gap opened; every record of the batches before the closing one backfilled; the closing batch's records live exactly when within 90 s of receipt; no other record captured 22:00-11:00 live; offset unchanged until both close; both `closed` with the last number; the next batch live) | T |
+| AC2 | `SqliteStoreTimelineThirteenHourOutageNeverStoresOutageRecordLive` (one sequence and one time gap opened; every record of the batches before the closing one backfilled; the closing batch's records live exactly when within 90 s of receipt; no other record captured 22:00-11:00 live; offset unchanged until both close; both `closed` with the last number; the next batch live); `SqliteStoreTimelineFullHolesOutageReplayNeverStoresOutageRecordLive` (10 minutes live, then the outage's records with consecutive numbers ahead of current ones and a counted late `self` sample: no record captured during the outage more than 90 s before its receipt live, offset and `measured_at` unchanged) | T |
 | AC3 | `SqliteStoreTimelineSameBootRestartDuringBackfillKeepsFirstClassification`, `SqliteStoreTimelineRebootJumpBecomesFinalAfterFiveMinutes`, `SqliteStoreTimelineWaitRestartsAfterReopen`, `SqliteStoreTimelineRefusedFirstBatchAfterReopenKeepsWaitReset` | T |
 | AC4 | `SqliteStoreTimelineAgentSpoolDroppedGapFinalizesNamedNumbers`, `SqliteStoreTimelineAgentGapAtOrAboveOwnNumberFinalizesNothing` | T |
 | AC5 | `SqliteStoreTimelineCleanStopHourIsFinalTimeGap`, `SqliteStoreTimelineTimeGapOpenWhileSequenceGapBetween`, `SqliteStoreTimelineTimeGapBelowFirstNumberDetected`, `SqliteStoreTimelineTimeGapBesideAgentGapStored`, `SqliteStoreTimelineTimeGapIgnoresOffsetChange` | T |
-| AC6 | `ClockEstimatorBehindTwoHoursMeasuredFromCountedSample`, `ClockEstimatorAheadTwoHoursFromRunTimedRecordsBeforeCountedSample`, `ClockEstimatorLogLineNeverRaisesEstimate`, `ClockEstimatorLateSampleNeverLowersEstimate`, `ClockEstimatorBackwardStepRecoversWithinFiveMinutes`, `ClockEstimatorPreSampleBoundExpiresAfterFiveMinutes`, `ClockEstimatorExpiryFallsBackToWindowMaximumNotBackfillBatch`, `ClockEstimatorSaturatesExtremeBounds`; `SqliteStoreTimelineClockAheadNeverMakesOldRecordLive`, `SqliteStoreTimelineClockBehindLiveFromCountedSample`, `SqliteStoreTimelineQuietAgentSamplesAreCounted`, `SqliteStoreTimelineClockAheadBackfillAfterExpiryStaysBackfilled` (agent 2 h ahead, installed while the backend was off, live and backfill batches mixed so that a backfill batch is the first after an expiry) | `tests/Vandox.Storage.Tests/ClockEstimatorTests.cs`; T |
+| AC6 | `ClockEstimatorBehindTwoHoursMeasuredFromCountedSample`, `ClockEstimatorAheadTwoHoursFromRunTimedRecordsBeforeCountedSample`, `ClockEstimatorLogLineNeverRaisesEstimate`, `ClockEstimatorLateSampleNeverLowersEstimate`, `ClockEstimatorBackwardStepRecoversWithinFiveMinutes`, `ClockEstimatorPreSampleBoundExpiresAfterFiveMinutes`, `ClockEstimatorExpiryFallsBackToWindowMaximumNotBackfillBatch`, `ClockEstimatorSaturatesExtremeBounds`, `ClockEstimatorFarLowerBoundMeasuresOnlyWhenConfirmed`, `ClockEstimatorConfirmationNeedsSpacingAndAgreement`, `ClockEstimatorRaisingBoundMeasuresAtOnce`; `SqliteStoreTimelineClockAheadNeverMakesOldRecordLive`, `SqliteStoreTimelineClockBehindLiveFromConfirmingSample`, `SqliteStoreTimelineClockBackwardStepRecoversWithinTenMinutes`, `SqliteStoreTimelineQuietAgentSamplesAreCounted`, `SqliteStoreTimelineClockAheadBackfillAfterExpiryStaysBackfilled` (agent 2 h ahead, installed while the backend was off, live and backfill batches mixed so that a backfill batch is the first after an expiry) | `tests/Vandox.Storage.Tests/ClockEstimatorTests.cs`; T |
 | AC7 | `SqliteStoreTimelineNoSequenceGapBelowFirstNumber`, `SqliteStoreTimelineMiddleFillSplitsGap`, `SqliteStoreTimelineFinalGapShrinksAndCloses`, `SqliteStoreTimelineGapStatesSurviveReopen` | T |
 | AC8 | `SqliteStoreTimelineRefusedBatchChangesNothing`, `SqliteStoreTimelineConcurrentBatchesMatchCommitOrder`, `SqliteStoreTimelineJumpInNumberAndTimeAddsAtMostTwoRowsPerRecord`, `SqliteStoreTimelineNumbersNearMaximumWork`, `SqliteStoreTimelineAgentGapRangeAboveLongMaximumWorks`, `SqliteStoreTimelineCaptureTimesAtStorableEndsStoredBackfilled`; `AgentTimelineQueriesUseIndexSearchesOnly`; `IngestEndpointTimelineCaptureTimeAtStorableEndAnswers204` | T; `tests/Vandox.Storage.Tests/AgentTimelineQueriesTests.cs`; `tests/Vandox.Backend.Tests/IngestEndpointTimelineTests.cs` |
 | AC9 | `SqliteStoreTimelineImportRecordsReadBackfilled`, `SqliteStoreOpenMigratesAgentRecordsAsBackfilledWithoutGaps` | T; `tests/Vandox.Storage.Tests/SqliteStoreOpenTests.cs` |
@@ -132,6 +132,14 @@ backend clock), saturated. Only run-timed records give bounds — every kind exc
   own batch (AC6). The live stream sends every 4 seconds beside the backfill, so a window always holds live batches
   while the agent sends. A forward step before the first counted sample
   therefore lasts at most 5 minutes (M2); the migration seeds nothing (null), so nothing old survives the upgrade.
+- Measuring (review B1): the batch's candidates are walked in ascending `seq`. A candidate's reading (bound, raw capture time,
+  receive time) **measures** — enters its `counted` bucket — when its bound is at least the offset in effect (`offset_ns`, 0
+  when null) minus 90 s, or when the agent's previous counted reading lies 1 to 5 minutes before it in both capture and
+  receive time and within 90 s of its bound (`ClockEstimator.Measures`, `Int128`). Every candidate then becomes the previous
+  reading (`agent_streams.last_*`). Only a measuring candidate sets `measured_at` and re-estimates. So a late sample that a
+  full-holes live stream ([Agent](../../docs/areas/agent.md), *Sending*: 32 ranges, no jump) brings as the head never
+  measures; a behind or stepped-back clock is learned from its second counted sample. Residual: two late counted samples
+  (agent started twice in an outage) 1 to 5 minutes apart in capture and receive time that agree within 90 s.
 `measured_at` = the newest counted sample's receive time. Residual (N4): the offset can be short by the delivery delay of
 the freshest counted sample, up to the agent's 30-second request timeout. Crossing |offset| = 90 s sets or clears `agent_streams.clock_off`.
 
@@ -140,8 +148,8 @@ commit; a refused or rolled-back first batch leaves the reset for the next one.
 
 **Schema step 12** (`SchemaMigrator`): `records.live` (`INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1))`); `agent_streams`
 (`agent_id` primary key, `floor_seq`, `max_seq`, `max_captured_at`, `fill_at`, `open_gaps`,
-`offset_ns`, `measured_at`, `clock_off`), seeded from existing agent records (`floor_seq` = `max_seq` = the highest stored number,
-its capture and receive time, `open_gaps` 0, offsets null); `agent_clock_samples` (`agent_id`, `sort` `counted`/`run`, `bucket` (receive
+`offset_ns`, `measured_at`, `clock_off`, `last_bound_ns`, `last_captured_at`, `last_received_at`), seeded from existing agent records (`floor_seq` = `max_seq` = the highest stored number,
+its capture and receive time, `open_gaps` 0, offsets and `last_*` null); `agent_clock_samples` (`agent_id`, `sort` `counted`/`run`, `bucket` (receive
 time floored to 10 s), `bound_ns`, primary key `(agent_id, sort, bucket)`, without row ID, empty after the migration); `agent_sample_times` (`agent_id`, `captured_at`, `min_seq`, `max_seq`, primary key `(agent_id,
 captured_at)`, without row ID, empty after the migration); `gaps` (`id` `AUTOINCREMENT`, `agent_id`, `kind`, `cause`, `state`,
 `first_seq`, `last_seq`, `from_seq`, `to_seq`, `from_at`, `to_at`, `detected_at`, `changed_at`, `CHECK`s on kind, state, and
@@ -151,7 +159,8 @@ captured_at)`, without row ID, empty after the migration); `gaps` (`id` `AUTOINC
 (`GapsAsync`, `ClockAsync`) on reader connections, bound parameters, a page of 1 to 1,000 gaps by ID.
 
 **Logs** (`IngestEndpoint.Acknowledge`, `BackendLog`): after `ingest batch stored`, when `result.Timeline` is set: info `ingest
-gaps changed {AgentId} {Opened} {Closed} {Final} {Open}` (EventId 66) when a gap changed; warning `agent clock off {AgentId}
+gaps changed {AgentId} {Opened} {Closed} {Final} {Open}` (EventId 66) when `Opened`, `Closed` or `Final` is above 0 (a batch that only shrinks or
+splits a gap writes none); warning `agent clock off {AgentId}
 {OffsetSeconds}` (67) when the state turned off, info `agent clock in step {AgentId}` (68) when it turned back. Layout fixed here.
 
 **Benchmark (minor 2).** Besides its current run, the Dev adds a scenario to `tools/Vandox.StorageBenchmark`: one 10,000-record
@@ -175,7 +184,7 @@ from counted samples only versus all records, a minimum-lateness window or the h
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| Vandox.Storage | `LiveRules.cs`, `ClockEstimator.cs`, `ClockSample.cs` (new) | the live rule, the allowances, the offset estimate |
+| Vandox.Storage | `LiveRules.cs`, `ClockEstimator.cs`, `ClockSample.cs`, `ClockReading.cs` (new) | the live rule, the allowances, the offset estimate |
 | Vandox.Storage | `AgentTimeline.cs`, `AgentTimelineQueries.cs` (new) | gap upkeep, counted samples, final wait, sample times, stream row; its SQL |
 | Vandox.Storage | `TimelineChange.cs`, `AgentGap.cs`, `AgentClock.cs`, `GapQuery.cs`, `GapKind.cs`, `GapState.cs`, `TimelineLimits.cs`, `IAgentTimelineReader.cs` (new) | result, read model, constants, reader |
 | Vandox.Storage | `BatchWriter.cs`, `SqliteStore.cs`, `SchemaMigrator.cs`, `StorageLimits.cs`, `RecordQueries.cs`, `StoredRecord.cs`, `WriteResult.cs` | `live`, the timeline, the restart set, step 12, readers |
@@ -192,7 +201,8 @@ public static class TimelineLimits
     public static readonly TimeSpan LogAllowance;        // 10 min
     public static readonly TimeSpan TimeGapSpan;         // 2 min
     public static readonly TimeSpan FinalWait;           // 5 min
-    public static readonly TimeSpan SampleWindow;        // 5 min
+    public static readonly TimeSpan SampleWindow;        // 5 min, also the oldest previous reading that confirms
+    public static readonly TimeSpan ConfirmSpacing;      // 1 min
     public const double MaxCountedSendLagSeconds = 60;
     public static readonly TimeSpan SampleBucket;        // 10 s
     public const int MaxClockSamples = 64;            // rows per agent and sort
@@ -206,11 +216,13 @@ public static class LiveRules
     public static bool IsLive(DataRecord record, DateTimeOffset receivedAt, long offsetNs, ulong? lowestOpenGapFirstSeq);
 }
 public readonly record struct ClockSample(DateTimeOffset Bucket, long BoundNs); // the bucket's largest bound
+public readonly record struct ClockReading(long BoundNs, DateTimeOffset CapturedAt, DateTimeOffset ReceivedAt);
 public static class ClockEstimator
 {
     public static long BoundOf(DateTimeOffset capturedAt, DateTimeOffset receivedAt); // Int128 inside, saturated
     public static long Estimate(IReadOnlyList<ClockSample> countedBuckets, IReadOnlyList<ClockSample> runBuckets);
     public static DateTimeOffset BucketOf(DateTimeOffset receivedAt);
+    public static bool Measures(ClockReading candidate, ClockReading? previous, long offsetInEffectNs);
 }
 public sealed class TimelineChange
 {

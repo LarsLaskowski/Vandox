@@ -56,13 +56,24 @@ How the clock offset is measured:
    would let a record stamped at the end of the storable range prove itself current. A counted sample counts for its own
    batch, because its send lag already shows it fresh. Both windows are kept as bounded rows of
    10-second buckets, so a window's maximum survives the expiry of its largest value. A late sample only lowers its own bound, which
-   the maximum ignores; a clock stepped back leaves a too-large estimate for up to 5 minutes, which only makes fresh records
-   backfilled.
+   the maximum ignores while the window holds a fresher counted bucket. When it does not (an agent whose 32 holes are full
+   sends an outage's records with consecutive numbers, so a late sample arrives as the head), a bound more than 90 seconds
+   below the offset in effect measures only when the agent's previous counted sample, 1 to 5 minutes earlier in capture and
+   receive time, agrees with it within 90 seconds: a late sample has no such partner, a clock that is really behind or
+   stepped back has one a minute later. A clock stepped back leaves a too-large estimate for up to about 6 minutes, which
+   only makes fresh records backfilled.
 2. **The largest bound over every record of the batch as well** — one future-stamped log line would raise the estimate and
    backfill every honest record of its batch.
 3. **The minimum lateness over a time window of all records** — a window that holds only backfill (an agent restarted with
    holes) measures the backlog's age as an offset and makes old records live (the spec challenge's M1).
 4. **The header's `clock_offset_ns`** — empty today, and relative to the agent's time source, not to the backend.
+
+How a counted sample far below the estimate is confirmed (review of #41):
+
+1. **By the agent's previous counted sample, spaced 1 to 5 minutes and agreeing within 90 seconds** (chosen).
+2. **Counting a sample only when the agent's previous batch arrived shortly before** — the first sample of an agent started
+   during the outage counts its lag from the start and arrives in the middle of the replay, right after other batches.
+3. **Never letting a counted sample lower the estimate** — a clock that is behind or stepped back would never be learned.
 
 ## Decision
 
@@ -84,6 +95,9 @@ number once its whole batch is applied. The rules, constants and states are in t
   can make a write fail.
 - Time gaps keep only `open` or `closed`; whether a time gap is final is decided when it is read, so no batch walks other gaps.
   A stored record adds at most three gap rows, each found by an indexed seek.
+- A clock that is behind is measured from its second counted sample, about a minute after the first. Residual: two late
+  counted samples (an agent started twice during an outage) 1 to 5 minutes apart in capture and receive time that agree
+  within 90 seconds can still measure.
 - Residual: the measured offset can be short by the delivery delay of the freshest counted sample (up to the agent's 30-second request timeout), so a record can
   be up to that much older than its allowance and still be live.
 - A flood of log lines read more than 10 minutes late, and a backup start seen more than 90 seconds late, are backfilled.

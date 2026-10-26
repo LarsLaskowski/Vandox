@@ -21,7 +21,10 @@ records, whose capture time comes from a log, and 90 seconds for every other kin
 numbers the backend has not stored; a **time gap** is a span of more than 2 minutes, in the agent's own capture times, in
 which the backend holds no `metric` record of the agent. A gap is **open** (its data may still arrive), **closed** (all of it
 arrived) or **final** (it will not arrive). A **counted** `self` sample is one whose `agent_send_lag_seconds` is at most
-60 seconds (an acknowledgement within one `system` interval plus the send period) and which, when stored, is the agent's highest stored number with no open sequence gap below it.
+60 seconds (an acknowledgement within one `system` interval plus the send period) and which, when stored, is the agent's highest stored number with no open sequence gap below it. A counted sample whose
+bound (capture minus receive time) lies more than 90 seconds below the offset in effect **measures** only when the agent's
+previous counted sample, captured and received 1 to 5 minutes earlier, lies within 90 seconds of it; every other counted
+sample measures at once.
 
 - S1: Given an agent that sends live without backlog, when a batch arrives whose records' lateness lies within the allowance
   (late or early) and no open sequence gap of the agent lies below their numbers, then every record is stored as `live`.
@@ -45,7 +48,7 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 - S6: Given the agent was stopped cleanly for an hour in the same boot, so its numbers continue without a jump, when the next
   batch arrives, then a time gap with cause `no_data` is stored `final` for that hour and no sequence gap opens.
 - S7: Given the server's clock is 2 hours behind (or ahead of) the backend host's, when the agent sends live, then from the
-  first counted `self` sample on the measured offset is about −2 h (+2 h) and current records are `live`, while records
+  first measuring `self` sample on (behind: the second counted one) the measured offset is about −2 h (+2 h) and current records are `live`, while records
   captured more than the allowance before their receipt stay `backfilled` throughout.
 - S8: Given batches whose header `mode` contradicts the data, when they arrive, then the classification follows lateness and
   gaps alone: fresh records in a `backfill` batch are `live`, old records in a `live` batch `backfilled`.
@@ -68,13 +71,15 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   after it began are `backfilled`.
 - E6: The agent's clock is stepped back by more than the allowance: current records are `backfilled` until the offset is
   measured again, at most 10 minutes; it never makes an old record `live`.
-- E7: No counted `self` sample has arrived (a new agent, a sender that never caught up): the offset is the largest proof, among
+- E7: No `self` sample has measured yet (a new agent, a sender that never caught up): the offset is the largest proof, among
   the run-timed records (not `log_line` or `kernel_event`) of earlier batches received in the last 5 minutes, that the agent
   clock is ahead, and 0 when there is none — a record never proves its own batch current; so an agent clock behind by more than the allowance yields only `backfilled` records, and an old record
   is never made `live` by a clock that is ahead.
 - E8: A `self` sample with a small send lag that arrives late (the first sample of an agent started while the backend was off,
   whose lag counts from the start; a sample taken just before the backend went off and sent later by the backfill or into a
-  hole the live stream left) is not counted and never moves the offset.
+  hole the live stream left) is not counted and never moves the offset. When the agent's 32 holes are full its live stream
+  sends the outage's records with consecutive numbers ([Agent](../../docs/areas/agent.md), *Sending*), so such a sample can
+  be counted; its bound lies far below the offset and no earlier counted sample confirms it, so it does not measure.
 - E9: The backend restarts with open gaps: their states survive, and the 5-minute wait of S5 counts again from the agent's
   first batch stored after the start.
 - E10: A refused batch (`4xx`, `503`) or a rolled-back write changes no classification, gap or offset.
@@ -94,10 +99,10 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 
 ## Non-functional requirements
 
-- No new configuration: the allowances (10 min, 90 s), the time-gap span (2 min), the final wait (5 min) and the send-lag bound
-  (60 s) are tested constants (Detection area, *Live data and backfill*).
-- No wire-format change; the header's `mode` and `clock_offset_ns` are stored as before and not used for the classification
-  (record 0046 lets the backend prefer its own measurement).
+- No new configuration: the allowances (10 min, 90 s), the time-gap span (2 min), the final wait (5 min), the send-lag bound
+  (60 s) and the confirmation spacing (1 to 5 min) are tested constants (Detection area, *Live data and backfill*).
+- No wire-format change; the header's `mode` is only logged, never stored, and its `clock_offset_ns` is stored as before;
+  neither is used for the classification (record 0046 lets the backend prefer its own measurement).
 - Schema: one new migration step; a record row is still never updated after its insert.
 - Classification, gap upkeep and the offset update run in the batch's write transaction; the storage write-throughput
   criterion (Storage, *Write throughput*) still holds, and the backend keeps per agent only a fixed amount of memory for it.
@@ -105,7 +110,8 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 - Security: the classification is no trust boundary against an agent holding the token, which chooses its own capture
   times and numbers; it can add at most three gap rows per record it stores. Log lines carry the agent ID, counts, numbers,
   times and the offset, never record content.
-- Logs: info `ingest gaps changed` (`agent_id`, `opened`, `closed`, `final`, `open`) once per batch that changed a gap;
+- Logs: info `ingest gaps changed` (`agent_id`, `opened`, `closed`, `final`, `open`) once per batch that opened, closed or made final a gap (a batch that only
+  shrinks or splits a gap writes none);
   warning `agent clock off` (`agent_id`, `offset_seconds`) when the measured offset first exceeds 90 seconds, info
   `agent clock in step` when it returns.
 
@@ -118,7 +124,10 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   started during the outage, E8), opens one sequence gap and one time gap, stores every record of the batches before the one
   that brings the last missing number `backfilled` (current records included), never stores a record captured during the
   outage `live` unless it comes with that closing batch within its allowance, leaves the offset unchanged until the gaps
-  close, closes both gaps with the last missing number, and stores current records of the following batch `live` (S2, E8).
+  close, closes both gaps with the last missing number, and stores current records of the following batch `live`; replayed
+  again with the agent's holes full, so that the outage's records arrive first with consecutive numbers and a late `self`
+  sample is counted, it stores no record captured during the outage more than its allowance before its receipt `live` and
+  leaves the offset unchanged (S2, E8).
 - [ ] AC3: A same-boot agent restart during that backfill, with resent records, stores each record once with its first
   classification and keeps the outage gap open until filled; separately, a reboot with a numbering jump and a new boot ID
   makes the jump's gap `final` with the first batch stored 5 minutes after the wait's start of S5, and that batch's current records are `live` (S3, S5, E9).
@@ -129,7 +138,7 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   between its neighbouring records' numbers, `open` otherwise, and narrowed, split or `closed` by metrics that arrive inside
   it (S2, S6, E1, E15, E16).
 - [ ] AC6: With the server's clock 2 hours behind and, separately, 2 hours ahead, records sent live are `live` from the first
-  counted `self` sample on, no record captured more than its allowance (plus the delivery delay of the
+  measuring `self` sample on (ahead: the first counted one; behind: the second, which confirms the first), no record captured more than its allowance (plus the delivery delay of the
   freshest counted sample, none in the test) before its receipt is ever `live` (before, during and
   after the measurement and after a clock step), and after a backward step of 5 minutes current records are `live` again
   within 10 minutes; this holds for an agent without log traffic, whose send lag is set by its `system` samples (S7, E4, E6,
