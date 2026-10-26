@@ -173,7 +173,7 @@ public class ClockEstimatorTests
     }
 
     /// <summary>
-    /// A confirmation needs both spacings between 60 seconds and 5 minutes and a bound difference of at most 90 seconds.
+    /// A confirmation needs both spacings between 30 seconds and 5 minutes and a bound difference of at most 90 seconds.
     /// </summary>
     [TestMethod]
     public void ClockEstimatorConfirmationNeedsSpacingAndAgreement()
@@ -182,22 +182,24 @@ public class ClockEstimatorTests
         var candidate = Reading(1000, 1001, -46_800);
 
         // Act
-        var captureTooClose = ClockEstimator.Measures(candidate, Reading(941, 941, -46_800), 0);
-        var receiveTooClose = ClockEstimator.Measures(candidate, Reading(940, 942, -46_800), 0);
+        var captureTooClose = ClockEstimator.Measures(candidate, Reading(971, 971, -46_800), 0);
+        var receiveTooClose = ClockEstimator.Measures(candidate, Reading(970, 972, -46_800), 0);
+        var minuteSpacing = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800), 0);
         var captureTooFar = ClockEstimator.Measures(candidate, Reading(699, 700, -46_800), 0);
         var receiveTooFar = ClockEstimator.Measures(candidate, Reading(940, 700, -46_800), 0);
         var disagreeing = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800 + 91), 0);
-        var exactSpacing = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800), 0);
+        var exactSpacing = ClockEstimator.Measures(candidate, Reading(970, 971, -46_800), 0);
         var exactAgreement = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800 - 90), 0);
         var agreementAbove = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800 + 90), 0);
 
         // Assert
-        Assert.IsFalse(captureTooClose, "59 seconds apart in capture time");
-        Assert.IsFalse(receiveTooClose, "59 seconds apart in receive time");
+        Assert.IsFalse(captureTooClose, "29 seconds apart in capture time");
+        Assert.IsFalse(receiveTooClose, "29 seconds apart in receive time");
         Assert.IsFalse(captureTooFar, "301 seconds apart in capture time");
         Assert.IsFalse(receiveTooFar, "301 seconds apart in receive time");
         Assert.IsFalse(disagreeing, "bounds 91 seconds apart");
-        Assert.IsTrue(exactSpacing, "exactly 60 seconds apart in both");
+        Assert.IsTrue(minuteSpacing, "60 seconds apart in both");
+        Assert.IsTrue(exactSpacing, "exactly 30 seconds apart in both");
         Assert.IsTrue(exactAgreement, "bounds exactly 90 seconds apart, the previous one lower");
         Assert.IsTrue(agreementAbove, "bounds exactly 90 seconds apart, the previous one higher");
     }

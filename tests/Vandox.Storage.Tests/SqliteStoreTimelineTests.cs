@@ -715,6 +715,174 @@ public class SqliteStoreTimelineTests
     }
 
     /// <summary>
+    /// With the agent's clock two hours behind and its samples a little off the 60-second grid, the second counted sample still confirms the first: the offset is measured, and records are live from the batch with the second counted sample on.
+    /// </summary>
+    /// <param name="firstMilliseconds">The spacing of the first, third, ... sample in milliseconds</param>
+    /// <param name="secondMilliseconds">The spacing of the second, fourth, ... sample in milliseconds</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(59_900, 60_100)]
+    [DataRow(59_999, 59_999)]
+    public async Task SqliteStoreTimelineJitteredSamplesConfirmBehindClock(int firstMilliseconds, int secondMilliseconds)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+        var skew = TimeSpan.FromHours(-2);
+        var batches = new List<RecordBatch>();
+        var seq = 100UL;
+        var at = _t0;
+
+        for (var index = 0; index < 8; index++)
+        {
+            var batch = SampleBatch(seq, at, skew, 30, true);
+
+            batches.Add(batch);
+            seq += (ulong)batch.Records.Count;
+            at = at.AddMilliseconds(index % 2 == 0 ? firstMilliseconds : secondMilliseconds);
+        }
+
+        AgentClock? afterFirst = null;
+
+        // Act
+        for (var index = 0; index < batches.Count; index++)
+        {
+            await WriteAsync(store, batches[index]);
+
+            if (index == 0)
+            {
+                afterFirst = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+            }
+        }
+
+        var clock = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+        var live = await LiveAsync(directory);
+
+        // Assert
+        Assert.IsNull(afterFirst?.MeasuredAt, "the first counted sample alone measures nothing");
+        Assert.IsGreaterThanOrEqualTo(-7204 * NanosecondsPerSecond, clock!.OffsetNs ?? long.MinValue, "the offset is measured");
+        Assert.IsLessThanOrEqualTo(-7200 * NanosecondsPerSecond, clock.OffsetNs ?? long.MaxValue, "the offset is a lower bound");
+        AssertAll(live, batches[0], false, "the batch with the first counted sample");
+
+        for (var index = 1; index < batches.Count; index++)
+        {
+            AssertAll(live, batches[index], true, $"batch {index} from the second counted sample on");
+        }
+    }
+
+    /// <summary>
+    /// After the agent's clock is stepped back by 5 minutes, its samples a little under 60 seconds apart confirm each other, and current records are live again within 10 minutes.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTimelineJitteredSamplesConfirmBackwardStep()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+        var spacing = TimeSpan.FromMilliseconds(59_900);
+        var before = new List<RecordBatch>();
+        var after = new List<RecordBatch>();
+        var seq = 100UL;
+        var at = _t0;
+
+        for (var index = 0; index < 5; index++)
+        {
+            var batch = SampleBatch(seq, at, TimeSpan.Zero, 30, true);
+
+            before.Add(batch);
+            seq += (ulong)batch.Records.Count;
+            at += spacing;
+        }
+
+        var stepAt = at;
+
+        for (var index = 0; index < 13; index++)
+        {
+            var batch = SampleBatch(seq, at, TimeSpan.FromMinutes(-5), 30, true);
+
+            after.Add(batch);
+            seq += (ulong)batch.Records.Count;
+            at += spacing;
+        }
+
+        // Act
+        foreach (var batch in before.Concat(after))
+        {
+            await WriteAsync(store, batch);
+        }
+
+        var live = await LiveAsync(directory);
+
+        // Assert
+        AssertAll(live, before[^1], true, "the last batch before the step");
+        AssertAll(live, after[0], false, "the first batch after the step is 5 minutes off");
+
+        foreach (var batch in after.Where(batch => batch.ReceivedAt - stepAt >= TimeSpan.FromMinutes(10)))
+        {
+            AssertAll(live, batch, true, $"the batch received at {batch.ReceivedAt:HH:mm:ss}, 10 minutes after the step");
+        }
+
+        Assert.IsNotEmpty(after.Where(batch => batch.ReceivedAt - stepAt >= TimeSpan.FromMinutes(10)).ToList(), "batches 10 minutes after the step were written");
+    }
+
+    /// <summary>
+    /// With the agent's clock two hours behind, a second sample that is missing or not counted does not break the confirmation: the third sample, 120 seconds after the first, confirms the first and measures.
+    /// </summary>
+    /// <param name="missing"><see langword="true"/> when the second batch carries no self sample, <see langword="false"/> when its sample has a send lag over 60 seconds</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task SqliteStoreTimelineSkippedSampleStillConfirms(bool missing)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+        var skew = TimeSpan.FromHours(-2);
+        var batches = new List<RecordBatch>();
+        var seq = 100UL;
+
+        for (var index = 0; index < 5; index++)
+        {
+            var lag = index == 1 ? 90 : 30;
+            var samples = index == 1 && missing ? 0 : 1;
+            var batch = SampleBatch(seq, _t0.AddSeconds(60 * index), skew, lag, samples > 0);
+
+            batches.Add(batch);
+            seq += (ulong)batch.Records.Count;
+        }
+
+        AgentClock? afterSecond = null;
+
+        // Act
+        for (var index = 0; index < batches.Count; index++)
+        {
+            await WriteAsync(store, batches[index]);
+
+            if (index == 1)
+            {
+                afterSecond = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+            }
+        }
+
+        var clock = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+        var live = await LiveAsync(directory);
+
+        // Assert
+        Assert.IsNull(afterSecond?.MeasuredAt, "no counted sample confirmed the first one yet");
+        Assert.IsGreaterThanOrEqualTo(-7204 * NanosecondsPerSecond, clock!.OffsetNs ?? long.MinValue, "the third sample measures the offset");
+        Assert.IsLessThanOrEqualTo(-7200 * NanosecondsPerSecond, clock.OffsetNs ?? long.MaxValue, "the offset is a lower bound");
+        AssertAll(live, batches[0], false, "the batch with the first counted sample");
+        AssertAll(live, batches[1], false, "the batch before the measurement");
+
+        for (var index = 2; index < batches.Count; index++)
+        {
+            AssertAll(live, batches[index], true, $"batch {index} from the third sample on");
+        }
+    }
+
+    /// <summary>
     /// With the agent's holes full, so that its live stream sends the outage's records first with consecutive numbers and a late self sample is counted, no record captured during the outage more than 90 seconds before its receipt is stored live, the offset stays unchanged through the replay, and current batches are live once their counted samples arrive.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -1582,6 +1750,23 @@ public class SqliteStoreTimelineTests
     private static string DbPath(TempDirectory directory)
     {
         return Path.Combine(directory.Path, StorageLimits.FileName);
+    }
+
+    /// <summary>
+    /// Builds the batch of one sample period: a <c>system</c> metric and, optionally, a <c>self</c> sample, captured at the same time and received 3 seconds later.
+    /// </summary>
+    /// <param name="firstSeq">The number of the first record</param>
+    /// <param name="trueTime">The backend host's time of the capture</param>
+    /// <param name="skew">The agent's clock minus the backend host's clock</param>
+    /// <param name="lagSeconds">The send lag of the sample</param>
+    /// <param name="withSample"><see langword="true"/> to add the <c>self</c> sample</param>
+    /// <returns>The batch</returns>
+    private static RecordBatch SampleBatch(ulong firstSeq, DateTimeOffset trueTime, TimeSpan skew, double lagSeconds, bool withSample)
+    {
+        var stamp = trueTime + skew;
+        var records = withSample ? new[] { TimelineSamples.Metric(firstSeq, stamp), TimelineSamples.SelfSample(firstSeq + 1, stamp, lagSeconds) } : new[] { TimelineSamples.Metric(firstSeq, stamp) };
+
+        return TimelineSamples.Batch(trueTime.AddSeconds(3), records);
     }
 
     /// <summary>
