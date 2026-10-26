@@ -493,5 +493,34 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 65, Level = LogLevel.Debug, Message = "ingest batch stored {AgentId} {Mode} {Records} {Stored} {Duplicates}")]
     internal static partial void IngestBatchStored(this ILogger logger, string agentId, string mode, int records, int stored, int duplicates);
 
+    /// <summary>
+    /// Logs that the gaps of an agent changed with a batch.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="opened">The gaps opened by the batch</param>
+    /// <param name="closed">The gaps closed by the batch</param>
+    /// <param name="final">The gaps made final by the batch</param>
+    /// <param name="open">The open sequence gaps after the batch</param>
+    [LoggerMessage(EventId = 66, Level = LogLevel.Information, Message = "ingest gaps changed {AgentId} {Opened} {Closed} {Final} {Open}")]
+    internal static partial void IngestGapsChanged(this ILogger logger, string agentId, int opened, int closed, int final, int open);
+
+    /// <summary>
+    /// Logs that the clock of an agent is off by more than the allowance.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="offsetSeconds">The measured offset in seconds</param>
+    [LoggerMessage(EventId = 67, Level = LogLevel.Warning, Message = "agent clock off {AgentId} {OffsetSeconds}")]
+    internal static partial void AgentClockOff(this ILogger logger, string agentId, double offsetSeconds);
+
+    /// <summary>
+    /// Logs that the clock of an agent is back within the allowance.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID</param>
+    [LoggerMessage(EventId = 68, Level = LogLevel.Information, Message = "agent clock in step {AgentId}")]
+    internal static partial void AgentClockInStep(this ILogger logger, string agentId);
+
     #endregion // Methods
 }
