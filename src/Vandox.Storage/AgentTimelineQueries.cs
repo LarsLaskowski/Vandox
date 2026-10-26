@@ -15,15 +15,16 @@ internal static class AgentTimelineQueries
     /// <summary>
     /// Reads the stream state of an agent.
     /// </summary>
-    internal const string LoadStream = "SELECT floor_seq, max_seq, max_captured_at, fill_at, open_gaps, offset_ns, measured_at, clock_off FROM agent_streams WHERE agent_id = $agent";
+    internal const string LoadStream = "SELECT floor_seq, max_seq, max_captured_at, fill_at, open_gaps, offset_ns, measured_at, clock_off, last_bound_ns, last_captured_at, last_received_at FROM agent_streams WHERE agent_id = $agent";
 
     /// <summary>
     /// Writes the stream state of an agent.
     /// </summary>
-    internal const string SaveStream = "INSERT INTO agent_streams(agent_id, floor_seq, max_seq, max_captured_at, fill_at, open_gaps, offset_ns, measured_at, clock_off) "
-                                       + "VALUES ($agent, $floor, $max, $captured, $fill, $open, $offset, $measured, $off) "
+    internal const string SaveStream = "INSERT INTO agent_streams(agent_id, floor_seq, max_seq, max_captured_at, fill_at, open_gaps, offset_ns, measured_at, clock_off, last_bound_ns, last_captured_at, last_received_at) "
+                                       + "VALUES ($agent, $floor, $max, $captured, $fill, $open, $offset, $measured, $off, $lastBound, $lastCaptured, $lastReceived) "
                                        + "ON CONFLICT(agent_id) DO UPDATE SET floor_seq = excluded.floor_seq, max_seq = excluded.max_seq, max_captured_at = excluded.max_captured_at, "
-                                       + "fill_at = excluded.fill_at, open_gaps = excluded.open_gaps, offset_ns = excluded.offset_ns, measured_at = excluded.measured_at, clock_off = excluded.clock_off";
+                                       + "fill_at = excluded.fill_at, open_gaps = excluded.open_gaps, offset_ns = excluded.offset_ns, measured_at = excluded.measured_at, clock_off = excluded.clock_off, "
+                                       + "last_bound_ns = excluded.last_bound_ns, last_captured_at = excluded.last_captured_at, last_received_at = excluded.last_received_at";
 
     /// <summary>
     /// Finds the sequence gap that is not closed with the greatest first number at or below a number.

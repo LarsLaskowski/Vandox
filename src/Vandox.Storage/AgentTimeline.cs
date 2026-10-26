@@ -38,6 +38,7 @@ internal sealed class AgentTimeline : IDisposable
     private int _openGaps;
     private long? _offset;
     private long? _measuredAt;
+    private ClockReading? _previousReading;
     private bool _clockOff;
 
     private DateTimeOffset _received;
@@ -179,6 +180,9 @@ internal sealed class AgentTimeline : IDisposable
                                                       .Set("$offset", _offset)
                                                       .Set("$measured", _measuredAt)
                                                       .Set("$off", _clockOff ? 1L : 0L)
+                                                      .Set("$lastBound", _previousReading?.BoundNs)
+                                                      .Set("$lastCaptured", ToNullable(_previousReading?.CapturedAt))
+                                                      .Set("$lastReceived", ToNullable(_previousReading?.ReceivedAt))
                                                       .Execute();
         }
 
@@ -220,6 +224,16 @@ internal sealed class AgentTimeline : IDisposable
     }
 
     /// <summary>
+    /// Converts an instant to nanoseconds, keeping a missing one.
+    /// </summary>
+    /// <param name="instant">The instant</param>
+    /// <returns>The nanoseconds, or <see langword="null"/></returns>
+    private static long? ToNullable(DateTimeOffset? instant)
+    {
+        return instant is null ? null : StorageTime.ToNanoseconds(instant.Value);
+    }
+
+    /// <summary>
     /// Gets a statement of this transaction, creating it on first use.
     /// </summary>
     /// <param name="sql">The statement</param>
@@ -255,6 +269,7 @@ internal sealed class AgentTimeline : IDisposable
             _offset = reader.IsDBNull(5) ? null : reader.GetInt64(5);
             _measuredAt = reader.IsDBNull(6) ? null : reader.GetInt64(6);
             _clockOff = reader.GetInt64(7) == 1;
+            _previousReading = reader.IsDBNull(8) ? null : new ClockReading(reader.GetInt64(8), StorageTime.FromNanoseconds(reader.GetInt64(9)), StorageTime.FromNanoseconds(reader.GetInt64(10)));
         }
     }
 
@@ -541,21 +556,30 @@ internal sealed class AgentTimeline : IDisposable
     /// <param name="scan">The bounds of the batch's records</param>
     private void UpdateClock(ClockScan scan)
     {
-        long? counted = null;
-
-        foreach (var (seq, bound) in scan.Candidates)
-        {
-            if (_lowestOpen is null || _lowestOpen.Value >= (ulong)seq)
-            {
-                counted = counted is null ? bound : Math.Max(counted.Value, bound);
-            }
-        }
-
+        var inEffect = _offset ?? 0;
+        var measuring = false;
         var bucket = StorageTime.ToNanoseconds(ClockEstimator.BucketOf(_received));
 
-        if (counted is not null)
+        foreach (var (seq, bound, capturedAt) in scan.Candidates)
         {
-            WriteSample(CountedSort, bucket, counted.Value);
+            if (_lowestOpen is not null && _lowestOpen.Value < (ulong)seq)
+            {
+                continue;
+            }
+
+            var reading = new ClockReading(bound, capturedAt, _received);
+
+            if (ClockEstimator.Measures(reading, _previousReading, inEffect))
+            {
+                WriteSample(CountedSort, bucket, bound);
+                measuring = true;
+            }
+
+            _previousReading = reading;
+        }
+
+        if (measuring)
+        {
             _measuredAt = _receivedNs;
             SetOffset(ClockEstimator.Estimate(ReadSamples(CountedSort), []), true);
         }

@@ -23,9 +23,9 @@ internal sealed class ClockScan
     internal long? RunBound { get; private set; }
 
     /// <summary>
-    /// Gets the send lag samples that arrived as the agent's highest number, with their bounds.
+    /// Gets the send lag samples that arrived as the agent's highest number, with their bounds and capture times.
     /// </summary>
-    internal List<(long Seq, long Bound)> Candidates { get; } = [];
+    internal List<(long Seq, long Bound, DateTimeOffset CapturedAt)> Candidates { get; } = [];
 
     #endregion // Properties
 
@@ -47,7 +47,7 @@ internal sealed class ClockScan
 
         if (newest && record is { Source: SelfSource, Data: MetricPoint { Name: SendLagName, Value: >= 0 and <= TimelineLimits.MaxCountedSendLagSeconds } })
         {
-            Candidates.Add((seq, bound));
+            Candidates.Add((seq, bound, record.CapturedAt));
         }
     }
 

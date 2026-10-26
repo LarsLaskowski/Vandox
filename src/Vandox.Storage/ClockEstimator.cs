@@ -1,7 +1,5 @@
 namespace Vandox.Storage;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Estimates an agent's clock offset from clock bounds.
 /// </summary>
@@ -43,7 +41,9 @@ public static class ClockEstimator
     }
 
     /// <summary>
-    /// Decides whether a counted sample measures the offset (skeleton: not implemented yet).
+    /// Decides whether a counted sample measures the offset: its bound is not more than the run allowance below the offset in effect, or the previous counted
+    /// reading lies <see cref="TimelineLimits.ConfirmSpacing"/> to <see cref="TimelineLimits.SampleWindow"/> before it in capture and in receive time and within the
+    /// run allowance of its bound.
     /// </summary>
     /// <param name="candidate">The sample</param>
     /// <param name="previous">The previous counted reading, if any</param>
@@ -51,7 +51,21 @@ public static class ClockEstimator
     /// <returns><see langword="true"/> when the sample measures</returns>
     public static bool Measures(ClockReading candidate, ClockReading? previous, long offsetInEffectNs)
     {
-        throw new NotImplementedException();
+        var allowance = (Int128)TimelineLimits.RunAllowance.Ticks * NanosecondsPerTick;
+
+        if (candidate.BoundNs >= (Int128)offsetInEffectNs - allowance)
+        {
+            return true;
+        }
+
+        if (previous is null)
+        {
+            return false;
+        }
+
+        var earlier = previous.Value;
+
+        return IsSpaced(candidate.CapturedAt, earlier.CapturedAt) && IsSpaced(candidate.ReceivedAt, earlier.ReceivedAt) && Int128.Abs((Int128)candidate.BoundNs - earlier.BoundNs) <= allowance;
     }
 
     /// <summary>
@@ -66,6 +80,19 @@ public static class ClockEstimator
         var floored = ticks - (((ticks % width) + width) % width);
 
         return new DateTimeOffset(floored, TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether an instant lies the confirmation spacing to the sample window after another one.
+    /// </summary>
+    /// <param name="later">The later instant</param>
+    /// <param name="earlier">The earlier instant</param>
+    /// <returns><see langword="true"/> when the distance is within the spacing and the window</returns>
+    private static bool IsSpaced(DateTimeOffset later, DateTimeOffset earlier)
+    {
+        var distance = (Int128)later.UtcTicks - earlier.UtcTicks;
+
+        return distance >= TimelineLimits.ConfirmSpacing.Ticks && distance <= TimelineLimits.SampleWindow.Ticks;
     }
 
     /// <summary>

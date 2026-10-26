@@ -34,7 +34,7 @@ added by the backend and cannot be supplied by the agent.
 | `agent_id` | string | `^[A-Za-z0-9][A-Za-z0-9._-]*$`, 1 to 64 bytes |
 | `boot_id` | string | lower-case UUID, `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` |
 | `clock_offset_ns` | integer, optional | agent clock minus the reference time of its time synchronization, in nanoseconds; positive means the agent is ahead; omitted means unknown |
-| `mode` | string | `live` or `backfill`; a hint only, logged and stored with nothing of the classification: the backend classifies records itself (0022, 0130) by lateness and gaps. The agent's sender sets `live` on the stream that sends current records and `backfill` on the throttled stream that sends the spool's older ones ([Agent](agent.md), *Sending*) |
+| `mode` | string | `live` or `backfill`; a hint only, logged and never stored or used: the backend classifies records itself (0022, 0130) by lateness and gaps. The agent's sender sets `live` on the stream that sends current records and `backfill` on the throttled stream that sends the spool's older ones ([Agent](agent.md), *Sending*) |
 
 ### Capture context (0046)
 

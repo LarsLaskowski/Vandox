@@ -210,7 +210,10 @@ internal static class SchemaMigrator
                                                                 open_gaps INTEGER NOT NULL DEFAULT 0 CHECK (open_gaps >= 0),
                                                                 offset_ns INTEGER,
                                                                 measured_at INTEGER,
-                                                                clock_off INTEGER NOT NULL DEFAULT 0 CHECK (clock_off IN (0, 1))
+                                                                clock_off INTEGER NOT NULL DEFAULT 0 CHECK (clock_off IN (0, 1)),
+                                                                last_bound_ns INTEGER,
+                                                                last_captured_at INTEGER,
+                                                                last_received_at INTEGER
                                                               ) STRICT, WITHOUT ROWID
                                                               """,
                                                               """
