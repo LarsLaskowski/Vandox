@@ -1,5 +1,7 @@
 namespace Vandox.Storage;
 
+#pragma warning disable RH2003, S2325
+
 /// <summary>
 /// Estimates an agent's clock offset from clock bounds.
 /// </summary>
@@ -38,6 +40,18 @@ public static class ClockEstimator
         }
 
         return runBuckets.Count > 0 ? Math.Max(0, WindowMaximum(runBuckets)) : 0;
+    }
+
+    /// <summary>
+    /// Decides whether a counted sample measures the offset (skeleton: not implemented yet).
+    /// </summary>
+    /// <param name="candidate">The sample</param>
+    /// <param name="previous">The previous counted reading, if any</param>
+    /// <param name="offsetInEffectNs">The offset in effect in nanoseconds</param>
+    /// <returns><see langword="true"/> when the sample measures</returns>
+    public static bool Measures(ClockReading candidate, ClockReading? previous, long offsetInEffectNs)
+    {
+        throw new NotImplementedException();
     }
 
     /// <summary>

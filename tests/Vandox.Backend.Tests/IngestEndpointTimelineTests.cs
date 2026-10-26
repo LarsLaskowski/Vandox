@@ -147,6 +147,36 @@ public class IngestEndpointTimelineTests
     }
 
     /// <summary>
+    /// A batch that only shrinks an open gap, without closing or detecting any, writes no gaps line.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task IngestEndpointTimelineBatchThatOnlyShrinksGapLogsNoGapsLine()
+    {
+        // Arrange
+        await using var rig = await IngestRig.CreateWithStoreAsync(TestContext.CancellationToken);
+
+        await PostAsync(rig, _now, "live", Metric(1, _now.AddSeconds(-3)), Metric(2, _now.AddSeconds(-2)), Metric(3, _now.AddSeconds(-1)));
+
+        var opening = _now.AddMinutes(5).AddSeconds(2);
+
+        await PostAsync(rig, opening, "live", Metric(10, opening.AddSeconds(-2)), Metric(11, opening.AddSeconds(-1)));
+
+        var afterJump = rig.Log.Named(GapsChanged).Count;
+
+        // Act
+        var status = await PostAsync(rig, opening.AddSeconds(8), "backfill", Metric(4, _now.AddSeconds(-10)), Metric(5, _now.AddSeconds(-9)));
+
+        var afterShrink = rig.Log.Named(GapsChanged).Count;
+
+        // Assert
+        Assert.AreEqual(204, status, "status");
+        Assert.AreEqual(1, afterJump, "the jump is logged");
+        Assert.AreEqual(afterJump, afterShrink, "the batch that only shrinks the gap writes no line");
+        Assert.AreEqual(2L, await rig.ScalarAsync("SELECT count(*) FROM gaps WHERE state = 'open'", TestContext.CancellationToken), "the gaps stay open, the sequence gap shrunk");
+    }
+
+    /// <summary>
     /// The warning that the clock of an agent is off is logged once when the measured offset first exceeds 90 seconds, and the info that it is in step again once when it returns.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

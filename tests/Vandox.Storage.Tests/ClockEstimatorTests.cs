@@ -154,6 +154,120 @@ public class ClockEstimatorTests
     }
 
     /// <summary>
+    /// A bound 13 hours below the offset in effect measures only when the previous reading, 60 seconds earlier in capture and receive time and within 90 seconds of its bound, confirms it.
+    /// </summary>
+    [TestMethod]
+    public void ClockEstimatorFarLowerBoundMeasuresOnlyWhenConfirmed()
+    {
+        // Arrange
+        var candidate = Reading(1000, 1001, -46_800);
+        var confirming = Reading(940, 941, -46_790);
+
+        // Act
+        var alone = ClockEstimator.Measures(candidate, null, 0);
+        var confirmed = ClockEstimator.Measures(candidate, confirming, 0);
+
+        // Assert
+        Assert.IsFalse(alone, "a far lower bound without a previous reading does not measure");
+        Assert.IsTrue(confirmed, "the previous reading 60 seconds earlier agrees within 90 seconds");
+    }
+
+    /// <summary>
+    /// A confirmation needs both spacings between 60 seconds and 5 minutes and a bound difference of at most 90 seconds.
+    /// </summary>
+    [TestMethod]
+    public void ClockEstimatorConfirmationNeedsSpacingAndAgreement()
+    {
+        // Arrange
+        var candidate = Reading(1000, 1001, -46_800);
+
+        // Act
+        var captureTooClose = ClockEstimator.Measures(candidate, Reading(941, 941, -46_800), 0);
+        var receiveTooClose = ClockEstimator.Measures(candidate, Reading(940, 942, -46_800), 0);
+        var captureTooFar = ClockEstimator.Measures(candidate, Reading(699, 700, -46_800), 0);
+        var receiveTooFar = ClockEstimator.Measures(candidate, Reading(940, 700, -46_800), 0);
+        var disagreeing = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800 + 91), 0);
+        var exactSpacing = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800), 0);
+        var exactAgreement = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800 - 90), 0);
+        var agreementAbove = ClockEstimator.Measures(candidate, Reading(940, 941, -46_800 + 90), 0);
+
+        // Assert
+        Assert.IsFalse(captureTooClose, "59 seconds apart in capture time");
+        Assert.IsFalse(receiveTooClose, "59 seconds apart in receive time");
+        Assert.IsFalse(captureTooFar, "301 seconds apart in capture time");
+        Assert.IsFalse(receiveTooFar, "301 seconds apart in receive time");
+        Assert.IsFalse(disagreeing, "bounds 91 seconds apart");
+        Assert.IsTrue(exactSpacing, "exactly 60 seconds apart in both");
+        Assert.IsTrue(exactAgreement, "bounds exactly 90 seconds apart, the previous one lower");
+        Assert.IsTrue(agreementAbove, "bounds exactly 90 seconds apart, the previous one higher");
+    }
+
+    /// <summary>
+    /// A bound above the offset in effect and one exactly 90 seconds below it measure at once, also at the ends of the long range.
+    /// </summary>
+    [TestMethod]
+    public void ClockEstimatorRaisingBoundMeasuresAtOnce()
+    {
+        // Arrange
+        var offset = -7200 * NanosecondsPerSecond;
+        var ninety = 90 * NanosecondsPerSecond;
+
+        // Act
+        var above = ClockEstimator.Measures(Reading(10, 11, -7000), null, offset);
+        var equal = ClockEstimator.Measures(Reading(10, 11, -7200), null, offset);
+        var exactlyBelow = ClockEstimator.Measures(Reading(10, 11, -7290), null, offset);
+        var justBelow = ClockEstimator.Measures(Reading(10, 11, -7291), null, offset);
+        var maxAboveMin = ClockEstimator.Measures(Reading(10, 11, 0) with
+                                                                     {
+                                                                         BoundNs = long.MaxValue
+                                                                     },
+                                                  null,
+                                                  long.MinValue);
+        var minAtMin = ClockEstimator.Measures(Reading(10, 11, 0) with
+                                                                  {
+                                                                      BoundNs = long.MinValue
+                                                                  },
+                                               null,
+                                               long.MinValue);
+        var minBelowMinPlus = ClockEstimator.Measures(Reading(10, 11, 0) with
+                                                                         {
+                                                                             BoundNs = long.MinValue
+                                                                         },
+                                                      null,
+                                                      long.MinValue + ninety);
+        var minTooFarBelow = ClockEstimator.Measures(Reading(10, 11, 0) with
+                                                                        {
+                                                                            BoundNs = long.MinValue
+                                                                        },
+                                                     null,
+                                                     long.MinValue + ninety + 1);
+        var minBelowMax = ClockEstimator.Measures(Reading(10, 11, 0) with
+                                                                     {
+                                                                         BoundNs = long.MinValue
+                                                                     },
+                                                  null,
+                                                  long.MaxValue);
+        var maxAtMax = ClockEstimator.Measures(Reading(10, 11, 0) with
+                                                                  {
+                                                                      BoundNs = long.MaxValue
+                                                                  },
+                                               null,
+                                               long.MaxValue);
+
+        // Assert
+        Assert.IsTrue(above, "a bound above the offset in effect");
+        Assert.IsTrue(equal, "a bound equal to the offset in effect");
+        Assert.IsTrue(exactlyBelow, "a bound exactly 90 seconds below the offset in effect");
+        Assert.IsFalse(justBelow, "a bound 91 seconds below it needs a confirmation");
+        Assert.IsTrue(maxAboveMin, "the largest bound against the smallest offset");
+        Assert.IsTrue(minAtMin, "the smallest bound against the smallest offset");
+        Assert.IsTrue(minBelowMinPlus, "the smallest bound exactly 90 seconds below an offset near the smallest value");
+        Assert.IsFalse(minTooFarBelow, "one nanosecond more than 90 seconds below, without overflow");
+        Assert.IsFalse(minBelowMax, "the smallest bound against the largest offset, without overflow");
+        Assert.IsTrue(maxAtMax, "the largest bound against the largest offset");
+    }
+
+    /// <summary>
     /// A counted sample that arrives with a longer delay never lowers the estimate while a tighter one is in the window.
     /// </summary>
     [TestMethod]
@@ -287,6 +401,18 @@ public class ClockEstimatorTests
     private static ClockSample Sample(int seconds, long boundSeconds)
     {
         return new ClockSample(Samples.Base.AddSeconds(seconds), boundSeconds * NanosecondsPerSecond);
+    }
+
+    /// <summary>
+    /// Creates a reading.
+    /// </summary>
+    /// <param name="captureSeconds">The raw capture time, seconds after the base time</param>
+    /// <param name="receiveSeconds">The receive time, seconds after the base time</param>
+    /// <param name="boundSeconds">The bound in seconds</param>
+    /// <returns>The reading</returns>
+    private static ClockReading Reading(int captureSeconds, int receiveSeconds, long boundSeconds)
+    {
+        return new ClockReading(boundSeconds * NanosecondsPerSecond, Samples.Base.AddSeconds(captureSeconds), Samples.Base.AddSeconds(receiveSeconds));
     }
 
     #endregion // Methods

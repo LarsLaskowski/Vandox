@@ -113,6 +113,11 @@ internal sealed class AgentReplay
     internal TimeSpan Skew { get; private set; }
 
     /// <summary>
+    /// Gets or sets a value that is <see langword="true"/> when the agent's 32 holes are full: after an outage its live stream reads from the oldest unacknowledged record, with no jump to the newest, and no backfill stream exists.
+    /// </summary>
+    internal bool FullHoles { get; set; }
+
+    /// <summary>
     /// Gets the number the agent assigned last.
     /// </summary>
     internal ulong LastSeq => _nextSeq - 1;
@@ -129,9 +134,16 @@ internal sealed class AgentReplay
     {
         if (up && _backendUp == default)
         {
-            _liveCursor = _nextSeq - 1;
-            _backfillLimit = _nextSeq - 1;
-            _backfillHeld = _spool.Keys.Any(seq => seq <= _backfillLimit);
+            if (FullHoles)
+            {
+                _backfillLimit = _liveCursor;
+            }
+            else
+            {
+                _liveCursor = _nextSeq - 1;
+                _backfillLimit = _nextSeq - 1;
+                _backfillHeld = _spool.Keys.Any(seq => seq <= _backfillLimit);
+            }
         }
 
         _backendUp = up;

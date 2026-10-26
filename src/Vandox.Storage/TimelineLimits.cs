@@ -47,6 +47,11 @@ public static class TimelineLimits
     public static readonly TimeSpan SampleWindow = TimeSpan.FromMinutes(5);
 
     /// <summary>
+    /// The least spacing, in capture and in receive time, between a counted sample and the previous one that confirms it.
+    /// </summary>
+    public static readonly TimeSpan ConfirmSpacing = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// The width of one clock sample bucket of receive time.
     /// </summary>
     public static readonly TimeSpan SampleBucket = TimeSpan.FromSeconds(10);

@@ -665,19 +665,33 @@ public class SqliteStoreTimelineTests
     }
 
     /// <summary>
-    /// With the agent's clock two hours behind, records sent live are live from the first counted sample on, and an old record is not.
+    /// With the agent's clock two hours behind, the first counted sample alone measures nothing, so records are backfilled until the batch that carries the second counted sample, which confirms the first; from that batch on records sent live are live, and an old record is not.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task SqliteStoreTimelineClockBehindLiveFromCountedSample()
+    public async Task SqliteStoreTimelineClockBehindLiveFromConfirmingSample()
     {
         // Arrange
         using var directory = new TempDirectory();
         await using var store = await Open(directory);
         var replay = new AgentReplay(_t0, TimeSpan.FromHours(-2), 100);
         var steady = replay.AdvanceTo(_t0.AddMinutes(6));
+        var counted = Enumerable.Range(0, steady.Count).Where(index => HasCountedSample(steady[index])).ToList();
 
-        await WriteAllAsync(store, steady);
+        Assert.IsGreaterThanOrEqualTo(3, counted.Count, "the replay brings several counted samples");
+
+        var confirming = counted[1];
+        AgentClock? afterFirst = null;
+
+        for (var index = 0; index < steady.Count; index++)
+        {
+            await WriteAsync(store, steady[index].Batch);
+
+            if (index == counted[0])
+            {
+                afterFirst = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+            }
+        }
 
         var staleSeq = replay.ReserveSeq();
         var received = replay.Now;
@@ -689,14 +703,90 @@ public class SqliteStoreTimelineTests
         var live = await LiveAsync(directory);
 
         // Assert
-        Assert.IsGreaterThanOrEqualTo(-7204 * NanosecondsPerSecond, clock!.OffsetNs ?? long.MinValue, "the offset is measured from the first counted sample");
+        Assert.IsNull(afterFirst?.MeasuredAt, "the first counted sample alone measures nothing");
+        Assert.IsGreaterThanOrEqualTo(-7204 * NanosecondsPerSecond, clock!.OffsetNs ?? long.MinValue, "the offset is measured from the confirmed samples");
         Assert.IsLessThanOrEqualTo(-7200 * NanosecondsPerSecond, clock.OffsetNs ?? long.MaxValue, "the offset is a lower bound");
         Assert.IsFalse(live[staleSeq], "a record 20 minutes before its receipt");
 
-        foreach (var batch in steady)
+        for (var index = 0; index < steady.Count; index++)
         {
-            AssertAll(live, batch.Batch, true, "a batch sent live by an agent whose clock is two hours behind");
+            AssertAll(live, steady[index].Batch, index >= confirming, index >= confirming ? "a batch sent live from the confirming sample on" : "a batch before the confirming sample");
         }
+    }
+
+    /// <summary>
+    /// With the agent's holes full, so that its live stream sends the outage's records first with consecutive numbers and a late self sample is counted, no record captured during the outage more than 90 seconds before its receipt is stored live, the offset stays unchanged through the replay, and current batches are live once their counted samples arrive.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTimelineFullHolesOutageReplayNeverStoresOutageRecordLive()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+        var start = new DateTimeOffset(2026, 10, 1, 21, 50, 0, TimeSpan.Zero);
+        var outageStart = start.AddMinutes(10);
+        var backendBack = outageStart.AddHours(13);
+        var replay = new AgentReplay(start, TimeSpan.Zero, 1000)
+                     {
+                         FullHoles = true
+                     };
+
+        await WriteAllAsync(store, replay.AdvanceTo(outageStart));
+
+        var clockBefore = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+
+        replay.SetBackend(false);
+        replay.AdvanceTo(backendBack);
+        replay.SetBackend(true);
+
+        var batches = replay.AdvanceTo(backendBack.AddMinutes(3));
+        var receivedOf = new Dictionary<ulong, DateTimeOffset>();
+        var clockHeld = true;
+        var held = 0;
+
+        // Act
+        foreach (var batch in batches)
+        {
+            await WriteAsync(store, batch.Batch);
+
+            foreach (var record in batch.Batch.Records)
+            {
+                receivedOf[record.Seq] = batch.Batch.ReceivedAt;
+            }
+
+            var inOutage = batch.Batch.Records.All(record => replay.TrueCaptureOf(record.Seq) < backendBack.AddMinutes(-2));
+
+            if (inOutage)
+            {
+                var clock = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+
+                clockHeld &= clock!.OffsetNs == clockBefore!.OffsetNs && clock.MeasuredAt == clockBefore.MeasuredAt;
+                held++;
+            }
+        }
+
+        var live = await LiveAsync(directory);
+        var clockAfter = await store.ClockAsync(AgentId, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(clockBefore?.MeasuredAt, "the 10 minutes of live batches measured the offset");
+        Assert.IsGreaterThan(0, held, "batches of the outage's records were written");
+        Assert.IsTrue(clockHeld, "the offset and its time stay unchanged while the outage's records arrive");
+        Assert.IsGreaterThan(1, batches.Count(batch => batch.Batch.Records.Any(record => replay.TrueCaptureOf(record.Seq) < backendBack.AddMinutes(-2))), "the outage's records come in several batches");
+
+        foreach (var seq in live.Keys.Where(seq => replay.TrueCaptureOf(seq) >= outageStart && replay.TrueCaptureOf(seq) < backendBack && receivedOf[seq] - replay.TrueCaptureOf(seq) > TimeSpan.FromSeconds(90)))
+        {
+            Assert.IsFalse(live[seq], $"record {seq} captured at {replay.TrueCaptureOf(seq):HH:mm:ss} during the outage");
+        }
+
+        Assert.IsNotNull(clockAfter?.MeasuredAt, "the offset is still known at the end");
+        Assert.IsGreaterThan(backendBack, clockAfter.MeasuredAt ?? DateTimeOffset.MinValue, "a current counted sample measured the offset after the outage's records");
+
+        var last = batches[^1];
+
+        Assert.IsTrue(last.Live, "the last batch is a live one");
+        AssertAll(live, last.Batch, true, "current records once their counted samples arrived");
     }
 
     /// <summary>
@@ -1492,6 +1582,16 @@ public class SqliteStoreTimelineTests
     private static string DbPath(TempDirectory directory)
     {
         return Path.Combine(directory.Path, StorageLimits.FileName);
+    }
+
+    /// <summary>
+    /// Tells whether a batch carries a counted <c>self</c> sample: a send lag of at most 60 seconds.
+    /// </summary>
+    /// <param name="batch">The batch</param>
+    /// <returns><see langword="true"/> when it carries one</returns>
+    private static bool HasCountedSample(ReplayBatch batch)
+    {
+        return batch.Batch.Records.Any(record => record.Data is MetricPoint { Name: "agent_send_lag_seconds" } point && point.Value <= TimelineLimits.MaxCountedSendLagSeconds);
     }
 
     /// <summary>
