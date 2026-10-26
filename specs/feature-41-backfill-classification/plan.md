@@ -49,7 +49,7 @@ through `AgentReplay` (*Test files*).
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
 | AC1 | `LiveRulesMetricWithinNinetySecondsIsLive`, `LiveRulesMetricNinetyOneSecondsLateIsBackfilled`, `LiveRulesLogLineNineMinutesLateIsLive`, `LiveRulesKernelEventElevenMinutesLateIsBackfilled`, `LiveRulesEarlyBeyondAllowanceIsBackfilled`, `LiveRulesOpenGapBelowIsBackfilled`, `LiveRulesExtremeTimesDoNotOverflow`; `SqliteStoreTimelineClockSteppedForwardFreshRecordsBackfilled`; `IngestEndpointTimelineBackfillModeFreshRecordsStoredLive`, `IngestEndpointTimelineLiveModeOldRecordsStoredBackfilled` | `tests/Vandox.Storage.Tests/LiveRulesTests.cs`; T; `tests/Vandox.Backend.Tests/IngestEndpointTimelineTests.cs` |
-| AC2 | `SqliteStoreTimelineThirteenHourOutageNeverStoresOutageRecordLive` (one sequence and one time gap opened; no record captured 22:00-09:00 live; every current record before the closing batch backfilled; offset unchanged until both close; both `closed` with the last number; the next batch live) | T |
+| AC2 | `SqliteStoreTimelineThirteenHourOutageNeverStoresOutageRecordLive` (one sequence and one time gap opened; every record of the batches before the closing one backfilled; the closing batch's records live exactly when within 90 s of receipt; no other record captured 22:00-11:00 live; offset unchanged until both close; both `closed` with the last number; the next batch live) | T |
 | AC3 | `SqliteStoreTimelineSameBootRestartDuringBackfillKeepsFirstClassification`, `SqliteStoreTimelineRebootJumpBecomesFinalAfterFiveMinutes`, `SqliteStoreTimelineWaitRestartsAfterReopen`, `SqliteStoreTimelineRefusedFirstBatchAfterReopenKeepsWaitReset` | T |
 | AC4 | `SqliteStoreTimelineAgentSpoolDroppedGapFinalizesNamedNumbers`, `SqliteStoreTimelineAgentGapAtOrAboveOwnNumberFinalizesNothing` | T |
 | AC5 | `SqliteStoreTimelineCleanStopHourIsFinalTimeGap`, `SqliteStoreTimelineTimeGapOpenWhileSequenceGapBetween`, `SqliteStoreTimelineTimeGapBelowFirstNumberDetected`, `SqliteStoreTimelineTimeGapBesideAgentGapStored`, `SqliteStoreTimelineTimeGapIgnoresOffsetChange` | T |
@@ -81,14 +81,14 @@ narrowing to a `long` column.
      empty); a fill into an `open` gap sets `fill_at`;
    - an agent `gap` record with `first_seq`/`last_seq`: the clipped range's part inside open sequence gaps becomes `final` with
      the record's cause (found by seeks from the range's start, walking only the gaps that overlap it).
-   Gaps touched in the batch live in an in-memory overlay (sorted by first number, at most three rows per stored record) that
-   every seek consults first; each changed row is written once at `Finish`. Then the final wait: if `restartWait`,
+   Consecutive numbers of the batch are applied as runs: one seek per gap a run touches and each changed row written in place
+   (no in-memory overlay). Then the final wait: if `restartWait`,
    `fill_at` = receive time; else if the agent's open sequence gap count is above 0, the batch filled none, and receive time −
    `fill_at` ≥ 5 minutes, one `UPDATE gaps SET state = 'final', changed_at = … WHERE agent_id = … AND kind = 'sequence' AND
-   state = 'open'` finalizes them, its row count is the `Final` count, and the overlay's open rows follow. A candidate is
+   state = 'open'` finalizes them, its row count added to the `Final` count. A candidate is
    **counted** when, after this, no open sequence gap starts below its number. Then the offset (`ClockEstimator`).
-3. `IsLive(record)`: `LiveRules.IsLive` with the receive time, the offset and the lowest open sequence gap's first number (one
-   seek, or the overlay). `BatchWriter.Write` gets `live` and binds `records.live`; records of origin `import` or `backend` and
+3. `IsLive(record)`: `LiveRules.IsLive` with the receive time, the offset and the lowest open sequence gap's first number after
+   the whole of step 2 (one seek), so a batch that closes the last gap below its records is live by lateness alone. `BatchWriter.Write` gets `live` and binds `records.live`; records of origin `import` or `backend` and
    batches without an agent ID get 0.
 4. After the inserts: `WriteSampleTimes` inserts each distinct capture time of the batch's stored agent `metric` records into
    `agent_sample_times` (`INSERT OR IGNORE`, one row per sample, with the lowest and highest number at that time), and for each
@@ -96,9 +96,10 @@ narrowing to a `long` column.
    narrowed or split, `closed` when no part is over 2 minutes; otherwise, with `p` the previous stored time (one seek), a gap
    `(p, t)` is created when `t − p` is over 2 minutes, and `(t, n)` with the next time `n` when `t` is the earliest. Creation is
    idempotent through the unique index. Raw capture times, cause `no_data`; `from_seq`/`to_seq` are the bounding samples' numbers.
-5. `Finish()`: writes the overlay's changed rows and the stream row (with the open sequence gap count kept as a counter), and
-   returns a `TimelineChange` (gaps opened, closed and made final in this batch, open sequence gaps after it, the offset, a
-   crossing of ±90 s) or `null` when none of that changed.
+5. `Finish()`: writes the stream row (with the open sequence gap count kept as a counter) and returns a `TimelineChange` or
+   `null` when no gap changed and no ±90 s crossing happened. `Opened`: gaps newly detected (a jump's sequence gap, a new time
+   gap span); `Final`: sequence gaps made final plus time gaps detected final; `Closed`: rows moved to `closed`; a row split
+   off an existing gap counts in none; `Open`: open sequence gaps after the batch.
 
 **Time gap state at read time (B2).** A time gap's stored state is `open` or `closed`; the reader reports a not-closed time gap
 as `final` when no open sequence gap overlaps `(from_seq, to_seq)` — one seek (greatest open `first_seq < to_seq`, then
@@ -107,8 +108,8 @@ appears in `ingest gaps changed` except at creation, where the same seek decides
 classification.
 
 **Indexes (B2).** Partial indexes `gaps_seq (agent_id, first_seq) WHERE kind = 'sequence' AND state <> 'closed'`,
-`gaps_seq_open (agent_id, first_seq) WHERE kind = 'sequence' AND state = 'open'`, and unique `gaps_time (agent_id, from_at)
-WHERE kind = 'time' AND state <> 'closed'`. Every lookup is "greatest key <= x, `LIMIT 1`, then check the end", or the minimum;
+`gaps_seq_open (agent_id, first_seq) WHERE kind = 'sequence' AND state = 'open'`, unique `gaps_time (agent_id, from_at)
+WHERE kind = 'time' AND state <> 'closed'`, and `gaps_agent (agent_id, id)` for the reader's pages. Every lookup is "greatest key <= x, `LIMIT 1`, then check the end", or the minimum;
 the SQL lives in `AgentTimelineQueries` (constants), and `AgentTimelineQueriesUseIndexSearchesOnly` asserts by `EXPLAIN QUERY
 PLAN` that each statement shows `SEARCH` and never `SCAN` on `gaps` and `agent_sample_times`. The work per stored record is a
 constant number of seeks, whatever the number of open gaps.
@@ -126,7 +127,9 @@ backend clock), saturated. Only run-timed records give bounds — every kind exc
   record raises it, so a future-stamped record cannot, and the offset stays unchanged while open gaps stop samples from counting
   (AC2).
 - Before it (E7): the largest `run` bound in the buckets within 5 minutes before the newest `run` bucket, and 0 when it is
-  below 0 or there is none. The live stream sends every 4 seconds beside the backfill, so a window always holds live batches
+  below 0 or there is none, taken from earlier batches only: a batch's own `run` bounds are added after its records are
+  classified, so a record stamped `StorableTime.Max` cannot prove itself current (AC8), while a counted sample counts for its
+  own batch (AC6). The live stream sends every 4 seconds beside the backfill, so a window always holds live batches
   while the agent sends. A forward step before the first counted sample
   therefore lasts at most 5 minutes (M2); the migration seeds nothing (null), so nothing old survives the upgrade.
 `measured_at` = the newest counted sample's receive time. Residual (N4): the offset can be short by the delivery delay of
@@ -262,7 +265,8 @@ internal static partial void AgentClockInStep(this ILogger logger, string agentI
   `SqliteStoreOpenTests.cs` gets the migration test.
 - `tests/Vandox.Backend.Tests/IngestEndpointTimelineTests.cs` (real store through `IngestRig`, logs through `IngestLogCapture`).
 - Existing call sites: `SqliteStoreWriteTests.cs:226` calls `BatchWriter.Write` and is adapted by the Dev in step 4 (the new
-  `live` argument, mechanically). The 15 whole-value `WriteResult` assertions (fact 16) stay unless their batch changes a gap
+  `live` argument, mechanically); `SqliteStoreOpenTests.SqliteStoreSchemaVersionIsEleven` becomes
+  `SqliteStoreSchemaVersionIsTwelve` (Tester). The 15 whole-value `WriteResult` assertions (fact 16) stay unless their batch changes a gap
   (capture times more than 2 minutes apart, jumping numbers); the Tester checks every one in step 6 and adapts one that fails to
   compare `Stored` and `Duplicates`. `IngestEndpointTests` log expectations: the same check, Tester.
 - Files no unit test can cover: none.
@@ -322,7 +326,8 @@ Deduplication and the immutability of `records` rows stay. No guarantee needs th
   is 60 s (spec Terms and constants); `AgentReplay` derives the lag as the sender does, and AC6 adds an agent without log
   traffic (`SqliteStoreTimelineQuietAgentSamplesAreCounted`).
 - Minor 1 (existing test claims): accepted; facts 16 and *Test files* corrected (15 assertions, the direct `Write` call).
-- Minor 2 (benchmark misses the costly path; write once per batch): accepted; the backfill scenario and the overlay.
+- Minor 2 (benchmark misses the costly path; write once per batch): accepted; the backfill scenario, and runs of
+  consecutive numbers written once per changed row.
 
 ## Security review
 

@@ -9,7 +9,7 @@ The backend stores every agent record with its receive time but does not tell li
 is only logged (`IngestEndpoint`, `ingest batch stored`), no sequence or time gap is detected, and no clock offset is measured
 (the agent sends none: [Agent](../../docs/areas/agent.md), *Spool and sending*, *What is kept*). The rule engine (#56, #61) and
 the gap views (#54) need, per record, whether it may alert, and per agent, which data is missing and whether it can still
-arrive. Without that, a backend host that was off from 22:00 to 09:00 would make 11 hours of old data look current
+arrive. Without that, a backend host that was off from 22:00 to 11:00 would make 13 hours of old data look current
 (guarantee *Backfilled data never raises an alert by itself*, record 0022) and silent losses would look like calm periods
 (record 0028).
 
@@ -25,12 +25,12 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 
 - S1: Given an agent that sends live without backlog, when a batch arrives whose records' lateness lies within the allowance
   (late or early) and no open sequence gap of the agent lies below their numbers, then every record is stored as `live`.
-- S2: Given the backend host is off from 22:00 to 09:00 while the agent collects, when it starts at 09:00 and the agent's
+- S2: Given the backend host is off from 22:00 to 11:00 while the agent collects, when it starts at 11:00 and the agent's
   current batch arrives first, then a sequence gap opens for the numbers between the last stored one and the batch, a time
-  gap for 22:00 to 09:00, and the current records are stored `backfilled` because an open gap lies below them; as the
+  gap for 22:00 to 11:00, and the current records are stored `backfilled` because an open gap lies below them; as the
   backfill arrives oldest first, its records (`self` samples included) are stored `backfilled`, never move the offset, and
-  the gaps shrink; when the last missing number arrives both gaps are `closed`, and current records from the next batch on
-  are `live`.
+  the gaps shrink; when the last missing number arrives both gaps are `closed`, the records of that batch whose lateness lies
+  within the allowance (the last seconds before the start) are `live`, and current records from the next batch on are `live`.
 - S3: Given a backfill in progress, when the agent restarts in the same boot and resends records whose acknowledgement it
   lost, then its numbers continue without a jump, each record is stored once with the classification it got first, and the
   gap stays open until its numbers arrive, as in S2.
@@ -69,8 +69,8 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 - E6: The agent's clock is stepped back by more than the allowance: current records are `backfilled` until the offset is
   measured again, at most 10 minutes; it never makes an old record `live`.
 - E7: No counted `self` sample has arrived (a new agent, a sender that never caught up): the offset is the largest proof, among
-  the run-timed records (not `log_line` or `kernel_event`) received in the last 5 minutes, that the agent clock is ahead, and 0
-  when there is none; so an agent clock behind by more than the allowance yields only `backfilled` records, and an old record
+  the run-timed records (not `log_line` or `kernel_event`) of earlier batches received in the last 5 minutes, that the agent
+  clock is ahead, and 0 when there is none — a record never proves its own batch current; so an agent clock behind by more than the allowance yields only `backfilled` records, and an old record
   is never made `live` by a clock that is ahead.
 - E8: A `self` sample with a small send lag that arrives late (the first sample of an agent started while the backend was off,
   whose lag counts from the start; a sample taken just before the backend went off and sent later by the backfill or into a
@@ -112,11 +112,13 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 ## Acceptance criteria
 
 - [ ] AC1: An agent record is stored `live` exactly when its lateness lies within ± its kind's allowance and no open sequence
-  gap of its agent lies below its number, else `backfilled`, whatever the header's `mode` says (S1, S8, E4, E5).
-- [ ] AC2: The 13-hour outage (22:00–09:00) of S2, replayed as the agent sends it with its `self` samples (the agent also
-  started during the outage, E8), opens one sequence gap and one time gap, never stores a record captured during the outage
-  `live`, stores every current record of the backfill period `backfilled`, leaves the offset unchanged until the gaps close,
-  closes both gaps with the last missing number, and stores current records of the following batch `live` (S2, E8).
+  gap of its agent lies below its number once its whole batch is applied (its own fills and agent `gap` records included),
+  else `backfilled`, whatever the header's `mode` says (S1, S8, E4, E5).
+- [ ] AC2: The 13-hour outage (22:00–11:00) of S2, replayed as the agent sends it with its `self` samples (the agent also
+  started during the outage, E8), opens one sequence gap and one time gap, stores every record of the batches before the one
+  that brings the last missing number `backfilled` (current records included), never stores a record captured during the
+  outage `live` unless it comes with that closing batch within its allowance, leaves the offset unchanged until the gaps
+  close, closes both gaps with the last missing number, and stores current records of the following batch `live` (S2, E8).
 - [ ] AC3: A same-boot agent restart during that backfill, with resent records, stores each record once with its first
   classification and keeps the outage gap open until filled; separately, a reboot with a numbering jump and a new boot ID
   makes the jump's gap `final` with the first batch stored 5 minutes after the wait's start of S5, and that batch's current records are `live` (S3, S5, E9).

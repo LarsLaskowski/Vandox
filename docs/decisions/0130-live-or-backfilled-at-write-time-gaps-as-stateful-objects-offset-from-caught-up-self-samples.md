@@ -36,6 +36,14 @@ How a gap that never fills (a numbering jump after an unclean stop) stops holdin
    the sample and its own number would contradict.
 3. **Never** — one crash would keep every later record backfilled.
 
+When the gap state is taken for a batch's records:
+
+1. **After the whole batch is applied** (chosen): a batch that brings the last missing number of the gaps below its records
+   is classified by lateness alone. Its records then lie within the live allowance, like any live record.
+2. **Before the batch** — a live-stream batch that arrives after a later one and fills the gap it left would be backfilled in
+   normal operation, where the live and the backfill stream run side by side, while the closing batch's records it would
+   hold back are no older than live data may be.
+
 How the clock offset is measured:
 
 1. **The tightest lower bound from records that read the agent's clock** (chosen): a record whose capture time is the
@@ -44,7 +52,9 @@ How the clock offset is measured:
    nothing. The estimate is the largest such bound over the agent's *counted* self samples (a send lag of at most 60 seconds on
    the agent's own clock, which a quiet agent reaches through its 30-second `system` samples; a new highest number; no open
    sequence gap below it) received within 5 minutes before the newest of them. Before the first counted sample it is the
-   largest bound of the run-timed records of the last 5 minutes, never below 0. Both windows are kept as bounded rows of
+   largest bound of the run-timed records of earlier batches of the last 5 minutes, never below 0: a batch's own records
+   would let a record stamped at the end of the storable range prove itself current. A counted sample counts for its own
+   batch, because its send lag already shows it fresh. Both windows are kept as bounded rows of
    10-second buckets, so a window's maximum survives the expiry of its largest value. A late sample only lowers its own bound, which
    the maximum ignores; a clock stepped back leaves a too-large estimate for up to 5 minutes, which only makes fresh records
    backfilled.
@@ -59,7 +69,7 @@ How the clock offset is measured:
 The write transaction of a batch with an agent ID keeps the agent's sequence and time gaps, measures the offset with option
 1 of the last list, and stores each record as live exactly when its corrected lateness lies within its kind's allowance
 (10 minutes for `log_line` and `kernel_event`, 90 seconds otherwise) and no open sequence gap of the agent lies below its
-number. The rules, constants and states are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area
+number once its whole batch is applied. The rules, constants and states are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area
 (*Live data and backfill*); the tables in [Storage](../areas/storage.md).
 
 ## Consequences
