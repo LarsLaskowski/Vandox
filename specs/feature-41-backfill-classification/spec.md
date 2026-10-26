@@ -1,7 +1,7 @@
 # Spec: Recognize backfilled data from the data itself
 
 Source: Issue #41
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -39,7 +39,8 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   with the agent's cause, so they never hold back the classification of later records.
 - S5: Given the server rebooted after an unclean stop, so the agent's numbers jump under a new boot ID, when the batch after
   the jump arrives, then a sequence gap with cause `sequence_missing` opens for the jump; once no record has arrived into any
-  open sequence gap of that agent for 5 minutes, the next batch stored from the agent makes all its open sequence gaps `final`
+  open sequence gap of that agent for 5 minutes (counted from the last such record, the opening of a gap or the first batch
+  after a backend start, whichever is latest), the next batch stored from the agent makes all its open sequence gaps `final`
   (last changed: that batch's commit), and its records and later ones are `live` again.
 - S6: Given the agent was stopped cleanly for an hour in the same boot, so its numbers continue without a jump, when the next
   batch arrives, then a time gap with cause `no_data` is stored `final` for that hour and no sequence gap opens.
@@ -72,7 +73,8 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 - E8: A `self` sample with a small send lag that arrives late (the first sample of an agent started while the backend was off,
   whose lag counts from the start; a sample taken just before the backend went off and sent later by the backfill or into a
   hole the live stream left) is not counted and never moves the offset.
-- E9: The backend restarts with open gaps: their states survive, and the 5-minute wait of S5 counts again from the start.
+- E9: The backend restarts with open gaps: their states survive, and the 5-minute wait of S5 counts again from the agent's
+  first batch stored after the start.
 - E10: A refused batch (`4xx`, `503`) or a rolled-back write changes no classification, gap or offset.
 - E11: Two batches of one agent are written at once (live and backfill stream): the result equals writing them one after the
   other in commit order.
@@ -114,8 +116,7 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   closes both gaps with the last missing number, and stores current records of the following batch `live` (S2, E8).
 - [ ] AC3: A same-boot agent restart during that backfill, with resent records, stores each record once with its first
   classification and keeps the outage gap open until filled; separately, a reboot with a numbering jump and a new boot ID
-  makes the jump's gap `final` with the first batch stored 5 minutes after the last record that arrived into an open sequence
-  gap of the agent, and that batch's current records are `live` (S3, S5, E9).
+  makes the jump's gap `final` with the first batch stored 5 minutes after the wait's start of S5, and that batch's current records are `live` (S3, S5, E9).
 - [ ] AC4: Numbers below its own number that an agent `gap` record names with `first_seq` and `last_seq` are `final` with that
   record's cause as soon as it is stored (S4, E12).
 - [ ] AC5: A span of more than 2 minutes of raw capture time without an agent `metric` record is a time gap with cause
@@ -123,7 +124,8 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   between its neighbouring records' numbers, `open` otherwise, and narrowed, split or `closed` by metrics that arrive inside
   it (S2, S6, E1, E15, E16).
 - [ ] AC6: With the server's clock 2 hours behind and, separately, 2 hours ahead, records sent live are `live` from the first
-  counted `self` sample on, no record captured more than its allowance before its receipt is ever `live` (before, during and
+  counted `self` sample on, no record captured more than its allowance (plus the delivery delay of the
+  freshest counted sample, none in the test) before its receipt is ever `live` (before, during and
   after the measurement and after a clock step), and after a backward step of 5 minutes current records are `live` again
   within 10 minutes (S7, E6, E7).
 - [ ] AC7: Gap upkeep follows E1 to E3: no sequence gap below an agent's first stored number, a middle fill splits a gap, a

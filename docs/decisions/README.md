@@ -158,4 +158,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | [0127](0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) | The backend host needs Tailscale in TUN mode; the ingest port is published on a required bind address (amends 0060) | Accepted | 2026-10-25 |
 | [0128](0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md) | The C# decoder reads the gzip framing itself, so trailing bytes and header rules match the Go decoder (amends 0076) | Accepted | 2026-10-25 |
 | [0129](0129-configuration-and-secret-files-opened-without-blocking.md) | Configuration and secret files are opened without blocking and their type is checked on the opened file (amends 0049) | Accepted | 2026-10-25 |
+| [0130](0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) | Live or backfilled is decided at write time; gaps are stateful objects; the offset comes from caught-up self samples (amends 0022) | Proposed | 2026-10-26 |
 <!-- project:end index -->
