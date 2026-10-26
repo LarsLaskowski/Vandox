@@ -1,6 +1,6 @@
 # 0130: Live or backfilled is decided at write time; gaps are stateful objects; the offset comes from caught-up self samples
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-26
 - **Area:** Detection, alerts and reports
 - **Source:** Issue #41
@@ -94,8 +94,9 @@ number once its whole batch is applied. The rules, constants and states are in t
   backfilled until an outage's gaps close or become final.
 - After an unclean stop, current data stays backfilled for the backfill's duration plus 5 minutes.
 - Before the first counted self sample, an agent clock that is behind by more than the allowance yields only backfilled
-  records; a clock stepped back, or stepped forward before the first counted sample, makes fresh records backfilled for up to
-  about 5 minutes; a clock stepped forward later, until the next counted sample.
+  records; a clock stepped back makes fresh records backfilled for up to about 6 minutes, until the bounds from before the step
+  have left the 5-minute window; a clock stepped forward before the first counted sample for up to about 5 minutes; a clock
+  stepped forward later, until the next counted sample.
 - All time arithmetic is done in 128-bit integers and stored bounds are saturated, so no capture time in the storable range
   can make a write fail.
 - Time gaps keep only `open` or `closed`; whether a time gap is final is decided when it is read, so no batch walks other gaps.
