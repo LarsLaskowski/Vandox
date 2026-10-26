@@ -42,7 +42,7 @@ public static class ClockEstimator
 
     /// <summary>
     /// Decides whether a counted sample measures the offset: its bound is not more than the run allowance below the offset in effect, or the previous counted
-    /// reading lies <see cref="TimelineLimits.ConfirmSpacing"/> to <see cref="TimelineLimits.SampleWindow"/> before it in capture and in receive time and within the
+    /// reading lies <see cref="TimelineLimits.ConfirmSpacing"/> (30 seconds) to <see cref="TimelineLimits.SampleWindow"/> before it in capture and in receive time and within the
     /// run allowance of its bound.
     /// </summary>
     /// <param name="candidate">The sample</param>

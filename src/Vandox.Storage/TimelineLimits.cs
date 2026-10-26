@@ -47,9 +47,9 @@ public static class TimelineLimits
     public static readonly TimeSpan SampleWindow = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// The least spacing, in capture and in receive time, between a counted sample and the previous one that confirms it.
+    /// The least spacing, 30 seconds, in capture and in receive time, between a counted sample and the previous one that confirms it; half the 60-second interval of the self samples, so timer jitter and delivery delay never stop a pair from confirming.
     /// </summary>
-    public static readonly TimeSpan ConfirmSpacing = TimeSpan.FromMinutes(1);
+    public static readonly TimeSpan ConfirmSpacing = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// The width of one clock sample bucket of receive time.
