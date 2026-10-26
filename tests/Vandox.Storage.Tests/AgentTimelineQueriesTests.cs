@@ -9,7 +9,7 @@ namespace Vandox.Storage.Tests;
 /// Tests for <see cref="AgentTimelineQueries"/>
 /// </summary>
 [TestClass]
-public class AgentTimelineQueriesTests
+public partial class AgentTimelineQueriesTests
 {
     #region Properties
 
@@ -40,7 +40,7 @@ public class AgentTimelineQueriesTests
         var statements = typeof(AgentTimelineQueries).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                                                      .Where(field => field.FieldType == typeof(string))
                                                      .Select(field => (field.Name, Sql: (string)(field.IsLiteral ? field.GetRawConstantValue()! : field.GetValue(null)!)))
-                                                     .Where(statement => Regex.IsMatch(statement.Sql, @"\b(gaps|agent_streams|agent_clock_samples|agent_sample_times)\b"))
+                                                     .Where(statement => TimelineTablePattern().IsMatch(statement.Sql))
                                                      .ToList();
 
         await using var connection = new SqliteConnection($"Data Source={Path.Combine(directory.Path, StorageLimits.FileName)};Pooling=False");
@@ -56,7 +56,7 @@ public class AgentTimelineQueriesTests
 
             command.CommandText = $"EXPLAIN QUERY PLAN {sql}";
 
-            foreach (Match parameter in Regex.Matches(sql, @"[$@:][A-Za-z_][A-Za-z0-9_]*").DistinctBy(match => match.Value))
+            foreach (var parameter in ParameterPattern().Matches(sql).DistinctBy(match => match.Value))
             {
                 command.Parameters.AddWithValue(parameter.Value, 1L);
             }
@@ -71,14 +71,49 @@ public class AgentTimelineQueriesTests
 
         // Assert
         Assert.IsNotEmpty(statements, "the queries class holds the statements as string constants");
-        Assert.IsGreaterThan(0, plans.Count(plan => Regex.IsMatch(plan.Detail, @"SEARCH gaps\b")), "the gap statements search the gap table");
-        Assert.IsGreaterThan(0, plans.Count(plan => Regex.IsMatch(plan.Detail, @"SEARCH agent_sample_times\b")), "the sample time statements search their table");
+        Assert.IsGreaterThan(0, plans.Count(plan => SearchGapsPattern().IsMatch(plan.Detail)), "the gap statements search the gap table");
+        Assert.IsGreaterThan(0, plans.Count(plan => SearchSampleTimesPattern().IsMatch(plan.Detail)), "the sample time statements search their table");
 
         foreach (var (name, detail) in plans)
         {
-            Assert.IsFalse(Regex.IsMatch(detail, @"SCAN (gaps|agent_streams|agent_clock_samples|agent_sample_times)\b"), $"{name} scans a table: {detail}");
+            Assert.IsFalse(ScanPattern().IsMatch(detail), $"{name} scans a table: {detail}");
         }
     }
+
+    /// <summary>
+    /// Creates the pattern of a statement that uses one of the timeline tables.
+    /// </summary>
+    /// <returns>The pattern</returns>
+    [GeneratedRegex(@"\b(gaps|agent_streams|agent_clock_samples|agent_sample_times)\b")]
+    private static partial Regex TimelineTablePattern();
+
+    /// <summary>
+    /// Creates the pattern of a statement parameter.
+    /// </summary>
+    /// <returns>The pattern</returns>
+    [GeneratedRegex(@"[$@:][A-Za-z_][A-Za-z0-9_]*")]
+    private static partial Regex ParameterPattern();
+
+    /// <summary>
+    /// Creates the pattern of an index search of the gap table.
+    /// </summary>
+    /// <returns>The pattern</returns>
+    [GeneratedRegex(@"SEARCH gaps\b")]
+    private static partial Regex SearchGapsPattern();
+
+    /// <summary>
+    /// Creates the pattern of an index search of the sample time table.
+    /// </summary>
+    /// <returns>The pattern</returns>
+    [GeneratedRegex(@"SEARCH agent_sample_times\b")]
+    private static partial Regex SearchSampleTimesPattern();
+
+    /// <summary>
+    /// Creates the pattern of a table scan of one of the timeline tables.
+    /// </summary>
+    /// <returns>The pattern</returns>
+    [GeneratedRegex(@"SCAN (gaps|agent_streams|agent_clock_samples|agent_sample_times)\b")]
+    private static partial Regex ScanPattern();
 
     #endregion // Methods
 }

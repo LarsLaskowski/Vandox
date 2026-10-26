@@ -100,7 +100,7 @@ public class SqliteStoreTimelineTests
     }
 
     /// <summary>
-    /// A backend that is off for the night opens one sequence gap and one time gap, stores no outage record live, keeps the offset until both gaps close, and stores the current records of the batch after it live.
+    /// A backend that is off from 22:00 to 11:00 opens one sequence gap and one time gap, stores no outage record live, keeps the offset until both gaps close, and stores the current records of the batch after it live.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -173,15 +173,27 @@ public class SqliteStoreTimelineTests
         Assert.HasCount(2, closedGaps, "no further gap");
         Assert.IsTrue(closedGaps.All(gap => gap.State == GapState.Closed), "both gaps are closed with the last missing number");
 
-        foreach (var seq in live.Keys.Where(seq => replay.TrueCaptureOf(seq) >= outageStart && replay.TrueCaptureOf(seq) < backendBack))
+        var closing = batches[closeIndex].Batch;
+        var closingSeqs = closing.Records.Select(record => record.Seq).ToHashSet();
+
+        foreach (var seq in live.Keys.Except(closingSeqs).Where(seq => replay.TrueCaptureOf(seq) >= outageStart && replay.TrueCaptureOf(seq) < backendBack))
         {
             Assert.IsFalse(live[seq], $"record {seq} captured at {replay.TrueCaptureOf(seq):HH:mm:ss} during the outage");
         }
 
-        for (var index = 0; index <= closeIndex; index++)
+        for (var index = 0; index < closeIndex; index++)
         {
-            AssertAll(live, batches[index].Batch, false, $"batch {index} arrived before the gaps closed");
+            AssertAll(live, batches[index].Batch, false, $"batch {index} arrived before the closing batch");
         }
+
+        foreach (var record in closing.Records)
+        {
+            var expected = closing.ReceivedAt - replay.TrueCaptureOf(record.Seq) <= TimeSpan.FromSeconds(90);
+
+            Assert.AreEqual(expected, live[record.Seq], $"record {record.Seq} of the closing batch is live exactly when it is at most 90 seconds old on arrival");
+        }
+
+        Assert.IsNotEmpty(closing.Records.Where(record => live[record.Seq]).ToList(), "the closing batch stores at least one current record live");
 
         var later = batches.Skip(closeIndex + 1).Where(batch => batch.Live).ToList();
 
@@ -232,7 +244,7 @@ public class SqliteStoreTimelineTests
 
         await WriteAllAsync(store, rest);
 
-        var steadyResent = await WriteAsync(store, TimelineSamples.Resend(steady[10].Batch, backendBack.AddMinutes(10)));
+        var steadyResent = await WriteAsync(store, TimelineSamples.Resend(steady[^1].Batch, backendBack.AddMinutes(10)));
         var live = await LiveAsync(directory);
         var closed = await GapsAsync(store);
 
@@ -243,7 +255,7 @@ public class SqliteStoreTimelineTests
         Assert.AreEqual(TimelineSamples.Fingerprint(shrunk), TimelineSamples.Fingerprint(afterResend), "the resend changes no gap");
         AssertAll(live, first[2].Batch, false, "the resent records keep their first classification");
         Assert.AreEqual(0, steadyResent.Stored, "a later resend of a live batch stores nothing");
-        AssertAll(live, steady[10].Batch, true, "a record stored live stays live when it arrives again late");
+        AssertAll(live, steady[^1].Batch, true, "a record stored live stays live when it arrives again late");
         Assert.IsTrue(closed.Where(gap => gap.Kind == GapKind.Sequence).All(gap => gap.State == GapState.Closed), "the gap closes when its numbers have arrived");
         Assert.HasCount(1, TimelineSamples.SequenceGaps(closed), "no other sequence gap");
     }
@@ -845,7 +857,7 @@ public class SqliteStoreTimelineTests
         await WriteAsync(store, TimelineSamples.Run(10, 1, _t0.AddSeconds(90)));
 
         // Act
-        await WriteAsync(store, TimelineSamples.OldRun(6, 1, _t0.AddSeconds(5), _t0.AddSeconds(120)));
+        var splitting = await WriteAsync(store, TimelineSamples.OldRun(6, 1, _t0.AddSeconds(5), _t0.AddSeconds(120)));
 
         var split = await GapsAsync(store);
 
@@ -858,10 +870,143 @@ public class SqliteStoreTimelineTests
         var closed = await GapsAsync(store);
 
         // Assert
+        Assert.AreEqual(0, splitting.Timeline?.Opened ?? 0, "a split-off row is no newly detected gap");
+        Assert.AreEqual(0, splitting.Timeline?.Closed ?? 0, "the split closes no gap");
         Assert.AreSequenceEqual([$"4-5 {OpenSequenceGap}", $"7-9 {OpenSequenceGap}"], TimelineSamples.SequenceGaps(split), "the lower part keeps the gap, the upper part is a new gap of the same cause and state");
         Assert.AreSequenceEqual([$"7-9 {OpenSequenceGap}"], TimelineSamples.SequenceGaps(lowerClosed).Where(text => text.Contains("open", StringComparison.Ordinal)).ToList(), "the lower part is filled");
         Assert.IsEmpty(closed.Where(gap => gap.Kind == GapKind.Sequence && gap.State != GapState.Closed).ToList(), "a gap that lost all its missing numbers is closed");
         Assert.HasCount(2, closed.Where(gap => gap.Kind == GapKind.Sequence).ToList(), "two closed gaps remain readable");
+    }
+
+    /// <summary>
+    /// Numbers that arrive at the upper end of an open gap shrink it from above and open no new gap.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTimelineUpperFillShrinksGapFromAbove()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+
+        await WriteAsync(store, TimelineSamples.Run(1, 3, _t0.AddSeconds(60)));
+        await WriteAsync(store, TimelineSamples.Run(10, 1, _t0.AddSeconds(90)));
+
+        // Act
+        var result = await WriteAsync(store, TimelineSamples.OldRun(7, 3, _t0.AddSeconds(8), _t0.AddSeconds(120)));
+        var gaps = await GapsAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([$"4-6 {OpenSequenceGap}"], TimelineSamples.SequenceGaps(gaps), "the numbers below the filled ones are still missing");
+        Assert.AreEqual(0, result.Timeline?.Opened ?? 0, "the fill opens no gap");
+        Assert.AreEqual(0, result.Timeline?.Closed ?? 0, "the fill closes no gap");
+    }
+
+    /// <summary>
+    /// A gap record that names numbers no open gap contains, because they are stored or lie above every gap, changes no gap.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTimelineAgentGapNamingNoMissingNumbersChangesNothing()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+
+        await WriteAsync(store, TimelineSamples.Run(1, 3, _t0.AddSeconds(60)));
+        await WriteAsync(store, TimelineSamples.Run(7, 2, _t0.AddSeconds(90)));
+
+        var before = TimelineSamples.Fingerprint(await GapsAsync(store));
+        var received = _t0.AddSeconds(120);
+
+        // Act
+        await WriteAsync(store, TimelineSamples.Batch(received, TimelineSamples.AgentGap(9, received.AddSeconds(-1), GapCause.SpoolDropped, 8, 8)));
+
+        var above = TimelineSamples.Fingerprint(await GapsAsync(store));
+
+        await WriteAsync(store, TimelineSamples.Batch(received.AddSeconds(1), TimelineSamples.AgentGap(10, received, GapCause.SpoolDropped, 2, 3)));
+
+        var below = TimelineSamples.Fingerprint(await GapsAsync(store));
+
+        // Assert
+        Assert.AreEqual(before, above, "the stored numbers above the open gap make nothing final");
+        Assert.AreEqual(before, below, "the stored numbers below the open gap make nothing final");
+        Assert.AreSequenceEqual([$"4-6 {OpenSequenceGap}"], TimelineSamples.SequenceGaps(await GapsAsync(store)), "the gap stays open");
+    }
+
+    /// <summary>
+    /// A gap record that names the lower part of an open gap makes only that part final and leaves the upper rest open.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTimelineAgentGapNamingLowerPartLeavesUpperRestOpen()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+
+        await WriteAsync(store, TimelineSamples.Run(1, 10, _t0.AddSeconds(60)));
+
+        var received = _t0.AddSeconds(120);
+
+        // Act
+        var result = await WriteAsync(store, TimelineSamples.Batch(received, TimelineSamples.AgentGap(50, received.AddSeconds(-1), GapCause.SpoolDropped, 11, 20)));
+        var gaps = await GapsAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual(["11-20 final spool_dropped", $"21-49 {OpenSequenceGap}"], TimelineSamples.SequenceGaps(gaps), "the named numbers are final, the rest above them stays missing");
+        Assert.AreEqual(1, result.Timeline!.Open, "the rest is the one open sequence gap");
+    }
+
+    /// <summary>
+    /// A sample time inside a time gap splits it, narrows it from above or from below, according to how much of the gap is left on each side, and opens no new gap.
+    /// </summary>
+    /// <param name="offsetSeconds">The capture time of the new sample, seconds after the start</param>
+    /// <param name="expected">The time gaps afterwards, in seconds after the start</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(330, "30-330,330-630")]
+    [DataRow(570, "30-570")]
+    [DataRow(90, "90-630")]
+    public async Task SqliteStoreTimelineSampleInsideTimeGapNarrowsOrSplitsIt(int offsetSeconds, string expected)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+
+        await WriteAsync(store, TimelineSamples.Batch(_t0.AddSeconds(31), TimelineSamples.Metric(1, _t0), TimelineSamples.Metric(2, _t0.AddSeconds(30))));
+        await WriteAsync(store, TimelineSamples.Batch(_t0.AddSeconds(631), TimelineSamples.Metric(3, _t0.AddSeconds(630))));
+
+        // Act
+        var result = await WriteAsync(store, TimelineSamples.Batch(_t0.AddSeconds(632), TimelineSamples.Metric(4, _t0.AddSeconds(offsetSeconds))));
+        var gaps = TimelineSamples.TimeGaps(await GapsAsync(store));
+
+        // Assert
+        Assert.AreEqual(expected, string.Join(",", gaps.Select(gap => $"{(gap.From - _t0).TotalSeconds}-{(gap.To - _t0).TotalSeconds}")), "the time gaps left");
+        Assert.IsTrue(gaps.All(gap => gap.State != GapState.Closed), "no time gap closes");
+        Assert.AreEqual(0, result.Timeline?.Opened ?? 0, "a split-off part is no newly detected gap");
+    }
+
+    /// <summary>
+    /// A batch of an agent that holds no agent record is stored and changes no gap and no clock.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTimelineBatchWithoutAgentRecordsChangesNoTimeline()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await Open(directory);
+        var batch = TimelineSamples.BatchOf(AgentId, TimelineSamples.BootId, _t0.AddSeconds(30), [Samples.Log(RecordOrigin.Backend, 0, 0, "written by the backend")]);
+
+        // Act
+        var result = await WriteAsync(store, batch);
+        var gaps = await GapsAsync(store);
+
+        // Assert
+        Assert.AreEqual(1, result.Stored, "the record is stored");
+        Assert.IsNull(result.Timeline, "nothing of note changed");
+        Assert.IsEmpty(gaps, "no gap exists");
     }
 
     /// <summary>
