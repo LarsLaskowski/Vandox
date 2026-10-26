@@ -6,4 +6,4 @@ are quoted in full.
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-10-26 17:47 | 1 Intake | squad-orchestrator | Issue 41 read (feature, open, #40 merged); branch claude/vibrant-cray-hpseeo |
-| 2026-10-26 17:58 | 2a Spec | squad-lead | spec.md written: 9 scenarios, 13 edge cases, 10 criteria; RESULT: DONE (opus/medium · usage pending) |
+| 2026-10-26 17:58 | 2a Spec | squad-lead | spec.md written: 9 scenarios, 13 edge cases, 10 criteria; RESULT: DONE (opus/medium · 190,892 tokens · 41 tool uses · 646 s) |
