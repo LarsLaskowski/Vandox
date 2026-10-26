@@ -4,7 +4,7 @@ Plan: [plan.md](plan.md) — Status: Draft
 
 | # | Group | Task | Files | Criteria | Depends on | Owner | Done |
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
-| 1 | G1 | Skeleton: `TimelineLimits`, `GapKind`, `GapState`, `LiveRules`, `ClockSample`, `ClockEstimator` (throwing bodies) | `src/Vandox.Storage/TimelineLimits.cs`, `GapKind.cs`, `GapState.cs`, `LiveRules.cs`, `ClockSample.cs`, `ClockEstimator.cs` | AC1, AC6 | — | Dev | [ ] |
+| 1 | G1 | Skeleton: `TimelineLimits`, `GapKind`, `GapState`, `LiveRules`, `ClockSample`, `ClockEstimator` (throwing bodies) | `src/Vandox.Storage/TimelineLimits.cs`, `GapKind.cs`, `GapState.cs`, `LiveRules.cs`, `ClockSample.cs`, `ClockEstimator.cs` | AC1, AC6 | — | Dev | [x] |
 | 2 | G1 | Tests first: `LiveRulesTests`, `ClockEstimatorTests` | `tests/Vandox.Storage.Tests/LiveRulesTests.cs`, `ClockEstimatorTests.cs` | AC1, AC6 | 1 | Tester | [ ] |
 | 3 | G1 | Implement the live rule and the estimator | the files of task 1 | AC1, AC6 | 2 | Dev | [ ] |
 | 4 | G2 | Skeleton: `WriteResult.Timeline`, `TimelineChange`, `StoredRecord.Live`, `AgentGap`, `AgentClock`, `GapQuery` (`State`, `AfterId`, `Limit`, refused with `InvalidQueryException`), `IAgentTimelineReader` on `SqliteStore`, `AgentTimeline`, `AgentTimelineQueries`, `BatchWriter.Write(…, live, …)` (and its call in `SqliteStoreWriteTests.cs:226`), `StorageLimits.SchemaVersion` 12 | `src/Vandox.Storage/WriteResult.cs`, `AgentTimelineQueries.cs`, `tests/Vandox.Storage.Tests/SqliteStoreWriteTests.cs`, `TimelineChange.cs`, `StoredRecord.cs`, `AgentGap.cs`, `AgentClock.cs`, `GapQuery.cs`, `IAgentTimelineReader.cs`, `AgentTimeline.cs`, `BatchWriter.cs`, `SqliteStore.cs`, `StorageLimits.cs` | AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10 | 3 | Dev | [ ] |
