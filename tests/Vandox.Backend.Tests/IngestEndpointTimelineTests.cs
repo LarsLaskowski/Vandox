@@ -199,14 +199,15 @@ public class IngestEndpointTimelineTests
         await PostAsync(rig, _now.AddMinutes(2), "live", SelfSample(3, _now.AddMinutes(2).AddHours(2).AddSeconds(-1)));
 
         var stillOff = rig.Log.Named(ClockOff).Count;
-        var inStepBefore = rig.Log.Named(ClockInStep).Count;
         var back = _now.AddMinutes(8);
 
         await PostAsync(rig, back, "live", SelfSample(4, back.AddSeconds(-1)));
 
-        var inStep = rig.Log.Named(ClockInStep).ToList();
+        var inStepBefore = rig.Log.Named(ClockInStep).Count;
 
         await PostAsync(rig, back.AddMinutes(1), "live", SelfSample(5, back.AddMinutes(1).AddSeconds(-1)));
+
+        var inStep = rig.Log.Named(ClockInStep).ToList();
 
         // Assert
         Assert.AreEqual(0, beforeStep, "a clock in step is not logged");
@@ -216,8 +217,8 @@ public class IngestEndpointTimelineTests
         Assert.AreEqual(7199d, double.Parse(off[0].Value("OffsetSeconds")!, CultureInfo.InvariantCulture), "the measured offset in seconds");
         Assert.AreSequenceEqual(["AgentId", "OffsetSeconds"], off[0].Values.Keys.Order(StringComparer.Ordinal).ToArray(), "the warning carries the agent ID and the offset only");
         Assert.AreEqual(1, stillOff, "an offset that stays off is logged once");
-        Assert.AreEqual(0, inStepBefore, "no return before the clock is measured in step again");
-        Assert.HasCount(1, inStep, "the return is logged once");
+        Assert.AreEqual(0, inStepBefore, "the first sample in step is far below the offset in effect and measures nothing alone");
+        Assert.HasCount(1, inStep, "the second sample in step, one minute later, confirms the first and the return is logged once");
         Assert.AreEqual(LogLevel.Information, inStep[0].Level, "level of the info");
         Assert.AreEqual(IngestSamples.AgentId, inStep[0].Value("AgentId"), "agent of the info");
         Assert.AreSequenceEqual(["AgentId"], inStep[0].Values.Keys.ToArray(), "the info carries the agent ID only");
