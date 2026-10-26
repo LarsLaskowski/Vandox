@@ -53,7 +53,7 @@ through `AgentReplay` (*Test files*).
 | AC3 | `SqliteStoreTimelineSameBootRestartDuringBackfillKeepsFirstClassification`, `SqliteStoreTimelineRebootJumpBecomesFinalAfterFiveMinutes`, `SqliteStoreTimelineWaitRestartsAfterReopen`, `SqliteStoreTimelineRefusedFirstBatchAfterReopenKeepsWaitReset` | T |
 | AC4 | `SqliteStoreTimelineAgentSpoolDroppedGapFinalizesNamedNumbers`, `SqliteStoreTimelineAgentGapAtOrAboveOwnNumberFinalizesNothing` | T |
 | AC5 | `SqliteStoreTimelineCleanStopHourIsFinalTimeGap`, `SqliteStoreTimelineTimeGapOpenWhileSequenceGapBetween`, `SqliteStoreTimelineTimeGapBelowFirstNumberDetected`, `SqliteStoreTimelineTimeGapBesideAgentGapStored`, `SqliteStoreTimelineTimeGapIgnoresOffsetChange` | T |
-| AC6 | `ClockEstimatorBehindTwoHoursMeasuredFromCountedSample`, `ClockEstimatorAheadTwoHoursFromRunTimedRecordsBeforeCountedSample`, `ClockEstimatorLogLineNeverRaisesEstimate`, `ClockEstimatorLateSampleNeverLowersEstimate`, `ClockEstimatorBackwardStepRecoversWithinFiveMinutes`, `ClockEstimatorPreSampleBoundExpiresAfterFiveMinutes`, `ClockEstimatorExpiryFallsBackToWindowMaximumNotBackfillBatch`, `ClockEstimatorSaturatesExtremeBounds`, `ClockEstimatorFarLowerBoundMeasuresOnlyWhenConfirmed`, `ClockEstimatorConfirmationNeedsSpacingAndAgreement`, `ClockEstimatorRaisingBoundMeasuresAtOnce`; `SqliteStoreTimelineClockAheadNeverMakesOldRecordLive`, `SqliteStoreTimelineClockBehindLiveFromConfirmingSample`, `SqliteStoreTimelineClockBackwardStepRecoversWithinTenMinutes`, `SqliteStoreTimelineQuietAgentSamplesAreCounted`, `SqliteStoreTimelineClockAheadBackfillAfterExpiryStaysBackfilled` (agent 2 h ahead, installed while the backend was off, live and backfill batches mixed so that a backfill batch is the first after an expiry) | `tests/Vandox.Storage.Tests/ClockEstimatorTests.cs`; T |
+| AC6 | `ClockEstimatorBehindTwoHoursMeasuredFromCountedSample`, `ClockEstimatorAheadTwoHoursFromRunTimedRecordsBeforeCountedSample`, `ClockEstimatorLogLineNeverRaisesEstimate`, `ClockEstimatorLateSampleNeverLowersEstimate`, `ClockEstimatorBackwardStepRecoversWithinFiveMinutes`, `ClockEstimatorPreSampleBoundExpiresAfterFiveMinutes`, `ClockEstimatorExpiryFallsBackToWindowMaximumNotBackfillBatch`, `ClockEstimatorSaturatesExtremeBounds`, `ClockEstimatorFarLowerBoundMeasuresOnlyWhenConfirmed`, `ClockEstimatorConfirmationNeedsSpacingAndAgreement`, `ClockEstimatorRaisingBoundMeasuresAtOnce`; `SqliteStoreTimelineClockAheadNeverMakesOldRecordLive`, `SqliteStoreTimelineClockBehindLiveFromConfirmingSample`, `SqliteStoreTimelineClockBackwardStepRecoversWithinTenMinutes`, `SqliteStoreTimelineJitteredSamplesConfirmBehindClock`, `SqliteStoreTimelineJitteredSamplesConfirmBackwardStep`, `SqliteStoreTimelineSkippedSampleStillConfirms`, `SqliteStoreTimelineQuietAgentSamplesAreCounted`, `SqliteStoreTimelineClockAheadBackfillAfterExpiryStaysBackfilled` (agent 2 h ahead, installed while the backend was off, live and backfill batches mixed so that a backfill batch is the first after an expiry) | `tests/Vandox.Storage.Tests/ClockEstimatorTests.cs`; T |
 | AC7 | `SqliteStoreTimelineNoSequenceGapBelowFirstNumber`, `SqliteStoreTimelineMiddleFillSplitsGap`, `SqliteStoreTimelineFinalGapShrinksAndCloses`, `SqliteStoreTimelineGapStatesSurviveReopen` | T |
 | AC8 | `SqliteStoreTimelineRefusedBatchChangesNothing`, `SqliteStoreTimelineConcurrentBatchesMatchCommitOrder`, `SqliteStoreTimelineJumpInNumberAndTimeAddsAtMostTwoRowsPerRecord`, `SqliteStoreTimelineNumbersNearMaximumWork`, `SqliteStoreTimelineAgentGapRangeAboveLongMaximumWorks`, `SqliteStoreTimelineCaptureTimesAtStorableEndsStoredBackfilled`; `AgentTimelineQueriesUseIndexSearchesOnly`; `IngestEndpointTimelineCaptureTimeAtStorableEndAnswers204` | T; `tests/Vandox.Storage.Tests/AgentTimelineQueriesTests.cs`; `tests/Vandox.Backend.Tests/IngestEndpointTimelineTests.cs` |
 | AC9 | `SqliteStoreTimelineImportRecordsReadBackfilled`, `SqliteStoreOpenMigratesAgentRecordsAsBackfilledWithoutGaps` | T; `tests/Vandox.Storage.Tests/SqliteStoreOpenTests.cs` |
@@ -134,12 +134,15 @@ backend clock), saturated. Only run-timed records give bounds — every kind exc
   therefore lasts at most 5 minutes (M2); the migration seeds nothing (null), so nothing old survives the upgrade.
 - Measuring (review B1): the batch's candidates are walked in ascending `seq`. A candidate's reading (bound, raw capture time,
   receive time) **measures** — enters its `counted` bucket — when its bound is at least the offset in effect (`offset_ns`, 0
-  when null) minus 90 s, or when the agent's previous counted reading lies 1 to 5 minutes before it in both capture and
+  when null) minus 90 s, or when the agent's previous counted reading lies 30 s to 5 minutes before it in both capture and
   receive time and within 90 s of its bound (`ClockEstimator.Measures`, `Int128`). Every candidate then becomes the previous
   reading (`agent_streams.last_*`). Only a measuring candidate sets `measured_at` and re-estimates. So a late sample that a
   full-holes live stream ([Agent](../../docs/areas/agent.md), *Sending*: 32 ranges, no jump) brings as the head never
   measures; a behind or stepped-back clock is learned from its second counted sample. Residual: two late counted samples
-  (agent started twice in an outage) 1 to 5 minutes apart in capture and receive time that agree within 90 s.
+  (agent started twice in an outage) 30 s to 5 minutes apart in capture and receive time that agree within 90 s. The
+  lower bound is half the 60-second `self` interval, so the timer's jitter and a delivery delay of up to 30 s keep a pair
+  confirming (review round 2); a burst replay delivers its late samples seconds apart. The upper bound leaves room for up to
+  four `self` samples that do not count, and a sample that does not count never replaces the previous reading.
 `measured_at` = the newest counted sample's receive time. Residual (N4): the offset can be short by the delivery delay of
 the freshest counted sample, up to the agent's 30-second request timeout. Crossing |offset| = 90 s sets or clears `agent_streams.clock_off`.
 
@@ -202,7 +205,7 @@ public static class TimelineLimits
     public static readonly TimeSpan TimeGapSpan;         // 2 min
     public static readonly TimeSpan FinalWait;           // 5 min
     public static readonly TimeSpan SampleWindow;        // 5 min, also the oldest previous reading that confirms
-    public static readonly TimeSpan ConfirmSpacing;      // 1 min
+    public static readonly TimeSpan ConfirmSpacing;      // 30 s
     public const double MaxCountedSendLagSeconds = 60;
     public static readonly TimeSpan SampleBucket;        // 10 s
     public const int MaxClockSamples = 64;            // rows per agent and sort

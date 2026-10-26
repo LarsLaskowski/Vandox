@@ -23,7 +23,7 @@ which the backend holds no `metric` record of the agent. A gap is **open** (its 
 arrived) or **final** (it will not arrive). A **counted** `self` sample is one whose `agent_send_lag_seconds` is at most
 60 seconds (an acknowledgement within one `system` interval plus the send period) and which, when stored, is the agent's highest stored number with no open sequence gap below it. A counted sample whose
 bound (capture minus receive time) lies more than 90 seconds below the offset in effect **measures** only when the agent's
-previous counted sample, captured and received 1 to 5 minutes earlier, lies within 90 seconds of it; every other counted
+previous counted sample, captured and received 30 seconds to 5 minutes earlier, lies within 90 seconds of it; every other counted
 sample measures at once.
 
 - S1: Given an agent that sends live without backlog, when a batch arrives whose records' lateness lies within the allowance
@@ -100,7 +100,7 @@ sample measures at once.
 ## Non-functional requirements
 
 - No new configuration: the allowances (10 min, 90 s), the time-gap span (2 min), the final wait (5 min), the send-lag bound
-  (60 s) and the confirmation spacing (1 to 5 min) are tested constants (Detection area, *Live data and backfill*).
+  (60 s) and the confirmation spacing (30 s to 5 min) are tested constants (Detection area, *Live data and backfill*).
 - No wire-format change; the header's `mode` is only logged, never stored, and its `clock_offset_ns` is stored as before;
   neither is used for the classification (record 0046 lets the backend prefer its own measurement).
 - Schema: one new migration step; a record row is still never updated after its insert.
@@ -138,7 +138,8 @@ sample measures at once.
   between its neighbouring records' numbers, `open` otherwise, and narrowed, split or `closed` by metrics that arrive inside
   it (S2, S6, E1, E15, E16).
 - [ ] AC6: With the server's clock 2 hours behind and, separately, 2 hours ahead, records sent live are `live` from the first
-  measuring `self` sample on (ahead: the first counted one; behind: the second, which confirms the first), no record captured more than its allowance (plus the delivery delay of the
+  measuring `self` sample on (ahead: the first counted one; behind: the second, which confirms the first, also with the samples' spacing jittered
+  around 60 s), no record captured more than its allowance (plus the delivery delay of the
   freshest counted sample, none in the test) before its receipt is ever `live` (before, during and
   after the measurement and after a clock step), and after a backward step of 5 minutes current records are `live` again
   within 10 minutes; this holds for an agent without log traffic, whose send lag is set by its `system` samples (S7, E4, E6,
