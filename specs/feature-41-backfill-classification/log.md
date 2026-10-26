@@ -7,3 +7,4 @@ are quoted in full.
 | ---- | ---- | ------ | ------ |
 | 2026-10-26 17:47 | 1 Intake | squad-orchestrator | Issue 41 read (feature, open, #40 merged); branch claude/vibrant-cray-hpseeo |
 | 2026-10-26 17:58 | 2a Spec | squad-lead | spec.md written: 9 scenarios, 13 edge cases, 10 criteria; RESULT: DONE (opus/medium · 190,892 tokens · 41 tool uses · 646 s) |
+| 2026-10-26 18:03 | 2a Spec challenge | squad-devils-advocate | OBJECTIONS: 2 major (M1 late self sample can set wrong offset; M2 log_line lateness vs 90 s), 8 minor (opus/medium · 95,430 tokens · 24 tool uses · 288 s) |
