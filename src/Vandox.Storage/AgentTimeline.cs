@@ -434,7 +434,6 @@ internal sealed class AgentTimeline : IDisposable
         {
             UpdateSequenceGap(gap.Id, gap.First, from - 1, gap.State, gap.Cause);
             InsertSequenceGap(to + 1, gap.Last, gap.State, gap.Cause, gap.FromAt, gap.ToAt, gap.DetectedAt);
-            _opened++;
             _openGaps += isOpen ? 1 : 0;
         }
     }
@@ -496,7 +495,6 @@ internal sealed class AgentTimeline : IDisposable
         if (to < open.Last)
         {
             InsertSequenceGap(to + 1, open.Last, GapState.Open, open.Cause, open.FromAt, open.ToAt, open.DetectedAt);
-            _opened++;
             _openGaps++;
         }
     }
@@ -717,12 +715,12 @@ internal sealed class AgentTimeline : IDisposable
 
         if (previous is not null && IsOverSpan((Int128)time - previous.Value.Time))
         {
-            CreateTimeGap(previous.Value.Time, time, previous.Value.Seq, min, _receivedNs);
+            CreateTimeGap(previous.Value.Time, time, previous.Value.Seq, min, _receivedNs, true);
         }
 
         if (next is not null && IsOverSpan((Int128)next.Value.Time - time))
         {
-            CreateTimeGap(time, next.Value.Time, max, next.Value.Seq, _receivedNs);
+            CreateTimeGap(time, next.Value.Time, max, next.Value.Seq, _receivedNs, true);
         }
     }
 
@@ -741,7 +739,7 @@ internal sealed class AgentTimeline : IDisposable
         if (lower && upper)
         {
             UpdateTimeGap(gap.Id, gap.From, time, gap.FromSeq, min, GapState.Open);
-            CreateTimeGap(time, gap.To, max, gap.ToSeq, gap.DetectedAt);
+            CreateTimeGap(time, gap.To, max, gap.ToSeq, gap.DetectedAt, false);
         }
         else if (lower)
         {
@@ -766,7 +764,8 @@ internal sealed class AgentTimeline : IDisposable
     /// <param name="fromSeq">The highest metric number at the start</param>
     /// <param name="toSeq">The lowest metric number at the end</param>
     /// <param name="detectedAt">When the gap was detected</param>
-    private void CreateTimeGap(long from, long to, long? fromSeq, long? toSeq, long detectedAt)
+    /// <param name="detected">Whether the span is newly detected; the rest split off an existing gap counts in no total</param>
+    private void CreateTimeGap(long from, long to, long? fromSeq, long? toSeq, long detectedAt, bool detected)
     {
         var rows = Statement(AgentTimelineQueries.InsertGap).Set(TimelineParameter.Agent, _agentId)
                                                             .Set("$kind", GapKind.Time)
@@ -782,18 +781,16 @@ internal sealed class AgentTimeline : IDisposable
                                                             .Set(TimelineParameter.Changed, _receivedNs)
                                                             .Execute();
 
-        if (rows == 0)
+        if (rows > 0 && detected)
         {
-            return;
-        }
+            _opened++;
 
-        _opened++;
+            var between = toSeq is null ? null : Seek(AgentTimelineQueries.FindOpenGap, toSeq.Value - 1);
 
-        var between = toSeq is null ? null : Seek(AgentTimelineQueries.FindOpenGap, toSeq.Value - 1);
-
-        if (between is null || between.Value.Last <= fromSeq)
-        {
-            _final++;
+            if (between is null || between.Value.Last <= fromSeq)
+            {
+                _final++;
+            }
         }
     }
 

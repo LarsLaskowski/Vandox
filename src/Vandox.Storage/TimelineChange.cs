@@ -8,17 +8,17 @@ public sealed class TimelineChange
     #region Properties
 
     /// <summary>
-    /// Gets the number of gaps opened by the batch.
+    /// Gets the number of gaps newly detected by the batch: the sequence gap of a jump in numbers and each new time-gap span; a row split off an existing gap counts in none.
     /// </summary>
     public int Opened { get; init; }
 
     /// <summary>
-    /// Gets the number of gaps closed by the batch.
+    /// Gets the number of gap rows the batch moved to closed.
     /// </summary>
     public int Closed { get; init; }
 
     /// <summary>
-    /// Gets the number of gaps made final by the batch.
+    /// Gets the number of sequence gaps the batch made final plus the time gaps it detected final.
     /// </summary>
     public int Final { get; init; }
 
