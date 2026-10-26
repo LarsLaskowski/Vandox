@@ -25,3 +25,4 @@ are quoted in full.
 | 2026-10-26 19:35 | 6 Fix round G2 (TimelineChange counts) | squad-dev | split rows no longer counted in Opened/Final; build clean; Storage 591 pass/13 fail (tests to adapt) (sonnet/medium · 5,253 tokens · 6 tool uses · 93 s · continued from 6 Implement G1) |
 | 2026-10-26 19:49 | 6 Coverage pass G2 | squad-tester | Disputed tests adapted, Open tests adapted to step 12, 5 new tests; Storage 611 pass, full solution green; 15 WriteResult assertions hold (sonnet/medium · 135,582 tokens · 30 tool uses · 807 s) |
 | 2026-10-26 19:50 | 4 Skeleton G3 | squad-dev | Three BackendLog methods (EventIds 66-68); build clean (sonnet/medium · 4,892 tokens · 4 tool uses · 53 s · continued from 4 Skeleton G1) |
+| 2026-10-26 19:54 | 5 Tests first G3 | squad-tester | IngestEndpointTimelineTests: 2 fail (log lines missing), 3 already pass as end-to-end guards; none deferred (sonnet/medium · usage pending) |
