@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-10-26 18:25 | 2b Plan revise (Security notes N3, N4) | squad-lead | N3 accepted (clock bounds as 10 s bucket rows, max 64 per sort), N4 accepted; plan 4,275 words under Plan size line; RESULT: DONE (opus/medium · 7,466 tokens · 4 tool uses · 43 s · continued) |
 | 2026-10-26 18:28 | 4 Skeleton G1 | squad-dev | TimelineLimits, GapKind, GapState, ClockSample, LiveRules, ClockEstimator; build 0 warnings (sonnet/medium · 96,660 tokens · 9 tool uses · 124 s) |
 | 2026-10-26 18:32 | 5 Tests first G1 | squad-tester | LiveRulesTests, ClockEstimatorTests; 52 cases fail with NotImplementedException; nothing deferred (sonnet/medium · 128,518 tokens · 16 tool uses · 234 s) |
+| 2026-10-26 18:34 | 6 Implement G1 | squad-dev | LiveRules, ClockEstimator implemented; Storage tests 569 passed; coverage gate deferred to the end of G3 (overall figure needs all groups) (sonnet/medium · 93,422 tokens · 9 tool uses · 103 s) |

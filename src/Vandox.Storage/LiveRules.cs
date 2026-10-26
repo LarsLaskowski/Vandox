@@ -2,12 +2,17 @@ using Vandox.Core.Model;
 
 namespace Vandox.Storage;
 
-#pragma warning disable RH2003, S2325
 /// <summary>
 /// Decides whether a record counts as live data.
 /// </summary>
 public static class LiveRules
 {
+    #region Constants
+
+    private const long NanosecondsPerTick = 100;
+
+    #endregion // Constants
+
     #region Methods
 
     /// <summary>
@@ -17,7 +22,7 @@ public static class LiveRules
     /// <returns>The allowed distance between the corrected capture time and the receive time.</returns>
     public static TimeSpan AllowanceOf(string kind)
     {
-        throw new NotImplementedException();
+        return IsRunTimed(kind) ? TimelineLimits.RunAllowance : TimelineLimits.LogAllowance;
     }
 
     /// <summary>
@@ -27,7 +32,7 @@ public static class LiveRules
     /// <returns><see langword="true"/> for every kind except log lines and kernel events.</returns>
     public static bool IsRunTimed(string kind)
     {
-        throw new NotImplementedException();
+        return kind != RecordKind.LogLine && kind != RecordKind.KernelEvent;
     }
 
     /// <summary>
@@ -40,7 +45,15 @@ public static class LiveRules
     /// <returns><see langword="true"/> when the record is live.</returns>
     public static bool IsLive(DataRecord record, DateTimeOffset receivedAt, long offsetNs, ulong? lowestOpenGapFirstSeq)
     {
-        throw new NotImplementedException();
+        if (lowestOpenGapFirstSeq is not null && lowestOpenGapFirstSeq.Value < record.Seq)
+        {
+            return false;
+        }
+
+        var lateness = ((Int128)(receivedAt.UtcTicks - record.CapturedAt.UtcTicks) * NanosecondsPerTick) + offsetNs;
+        var allowance = (Int128)AllowanceOf(record.Kind).Ticks * NanosecondsPerTick;
+
+        return lateness >= -allowance && lateness <= allowance;
     }
 
     #endregion // Methods
