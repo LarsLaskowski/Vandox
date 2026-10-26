@@ -26,4 +26,4 @@ are quoted in full.
 | 2026-10-26 19:49 | 6 Coverage pass G2 | squad-tester | Disputed tests adapted, Open tests adapted to step 12, 5 new tests; Storage 611 pass, full solution green; 15 WriteResult assertions hold (sonnet/medium · 135,582 tokens · 30 tool uses · 807 s) |
 | 2026-10-26 19:50 | 4 Skeleton G3 | squad-dev | Three BackendLog methods (EventIds 66-68); build clean (sonnet/medium · 4,892 tokens · 4 tool uses · 53 s · continued from 4 Skeleton G1) |
 | 2026-10-26 19:54 | 5 Tests first G3 | squad-tester | IngestEndpointTimelineTests: 2 fail (log lines missing), 3 already pass as end-to-end guards; none deferred (sonnet/medium · 30,612 tokens · 10 tool uses · 249 s · continued from 5 Tests first G1) |
-| 2026-10-26 19:56 | 6 Implement G3 | squad-dev | LogTimeline in IngestEndpoint.Acknowledge; Backend 1181 pass (sonnet/medium · usage pending) |
+| 2026-10-26 19:56 | 6 Implement G3 | squad-dev | LogTimeline in IngestEndpoint.Acknowledge; Backend 1181 pass (sonnet/medium · 3,755 tokens · 4 tool uses · 95 s · continued from 6 Implement G1) |
