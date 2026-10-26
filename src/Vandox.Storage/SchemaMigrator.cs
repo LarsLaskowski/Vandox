@@ -196,6 +196,68 @@ internal static class SchemaMigrator
                                                               ) STRICT
                                                               """,
                                                               "CREATE INDEX listener_comparisons_findings ON listener_comparisons(captured_at DESC, agent_id, seq DESC) WHERE finding = 1"
+                                                          ]),
+                                                      new(12,
+                                                          [
+                                                              "ALTER TABLE records ADD COLUMN live INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1))",
+                                                              """
+                                                              CREATE TABLE agent_streams (
+                                                                agent_id TEXT PRIMARY KEY,
+                                                                floor_seq INTEGER NOT NULL,
+                                                                max_seq INTEGER NOT NULL,
+                                                                max_captured_at INTEGER NOT NULL,
+                                                                fill_at INTEGER NOT NULL,
+                                                                open_gaps INTEGER NOT NULL DEFAULT 0 CHECK (open_gaps >= 0),
+                                                                offset_ns INTEGER,
+                                                                measured_at INTEGER,
+                                                                clock_off INTEGER NOT NULL DEFAULT 0 CHECK (clock_off IN (0, 1))
+                                                              ) STRICT, WITHOUT ROWID
+                                                              """,
+                                                              """
+                                                              INSERT INTO agent_streams(agent_id, floor_seq, max_seq, max_captured_at, fill_at, open_gaps)
+                                                              SELECT agent_id, seq, seq, captured_at, received_at, 0
+                                                              FROM (SELECT agent_id, seq, captured_at, received_at, max(seq) FROM records WHERE origin = 'agent' AND agent_id IS NOT NULL GROUP BY agent_id)
+                                                              """,
+                                                              """
+                                                              CREATE TABLE agent_clock_samples (
+                                                                agent_id TEXT NOT NULL,
+                                                                sort TEXT NOT NULL CHECK (sort IN ('counted', 'run')),
+                                                                bucket INTEGER NOT NULL,
+                                                                bound_ns INTEGER NOT NULL,
+                                                                PRIMARY KEY (agent_id, sort, bucket)
+                                                              ) STRICT, WITHOUT ROWID
+                                                              """,
+                                                              """
+                                                              CREATE TABLE agent_sample_times (
+                                                                agent_id TEXT NOT NULL,
+                                                                captured_at INTEGER NOT NULL,
+                                                                min_seq INTEGER NOT NULL,
+                                                                max_seq INTEGER NOT NULL,
+                                                                PRIMARY KEY (agent_id, captured_at)
+                                                              ) STRICT, WITHOUT ROWID
+                                                              """,
+                                                              """
+                                                              CREATE TABLE gaps (
+                                                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                                agent_id TEXT NOT NULL,
+                                                                kind TEXT NOT NULL CHECK (kind IN ('sequence', 'time')),
+                                                                cause TEXT NOT NULL,
+                                                                state TEXT NOT NULL CHECK (state IN ('open', 'closed', 'final')),
+                                                                first_seq INTEGER,
+                                                                last_seq INTEGER,
+                                                                from_seq INTEGER,
+                                                                to_seq INTEGER,
+                                                                from_at INTEGER NOT NULL,
+                                                                to_at INTEGER NOT NULL,
+                                                                detected_at INTEGER NOT NULL,
+                                                                changed_at INTEGER NOT NULL,
+                                                                CHECK (first_seq <= last_seq)
+                                                              ) STRICT
+                                                              """,
+                                                              "CREATE INDEX gaps_seq ON gaps(agent_id, first_seq) WHERE kind = 'sequence' AND state <> 'closed'",
+                                                              "CREATE INDEX gaps_seq_open ON gaps(agent_id, first_seq) WHERE kind = 'sequence' AND state = 'open'",
+                                                              "CREATE UNIQUE INDEX gaps_time ON gaps(agent_id, from_at) WHERE kind = 'time' AND state <> 'closed'",
+                                                              "CREATE INDEX gaps_agent ON gaps(agent_id, id)"
                                                           ])
                                                   ];
 

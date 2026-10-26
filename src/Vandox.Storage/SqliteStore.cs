@@ -42,6 +42,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     private const string ListenersContext = "store: reading listener findings";
 
     /// <summary>
+    /// The operation named in the error of a gap or clock read.
+    /// </summary>
+    private const string TimelineContext = "store: reading agent timeline";
+
+    /// <summary>
     /// The seconds a connection waits for a lock another connection holds, the whole wait (<c>DefaultTimeout</c> retries on top of the busy timeout pragma).
     /// </summary>
     private const int BusyTimeoutSeconds = 5;
@@ -60,6 +65,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     private readonly SqliteConnection _writer;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly SemaphoreSlim _readers = new(MaxReaders, MaxReaders);
+    private readonly HashSet<string> _writtenAgents = new(StringComparer.Ordinal);
     private bool _disposed;
 
     #endregion // Fields
@@ -409,6 +415,21 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
+    /// Gets a value indicating whether no batch of an agent has been committed since the store was opened.
+    /// </summary>
+    /// <param name="agentId">The agent ID</param>
+    /// <returns><see langword="true"/> when this is the agent's first batch since the start</returns>
+    private bool IsFirstBatchOf(string agentId)
+    {
+        if (_writtenAgents.Contains(agentId))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Runs an action in one committed writer transaction under the writer lock.
     /// </summary>
     /// <typeparam name="TResult">The type of the result</typeparam>
@@ -473,14 +494,29 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                 await ImportRepository.AdvanceAsync(_writer, transaction, batch.Import, batch.Records.Count, batch.ReceivedAt, cancellationToken).ConfigureAwait(false);
             }
 
-            var stored = batch.Records.Count(record => writer.Write(batch, record, false, cancellationToken));
+            using var timeline = batch.AgentId.Length > 0 ? AgentTimeline.Load(_writer, transaction, batch.AgentId) : null;
+
+            timeline?.Prepare(batch, IsFirstBatchOf(batch.AgentId), cancellationToken);
+
+            var stored = batch.Records.Where(record => writer.Write(batch, record, timeline?.IsLive(record) ?? false, cancellationToken)).ToList();
 
             writer.WriteTemplates(cancellationToken);
             writer.WriteListenerComparisons(cancellationToken);
+            timeline?.WriteSampleTimes(batch, stored, cancellationToken);
+
+            var change = timeline?.Finish(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
-            return new WriteResult(stored, batch.Records.Count - stored);
+            if (timeline is not null)
+            {
+                _writtenAgents.Add(batch.AgentId);
+            }
+
+            return new WriteResult(stored.Count, batch.Records.Count - stored.Count)
+                   {
+                       Timeline = change
+                   };
         }
         catch (SqliteException exception)
         {
@@ -830,25 +866,55 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
     #endregion // IListenerHistoryReader
 
-#pragma warning disable RH2003
-
     #region IAgentTimelineReader
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AgentGap>> GapsAsync(GapQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        AgentTimelineQueries.Validate(query);
+
+        var parameters = new Dictionary<string, object>
+                         {
+                             ["$agent"] = query.AgentId,
+                             ["$after"] = query.AfterId,
+                             ["$limit"] = (long)query.Limit
+                         };
+
+        if (query.State.Length > 0)
+        {
+            parameters["$state"] = query.State;
+        }
+
+        return QueryAsync(query.State.Length > 0 ? AgentTimelineQueries.ReadGapsInState : AgentTimelineQueries.ReadGaps,
+                          parameters,
+                          reader => AgentTimelineQueries.ReadGap(query.AgentId, reader),
+                          TimelineContext,
+                          cancellationToken);
     }
 
     /// <inheritdoc />
-    public Task<AgentClock?> ClockAsync(string agentId, CancellationToken cancellationToken)
+    public async Task<AgentClock?> ClockAsync(string agentId, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        AgentTimelineQueries.ValidateAgentId(agentId);
+
+        var rows = await QueryAsync(AgentTimelineQueries.ReadClock,
+                                    new Dictionary<string, object>
+                                    {
+                                        ["$agent"] = agentId
+                                    },
+                                    reader => new AgentClock
+                                              {
+                                                  AgentId = agentId,
+                                                  OffsetNs = reader.IsDBNull(0) ? null : reader.GetInt64(0),
+                                                  MeasuredAt = reader.IsDBNull(1) ? null : StorageTime.FromNanoseconds(reader.GetInt64(1))
+                                              },
+                                    TimelineContext,
+                                    cancellationToken).ConfigureAwait(false);
+
+        return rows.Count > 0 ? rows[0] : null;
     }
 
     #endregion // IAgentTimelineReader
-
-#pragma warning restore RH2003
 
     #region IImportTracker
 

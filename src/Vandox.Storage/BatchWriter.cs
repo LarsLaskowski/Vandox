@@ -45,8 +45,8 @@ internal sealed class BatchWriter : IDisposable
     {
         _record = Create(connection,
                          transaction,
-                         "INSERT INTO records(kind, origin, source, agent_id, seq, captured_at, received_at, boot_id, clock_offset_ns, data) "
-                         + "VALUES ($kind, $origin, $source, $agent, $seq, $captured, $received, $boot, $offset, CAST($data AS TEXT)) ON CONFLICT DO NOTHING RETURNING id");
+                         "INSERT INTO records(kind, origin, source, agent_id, seq, captured_at, received_at, boot_id, clock_offset_ns, data, live) "
+                         + "VALUES ($kind, $origin, $source, $agent, $seq, $captured, $received, $boot, $offset, CAST($data AS TEXT), $live) ON CONFLICT DO NOTHING RETURNING id");
         _metric = Create(connection,
                          transaction,
                          "INSERT INTO metrics(record_id, source, name, captured_at, value, unit, labels) VALUES ($id, $source, $name, $captured, $value, $unit, $labels)");
@@ -54,7 +54,7 @@ internal sealed class BatchWriter : IDisposable
                           transaction,
                           "INSERT INTO log_lines(record_id, log, program, pid, priority, message, truncated, host, event) VALUES ($id, $log, $program, $pid, $priority, $message, $truncated, $host, $event)");
         _logFts = Create(connection, transaction, "INSERT INTO log_fts(rowid, message) VALUES ($id, $message)");
-        _recordValues = Bind(_record, "$kind", "$origin", "$source", "$agent", "$seq", "$captured", "$received", "$boot", "$offset", "$data");
+        _recordValues = Bind(_record, "$kind", "$origin", "$source", "$agent", "$seq", "$captured", "$received", "$boot", "$offset", "$data", "$live");
         _metricValues = Bind(_metric, "$id", "$source", "$name", "$captured", "$value", "$unit", "$labels");
         _logLineValues = Bind(_logLine, "$id", "$log", "$program", "$pid", "$priority", "$message", "$truncated", "$host", "$event");
         _logFtsValues = Bind(_logFts, "$id", "$message");
@@ -110,6 +110,8 @@ internal sealed class BatchWriter : IDisposable
                                      ? DBNull.Value
                                      : PayloadJson.Serialize(payload, StorageLimits.MaxPayloadBytes)
                                            ?? throw new InvalidBatchException($"store: invalid batch: {RecordRules.TooLargeMessage}");
+
+        _recordValues[10].Value = live ? 1L : 0L;
 
         if (_record.ExecuteScalar() is not long recordId)
         {
