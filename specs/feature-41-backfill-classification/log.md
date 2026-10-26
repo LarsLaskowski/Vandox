@@ -27,3 +27,4 @@ are quoted in full.
 | 2026-10-26 19:50 | 4 Skeleton G3 | squad-dev | Three BackendLog methods (EventIds 66-68); build clean (sonnet/medium · 4,892 tokens · 4 tool uses · 53 s · continued from 4 Skeleton G1) |
 | 2026-10-26 19:54 | 5 Tests first G3 | squad-tester | IngestEndpointTimelineTests: 2 fail (log lines missing), 3 already pass as end-to-end guards; none deferred (sonnet/medium · 30,612 tokens · 10 tool uses · 249 s · continued from 5 Tests first G1) |
 | 2026-10-26 19:56 | 6 Implement G3 | squad-dev | LogTimeline in IngestEndpoint.Acknowledge; Backend 1181 pass (sonnet/medium · 3,755 tokens · 4 tool uses · 95 s · continued from 6 Implement G1) |
+| 2026-10-26 20:07 | 6 Benchmark and documentation G3 | squad-dev | Tasks 11, 12 done; contiguous batches ~12-15 % slower on dev host; docs written; 10 skipped as already covered by the G2 coverage pass (sonnet/medium · usage pending) |

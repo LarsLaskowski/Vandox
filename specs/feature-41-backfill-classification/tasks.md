@@ -13,6 +13,6 @@ Plan: [plan.md](plan.md) — Status: Draft
 | 7 | G3 | Skeleton: the three `BackendLog` methods | `src/Vandox.Backend/Hosting/BackendLog.cs` | AC10 | 6 | Dev | [x] |
 | 8 | G3 | Tests first: `IngestEndpointTimelineTests` | `tests/Vandox.Backend.Tests/IngestEndpointTimelineTests.cs` | AC1, AC10 | 7 | Tester | [x] |
 | 9 | G3 | Implement the log lines in `IngestEndpoint.Acknowledge` | `src/Vandox.Backend/Ingest/IngestEndpoint.cs`, `Hosting/BackendLog.cs` | AC1, AC10 | 8 | Dev | [x] |
-| 10 | G3 | Coverage pass; check the 15 whole-value `WriteResult` assertions and the ingest log expectations | `tests/Vandox.Storage.Tests/*`, `tests/Vandox.Backend.Tests/*` | AC8, AC10 | 9 | Tester | [ ] |
-| 11 | G3 | Add the backfill scenario to `tools/Vandox.StorageBenchmark`; run it before and after on the development host | `tools/Vandox.StorageBenchmark/Program.cs`, `docs/BENCHMARKS.md` | AC8 | 9 | Dev | [ ] |
-| 12 | G3 | Documentation updates of the plan | `docs/areas/detection-and-reports.md`, `docs/areas/storage.md`, `docs/areas/backend-host.md`, `docs/areas/wire-format.md`, `docs/areas/agent.md`, `docs/ARCHITECTURE.md`, `.squad/project.md` | AC10 | 10, 11 | Dev | [ ] |
+| 10 | G3 | Coverage pass; check the 15 whole-value `WriteResult` assertions and the ingest log expectations | `tests/Vandox.Storage.Tests/*`, `tests/Vandox.Backend.Tests/*` | AC8, AC10 | 9 | Tester | [x] |
+| 11 | G3 | Add the backfill scenario to `tools/Vandox.StorageBenchmark`; run it before and after on the development host | `tools/Vandox.StorageBenchmark/Program.cs`, `docs/BENCHMARKS.md` | AC8 | 9 | Dev | [x] |
+| 12 | G3 | Documentation updates of the plan | `docs/areas/detection-and-reports.md`, `docs/areas/storage.md`, `docs/areas/backend-host.md`, `docs/areas/wire-format.md`, `docs/areas/agent.md`, `docs/ARCHITECTURE.md`, `.squad/project.md` | AC10 | 10, 11 | Dev | [x] |

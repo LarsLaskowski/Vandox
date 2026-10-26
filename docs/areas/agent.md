@@ -1515,9 +1515,10 @@ grows faster until its size bound evicts older data with a recorded gap, bounded
 **There is no data gap unless it is explicitly recorded.** The agent records the gaps it knows about: a collector sample missed or
 skipped, a span of kernel messages it cannot read (*Kernel events*), a span of log lines it cannot ship (*Log shipping*), spool
 data dropped for the size bound, the free-space reserve or the file limit or lost to damage (`spool_dropped`), and the records the
-spool refused while its writes failed (`unknown`; *Spool and sending*). The backend records the gaps it detects (missing sequence numbers,
-intervals with no batch). Analysis, reports and the web UI treat a recorded gap as *unknown*, never as *normal*. Spool eviction,
-collector timeouts and backend gap detection each emit a gap record, and each path has a test.
+spool refused while its writes failed (`unknown`; *Spool and sending*). The backend records the gaps it detects as rows of its own, not as records: a sequence gap
+for numbers it has not stored (cause `sequence_missing`) and a time gap for a span of more than 2 minutes without a `metric` record (cause `no_data`), each open, closed or final
+([Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*; [Storage](storage.md), *Writing*). A `gap` record that names `first_seq` and `last_seq` makes the numbers below its own final at once, with its cause. Analysis, reports and the web UI treat a recorded gap as *unknown*, never as *normal*. Spool eviction
+and collector timeouts each emit a gap record, and each path has a test.
 
 ## Spool and sending
 
@@ -1647,7 +1648,7 @@ not kept; the refusal never blocks the watchdog. Unlike at the start the agent k
 spool logs the warning `spool write failed` (`err`) once per episode; a hand-over refused for want of room or numbers belongs to the
 same episode. The first hand-over that is written again first writes one `gap` with cause `unknown`, source `agent` and no sequence
 range, from the earliest to the latest capture time of every record refused in the episode (at least one second), and logs the info
-`spool writes again`. A gap still owed when the agent stops is lost with it; the backend's time-gap detection (#41) covers that span.
+`spool writes again`. A gap still owed when the agent stops is lost with it; the backend's time-gap detection ([Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*) covers that span.
 
 **Damaged data (security area 10).** Values read back from the spool's files are held to consistency rules before they are used:
 the header's, each frame's and the summary's checksum; the format version; a frame length within the bound above; a header boot ID
@@ -1690,7 +1691,7 @@ page cache keeps it). A hand-over is written even when the caller's context is a
 while the agent stops are kept; the context only accompanies the spool's log lines. Once a second, when something was written, the spool syncs the file being written to, the meta file and the
 directory; at most one sync is in flight, outside the spool's lock, so a slow sync never holds up a hand-over, and a caller that finds
 one running waits for its result. An OS crash or power loss therefore loses at most the records of about the last second, never a
-damaged record handed out and never a number issued twice; the backend sees the loss as a sequence gap (#41), and the `kernel` and
+damaged record handed out and never a number issued twice; the backend sees the loss as a sequence gap ([Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*), and the `kernel` and
 `logs` collectors read their entries again because every state save first makes the spool durable (*Agent state*). The exception is
 the boot and backup change written before the hand-over (*Kernel events* and *Backup runs*, residuals; #300). At the stop, after the
 scheduler has stopped and the state file's last save, the spool is closed: synced, the meta file written with `clean` true and

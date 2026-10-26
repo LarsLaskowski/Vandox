@@ -41,7 +41,7 @@ database in a subfolder and removes it afterwards, and first prints how long a 4
 dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> [--batches N] [--size N] [--warmup]
 ```
 
-`--warmup` writes a small batch first that is not counted, which shows how much of the first batch is start-up cost. On the development host the
+`--warmup` writes a small batch first that is not counted, which shows how much of the first batch is start-up cost; `--backfill` runs the scenario of the agent timeline instead (below). On the development host the
 same measurement runs with `dotnet run -c Release --project tools/Vandox.StorageBenchmark -- <folder>` or, as a test,
 
 ```bash
@@ -84,6 +84,40 @@ A metric batch pays nothing for the marks, and a batch of usable snapshots pays 
 for each of them. A start stored before a backlog of its predecessors is not decoded per record: the backlog's batches decoded two payloads in all
 for the start (`ListenerMarkWriter.PayloadDecodes`, checked by a test). The programs of these runs were not kept in the repository; the first case is
 `WriteThroughputOfTenThousandMetricsPerBatch`. The reference host is not measured.
+
+**Agent timeline** ([0130](decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md)).
+The write path of a batch with an agent ID also classifies each record and keeps the agent's gaps, clock samples, sample times and stream row in
+the same transaction (storage area, *Writing*). Measured on the development host (4 vCPU Intel Xeon 2.10 GHz, .NET 10.0, Release build of the
+tool, no flush cost: a 4 KiB write reaches the disk in 0.2-0.3 ms) with the contiguous scenario above, `tools/Vandox.StorageBenchmark` of
+`origin/main` (before) and of this change (after), alternating, three runs each (ms per batch, batches 1 to 5; its metric points carry
+capture times that repeat every hour, so the first batch inserts about 3,600 sample times and the later batches find them):
+
+| Run | Before | After |
+| --- | -----: | ----: |
+| 1 | 304 / 375 / 351 / 212 / 194 (median 304) | 453 / 432 / 322 / 240 / 225 (median 322) |
+| 2 | 280 / 330 / 340 / 262 / 247 (median 280) | 426 / 478 / 319 / 221 / 231 (median 319) |
+| 3 | 279 / 325 / 308 / 211 / 215 (median 279) | 429 / 419 / 335 / 221 / 250 (median 335) |
+
+The median of five batches rose from 279-304 ms to 319-335 ms (about 12 to 15 per cent), the first batches by about 120 ms: they pay a
+sample-time row and its lookups for each new capture time of a metric, the later ones mostly the stream row and the classification. The criterion
+stays met on the development host with a wide margin; the reference host is not measured (it stays with #44), and a rise of the same proportion
+would put its 783 ms median at about 900 ms, still under one second.
+
+The scenario of the backfill (`--backfill`, option of the same tool: `dotnet run -c Release --project tools/Vandox.StorageBenchmark -- <folder> --backfill [--size N]`)
+is the costly path of the timeline: for each of five agents in one database, a small batch is stored, a small batch far above it opens a sequence gap of
+10,000 numbers and a time gap of 10,020 seconds, and one batch of 10,000 metric points, each captured a second after the one before, fills the whole sequence
+gap and the time gap (every point narrows the time gap, and the batch closes both). Three runs, ms of the filling batch for the rounds 1 to 5:
+
+| Run | Filling batch (ms) |
+| --- | -----------------: |
+| 1 | 701 / 409 / 455 / 317 / 321 (median 409) |
+| 2 | 644 / 415 / 375 / 364 / 339 (median 375) |
+| 3 | 654 / 399 / 476 / 370 / 340 (median 399) |
+
+Filling a gap of 10,000 numbers and 10,000 sample times costs about the same as a contiguous batch of 10,000 records after the first (median 375-409 ms;
+the first round pays the start-up of the database): the numbers of a batch are applied as one run, so the gap row is written once, and each new sample time
+costs a few index seeks. There is no "before" for this scenario, because `origin/main` keeps no gaps; the nearest comparison is the contiguous batch above. The program
+removes its database afterwards and asserts nothing.
 
 ## Log templates
 
