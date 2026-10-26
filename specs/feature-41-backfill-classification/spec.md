@@ -21,7 +21,7 @@ records, whose capture time comes from a log, and 90 seconds for every other kin
 numbers the backend has not stored; a **time gap** is a span of more than 2 minutes, in the agent's own capture times, in
 which the backend holds no `metric` record of the agent. A gap is **open** (its data may still arrive), **closed** (all of it
 arrived) or **final** (it will not arrive). A **counted** `self` sample is one whose `agent_send_lag_seconds` is at most
-10 seconds and which, when stored, is the agent's highest stored number with no open sequence gap below it.
+60 seconds (an acknowledgement within one `system` interval plus the send period) and which, when stored, is the agent's highest stored number with no open sequence gap below it.
 
 - S1: Given an agent that sends live without backlog, when a batch arrives whose records' lateness lies within the allowance
   (late or early) and no open sequence gap of the agent lies below their numbers, then every record is stored as `live`.
@@ -68,8 +68,10 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   after it began are `backfilled`.
 - E6: The agent's clock is stepped back by more than the allowance: current records are `backfilled` until the offset is
   measured again, at most 10 minutes; it never makes an old record `live`.
-- E7: No counted `self` sample has arrived (a new agent, a sender that never caught up): the offset is unknown and taken as 0,
-  so an agent clock off by more than the allowance yields only `backfilled` records.
+- E7: No counted `self` sample has arrived (a new agent, a sender that never caught up): the offset is the largest proof, among
+  the run-timed records (not `log_line` or `kernel_event`) received in the last 5 minutes, that the agent clock is ahead, and 0
+  when there is none; so an agent clock behind by more than the allowance yields only `backfilled` records, and an old record
+  is never made `live` by a clock that is ahead.
 - E8: A `self` sample with a small send lag that arrives late (the first sample of an agent started while the backend was off,
   whose lag counts from the start; a sample taken just before the backend went off and sent later by the backfill or into a
   hole the live stream left) is not counted and never moves the offset.
@@ -79,8 +81,9 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 - E11: Two batches of one agent are written at once (live and backfill stream): the result equals writing them one after the
   other in commit order.
 - E12: A hostile or broken agent skips numbers between every record, or sends a `gap` naming numbers at or above its own:
-  at most one gap opens per stored record, numbers at or above the gap record's own number are not made `final`, and numbers
-  up to 2^63 − 1 are handled without overflow.
+  a stored record adds at most three gap rows (two unless it is an agent `gap` record), numbers at or above the gap record's
+  own number are not made `final`, numbers up to 2^63 − 1 (and gap ranges above it) and capture times anywhere in the
+  storable range are handled without overflow or refusal, and the work per record does not grow with the number of open gaps.
 - E13: Records of origin `import` or `backend` are stored `backfilled` and never take part in gaps or the offset.
 - E14: Agent records stored before this version are `backfilled`, and numbers below the highest one stored before the
   upgrade are never reported missing.
@@ -92,7 +95,7 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
 ## Non-functional requirements
 
 - No new configuration: the allowances (10 min, 90 s), the time-gap span (2 min), the final wait (5 min) and the send-lag bound
-  (10 s) are tested constants (Detection area, *Live data and backfill*).
+  (60 s) are tested constants (Detection area, *Live data and backfill*).
 - No wire-format change; the header's `mode` and `clock_offset_ns` are stored as before and not used for the classification
   (record 0046 lets the backend prefer its own measurement).
 - Schema: one new migration step; a record row is still never updated after its insert.
@@ -100,7 +103,7 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   criterion (Storage, *Write throughput*) still holds, and the backend keeps per agent only a fixed amount of memory for it.
 - Fail-safe: when the data cannot settle a case, the record is `backfilled`, never `live`.
 - Security: the classification is no trust boundary against an agent holding the token, which chooses its own capture
-  times and numbers; it can open at most one gap per record it stores. Log lines carry the agent ID, counts, numbers,
+  times and numbers; it can add at most three gap rows per record it stores. Log lines carry the agent ID, counts, numbers,
   times and the offset, never record content.
 - Logs: info `ingest gaps changed` (`agent_id`, `opened`, `closed`, `final`, `open`) once per batch that changed a gap;
   warning `agent clock off` (`agent_id`, `offset_seconds`) when the measured offset first exceeds 90 seconds, info
@@ -127,11 +130,14 @@ arrived) or **final** (it will not arrive). A **counted** `self` sample is one w
   counted `self` sample on, no record captured more than its allowance (plus the delivery delay of the
   freshest counted sample, none in the test) before its receipt is ever `live` (before, during and
   after the measurement and after a clock step), and after a backward step of 5 minutes current records are `live` again
-  within 10 minutes (S7, E6, E7).
+  within 10 minutes; this holds for an agent without log traffic, whose send lag is set by its `system` samples (S7, E4, E6,
+  E7).
 - [ ] AC7: Gap upkeep follows E1 to E3: no sequence gap below an agent's first stored number, a middle fill splits a gap, a
   final gap shrinks and closes like an open one, and states survive a backend restart (E1, E2, E3, E9).
-- [ ] AC8: A refused batch changes nothing, two concurrent batches give the result of their commit order, a batch with a jump
-  between every record opens at most one gap per record, and numbers near 2^63 − 1 work (E10, E11, E12).
+- [ ] AC8: A refused batch changes nothing, two concurrent batches give the result of their commit order, a batch of metrics jumping
+  in number and time between every record adds at most two gap rows per record, numbers near 2^63 − 1, gap ranges above it
+  and capture times at both ends of the storable range are stored (`204`) and `backfilled`, and a fill into one of 20,000
+  open gaps costs indexed lookups only (E10, E11, E12).
 - [ ] AC9: Import and backend records and agent records stored before the upgrade read `backfilled`, and no gap is reported
   below the highest number stored before the upgrade (E13, E14).
 - [ ] AC10: Every record read through the store carries its classification, the agent's gaps and measured offset can be read

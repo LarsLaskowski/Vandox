@@ -38,16 +38,20 @@ How a gap that never fills (a numbering jump after an unclean stop) stops holdin
 
 How the clock offset is measured:
 
-1. **The tightest lower bound** (chosen): every record proves that the agent clock is at least `captured − received` ahead
-   of the backend (the delay is never negative). The estimate is the largest such bound over the agent's *counted* self
-   samples (a send lag of at most 10 seconds on the agent's own clock, a new highest number, no open sequence gap below it)
-   received within 5 minutes before the newest of them, and over every record of the current batch. Before the first
-   counted sample it is the largest bound of all the agent's records, never below 0. A late sample only lowers its own bound,
-   which the maximum ignores; a clock stepped back leaves a too-large estimate for up to 5 minutes, which only makes fresh
-   records backfilled.
-2. **The minimum lateness over a time window of all records** — a window that holds only backfill (an agent restarted with
+1. **The tightest lower bound from records that read the agent's clock** (chosen): a record whose capture time is the
+   agent's run time proves that the agent clock is at least `captured − received` ahead of the backend (the delay is never
+   negative). Log lines and kernel events carry a time written by another program, possibly another host or zone, and prove
+   nothing. The estimate is the largest such bound over the agent's *counted* self samples (a send lag of at most 60 seconds on
+   the agent's own clock, which a quiet agent reaches through its 30-second `system` samples; a new highest number; no open
+   sequence gap below it) received within 5 minutes before the newest of them. Before the first counted sample it is the
+   largest bound of the run-timed records of the last 5 minutes, never below 0. A late sample only lowers its own bound, which
+   the maximum ignores; a clock stepped back leaves a too-large estimate for up to 5 minutes, which only makes fresh records
+   backfilled.
+2. **The largest bound over every record of the batch as well** — one future-stamped log line would raise the estimate and
+   backfill every honest record of its batch.
+3. **The minimum lateness over a time window of all records** — a window that holds only backfill (an agent restarted with
    holes) measures the backlog's age as an offset and makes old records live (the spec challenge's M1).
-3. **The header's `clock_offset_ns`** — empty today, and relative to the agent's time source, not to the backend.
+4. **The header's `clock_offset_ns`** — empty today, and relative to the agent's time source, not to the backend.
 
 ## Decision
 
@@ -63,7 +67,12 @@ number. The rules, constants and states are in the [Detection, alerts and report
   backfilled until an outage's gaps close or become final.
 - After an unclean stop, current data stays backfilled for the backfill's duration plus 5 minutes.
 - Before the first counted self sample, an agent clock that is behind by more than the allowance yields only backfilled
-  records; a clock stepped back makes fresh records backfilled for up to about 5 minutes.
+  records; a clock stepped back, or stepped forward before the first counted sample, makes fresh records backfilled for up to
+  about 5 minutes; a clock stepped forward later, until the next counted sample.
+- All time arithmetic is done in 128-bit integers and stored bounds are saturated, so no capture time in the storable range
+  can make a write fail.
+- Time gaps keep only `open` or `closed`; whether a time gap is final is decided when it is read, so no batch walks other gaps.
+  A stored record adds at most three gap rows, each found by an indexed seek.
 - Residual: the measured offset can be short by the delivery delay of the freshest counted sample (seconds), so a record can
   be up to that much older than its allowance and still be live.
 - A flood of log lines read more than 10 minutes late, and a backup start seen more than 90 seconds late, are backfilled.
