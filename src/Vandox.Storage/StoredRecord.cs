@@ -39,5 +39,10 @@ public sealed class StoredRecord
     /// </summary>
     public DateTimeOffset ReceivedAt { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the record was classified as live data when it was stored.
+    /// </summary>
+    public bool Live { get; set; }
+
     #endregion // Properties
 }

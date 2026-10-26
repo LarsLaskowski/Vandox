@@ -10,7 +10,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -473,7 +473,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                 await ImportRepository.AdvanceAsync(_writer, transaction, batch.Import, batch.Records.Count, batch.ReceivedAt, cancellationToken).ConfigureAwait(false);
             }
 
-            var stored = batch.Records.Count(record => writer.Write(batch, record, cancellationToken));
+            var stored = batch.Records.Count(record => writer.Write(batch, record, false, cancellationToken));
 
             writer.WriteTemplates(cancellationToken);
             writer.WriteListenerComparisons(cancellationToken);
@@ -829,6 +829,26 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IListenerHistoryReader
+
+#pragma warning disable RH2003
+
+    #region IAgentTimelineReader
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<AgentGap>> GapsAsync(GapQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<AgentClock?> ClockAsync(string agentId, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    #endregion // IAgentTimelineReader
+
+#pragma warning restore RH2003
 
     #region IImportTracker
 

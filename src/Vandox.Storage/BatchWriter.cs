@@ -86,9 +86,10 @@ internal sealed class BatchWriter : IDisposable
     /// </summary>
     /// <param name="batch">The batch the record belongs to</param>
     /// <param name="record">The record</param>
+    /// <param name="live">Whether the record is stored as live data</param>
     /// <param name="cancellationToken">Cancels the write</param>
     /// <returns><c>true</c> when the record was stored, <c>false</c> when it was a duplicate</returns>
-    internal bool Write(RecordBatch batch, DataRecord record, CancellationToken cancellationToken)
+    internal bool Write(RecordBatch batch, DataRecord record, bool live, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
