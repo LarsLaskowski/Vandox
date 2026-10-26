@@ -44,7 +44,8 @@ How the clock offset is measured:
    nothing. The estimate is the largest such bound over the agent's *counted* self samples (a send lag of at most 60 seconds on
    the agent's own clock, which a quiet agent reaches through its 30-second `system` samples; a new highest number; no open
    sequence gap below it) received within 5 minutes before the newest of them. Before the first counted sample it is the
-   largest bound of the run-timed records of the last 5 minutes, never below 0. A late sample only lowers its own bound, which
+   largest bound of the run-timed records of the last 5 minutes, never below 0. Both windows are kept as bounded rows of
+   10-second buckets, so a window's maximum survives the expiry of its largest value. A late sample only lowers its own bound, which
    the maximum ignores; a clock stepped back leaves a too-large estimate for up to 5 minutes, which only makes fresh records
    backfilled.
 2. **The largest bound over every record of the batch as well** — one future-stamped log line would raise the estimate and
@@ -73,7 +74,7 @@ number. The rules, constants and states are in the [Detection, alerts and report
   can make a write fail.
 - Time gaps keep only `open` or `closed`; whether a time gap is final is decided when it is read, so no batch walks other gaps.
   A stored record adds at most three gap rows, each found by an indexed seek.
-- Residual: the measured offset can be short by the delivery delay of the freshest counted sample (seconds), so a record can
+- Residual: the measured offset can be short by the delivery delay of the freshest counted sample (up to the agent's 30-second request timeout), so a record can
   be up to that much older than its allowance and still be live.
 - A flood of log lines read more than 10 minutes late, and a backup start seen more than 90 seconds late, are backfilled.
 - Retention (#46) must delete the per-sample time rows and gap rows of the data it removes.

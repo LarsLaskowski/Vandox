@@ -53,7 +53,7 @@ through `AgentReplay` (*Test files*).
 | AC3 | `SqliteStoreTimelineSameBootRestartDuringBackfillKeepsFirstClassification`, `SqliteStoreTimelineRebootJumpBecomesFinalAfterFiveMinutes`, `SqliteStoreTimelineWaitRestartsAfterReopen`, `SqliteStoreTimelineRefusedFirstBatchAfterReopenKeepsWaitReset` | T |
 | AC4 | `SqliteStoreTimelineAgentSpoolDroppedGapFinalizesNamedNumbers`, `SqliteStoreTimelineAgentGapAtOrAboveOwnNumberFinalizesNothing` | T |
 | AC5 | `SqliteStoreTimelineCleanStopHourIsFinalTimeGap`, `SqliteStoreTimelineTimeGapOpenWhileSequenceGapBetween`, `SqliteStoreTimelineTimeGapBelowFirstNumberDetected`, `SqliteStoreTimelineTimeGapBesideAgentGapStored`, `SqliteStoreTimelineTimeGapIgnoresOffsetChange` | T |
-| AC6 | `ClockEstimatorBehindTwoHoursMeasuredFromCountedSample`, `ClockEstimatorAheadTwoHoursFromRunTimedRecordsBeforeCountedSample`, `ClockEstimatorLogLineNeverRaisesEstimate`, `ClockEstimatorLateSampleNeverLowersEstimate`, `ClockEstimatorBackwardStepRecoversWithinFiveMinutes`, `ClockEstimatorPreSampleBoundExpiresAfterFiveMinutes`, `ClockEstimatorSaturatesExtremeBounds`; `SqliteStoreTimelineClockAheadNeverMakesOldRecordLive`, `SqliteStoreTimelineClockBehindLiveFromCountedSample`, `SqliteStoreTimelineQuietAgentSamplesAreCounted` | `tests/Vandox.Storage.Tests/ClockEstimatorTests.cs`; T |
+| AC6 | `ClockEstimatorBehindTwoHoursMeasuredFromCountedSample`, `ClockEstimatorAheadTwoHoursFromRunTimedRecordsBeforeCountedSample`, `ClockEstimatorLogLineNeverRaisesEstimate`, `ClockEstimatorLateSampleNeverLowersEstimate`, `ClockEstimatorBackwardStepRecoversWithinFiveMinutes`, `ClockEstimatorPreSampleBoundExpiresAfterFiveMinutes`, `ClockEstimatorExpiryFallsBackToWindowMaximumNotBackfillBatch`, `ClockEstimatorSaturatesExtremeBounds`; `SqliteStoreTimelineClockAheadNeverMakesOldRecordLive`, `SqliteStoreTimelineClockBehindLiveFromCountedSample`, `SqliteStoreTimelineQuietAgentSamplesAreCounted`, `SqliteStoreTimelineClockAheadBackfillAfterExpiryStaysBackfilled` (agent 2 h ahead, installed while the backend was off, live and backfill batches mixed so that a backfill batch is the first after an expiry) | `tests/Vandox.Storage.Tests/ClockEstimatorTests.cs`; T |
 | AC7 | `SqliteStoreTimelineNoSequenceGapBelowFirstNumber`, `SqliteStoreTimelineMiddleFillSplitsGap`, `SqliteStoreTimelineFinalGapShrinksAndCloses`, `SqliteStoreTimelineGapStatesSurviveReopen` | T |
 | AC8 | `SqliteStoreTimelineRefusedBatchChangesNothing`, `SqliteStoreTimelineConcurrentBatchesMatchCommitOrder`, `SqliteStoreTimelineJumpInNumberAndTimeAddsAtMostTwoRowsPerRecord`, `SqliteStoreTimelineNumbersNearMaximumWork`, `SqliteStoreTimelineAgentGapRangeAboveLongMaximumWorks`, `SqliteStoreTimelineCaptureTimesAtStorableEndsStoredBackfilled`; `AgentTimelineQueriesUseIndexSearchesOnly`; `IngestEndpointTimelineCaptureTimeAtStorableEndAnswers204` | T; `tests/Vandox.Storage.Tests/AgentTimelineQueriesTests.cs`; `tests/Vandox.Backend.Tests/IngestEndpointTimelineTests.cs` |
 | AC9 | `SqliteStoreTimelineImportRecordsReadBackfilled`, `SqliteStoreOpenMigratesAgentRecordsAsBackfilledWithoutGaps` | T; `tests/Vandox.Storage.Tests/SqliteStoreOpenTests.cs` |
@@ -118,23 +118,28 @@ allowance(kind)` (`kernel_event`, `log_line`: 10 minutes; others: 90 seconds) an
 
 **Offset** (`ClockEstimator`, pure; record 0130). A bound is `capturedAt − receivedAt` (a lower bound of agent clock minus
 backend clock), saturated. Only run-timed records give bounds — every kind except `log_line` and `kernel_event` (M1).
-- From the first counted sample on: the largest bound among the counted samples received within 5 minutes before the newest
-  counted sample (`agent_clock_samples`, one row per batch with its largest counted bound, at most 64 kept per agent). No other
+- Bounds are kept as rows of `agent_clock_samples`, one per agent, sort (`counted` or `run`) and 10-second bucket of receive
+  time holding the bucket's largest bound (upsert with `MAX`), at most 64 rows per agent and sort (the oldest dropped), so a
+  5-minute window (30 buckets) is always held whole and an expiry falls back to the true window maximum (N3).
+- From the first counted sample on: the largest `counted` bound in the buckets within 5 minutes before the newest `counted`
+  bucket. No other
   record raises it, so a future-stamped record cannot, and the offset stays unchanged while open gaps stop samples from counting
   (AC2).
-- Before it (E7): the largest bound among run-timed records received within 5 minutes before the newest of them, and 0 when it
-  is below 0 or there is none (`agent_streams.pre_bound_ns`, `pre_bound_at`). A forward step before the first counted sample
+- Before it (E7): the largest `run` bound in the buckets within 5 minutes before the newest `run` bucket, and 0 when it is
+  below 0 or there is none. The live stream sends every 4 seconds beside the backfill, so a window always holds live batches
+  while the agent sends. A forward step before the first counted sample
   therefore lasts at most 5 minutes (M2); the migration seeds nothing (null), so nothing old survives the upgrade.
-`measured_at` = the newest counted sample's receive time. Crossing |offset| = 90 s sets or clears `agent_streams.clock_off`.
+`measured_at` = the newest counted sample's receive time. Residual (N4): the offset can be short by the delivery delay of
+the freshest counted sample, up to the agent's 30-second request timeout. Crossing |offset| = 90 s sets or clears `agent_streams.clock_off`.
 
 **Restart set (N1).** `SqliteStore` adds an agent ID to its in-memory set of agents written since open only after the batch's
 commit; a refused or rolled-back first batch leaves the reset for the next one.
 
 **Schema step 12** (`SchemaMigrator`): `records.live` (`INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1))`); `agent_streams`
-(`agent_id` primary key, `floor_seq`, `max_seq`, `max_captured_at`, `fill_at`, `open_gaps`, `pre_bound_ns`, `pre_bound_at`,
+(`agent_id` primary key, `floor_seq`, `max_seq`, `max_captured_at`, `fill_at`, `open_gaps`,
 `offset_ns`, `measured_at`, `clock_off`), seeded from existing agent records (`floor_seq` = `max_seq` = the highest stored number,
-its capture and receive time, `open_gaps` 0, offsets null); `agent_clock_samples` (`agent_id`, `received_at`, `bound_ns`, primary
-key both, without row ID); `agent_sample_times` (`agent_id`, `captured_at`, `min_seq`, `max_seq`, primary key `(agent_id,
+its capture and receive time, `open_gaps` 0, offsets null); `agent_clock_samples` (`agent_id`, `sort` `counted`/`run`, `bucket` (receive
+time floored to 10 s), `bound_ns`, primary key `(agent_id, sort, bucket)`, without row ID, empty after the migration); `agent_sample_times` (`agent_id`, `captured_at`, `min_seq`, `max_seq`, primary key `(agent_id,
 captured_at)`, without row ID, empty after the migration); `gaps` (`id` `AUTOINCREMENT`, `agent_id`, `kind`, `cause`, `state`,
 `first_seq`, `last_seq`, `from_seq`, `to_seq`, `from_at`, `to_at`, `detected_at`, `changed_at`, `CHECK`s on kind, state, and
 `first_seq <= last_seq`) with the indexes above.
@@ -186,7 +191,8 @@ public static class TimelineLimits
     public static readonly TimeSpan FinalWait;           // 5 min
     public static readonly TimeSpan SampleWindow;        // 5 min
     public const double MaxCountedSendLagSeconds = 60;
-    public const int MaxClockSamples = 64;
+    public static readonly TimeSpan SampleBucket;        // 10 s
+    public const int MaxClockSamples = 64;            // rows per agent and sort
 }
 public static class GapKind { public const string Sequence = "sequence"; public const string Time = "time"; }
 public static class GapState { public const string Open = "open"; public const string Closed = "closed"; public const string Final = "final"; }
@@ -196,11 +202,12 @@ public static class LiveRules
     public static bool IsRunTimed(string kind);
     public static bool IsLive(DataRecord record, DateTimeOffset receivedAt, long offsetNs, ulong? lowestOpenGapFirstSeq);
 }
-public readonly record struct ClockSample(DateTimeOffset ReceivedAt, long BoundNs);
+public readonly record struct ClockSample(DateTimeOffset Bucket, long BoundNs); // the bucket's largest bound
 public static class ClockEstimator
 {
     public static long BoundOf(DateTimeOffset capturedAt, DateTimeOffset receivedAt); // Int128 inside, saturated
-    public static long Estimate(IReadOnlyList<ClockSample> countedSamples, ClockSample? preSampleBound);
+    public static long Estimate(IReadOnlyList<ClockSample> countedBuckets, IReadOnlyList<ClockSample> runBuckets);
+    public static DateTimeOffset BucketOf(DateTimeOffset receivedAt);
 }
 public sealed class TimelineChange
 {
@@ -329,6 +336,11 @@ Deduplication and the immutability of `records` rows stay. No guarantee needs th
   count.
 - N1 (restart set before commit): accepted; filled after the commit, with a test.
 - N2 (schema fact): accepted; the row is gone, the migration test covers it.
+- N3 (one stored value cannot hold a sliding-window maximum; a backfill batch after an expiry lowers the pre-sample estimate):
+  accepted, option taken: bounded bucket rows for both sorts (*Offset*), with a pure and a store test where a backfill batch is
+  the first after an expiry.
+- N4 (residual delay is up to the request timeout, not seconds): accepted; record 0130 and *Offset* say "up to the 30-second
+  request timeout".
 
 ## Out of scope / follow-ups
 
