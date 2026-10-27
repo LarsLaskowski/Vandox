@@ -488,6 +488,8 @@ fi
 mkdir -m 0700 -- "$SPOOL"
 chown -h "$AGENT_USER:$AGENT_USER" -- "$SPOOL"
 wait_active 45 || fail "the agent did not come back within 45 s after the spool directory was recreated"
+# The removal took the marker of the repeat-install case with it; the uninstall and reinstall cases need one.
+printf 'kept\n' >"$SPOOL/keep-me"
 
 # --- case: address allow-list ----------------------------------------------------------------------------
 note "case: address allow-list (fact 16)"
