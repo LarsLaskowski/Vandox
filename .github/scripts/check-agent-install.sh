@@ -37,6 +37,13 @@ readonly unit_source="$agent_dir/vandox-agent.service"
 readonly IPCHECK_UNIT="/run/systemd/system/vandox-agent-ipcheck.service"
 readonly IPCHECK_OUT="/run/vandox-agent-ipcheck.out"
 
+# The case names of the messages that several cases share (SonarQube shelldre:S1192).
+readonly CASE_PURGE_BEFORE_INSTALL="purge before install"
+readonly CASE_UNINSTALL_BEFORE_INSTALL="uninstall before install"
+readonly CASE_FIRST_INSTALL="first install"
+readonly CASE_REPEAT_INSTALL="repeat install"
+readonly CASE_UNINSTALL="uninstall"
+
 OUT=""
 ERR=""
 RC=0
@@ -307,24 +314,24 @@ nothing_left "before the cases"
 note "case: uninstall before install"
 run "" "$agent_dir/uninstall.sh"
 expect_rc 0 "uninstall.sh on an absent installation"
-expect_out "uninstall.sh: unit not present" "uninstall before install"
-expect_out "uninstall.sh: binary not present" "uninstall before install"
-expect_out "uninstall.sh: kept user $AGENT_USER, $CONFIG_FILE, $TOKEN_FILE, $SPOOL and the MariaDB account; remove them with --purge" "uninstall before install"
-expect_empty_err "uninstall before install"
+expect_out "uninstall.sh: unit not present" "$CASE_UNINSTALL_BEFORE_INSTALL"
+expect_out "uninstall.sh: binary not present" "$CASE_UNINSTALL_BEFORE_INSTALL"
+expect_out "uninstall.sh: kept user $AGENT_USER, $CONFIG_FILE, $TOKEN_FILE, $SPOOL and the MariaDB account; remove them with --purge" "$CASE_UNINSTALL_BEFORE_INSTALL"
+expect_empty_err "$CASE_UNINSTALL_BEFORE_INSTALL"
 
 run "" "$agent_dir/uninstall.sh" --purge
 expect_rc 0 "uninstall.sh --purge on an absent installation"
-expect_out "uninstall.sh: $CONFIG_FILE not present" "purge before install"
-expect_out "uninstall.sh: $TOKEN_FILE not present" "purge before install"
-expect_out "uninstall.sh: $STATE_ROOT not present" "purge before install"
-expect_out "uninstall.sh: user $AGENT_USER not present" "purge before install"
-expect_out_re '^uninstall\.sh: WARNING MariaDB account not removed; run: (plesk db|mariadb) < deploy/agent/mariadb-user-remove\.sql$' "purge before install"
-expect_no_out "deleting" "purge before install"
+expect_out "uninstall.sh: $CONFIG_FILE not present" "$CASE_PURGE_BEFORE_INSTALL"
+expect_out "uninstall.sh: $TOKEN_FILE not present" "$CASE_PURGE_BEFORE_INSTALL"
+expect_out "uninstall.sh: $STATE_ROOT not present" "$CASE_PURGE_BEFORE_INSTALL"
+expect_out "uninstall.sh: user $AGENT_USER not present" "$CASE_PURGE_BEFORE_INSTALL"
+expect_out_re '^uninstall\.sh: WARNING MariaDB account not removed; run: (plesk db|mariadb) < deploy/agent/mariadb-user-remove\.sql$' "$CASE_PURGE_BEFORE_INSTALL"
+expect_no_out "deleting" "$CASE_PURGE_BEFORE_INSTALL"
 
 run "" "$agent_dir/uninstall.sh" --bogus
 expect_rc 2 "uninstall.sh --bogus"
 expect_err "usage: uninstall.sh [--purge]" "uninstall.sh --bogus"
-nothing_left "uninstall before install"
+nothing_left "$CASE_UNINSTALL_BEFORE_INSTALL"
 
 # --- case: tampered checksum -----------------------------------------------------------------------------
 note "case: tampered checksum"
@@ -361,13 +368,13 @@ note "case: first install"
 # shellcheck disable=SC2046
 install_run "$CI_TOKEN"$'\n' $(install_args)
 show
-expect_rc 0 "first install"
-expect_out "vandox-agent $VERSION installed and running" "first install"
-expect_out "install.sh: user $AGENT_USER: created" "first install"
-expect_out_re '^install\.sh: WARNING MariaDB account not created; run: (plesk db|mariadb) < (.*/)?deploy/agent/mariadb-user\.sql$' "first install"
+expect_rc 0 "$CASE_FIRST_INSTALL"
+expect_out "vandox-agent $VERSION installed and running" "$CASE_FIRST_INSTALL"
+expect_out "install.sh: user $AGENT_USER: created" "$CASE_FIRST_INSTALL"
+expect_out_re '^install\.sh: WARNING MariaDB account not created; run: (plesk db|mariadb) < (.*/)?deploy/agent/mariadb-user\.sql$' "$CASE_FIRST_INSTALL"
 
 for name in journal-group journal-clock ipc-filter capabilities; do
-  expect_out_re "^check $name: (ok|WARNING .+)\$" "first install"
+  expect_out_re "^check $name: (ok|WARNING .+)\$" "$CASE_FIRST_INSTALL"
 done
 
 if grep -Fq -- "$CI_TOKEN" <<<"$OUT$ERR"; then
@@ -464,10 +471,10 @@ printf 'kept\n' >"$SPOOL/keep-me"
 # Standard input is empty: asking for the token would fail the script.
 run "" "$agent_dir/install.sh" --version "$VERSION" --agent-id other-name --backend-url https://100.64.0.9:9 --from "$dist"
 show
-expect_rc 0 "repeat install"
-expect_out "vandox-agent $VERSION installed and running" "repeat install"
-expect_out "install.sh: keeping existing $CONFIG_FILE" "repeat install"
-expect_no_out "MariaDB account not created" "repeat install"
+expect_rc 0 "$CASE_REPEAT_INSTALL"
+expect_out "vandox-agent $VERSION installed and running" "$CASE_REPEAT_INSTALL"
+expect_out "install.sh: keeping existing $CONFIG_FILE" "$CASE_REPEAT_INSTALL"
+expect_no_out "MariaDB account not created" "$CASE_REPEAT_INSTALL"
 [[ "$(stat -c %i "$BINARY")" != "$inode_before" ]] || fail "repeat install: the binary was not replaced by a rename (same inode)"
 [[ "$(sha256sum "$CONFIG_FILE")" == "$config_before" ]] || fail "repeat install: agent.yaml changed"
 [[ "$(sha256sum "$TOKEN_FILE")" == "$token_before" ]] || fail "repeat install: the token file changed"
@@ -572,11 +579,11 @@ fi
 note "case: uninstall"
 run "" "$agent_dir/uninstall.sh"
 show
-expect_rc 0 "uninstall"
-expect_out "uninstall.sh: removed unit" "uninstall"
-expect_out "uninstall.sh: removed binary" "uninstall"
-expect_out "uninstall.sh: kept user $AGENT_USER, $CONFIG_FILE, $TOKEN_FILE, $SPOOL and the MariaDB account; remove them with --purge" "uninstall"
-expect_empty_err "uninstall"
+expect_rc 0 "$CASE_UNINSTALL"
+expect_out "uninstall.sh: removed unit" "$CASE_UNINSTALL"
+expect_out "uninstall.sh: removed binary" "$CASE_UNINSTALL"
+expect_out "uninstall.sh: kept user $AGENT_USER, $CONFIG_FILE, $TOKEN_FILE, $SPOOL and the MariaDB account; remove them with --purge" "$CASE_UNINSTALL"
+expect_empty_err "$CASE_UNINSTALL"
 expect_absent "$UNIT"
 expect_absent "$BINARY"
 expect_absent "$WANTS_LINK"
