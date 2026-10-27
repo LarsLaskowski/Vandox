@@ -11,6 +11,9 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
     if [[ $_install_source == "${BASH_SOURCE[0]}" ]]; then
         _install_source=.
     fi
+    # --- entry check (before anything is sourced) ---
+    exit 99
+    # --- end of entry check ---
     # shellcheck source=common.sh disable=SC1091
     source "$_install_source/common.sh"
 fi
@@ -406,12 +409,18 @@ _within_bound() {
     ((size <= limit))
 }
 
-# fetch_release VERSION FROMDIR WORKDIR: downloads the release files over HTTPS, or copies them from FROMDIR;
-# status 1 with the E3 line of the file that failed.
+# read_bundle_version DIR: sets VERSION from DIR/VERSION; status 2 with the E4 line.
+read_bundle_version() {
+    return 99
+}
+
+# fetch_release VERSION FROMDIR WORKDIR BUNDLEDIR: downloads the release files over HTTPS, or copies them from FROMDIR;
+# status 1 with the E3 line of the file that failed (BUNDLEDIR is not used yet).
 fetch_release() {
     local version=$1
     local from=$2
     local work=$3
+    : "${4:-}"
     local name limit
 
     for name in "$SUMS_NAME" "$BINARY_NAME"; do

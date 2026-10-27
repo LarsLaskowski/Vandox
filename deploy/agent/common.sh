@@ -204,3 +204,8 @@ run_mariadb_sql() {
     printf '%s: WARNING MariaDB account not created; run: %s < deploy/agent/mariadb-user.sql\n' "$script" "$tool_name"
     return 0
 }
+
+# check_bundle_dir DIR FILE...: refuses a link, a non-root owner or a group- or other-writable entry; status 1.
+check_bundle_dir() {
+    return 99
+}

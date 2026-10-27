@@ -10,6 +10,9 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
     if [[ $_uninstall_source == "${BASH_SOURCE[0]}" ]]; then
         _uninstall_source=.
     fi
+    # --- entry check (before anything is sourced) ---
+    exit 99
+    # --- end of entry check ---
     # shellcheck source=common.sh disable=SC1091
     source "$_uninstall_source/common.sh"
 fi
