@@ -51,10 +51,10 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
         fi
     done
     unset -f _entry_refuse _entry_stat
-    unset _entry_dir _entry_walk _entry_path _entry_uid _entry_mode
+    unset _entry_walk _entry_path _entry_uid _entry_mode
     # --- end of entry check ---
     # shellcheck source=common.sh disable=SC1091
-    source "$_entry_src/common.sh"
+    source "$_entry_dir/common.sh"
 fi
 
 readonly USAGE_LINE="usage: install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]"
@@ -914,8 +914,13 @@ main() {
     export PATH=/usr/sbin:/usr/bin:/sbin:/bin
     unset TMPDIR TOKEN
 
-    script_dir=${BASH_SOURCE[0]%/*}
-    script_dir=$(cd -- "$script_dir" && pwd)
+    # Everything after the entry check is read through the directory the check looked at.
+    if [[ -n ${_entry_dir:-} ]]; then
+        script_dir=$_entry_dir
+    else
+        script_dir=${BASH_SOURCE[0]%/*}
+        script_dir=$(cd -P -- "$script_dir" && pwd -P)
+    fi
 
     parse_args "$@" || exit 2
 

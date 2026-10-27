@@ -49,10 +49,10 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
         fi
     done
     unset -f _entry_refuse _entry_stat
-    unset _entry_dir _entry_walk _entry_path _entry_uid _entry_mode
+    unset _entry_walk _entry_path _entry_uid _entry_mode
     # --- end of entry check ---
     # shellcheck source=common.sh disable=SC1091
-    source "$_entry_src/common.sh"
+    source "$_entry_dir/common.sh"
 fi
 
 readonly U_SERVICE="vandox-agent"
@@ -176,8 +176,13 @@ main() {
     export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
     parse_args "$@" || exit 2
-    script_dir=${BASH_SOURCE[0]%/*}
-    script_dir=$(cd -- "$script_dir" && pwd)
+    # Everything after the entry check is read through the directory the check looked at.
+    if [[ -n ${_entry_dir:-} ]]; then
+        script_dir=$_entry_dir
+    else
+        script_dir=${BASH_SOURCE[0]%/*}
+        script_dir=$(cd -P -- "$script_dir" && pwd -P)
+    fi
     check_bundle_dir "$script_dir" uninstall.sh common.sh mariadb-user-remove.sql || exit 1
 
     if [[ $EUID != 0 ]]; then

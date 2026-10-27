@@ -2022,7 +2022,7 @@ bundle directory, the script and `common.sh` must have no group- or other-write 
 as an octal number, `mode & 07022 == 0`). A failure prints `<script>: <path> is not owned by root or is writable by others; extract the bundle as root in
 a private directory`, exit 1, with nothing sourced or changed. `main` then checks, with the same per-entry rule (`check_bundle_dir`), the other files it
 reads: `VERSION`, `vandox-agent.service`, `mariadb-user.sql`, `agent.yaml` and the pin file (`uninstall.sh`: `mariadb-user-remove.sql`); a missing file is left
-to the later checks. What remains is the time between a check and the read.
+to the later checks. Everything after the check, `common.sh` and the bundle files included, is read through the physical directory the check looked at, never through the path as typed (which may run through a link). What remains is the time between a check and the read.
 
 **Order, and what stops it.** Nothing changes before the files are verified.
 1. The entry check (E15, exit 1, before the arguments are read); arguments (exit 2); the other bundle files (E15, exit 1); `VERSION` (exit 2); then root, systemd as PID 1 and `x86_64`, else
