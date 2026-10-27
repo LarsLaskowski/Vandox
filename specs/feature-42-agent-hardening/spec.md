@@ -1,7 +1,7 @@
 # Spec: Agent hardening and installation
 
 Source: Issue #42 (and its two comments)
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -13,8 +13,8 @@ breaks a collector silently or widens what a compromised agent reaches; several 
 
 - S1: (install) Given a fresh Ubuntu 22.04 server with systemd and the source of release `vX.Y.Z`, when root runs
   `deploy/agent/install.sh --version vX.Y.Z --agent-id web-1 --backend-url http://100.101.102.103:8081` and types the agent token at the
-  prompt (no echo; piped standard input works too), then the script downloads `vandox-agent-linux-amd64` and `SHA256SUMS` of that release,
-  checks the checksum, and creates: the system user `vandox-agent` (no login shell, no home, supplementary groups exactly `adm` and
+  prompt (no echo; piped standard input works too), then the script downloads `vandox-agent-linux-amd64` and `SHA256SUMS` of that release
+  (`--from <dir>` takes both from a local directory instead), checks the checksum and the binary's `-version`, and creates: the system user `vandox-agent` (no login shell, no home, supplementary groups exactly `adm` and
   `systemd-journal`), `/usr/local/bin/vandox-agent` (root-owned, 0755), `/etc/vandox/agent.yaml` from the example with the two values
   (root:vandox-agent, 0640), `/etc/vandox/agent-token` (root:root, 0600), `/var/lib/vandox/spool` (vandox-agent, 0700), the unit
   `vandox-agent.service` and the MariaDB account (`plesk db` on Plesk, else `mariadb`); it starts the enabled unit and ends with `vandox-agent vX.Y.Z installed and running`.
@@ -44,7 +44,8 @@ breaks a collector silently or widens what a compromised agent reaches; several 
 - E2: The binary does not match its `SHA256SUMS` line, or `SHA256SUMS` lacks exactly one well-formed line for
   `vandox-agent-linux-amd64`: `install.sh: checksum mismatch, nothing installed`, exit 1; an installed binary stays untouched and nothing
   downloaded is ever run.
-- E3: The download fails: `install.sh: download failed: <file>`, exit 1, nothing changed.
+- E3: The download fails: `install.sh: download failed: <file>`, exit 1, nothing changed. A verified binary whose `-version` names
+  another version: `install.sh: binary is not <version>`, exit 1, nothing changed.
 - E4: `--version` missing or not of the form `vX.Y.Z` / `vX.Y.Z-rc.N`: usage text, exit 2. The token given as an option or argument:
   refused with usage text (it would show in `ps` and the shell history).
 - E5: The token read on a first install breaks the secret rules (fewer than 32 or more than 4096 characters, a character outside
@@ -55,7 +56,8 @@ breaks a collector silently or widens what a compromised agent reaches; several 
   `install.sh: WARNING <host> is not a tailnet address; the unit blocks it`. An existing `agent.yaml` is never overwritten; given values
   are then ignored with the line `install.sh: keeping existing /etc/vandox/agent.yaml`. The script, uninstall and purge take
   `spool.directory` from the kept file (default `/var/lib/vandox/spool`); a value not at or below `/var/lib/vandox` stops the script with
-  `install.sh: spool.directory must be below /var/lib/vandox`, exit 2, because the unit allows writes only there.
+  `install.sh: spool.directory must be below /var/lib/vandox`, exit 2, because the unit allows writes only there; an existing spool
+  directory that is a link or not owned by `vandox-agent` stops it with `install.sh: <path> is not the agent's directory`, exit 1.
 - E7: MariaDB not installed or the administrator login fails: the account is not created, the line
   `install.sh: WARNING MariaDB account not created; run: plesk db < deploy/agent/mariadb-user.sql` (or `mariadb <`), install continues.
   `--no-mariadb` skips the step without a warning.
@@ -159,18 +161,16 @@ breaks a collector silently or widens what a compromised agent reaches; several 
 
 ## Challenge
 
-Devil's Advocate, spec challenge:
+Devil's Advocate, spec challenge (answers folded into the sections named):
 
-1. Major — AC8 checks only on systemd 255; 249 drops unknown keys and `%d`. Accepted: AC8 verifies with systemd 249, the Secrets NFR
-   writes the credential path out and forbids `%d`. How 249's `systemd-analyze` is obtained is left to the plan; the
-   version that brought `%d` was not checked, the rule makes it moot.
-2. Minor — kept `spool.directory` outside `/var/lib/vandox`. Accepted: the scripts read it and stop (exit 2) outside that tree, so
-   `ReadWritePaths=` stays fixed (E6, AC4); uninstall and purge use the same path.
-3. Minor — unchecked `--agent-id` / `--backend-url`. Accepted (E6, AC4), with the tailnet warning; the Agent area's *Connection*
-   bullet is under *Area documents*.
-4. Minor — an existing user. Accepted (E13); a home directory is named and kept, also on purge: the script did not create it.
-5. Minor — upgrade details. Accepted in part (S3, AC2): token only when its file is missing; binary by rename. The checkout check is a
-   warning, not a stop, and only for a Git checkout on a tag: a source archive carries no reliable version to compare.
-6. Minor — redirects. Accepted (Install-script safety NFR).
-7. Minor — `MemoryMax=` basis and `GOMEMLIMIT=`. Accepted (Resources NFR); `GOMEMLIMIT=` is decided in the plan (the agent refuses
-   only unknown `VANDOX_` variables, `internal/config/secret.go`).
+1. Major — AC8 checked only on systemd 255. Accepted: AC8 verifies with systemd 249 (how: `plan.md`), the Secrets NFR forbids `%d`.
+2. Minor — kept `spool.directory` outside `/var/lib/vandox`. Accepted: E6, AC4; uninstall and purge use the same path.
+3. Minor — unchecked `--agent-id` / `--backend-url`. Accepted: E6, AC4, the *Connection* entry under *Area documents*.
+4. Minor — an existing user. Accepted: E13; a home directory the script did not create is kept, also on purge.
+5. Minor — upgrade details. Accepted in part: S3, AC2; the checkout check only warns, for a Git checkout on a tag, because a source
+   archive carries no reliable version.
+6. Minor — redirects. Accepted: Install-script safety NFR.
+7. Minor — `MemoryMax=` basis and `GOMEMLIMIT=`. Accepted: Resources NFR; `GOMEMLIMIT=` is decided in `plan.md`.
+
+Lead, while planning: added `--from <dir>` (S1; the end-to-end check installs a local build), the `-version` check (E3) and the
+existing-spool check (E6).
