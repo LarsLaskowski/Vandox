@@ -77,8 +77,8 @@ How the scripts, the unit and their files reach the server:
 22. **A Git checkout of the tag** (the first build of this record) — needs `git` and the whole repository on a production server; a
     checkout on another tag could only be warned about.
 23. **An install bundle as a release asset** (chosen by the Product Manager on PR #324) — one `tar.gz` with the two scripts,
-    `common.sh`, the unit, both SQL files, the example `agent.yaml` and a `VERSION` file, built from the tagged tree by the release
-    workflow and listed in the same `SHA256SUMS`; the server needs `curl`, `tar` and `sha256sum` only, and the version of the scripts and
+    `common.sh`, the unit, both SQL files, the example `agent.yaml`, a `VERSION` file and the binary's SHA-256, built from the tagged
+    tree by the release workflow and listed in the same `SHA256SUMS`; the server needs `curl`, `tar` and `sha256sum` only, and the version of the scripts and
     the binary is one value (`VERSION`) instead of an option that can disagree with the files.
 24. **Each file as its own release asset**, fetched and checked by `install.sh` — more downloads and more code in the one script that
     runs as root, and the first download (`install.sh` itself) is still checked by hand.
@@ -87,12 +87,26 @@ How the scripts, the unit and their files reach the server:
 26. **The binary inside the bundle** — a second copy of a 64 MiB-bounded file per release, and the bundle would carry an artifact that
     is attested on its own; the script keeps downloading the binary of the bundle's version.
 27. **A `curl … | bash` one-liner** — runs bytes from the network before any check; never documented.
-28. **`install.sh` checks the bundle itself** (its own checksum or the ownership of its directory) — a script cannot vouch for the
-    files it is part of; the check belongs before extraction, which the documents prescribe.
+28. **`install.sh` checks its own checksum** — a script cannot vouch for the files it is part of; the check belongs before extraction.
+29. **`install.sh` refuses a directory or file of the bundle that is a link, not owned by root or group- or other-writable** (chosen,
+    Security review) — a cheap backstop when a bundle is extracted somewhere shared; it cannot help once `common.sh`, sourced before
+    the check, or the script itself was changed, so the documented extraction stays the control.
+
+Which checksum `install.sh` checks the binary against:
+30. **The release's `SHA256SUMS`, downloaded at install time** — an operator who verifies the bundle's attestation still installs a
+    binary pinned only by a second, unattested download, and `install.sh` must parse a file of several lines.
+31. **The binary's SHA-256 inside the bundle** (`vandox-agent-linux-amd64.sha256`, chosen, Security review) — verifying the bundle,
+    by `SHA256SUMS` or by its attestation, covers the binary too; `install.sh` keeps its one-line rule and downloads only the binary.
+
+Documented commands:
+32. **Download, check, extract and run as separate lines** — pasted line by line, a failed check does not stop `tar` and `install.sh`.
+33. **One command chained with `&&`, as root in a new `mktemp -d` directory** (chosen, Security review) — a failed check stops it, and
+    no other local user can have created the extraction directory; the bundle's line is selected by an exact string comparison, not a
+    pattern, and `tar` extracts with root as owner and root's umask (`--no-same-owner --no-same-permissions`).
 
 ## Decision
 
-The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16, 18, 21 and 23; the settings, values, paths and messages are
+The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16, 18, 21, 23, 29, 31 and 33; the settings, values, paths and messages are
 in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manager*) and in `deploy/agent/README.md`.
 
 ## Consequences
@@ -106,12 +120,12 @@ in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manag
   `StartLimitIntervalSec=0` retries forever, at most twice a minute.
 - The resource values rest on the documented per-collector bounds, not on a measurement on the server; the #45 parallel run
   checks the agent's peak RSS against them.
-- `SHA256SUMS` does not prove who built the binary or the bundle; `gh attestation verify` covers both for operators who want it.
-- `SHA256SUMS` holds one line per asset (bundle and binary, in that order), so `install.sh` checks the form of every line and the binary's
-  line alone, instead of requiring exactly one line; a later asset needs no script change.
-- The operator's check of the bundle line before extraction is the trust boundary for the scripts and the unit: nothing the scripts do
-  can replace it, so every document shows that check before `tar` and never a pipe into a shell. Extraction runs as root in a fresh
-  private directory, so no other local user can place files into the extracted tree.
+- `SHA256SUMS` does not prove who built the binary or the bundle; `gh attestation verify` of the bundle covers the binary too, through
+  the SHA-256 the bundle carries.
+- `SHA256SUMS` holds one line per asset (bundle and binary) and serves the operator's check of the bundle and anyone who downloads the
+  binary by hand; `install.sh` no longer reads it.
+- The operator's check of the bundle before extraction is the trust boundary for the scripts, the unit and the binary: every document
+  shows it in one `&&` chain with `tar` and `install.sh`, as root in a new private directory, and never a pipe into a shell.
 - `install.sh` takes its version only from the bundle's `VERSION`, so the scripts, the unit and the binary come from one release; the
   `--version` option and the checkout warning are gone, and a run from a source checkout (no `VERSION`) is refused. A developer builds
   a bundle with the release's packaging script.
@@ -119,8 +133,8 @@ in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manag
   publishing a bundle that cannot install.
 - The bundle is byte-for-byte reproducible from the tagged tree with the same `tar` and `gzip` (fixed order, owner, modes and time), which
   the release checks by packaging twice; it is not reproducible across `gzip` versions.
-- `--from DIR` still takes only the binary and `SHA256SUMS`, for offline installs and CI; the bundle is checked and extracted the same
-  way as online.
+- `--from DIR` takes only the binary, for offline installs and CI; it is checked against the bundle's SHA-256 like a download, and the
+  bundle is checked and extracted the same way as online.
 - The CI job depends on GitHub keeping an `ubuntu-22.04` runner; it fails when the runner's systemd is not 249.
 - A kept configuration whose `spool` block is written in another YAML form is refused by the scripts, though the agent reads it.
 - The CI job installs from the bundle it packages exactly as the release does, so the documented path is the tested one; it does not
