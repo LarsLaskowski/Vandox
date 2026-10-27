@@ -343,7 +343,8 @@ run_chain() {
 
   mkdir -p -- "$tmp"
   RC=0
-  (umask 022 && export TMPDIR="$tmp" src v="$VERSION" bundle_file && bash -c "$documented_chain") >"$work/out" 2>"$work/err" || RC=$?
+  (umask 022 && export TMPDIR="$tmp" CHAIN_SRC="$src" CHAIN_VERSION="$VERSION" CHAIN_BUNDLE_FILE="$bundle_file" &&
+    bash -c "src=\$CHAIN_SRC; v=\$CHAIN_VERSION; bundle_file=\$CHAIN_BUNDLE_FILE; $documented_chain") >"$work/out" 2>"$work/err" || RC=$?
   OUT="$(<"$work/out")"
   ERR="$(<"$work/err")"
 }
