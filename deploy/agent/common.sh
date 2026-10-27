@@ -105,10 +105,14 @@ _spool_line() {
 }
 
 # read_spool_directory FILE: prints the spool directory of an agent.yaml, read by fail-closed line rules.
-# Status 0, or 2 with the message on standard error.
+# Status 0, or 2 with the message on standard error. The C locale applies to the whole call, helpers included.
 read_spool_directory() {
+    LC_ALL=C _read_spool_directory_body "$@"
+}
+
+# _read_spool_directory_body FILE: the body of read_spool_directory.
+_read_spool_directory_body() {
     local file=$1
-    local LC_ALL=C
     local who=${0##*/}
     local line stray name
     local re_dir="^${SPOOL_ROOT}/([A-Za-z0-9._-]+)\$"
