@@ -25,3 +25,4 @@ are quoted in full.
 | 2026-10-27 08:21 | 5 Tests first G3 | squad-tester | uninstall_test.go: usage + SQL tests fail as intended, agentyaml pin passes; main/purge sequence left to CI cases (sonnet/medium · 85,279 tokens · 8 tool uses · 55 s) |
 | 2026-10-27 08:23 | 6 Implement G3 | squad-dev | uninstall.sh and mariadb-user-remove.sql implemented; only README test red (G5) (sonnet/medium · 13,283 tokens · 8 tool uses · 109 s · continued from 6 Implement G2) |
 | 2026-10-27 08:26 | 5 Tests first G4 | squad-tester | check-agent-install.sh written (13 cases); bash -n, shellcheck clean; never run (needs systemd 249) (sonnet/medium · 44,961 tokens · 8 tool uses · 142 s · continued from 5 Tests first G3) |
+| 2026-10-27 08:27 | 6 Implement G4 | squad-dev | ci.yml job agent-install added, actionlint passes; row 10 end-to-end not runnable here (needs systemd 249) (sonnet/medium · usage pending) |
