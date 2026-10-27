@@ -1,0 +1,63 @@
+[Unit]
+Description=Vandox monitoring agent
+Documentation=https://github.com/LarsLaskowski/Vandox/blob/main/deploy/agent/README.md
+After=systemd-journal-flush.service
+# Restart forever: the agent must come back after any failure, so no start limit applies.
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/local/bin/vandox-agent
+User=vandox-agent
+Group=vandox-agent
+SupplementaryGroups=adm systemd-journal
+AmbientCapabilities=CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_SYS_PTRACE
+NoNewPrivileges=yes
+
+# The token reaches the process as a credential file, never as an argument or environment value.
+LoadCredential=agent-token:/etc/vandox/agent-token
+Environment=VANDOX_AGENT_TOKEN_FILE=/run/credentials/vandox-agent.service/agent-token
+Environment=GOMEMLIMIT=192MiB
+
+ProtectSystem=strict
+ReadWritePaths=/var/lib/vandox
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+UMask=0077
+KeyringMode=private
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service adjtimex
+SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise
+SystemCallErrorNumber=EPERM
+InaccessiblePaths=/etc/shadow /etc/gshadow
+
+# Only loopback and the tailnet are reachable.
+IPAddressDeny=any
+IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48
+
+MemoryMax=256M
+CPUQuota=50%
+Nice=5
+IOWeight=50
+
+WatchdogSec=2min
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target

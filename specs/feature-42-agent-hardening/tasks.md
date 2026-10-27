@@ -4,9 +4,9 @@ Plan: [plan.md](plan.md) — Status: Draft
 
 | # | Group | Task | Files | Criteria | Depends on | Owner | Done |
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
-| 1 | G1 | The unit file: no new API | — | AC6, AC8 | — | Dev | [ ] |
+| 1 | G1 | The unit file: no new API | — | AC6, AC8 | — | Dev | [x] |
 | 2 | G1 | Unit tests first (keys of systemd 249 read from tag `v249` first) | `deploy/agent/service_test.go` | AC6, AC8, AC11 | — | Tester | [x] |
-| 3 | G1 | Write the unit | `deploy/agent/vandox-agent.service` | AC6, AC8 | 2 | Dev | [ ] |
+| 3 | G1 | Write the unit | `deploy/agent/vandox-agent.service` | AC6, AC8 | 2 | Dev | [x] |
 | 4 | G2 | Skeleton: `read_spool_directory`, `check_platform`, `run_mariadb_sql`, `parse_args`, `validate_version`, `validate_agent_id`, `validate_backend_url`, `tailnet_warning`, `needs_token`, `read_token`, `validate_token`, `fetch_release`, `verify_checksum`, `check_binary_version`, `checkout_warning`, `render_config`, `name_server_warning`, `write_token`, `dropin_warning`, `ensure_user`, `ensure_spool_directory`, `check_journal_group`, `check_journal_clock`, `check_ipc_filter`, `check_capabilities`, `main` | `deploy/agent/common.sh`, `deploy/agent/install.sh` | AC1, AC2, AC3, AC4, AC5, AC10 | 3 | Dev | [ ] |
 | 5 | G2 | Install tests first | `deploy/agent/common_test.go`, `deploy/agent/install_test.go` | AC1, AC2, AC3, AC4, AC5, AC10 | 4 | Tester | [ ] |
 | 6 | G2 | Implement the install script and the shared functions | `deploy/agent/common.sh`, `deploy/agent/install.sh` | AC1, AC2, AC3, AC4, AC5, AC10 | 5 | Dev | [ ] |
