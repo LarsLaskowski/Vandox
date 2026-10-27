@@ -1860,6 +1860,167 @@ func assertSpoolTree(t *testing.T, h *harness, tc spoolTree, got shellResult, pa
 	}
 }
 
+// checkSpoolCase is one tree for check_spool_directory.
+type checkSpoolCase struct {
+	name   string
+	setup  func(t *testing.T, h *harness, parent, spool string)
+	noUser bool   // the account database has no vandox-agent user
+	refuse string // "parent", "spool" or "" for accepted
+}
+
+// treeSnapshot describes every entry below root (links not followed): path, type and mode, size and link target.
+func treeSnapshot(t *testing.T, root string) string {
+	t.Helper()
+
+	var sb strings.Builder
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+
+		target := ""
+		if info.Mode()&os.ModeSymlink != 0 {
+			if target, err = os.Readlink(path); err != nil {
+				return err
+			}
+		}
+
+		fmt.Fprintf(&sb, "%s|%s|%d|%s\n", path, info.Mode(), info.Size(), target)
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot of %s: %v", root, err)
+	}
+
+	return sb.String()
+}
+
+// TestCheckSpoolDirectory_RefusesBeforeAnyChange checks E6 and AC4: the read-only check refuses a parent or a
+// spool that is not the agent's with the E6 line and status 1, accepts missing entries and a right spool, and
+// in every row no creating or changing command ran and the tree is unchanged.
+func TestCheckSpoolDirectory_RefusesBeforeAnyChange(t *testing.T) {
+	t.Parallel()
+
+	mkdir := func(t *testing.T, path string, mode os.FileMode) {
+		t.Helper()
+
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatalf("chmod %s: %v", path, err)
+		}
+	}
+
+	link := func(t *testing.T, target, path string) {
+		t.Helper()
+
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatalf("symlink %s: %v", path, err)
+		}
+	}
+
+	cases := []checkSpoolCase{
+		{name: "neither exists", setup: func(*testing.T, *harness, string, string) {}},
+		{name: "parent right, spool missing", setup: func(t *testing.T, _ *harness, parent, _ string) { mkdir(t, parent, 0o755) }},
+		{name: "spool owned by the agent", setup: func(t *testing.T, h *harness, parent, spool string) {
+			mkdir(t, parent, 0o755)
+			mkdir(t, spool, 0o700)
+			appendOwner(h, spool, "vandox-agent", 998)
+		}},
+		{name: "parent a link", refuse: "parent", setup: func(t *testing.T, h *harness, parent, _ string) {
+			mkdir(t, filepath.Join(h.dir, "realparent"), 0o755)
+			link(t, filepath.Join(h.dir, "realparent"), parent)
+		}},
+		{name: "parent a file", refuse: "parent", setup: func(t *testing.T, _ *harness, parent, _ string) { writeBytes(t, parent, "x") }},
+		{name: "parent owned by another user", refuse: "parent", setup: func(t *testing.T, h *harness, parent, _ string) {
+			mkdir(t, parent, 0o755)
+			appendOwner(h, parent, "mallory", 1234)
+		}},
+		{name: "parent group-writable", refuse: "parent", setup: func(t *testing.T, _ *harness, parent, _ string) { mkdir(t, parent, 0o775) }},
+		{name: "parent other-writable", refuse: "parent", setup: func(t *testing.T, _ *harness, parent, _ string) { mkdir(t, parent, 0o757) }},
+		{name: "spool a link", refuse: "spool", setup: func(t *testing.T, h *harness, parent, spool string) {
+			mkdir(t, parent, 0o755)
+			mkdir(t, filepath.Join(h.dir, "elsewhere"), 0o700)
+			appendOwner(h, spool, "vandox-agent", 998)
+			link(t, filepath.Join(h.dir, "elsewhere"), spool)
+		}},
+		{name: "spool a file", refuse: "spool", setup: func(t *testing.T, _ *harness, parent, spool string) {
+			mkdir(t, parent, 0o755)
+			writeBytes(t, spool, "x")
+		}},
+		{name: "spool owned by another user", refuse: "spool", setup: func(t *testing.T, h *harness, parent, spool string) {
+			mkdir(t, parent, 0o755)
+			mkdir(t, spool, 0o700)
+			appendOwner(h, spool, "mallory", 1234)
+		}},
+		{name: "spool exists while the user does not", refuse: "spool", noUser: true, setup: func(t *testing.T, h *harness, parent, spool string) {
+			mkdir(t, parent, 0o755)
+			mkdir(t, spool, 0o700)
+			appendOwner(h, spool, "vandox-agent", 998)
+		}},
+	}
+
+	changing := []string{"mkdir", "chown", "chmod", "useradd", "groupadd", "usermod", "install", "mv", "systemctl"}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := newHarness(t)
+
+			users := []string{conformUser}
+			if tc.noUser {
+				users = nil
+			}
+
+			h.accounts(users, append(strings.Split(groupsBase, "\n"), "vandox-agent|998"))
+			h.owners()
+
+			for _, name := range []string{"mkdir", "chmod", "install", "mv", "systemctl"} {
+				h.stub(name, "exit 0")
+			}
+
+			parent := filepath.Join(h.dir, "vandox")
+			spool := filepath.Join(parent, "spool")
+			tc.setup(t, h, parent, spool)
+
+			before := treeSnapshot(t, h.dir+"/vandox")
+
+			got := h.run(`check_spool_directory "$1"`, "", spool)
+
+			if tc.refuse == "" {
+				expectResult(t, "check_spool_directory", got, 0, "", "")
+			} else {
+				path := spool
+				if tc.refuse == "parent" {
+					path = parent
+				}
+
+				expectResult(t, "check_spool_directory", got, 1, "", "install.sh: "+path+" is not the agent's directory\n")
+			}
+
+			for _, name := range changing {
+				if calls := h.calls(name); len(calls) != 0 {
+					t.Errorf("%s calls = %q, want none (the check is read-only)", name, calls)
+				}
+			}
+
+			if after := treeSnapshot(t, h.dir+"/vandox"); after != before {
+				t.Errorf("the tree changed:\nbefore:\n%safter:\n%s", before, after)
+			}
+		})
+	}
+}
+
 // TestTailnetWarning_OnlyForLiteralsOutsideTheRanges checks E6: only an IP literal outside 100.64.0.0/10 and
 // fd7a:115c:a1e0::/48 is warned about; a name is not.
 func TestTailnetWarning_OnlyForLiteralsOutsideTheRanges(t *testing.T) {

@@ -148,9 +148,11 @@ expect_no_out() {
 }
 
 expect_empty_err() {
+  local what=$1
+
   if [[ -n "$ERR" ]]; then
     show
-    fail "$1: standard error is not empty"
+    fail "$what: standard error is not empty"
   fi
 }
 
@@ -194,28 +196,29 @@ expect_absent() {
 
 # nothing_left WHAT: nothing of S1 is on the host.
 nothing_left() {
+  local what=$1
   local path
 
   for path in "$CONFIG_FILE" "$TOKEN_FILE" "$CONFIG_DIR" "$STATE_ROOT" "$BINARY" "$UNIT" "$WANTS_LINK"; do
     if [[ -e "$path" || -L "$path" ]]; then
-      fail "$1: $path is left"
+      fail "$what: $path is left"
     fi
   done
 
   if getent passwd "$AGENT_USER" >/dev/null; then
-    fail "$1: user $AGENT_USER is left"
+    fail "$what: user $AGENT_USER is left"
   fi
 
   if getent group "$AGENT_USER" >/dev/null; then
-    fail "$1: group $AGENT_USER is left"
+    fail "$what: group $AGENT_USER is left"
   fi
 
   if systemctl is-active --quiet vandox-agent; then
-    fail "$1: vandox-agent is still active"
+    fail "$what: vandox-agent is still active"
   fi
 
   if systemctl is-enabled --quiet vandox-agent 2>/dev/null; then
-    fail "$1: vandox-agent is still enabled"
+    fail "$what: vandox-agent is still enabled"
   fi
 }
 
@@ -421,11 +424,15 @@ mapfile -t props < <(unit_properties User AmbientCapabilities CapabilityBounding
 ptrace_code='import ctypes,sys
 libc = ctypes.CDLL(None, use_errno=True)
 r = libc.ptrace(16, int(sys.argv[1]), 0, 0)
-print("EPERM" if r == -1 and ctypes.get_errno() == 1 else "result=%d errno=%d" % (r, ctypes.get_errno()))'
+print("EPERM" if r == -1 and ctypes.get_errno() == 1 else "result=%d errno=%d" % (r, ctypes.get_errno()))
+for line in open("/proc/self/status"):
+    if line.startswith("CapEff:"):
+        print("CapEff=" + line.split()[1])'
 
 ptrace_out="$(systemd-run --wait --pipe --collect --quiet "${props[@]}" python3 -c "$ptrace_code" "$sleeper" 2>&1)" || true
 echo "$ptrace_out"
 grep -Fxq "EPERM" <<<"$ptrace_out" || fail "ptrace(PTRACE_ATTACH) is not refused with EPERM: $ptrace_out"
+grep -Fxq "CapEff=0000000000080000" <<<"$ptrace_out" || fail "the confined process does not hold CAP_SYS_PTRACE alone (CapEff): $ptrace_out"
 kill "$sleeper" 2>/dev/null || true
 
 # --- case: repeat install --------------------------------------------------------------------------------
