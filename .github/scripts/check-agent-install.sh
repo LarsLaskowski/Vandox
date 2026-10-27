@@ -278,8 +278,19 @@ done
 verify_out="$(systemd-analyze verify "$unit_source" 2>&1 || true)"
 echo "$verify_out"
 
-if grep -Eq "Unknown|ignoring|specifier" <<<"$verify_out"; then
-  fail "systemd-analyze verify reports an unknown key, an ignored line or a specifier"
+# Only lines about this unit count: the tool also loads other units of the runner (snapd.service has a key
+# systemd 249 does not know), which are printed as a note.
+findings="$(grep -E "Unknown|ignoring|specifier" <<<"$verify_out" || true)"
+own_findings="$(grep -F "vandox-agent.service" <<<"$findings" || true)"
+foreign_findings="$(grep -vF "vandox-agent.service" <<<"$findings" || true)"
+
+if [[ -n "$foreign_findings" ]]; then
+  note "ignored, these lines concern other units:"
+  echo "$foreign_findings"
+fi
+
+if [[ -n "$own_findings" ]]; then
+  fail "systemd-analyze verify reports an unknown key, an ignored line or a specifier of vandox-agent.service: $own_findings"
 fi
 
 nothing_left "before the cases"

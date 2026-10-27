@@ -560,15 +560,67 @@ func verifyFindings(t *testing.T, analyze, path string) []string {
 		t.Fatalf("run %s verify %s: %v", analyze, path, err)
 	}
 
-	var findings []string
+	own, foreign := splitFindings(string(out))
 
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, "Unknown") || strings.Contains(line, "ignoring") || strings.Contains(line, "specifier") {
-			findings = append(findings, line)
+	for _, line := range foreign {
+		t.Logf("ignored, concerns another unit: %s", line)
+	}
+
+	return own
+}
+
+// splitFindings sorts the lines of systemd-analyze verify output that report an unknown key or section, an
+// ignored line or a specifier problem: own are the ones that name vandox-agent.service, foreign the ones about
+// any other unit the tool loaded (for example snapd.service on the runner), which this unit cannot fix.
+func splitFindings(output string) (own, foreign []string) {
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, "Unknown") && !strings.Contains(line, "ignoring") && !strings.Contains(line, "specifier") {
+			continue
+		}
+
+		if strings.Contains(line, unitFile) {
+			own = append(own, line)
+		} else {
+			foreign = append(foreign, line)
 		}
 	}
 
-	return findings
+	return own, foreign
+}
+
+func TestSplitFindings_CountsOnlyLinesOfThisUnit(t *testing.T) {
+	t.Parallel()
+
+	foreignLine := "/lib/systemd/system/snapd.service:23: Unknown key name 'RestartMode' in section 'Service', ignoring."
+	ownLine := "/tmp/verify-1/" + unitFile + ":4: Unknown key name 'NoSuchKeyAtAll' in section 'Service', ignoring."
+	quiet := unitFile + ": Command /usr/local/bin/vandox-agent is not executable: No such file or directory"
+
+	t.Run("a foreign line is ignored", func(t *testing.T) {
+		t.Parallel()
+
+		own, foreign := splitFindings(quiet + "\n" + foreignLine + "\n")
+		if len(own) != 0 || len(foreign) != 1 || foreign[0] != foreignLine {
+			t.Errorf("splitFindings = own %q, foreign %q, want no own line and the foreign line", own, foreign)
+		}
+	})
+
+	t.Run("an own line is caught beside a foreign one", func(t *testing.T) {
+		t.Parallel()
+
+		own, foreign := splitFindings(foreignLine + "\n" + ownLine + "\n" + quiet + "\n")
+		if len(own) != 1 || own[0] != ownLine || len(foreign) != 1 {
+			t.Errorf("splitFindings = own %q, foreign %q, want the own line caught and the foreign one set aside", own, foreign)
+		}
+	})
+
+	t.Run("a specifier line of this unit is caught", func(t *testing.T) {
+		t.Parallel()
+
+		line := unitFile + ":9: Failed to resolve specifiers in Environment=%d"
+		if own, _ := splitFindings(line); len(own) != 1 {
+			t.Errorf("splitFindings(%q) own = %q, want the line", line, own)
+		}
+	})
 }
 
 // writeTempUnit writes text as vandox-agent.service into a fresh directory whose name holds none of the words
