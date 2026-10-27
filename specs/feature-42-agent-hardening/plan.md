@@ -233,3 +233,28 @@ unit, not weakened; the allow-list adds enforcement to the last one. `docs/ARCHI
 ## Out of scope / follow-ups
 
 As the spec. No follow-up issue.
+
+## Challenge notes
+
+Devil's Advocate, plan challenge: 0 major, 8 minor objections, appended verbatim.
+
+1. **minor — the version check cannot execute the downloaded binary.** `main` sets `umask 077`, so `curl -o` (and the copy from `--from`) creates the binary as 0600 root without an execute bit. The 0711 work directory does not help: `setpriv --reuid=nobody … <bin> -version` then fails with `EACCES`, and every real install would end with `binary is not <version>` (plan *Approach*, install.sh step 5).
+   - Instruction: after `verify_checksum` passes, `chmod 0755` the binary in the work directory before `check_binary_version`.
+   - A unit test should pin that the function is called on a file that `nobody` can execute.
+2. **minor — `spool.directory: /var/lib/vandox` (accepted as "at or below") breaks step 6.** Step 6 first creates `/var/lib/vandox` as root 0755. `ensure_spool_directory` then refuses it as "not the agent's directory", after user, token and binary have already been written.
+   - The plan also leaves open who creates and owns the directories in between for a deeper path (`/var/lib/vandox/a/b`).
+   - Instruction: `read_spool_directory` accepts only paths strictly below `/var/lib/vandox` (E6 message unchanged). Either create missing intermediate directories as root 0755, or allow exactly one level below. Name the chosen rule in the `TestReadSpoolDirectory_…` table, where `/var/lib/vandox` currently has no stated outcome.
+3. **minor — documents that still recommend a backend outside the tailnet are not on the update list.** `deploy/agent/agent.yaml` 23-26 ("use https for any other network") and `docs/areas/agent.md` 54-55 ("every other address is `https`") describe a configuration that `IPAddressDeny=any` now blocks. Yet the plan lists `agent.yaml` as "unchanged" (*Affected projects*).
+   - The same applies to `docs/areas/agent.md` 1843 and `deploy/agent/README.md` 121: both say an `IPAddressAllow=` "must include" the `/etc/resolv.conf` name server, and the plan does not include it.
+   - Instruction: change the `backend.url` comment in `deploy/agent/agent.yaml`. Keep the lines that `render_config` replaces (20, 27) byte-identical so `TestAgentYAML_HoldsTheLinesRenderConfigReplaces` holds. Rewrite agent.md 54-55 and 1843 and README 121 to: tailnet addresses and localhost only; a name must resolve through a localhost or tailnet name server (E12).
+4. **minor — a host name in `backend.url` can install "successfully" while the agent can never send.** Readiness does not depend on the connection, so S1's success line prints even when `/etc/resolv.conf` names a provider DNS outside the allow-list (E12).
+   - Instruction: extend `tailnet_warning` (or add a S7-style check `check name-server`). When the host is a name and a `nameserver` line of `/etc/resolv.conf` is neither loopback nor in the tailnet ranges, print `install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`, warning only.
+   - Add test rows for `127.0.0.53`, `100.100.100.100` and `1.1.1.1`.
+5. **minor — the E8 CI case leaves the "first install" case not a first install.** In the CI case order, "E8 (a kept invalid `agent.yaml`, then removed)" runs right before "first install". If only `agent.yaml` is removed, the unit file, token and user remain. The next case then asks for no token and skips the MariaDB step (it runs only when the unit file was absent), so its assertions ("the MariaDB warning", token prompt) fail or test the wrong path.
+   - Instruction: end the E8 case with `uninstall.sh --purge` and assert that nothing of S1 is left before "first install".
+6. **minor — `systemd-analyze verify` of the repository's unit fails before the binary exists.** It reports `/usr/local/bin/vandox-agent` as not executable and exits non-zero. That happens in the CI "verify on 249" case, which runs before any install, and in `TestService_SystemdAnalyzeVerifyReportsNoUnknownKey` locally.
+   - Instruction: in both, fail only on lines that contain `Unknown` or `ignoring` (or the specifier messages), not on the exit status. Or run the CI case after "first install". Also name the unit's install path (`/etc/systemd/system/vandox-agent.service`) in *Approach*, and have uninstall run `systemctl daemon-reload` and `reset-failed` after removing it.
+7. **minor — under `sudo`, the CI script probably cannot find the Go from `setup-go`, and its build cache would land in `/root`.** The plan has `sudo .github/scripts/check-agent-install.sh` build the agent itself; `sudo`'s `secure_path` likely lacks the `setup-go` toolchain.
+   - Instruction: build `vandox-agent` and write `SHA256SUMS` in an unprivileged workflow step (or a non-sudo part of the script). Pass the directory to the sudo part, which installs with `--from`.
+8. **minor — `checkout_warning` silently does nothing in the common case.** It runs `git describe` as root. When the operator clones as a normal user and runs `sudo install.sh`, Ubuntu 22.04's Git (with the safe.directory fix) refuses the repository as "dubious ownership", so the warning of S3 is skipped.
+   - Instruction: treat a failing `git describe` as "no tag", without output. Say in `deploy/agent/README.md` that the check needs a checkout owned by root (or `git config --global --add safe.directory`). Add a test row where the stub `git` exits 128.
