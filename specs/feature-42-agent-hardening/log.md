@@ -34,3 +34,4 @@ are quoted in full.
 | 2026-10-27 08:52 | 8 Review round 1 | squad-reviewer | BLOCKING 4 (E6 spool check after changes; AC9/AC10 measurements open; 2 verbatim doc fixes), NON-BLOCKING 1 (systemctl enable \|\| true) (opus/medium · 158,388 tokens · 34 tool uses · 340 s) |
 | 2026-10-27 08:52 | 8 Verbatim doc fixes | squad-orchestrator | two verbatim fixes in docs/areas/agent.md (resource limits in Service manager; spool error wording) |
 | 2026-10-27 08:55 | 8 Decide review round 1 | squad-lead | RESULT: DONE; AC9/AC10 accepted as verified only in CI/server (worked in step 11); check_spool_directory added to plan (G6); non-blocking a-d taken (opus/medium · 67,991 tokens · 17 tool uses · 162 s) |
+| 2026-10-27 08:55 | 4 Skeleton G6 | squad-dev | check_spool_directory skeleton added (return 99) (sonnet/medium · 610 tokens · 2 tool uses · 4 s · continued from 4 Skeleton G2) |
