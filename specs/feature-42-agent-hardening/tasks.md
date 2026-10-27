@@ -12,7 +12,7 @@ Plan: [plan.md](plan.md) — Status: Draft
 | 6 | G2 | Implement the install script and the shared functions | `deploy/agent/common.sh`, `deploy/agent/install.sh` | AC1, AC2, AC3, AC4, AC5, AC10 | 5 | Dev | [x] |
 | 7 | G3 | Skeleton: `parse_args`, `main` of `uninstall.sh` | `deploy/agent/uninstall.sh` | AC7 | 6 | Dev | [x] |
 | 8 | G3 | Uninstall tests first | `deploy/agent/uninstall_test.go` | AC7 | 7 | Tester | [x] |
-| 9 | G3 | Implement uninstall and purge, the removal SQL | `deploy/agent/uninstall.sh`, `deploy/agent/mariadb-user-remove.sql` | AC7 | 8 | Dev | [ ] |
+| 9 | G3 | Implement uninstall and purge, the removal SQL | `deploy/agent/uninstall.sh`, `deploy/agent/mariadb-user-remove.sql` | AC7 | 8 | Dev | [x] |
 | 10 | G4 | End-to-end check on systemd 249: no new API | — | AC1, AC2, AC3, AC6, AC7, AC8, AC9, AC10 | — | Dev | [ ] |
 | 11 | G4 | CI script with every case of *Approach* | `.github/scripts/check-agent-install.sh` | AC1, AC2, AC3, AC6, AC7, AC8, AC9, AC10 | 9 | Tester | [ ] |
 | 12 | G4 | CI job `agent-install` | `.github/workflows/ci.yml` | AC8, AC9 | 11 | Dev | [ ] |
