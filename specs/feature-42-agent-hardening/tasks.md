@@ -16,5 +16,5 @@ Plan: [plan.md](plan.md) — Status: Draft
 | 10 | G4 | End-to-end check on systemd 249: no new API | — | AC1, AC2, AC3, AC6, AC7, AC8, AC9, AC10 | — | Dev | [x] |
 | 11 | G4 | CI script with every case of *Approach* | `.github/scripts/check-agent-install.sh` | AC1, AC2, AC3, AC6, AC7, AC8, AC9, AC10 | 9 | Tester | [x] |
 | 12 | G4 | CI job `agent-install` | `.github/workflows/ci.yml` | AC8, AC9 | 11 | Dev | [x] |
-| 13 | G5 | Area documents, README files, INSTALL, ARCHITECTURE, project and stack entries | `docs/areas/agent.md`, `docs/areas/configuration-and-secrets.md`, `docs/areas/network-and-security-model.md`, `deploy/agent/README.md`, `README.md`, `docs/INSTALL.md`, `docs/ARCHITECTURE.md`, `.squad/project.md`, `.squad/stack.md` | AC9, AC10, AC11 | 12 | Dev | [ ] |
+| 13 | G5 | Area documents, README files, INSTALL, ARCHITECTURE, project and stack entries | `docs/areas/agent.md`, `docs/areas/configuration-and-secrets.md`, `docs/areas/network-and-security-model.md`, `deploy/agent/README.md`, `README.md`, `docs/INSTALL.md`, `docs/ARCHITECTURE.md`, `.squad/project.md`, `.squad/stack.md` | AC9, AC10, AC11 | 12 | Dev | [x] |
 | 14 | G5 | Test documentation | `docs/UNIT_TESTS.md` | AC11 | 12 | Tester | [x] |

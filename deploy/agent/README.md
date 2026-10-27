@@ -3,8 +3,47 @@
 `vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are
 listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent area names (*Rights*: `CAP_SYS_PTRACE` and the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent area
 (`docs/areas/agent.md`, *Rights*) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
-`security`-tier change. The example configuration is `agent.yaml` in this folder; the unit and the install scripts follow with the
-collectors that need them.
+`security`-tier change. The example configuration is `agent.yaml` in this folder; the unit is `vandox-agent.service`, installed by
+`install.sh` and removed by `uninstall.sh` (both in this folder, with `common.sh`); see *Install, upgrade, uninstall* and *Unit*.
+
+## Install, upgrade, uninstall
+
+Run as root on the monitored server (Ubuntu 22.04, systemd 249, `x86_64`), from a checkout of the release's source, so the unit and the
+scripts match the binary:
+
+```
+git clone --branch vX.Y.Z https://github.com/LarsLaskowski/Vandox.git
+sudo Vandox/deploy/agent/install.sh --version vX.Y.Z --agent-id web-1 --backend-url http://100.101.102.103:8081
+```
+
+- **Options.** `--version vX.Y.Z` (or `vX.Y.Z-rc.N`, required), `--agent-id` and `--backend-url` (required while `/etc/vandox/agent.yaml` does not
+  exist, ignored when it does), `--from DIR` (take `vandox-agent-linux-amd64` and `SHA256SUMS` from a directory instead of downloading them),
+  `--no-mariadb` (skip the MariaDB account without a warning). The token is read from the terminal without echo, or from one line of standard
+  input (`printf '%s\n' "$TOKEN" | sudo ...`); `--token` is refused. It is asked for only when `/etc/vandox/agent-token` is missing.
+- **What it does, in order,** and every message and exit code: the Agent area, *Installation* (`docs/areas/agent.md`). In short: it checks root,
+  systemd and `x86_64`; reads or validates the configuration values; downloads the release files over HTTPS only
+  (`curl --proto =https --proto-redir =https --fail`) into a private temporary directory; refuses a link, a non-regular file or an
+  oversize file (4096 bytes for `SHA256SUMS`, 64 MiB for the binary); installs only when the SHA-256 equals the one well-formed line of
+  `SHA256SUMS`; runs the verified binary once as `nobody` with `-version` and requires the version; and only then changes the server: user and
+  groups, `/etc/vandox`, `agent.yaml` (from the example, never overwritten), the token (root:root 0600), the spool directory, the binary
+  (written beside the old one and renamed over it), the unit, the MariaDB account, enable and restart. Nothing is changed before the files are verified.
+- **Upgrade.** Run it again with the new `--version`. Only the binary and the unit are replaced; configuration, token, spool and state stay and
+  the agent continues from them. A checkout on a Git tag other than `--version` is warned about, because the unit comes from the checkout
+  (the check needs a checkout owned by root or a `safe.directory` entry for it; without either Git refuses and the check is skipped silently).
+- **Uninstall.** `sudo Vandox/deploy/agent/uninstall.sh` stops and disables the agent (it saves its state), removes the unit and the binary, and
+  keeps the user, `agent.yaml`, the token, the spool and the MariaDB account so a later install continues. `uninstall.sh --purge` also removes
+  them (it says that unsent records are lost before it deletes `/var/lib/vandox`) and drops the MariaDB account with
+  `mariadb-user-remove.sql` (when that fails it prints the command to run: `plesk db < deploy/agent/mariadb-user-remove.sql` or `mariadb < ...`).
+  A home directory of an existing `vandox-agent` user is named and left in place. Both succeed on an absent or partial installation.
+- **Server checks.** After the start it prints `check journal-group`, `check journal-clock`, `check ipc-filter` and `check capabilities`, each `ok` or
+  `WARNING <what to do>`; see *Checks on the server*.
+- **Drop-ins.** A drop-in directory `/etc/systemd/system/vandox-agent.service.d/` or `/run/systemd/system/vandox-agent.service.d/` can change the unit
+  after the script has installed it; the script names each one it finds and does not read it. Check it against *Unit*.
+- **Provenance.** `SHA256SUMS` proves the binary is the one the release published, not who built it. To check the provenance too, on a machine with
+  the GitHub CLI: `gh attestation verify vandox-agent-linux-amd64 --repo LarsLaskowski/Vandox`.
+- **The name server.** A `backend.url` with a host name is resolved by the name server of `/etc/resolv.conf`; the unit blocks every name server
+  outside localhost and the tailnet (`install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`). Use the
+  tailnet address or the MagicDNS name (whose resolver is the tailnet's `100.100.100.100`).
 
 ## Capabilities
 
@@ -118,7 +157,7 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
 
 ### Unit settings that must stay as they are
 
-- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector) and **`AF_INET`** and **`AF_INET6`** (the sender's connection to the backend; an `IPAddressAllow=` for the backend address is left to the unit, #42; with a host name in `backend.url` the agent also queries the name server of `/etc/resolv.conf` (port 53), which an `IPAddressAllow=` must include).
+- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector) and **`AF_INET`** and **`AF_INET6`** (the sender's connection to the backend; the unit's `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent reach only localhost and the tailnet, so `backend.url` names a tailnet address or a MagicDNS name; a host name that is resolved by a name server outside localhost and the tailnet fails as `connection failed`, and `install.sh` warns about such a name server).
 - No own network namespace: no `PrivateNetwork=` and no `NetworkNamespacePath=`, or `/proc/net` shows another namespace's sockets.
 - `/run/dbus/system_bus_socket` stays reachable: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`.
 - No `ProcSubset=pid`: it hides `/proc/net`.
@@ -182,3 +221,60 @@ neither group, and neither do the connection, systemd and MariaDB collectors.
   logs `agent state not available` or `agent state not saved` once and runs on without it.
 - **The `backups` collector** reads `/proc` like the process collector and needs no further right; its rules are `backups.processes` in
   `agent.yaml`.
+
+## Unit
+
+`vandox-agent.service` is installed as `/etc/systemd/system/vandox-agent.service` (root, 0644). Every setting and why:
+
+| Setting | Why |
+| ------- | --- |
+| `Description=`, `Documentation=` | Names the unit and links this file. |
+| `After=systemd-journal-flush.service` | The persistent journal is in place when the `kernel` collector first reads it. |
+| `StartLimitIntervalSec=0`, `Restart=on-failure`, `RestartSec=30s` | A failed or watchdog-stopped agent is restarted at most twice a minute for ever, never giving up (`start-limit-hit`), so it comes back by itself once a cause such as a missing spool directory is fixed. |
+| `Type=notify`, `NotifyAccess=main`, `WatchdogSec=2min` | The agent sends `READY=1` and `WATCHDOG=1`; it pings every minute while its runners are on time (the longest runner timeout is 10 s), so a short stall under pressure does not restart it, a stuck runner does. |
+| `ExecStart=/usr/local/bin/vandox-agent`, `User=`, `Group=vandox-agent` | The dedicated user, never root. |
+| `SupplementaryGroups=adm systemd-journal` | Log files and the journal (*Groups*). |
+| `AmbientCapabilities=CAP_SYS_PTRACE`, `CapabilityBoundingSet=CAP_SYS_PTRACE`, `NoNewPrivileges=yes` | The one capability the process and connection collectors need, and nothing else (records 0030, 0122). |
+| `LoadCredential=agent-token:/etc/vandox/agent-token`, `Environment=VANDOX_AGENT_TOKEN_FILE=/run/credentials/vandox-agent.service/agent-token` | The token reaches the agent as a credential file; the path is written out because the `%d` specifier is not known to systemd 249. It is never an argument or an environment value (record 0032). |
+| `Environment=GOMEMLIMIT=192MiB` | The Go runtime does not know the cgroup limit; with the default garbage collector a heap can reach about twice its live size and the kernel would kill the agent for garbage. A soft limit below `MemoryMax=` makes the runtime collect harder only near it. A unit setting, not an agent option. |
+| `ProtectSystem=strict`, `ReadWritePaths=/var/lib/vandox`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes`, `ProtectHostname=yes`, `InaccessiblePaths=/etc/shadow /etc/gshadow` | The agent writes only below `/var/lib/vandox` (spool and state) and reads little else. `ProtectKernelLogs=yes` hides `/dev/kmsg` and `syslog(2)`; the kernel collector reads the journal instead. |
+| `RestrictNamespaces=yes`, `RestrictRealtime=yes`, `RestrictSUIDSGID=yes`, `LockPersonality=yes`, `MemoryDenyWriteExecute=yes`, `RemoveIPC=yes`, `UMask=0077`, `KeyringMode=private` | Further confinement; none is used by the collectors. |
+| `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6` | The socket probe, the bus and the MariaDB socket need `AF_UNIX`; the sender needs the two internet families. |
+| `SystemCallArchitectures=native`, `SystemCallFilter=@system-service adjtimex`, `SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise`, `SystemCallErrorNumber=EPERM` | `adjtimex` is read by the `clock` collector; the six denied calls are barrier (b) of record 0122. `process_madvise` is named because `@system-service` includes it. |
+| `IPAddressDeny=any`, `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` | The agent connects only over the tailnet (records 0006, 0010); the unit enforces it. Localhost is the MariaDB and bus sockets' side and the CI test target. |
+| `MemoryMax=256M` | The documented worst cases (a process run 48 MiB, MariaDB 32 MiB, logs 24 MiB, kernel 4 MiB, the sender one 1 MiB batch per stream) sum to about 112 MiB if all peak at once under memory pressure; with `GOMEMLIMIT=192MiB` this leaves headroom for the runtime and page cache. The memory pressure mode reads the system's `MemAvailable`, not the cgroup's. The agent's real peak RSS is **to be measured** (the parallel run of #45); until then the values rest on the documented bounds. |
+| `CPUQuota=50%` | Bounds a runaway loop to half a core; collector timeouts are at most 10 s, so an idle server never reaches it. |
+| `Nice=5`, `IOWeight=50` | The agent yields to the monitored services without starving while an outage builds. |
+| `[Install] WantedBy=multi-user.target` | Starts at boot. |
+
+Not set, on purpose (the *Unit settings that must stay as they are* section): `ProtectClock`, `PrivateNetwork`, `NetworkNamespacePath`, `ProcSubset`,
+a `ProtectProc=` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `DynamicUser`, any specifier, `VANDOX_AGENT_TOKEN=`, and any
+`InaccessiblePaths=` over `/run/dbus`, `/run/mysqld`, `/var/log/journal` or `/run/log/journal`.
+
+**`systemd-analyze security vandox-agent`.** Required: the overall exposure level `OK` or better (record 0131). A draft with these settings scored 2.2
+`OK` offline on systemd 255 in a development session; that is not the score of the shipped unit on 249.
+
+| Where | systemd | Overall exposure level | Items still flagged, with the collector that needs each |
+| ----- | ------- | ---------------------- | -------------------------------------------------------- |
+| CI job `agent-install` (Ubuntu 22.04 runner) | 249 | to be measured (first CI run) | to be entered from the run |
+| the monitored server | 249 | to be measured (Product Manager's server run) | to be entered from the run |
+
+## Checks on the server
+
+The install script prints these four checks (a warning never fails the installation); the rest are run by hand. The Product Manager's run on
+the server, with its results, is entered below.
+
+| Check | Command or line | Result to expect | Result of the server run |
+| ----- | --------------- | ---------------- | ------------------------ |
+| Journal files readable by the group | `check journal-group: ok` | `ok`; the `WARNING` means a file below `/var/log/journal` is not group-readable by `systemd-journal` (or there is none: a volatile journal only under `/run/log/journal`; then the `kernel` and `logs` collectors read that one, check it by hand with `ls -l /run/log/journal/*/`) | to be measured |
+| Clock of the journal | `check journal-clock: ok` | `/proc/uptime` and the journal's monotonic clock differ by less than 1 s; `WARNING ... differ by <n> ms` means every live kill reads as late and gets no extra snapshots; `WARNING could not read the journal timestamp` means `logger` or `journalctl` failed | to be measured |
+| `process_madvise` in `@ipc` | `check ipc-filter: ok` | systemd lists the name, so the system-call filter entry takes effect | to be measured |
+| Capabilities of the running agent | `check capabilities: ok` | `CapEff` is `0000000000080000` (`CAP_SYS_PTRACE` alone) | to be measured |
+| Security score | `systemd-analyze security vandox-agent` | `OK` or better (see *Unit*) | to be measured |
+| `ptrace` attach is refused | run `sleep 300 &` as root, then `sudo systemd-run --wait --pipe -p User=vandox-agent -p AmbientCapabilities=CAP_SYS_PTRACE -p CapabilityBoundingSet=CAP_SYS_PTRACE -p NoNewPrivileges=yes -p 'SystemCallFilter=@system-service adjtimex' -p 'SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise' -p SystemCallErrorNumber=EPERM -p SystemCallArchitectures=native python3 -c 'import ctypes,sys; l=ctypes.CDLL(None,use_errno=True); r=l.ptrace(16,int(sys.argv[1]),0,0); print("EPERM" if r==-1 and ctypes.get_errno()==1 else "NOT REFUSED")' <PID of the sleep>` | prints `EPERM` | to be measured |
+| Reboot | `sudo reboot`, then `systemctl is-active vandox-agent` | `active`, started by itself after the journal flush | to be measured |
+| rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
+| Peak memory | the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | to be measured |
+
+The same cases, on a throw-away runner with systemd 249, run in the CI job `agent-install` (`.github/scripts/check-agent-install.sh`); the results of
+its first run are to be entered in *Unit*.

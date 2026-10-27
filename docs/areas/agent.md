@@ -8,7 +8,7 @@ sends is in the [wire format](wire-format.md); its configuration file is in [Con
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
 switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the log shipping collector (the journal and configured `syslog` files), the backup run check, the agent's state file, the on-disk spool and the notification of systemd exist, as do
-the shared data model and the wire encoder, and the sender (*Spool and sending*, *Sending*). The other collectors and the systemd unit are **not implemented
+the shared data model and the wire encoder, and the sender (*Spool and sending*, *Sending*). The systemd unit and the install and uninstall scripts exist (*Installation*); the other collectors are **not implemented
 yet**. The backend's ingest endpoint accepts the sender's batches ([Backend host](backend-host.md), *Ingest endpoint*); while the
 backend is unreachable or not accepting, the sender waits and tries again (*Sending*), and the spool fills up to `spool.max_size` and
 then drops its oldest records with recorded gaps. The
@@ -52,7 +52,9 @@ rules below for the parts not implemented are the target the implementation is h
   (never skipped, TLS 1.2 at least), ends a request after 30 seconds, reads the header of an answer up to 16 KiB and at most 4,096 bytes
   of its body, which it discards.
 - Plain `http` is meant only for the backend host's tailnet address or its MagicDNS name, because the tailnet encrypts and
-  authenticates the transport; every other address is `https`. The scheme must match the listener: an `https` URL at a plain-http
+  authenticates the transport; every other address is `https`. The installed unit lets the agent reach only localhost and the tailnet
+  ranges (`IPAddressAllow=`, *Installation*), so any other address, and a host name resolved by a name server outside localhost and the
+  tailnet, fails as `connection failed`: use the tailnet address or the MagicDNS name. The scheme must match the listener: an `https` URL at a plain-http
   listener fails as `connection failed`, and an `http` URL at a TLS port gets a `400` without the refusal header (*Sending*), which
   counts as a backend that does not accept batches, so the agent only waits and gives no record up.
 - Commands for the server (a later feature) are fetched by the agent from the backend, never pushed to it, so they reach the server
@@ -1059,7 +1061,7 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
   gaps while it is refused. The compact layout is read as checked against systemd-journal-remote 255 output; files journald itself
   writes in that layout on the server are not yet checked.
 - Whether a kill is live compares `/proc/uptime`, which counts time in suspend, with the journal's monotonic clock, which does not.
-  They agree on a server that never suspends (to be checked on the server, #42); after a suspend every kill reads as late and gets no
+  They agree on a server that never suspends (to be checked on the server, `check journal-clock` of the install script, *Installation*); after a suspend every kill reads as late and gets no
   snapshots, never a snapshot too many.
 - After a restart the files of another ID without a readable header time are read again from their start (their kills return with
   the same identities), and a refused file gives its gap again once per agent start.
@@ -1356,7 +1358,7 @@ test and the C# import's test both read.
   (`read failed`) standing, until it reads again or the agent restarts.
 - A journal without keyed hashes, XZ or LZ4 items and entries with more than four compressed items are lost to recorded gaps.
 - The user files of the server's sample were empty: user-journal entries are read like system entries without a real one checked. That
-  rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked on the server (#42); the renamed file
+  rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked by the installation (a manual step in `deploy/agent/README.md`); the renamed file
   is read until the writer has moved whatever that window is.
 - A refused journal file gives its gap again after every agent start; a file replaced by a link between the listing and the read of the
   journal directory is followed, as for the kernel collector.
@@ -1417,7 +1419,7 @@ again while a match runs, the end again with the gone-by time of the last kept c
 The agent keeps one small state file, `agent-state.json` in `spool.directory` (security area 9): the last boot it ran in with that
 boot's uptime and boot time, the position of the `kernel` collector in the journal, the open backup run and the positions of the
 `logs` collector. Besides the spool's own files (*Spool and sending*) it is the agent's only file write. The agent never creates the
-directory; the installation does (#42).
+directory; the installation does (*Installation*).
 
 **Format.** One JSON object `{"version":1,"boot":{"id","uptime_ns","booted_at"},"journal":{"seqnum_id","seqnum","realtime"},
 "backup":{"boot_id","started_at","last_seen","max_processes"},"logs":{"journal":[{"seqnum_id","seqnum","realtime"}],"files":[{"path_sha256",
@@ -1506,7 +1508,8 @@ grows faster until its size bound evicts older data with a recorded gap, bounded
   time (*Scheduling*). When a runner is not on time, the notification is withheld and one warning is logged until it is sent again,
   so systemd restarts an agent whose runners stopped moving. A malformed value disables the watchdog with a warning.
 - For this to work the unit must use `Type=notify`, set `WatchdogSec=` and allow notifications from the main process
-  (`NotifyAccess=main`); the unit is part of the installation files.
+  (`NotifyAccess=main`); the installed unit does (*Installation*): `WatchdogSec=2min`, `Restart=on-failure`, `RestartSec=30s` and
+  `StartLimitIntervalSec=0`, so a failed or watchdog-stopped agent is restarted twice a minute at most, for ever.
 - `NOTIFY_SOCKET`, `WATCHDOG_USEC` or `WATCHDOG_PID` named twice in the environment is treated as malformed (*Logging* for
   `JOURNAL_STREAM`).
 
@@ -1575,7 +1578,7 @@ temporary file the meta file cannot be written, so the start fails and at run ti
 
 **Start.** The agent opens the state file first, then reads the boot ID and opens the spool. A spool that cannot be opened makes the
 agent log the error line `agent cannot start` with one of these errors and exit with 1 before it notifies systemd (`READY=1`), so
-`systemctl status` shows the failure; a failed start is retried only by the unit's `Restart=` (#42). No error names a path.
+`systemctl status` shows the failure; a failed start is retried only by the unit's `Restart=` (*Installation*). No error names a path.
 
 | Error | Cause |
 | ----- | ----- |
@@ -1801,7 +1804,8 @@ by the agent logs nothing.
 
 ## Rights
 
-- The agent runs as the dedicated system user `vandox-agent` without a login shell, **never as root**. It authenticates to MariaDB as
+- The agent runs as the dedicated system user `vandox-agent` without a login shell, **never as root**; the installed unit applies the
+  rights and confinement below (*Installation*). It authenticates to MariaDB as
   that OS user through `unix_socket` with only the `PROCESS` privilege.
 - For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes it holds
   `CAP_SYS_PTRACE` alone, as an ambient capability with a bounding set limited to it (rule below, record 0122). `CAP_DAC_READ_SEARCH` is
@@ -1838,8 +1842,7 @@ by the agent logs nothing.
   `default` (a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`).
 - **Sender.** The sender needs no group and no capability: it dials the backend's ingest port as the agent's user. The unit must allow
   it: `RestrictAddressFamilies=` keeps **`AF_INET` and `AF_INET6`** beside `AF_UNIX`, and a system-call filter must not deny `socket` and
-  `connect` for them, or every request fails as `connection failed`. (A restriction of the addresses the agent may reach, such as
-  `IPAddressAllow=` for the backend, is left to the unit, #42.)
+  `connect` for them, or every request fails as `connection failed`. (The unit restricts the addresses the agent may reach to localhost and the tailnet ranges, *Installation*.)
   With a host name in `backend.url` the agent also queries the name server of `/etc/resolv.conf` (port 53), which an `IPAddressAllow=` must include.
 - **Systemd collector.** Reading unit states over the system bus needs no group and no capability: systemd's bus policy lets every user
   call `Properties.Get`, `ListUnitsByPatterns`, `ListUnitsByNames` and `LoadUnit` (the server capture was taken with every call made
@@ -1862,7 +1865,7 @@ by the agent logs nothing.
   agent, which can reach the same files through another process's root in `/proc` where their own mode allows it. `process_madvise` is denied by name: systemd puts it
   in the group `@ipc`, which `@system-service` includes, so an allow-list built on `@system-service` admits it. The agent never calls it
   (the Go runtime uses `madvise` on its own memory only). That the server's systemd (249, Ubuntu 22.04) knows the name, so the entry takes
-  effect instead of being skipped, is checked on the server (#42): `systemd-analyze syscall-filter @ipc` lists `process_madvise`. If it
+  effect instead of being skipped, is checked on the server by the install script (`check ipc-filter`, *Installation*): `systemd-analyze syscall-filter @ipc` lists `process_madvise`. If it
   did not, barrier (c) below would still stop the write.
 - **No write into another user's process or file beyond its own mode** (record 0122). A compromised agent cannot use its capability to
   write into another user's process or file, or to run code as another user, except through a file whose own mode grants the agent's
@@ -1944,7 +1947,7 @@ by the agent logs nothing.
   `systemd-journal`, its first user, and `/etc/machine-id`, `/proc/sys/kernel/random/boot_id`, `/proc/uptime` and `/proc/stat`, which
   any user can read; it needs no capability (not `CAP_SYSLOG`: it does not read `/dev/kmsg`). The unit must keep both journal
   directories readable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them) and start after `systemd-journal-flush.service`.
-  That the server's journal files are readable by the group is checked on the server (#42).
+  That the server's journal files are readable by the group is checked on the server by the install script (`check journal-group`, *Installation*).
 - **Log shipping collector.** It reads the system and user journal files with `systemd-journal`, as the kernel collector does,
   `/etc/machine-id` and `/etc/localtime`, which any user can read, and the files `log_shipping.files` names with `adm`, or because their
   mode lets any user read them. It uses no capability: `CAP_DAC_READ_SEARCH` is not granted (record 0122). It opens the configured paths through the
@@ -1981,6 +1984,109 @@ by the agent logs nothing.
   whose working directory is the `0755` directory); credentials read that way may still lead to root through other services (password reuse, Plesk or MariaDB
   administration). A separate small helper that holds the capability is the way to reduce it.
 
+## Installation
+
+`deploy/agent/install.sh` installs or upgrades the agent, `deploy/agent/uninstall.sh` removes it; both run as root from a checkout of the
+tagged source, on Ubuntu 22.04 with systemd 249 on `x86_64`, and use `deploy/agent/common.sh`. The unit is `deploy/agent/vandox-agent.service`.
+Every setting of the unit with its reason is in `deploy/agent/README.md`; the reasons for the choices are in
+[record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md).
+
+**Command.** `install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`. `--version` is `vX.Y.Z` or
+`vX.Y.Z-rc.N`. `--agent-id` and `--backend-url` are required while no `/etc/vandox/agent.yaml` exists and are ignored when it does.
+`--from DIR` takes the two release files from a directory instead of downloading them. The token is never an option: `--token` and
+`--token=...` are refused with `install.sh: the token is read from standard input, never from an option` and the usage line, exit 2.
+A wrong argument prints `usage: install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`, exit 2.
+`--agent-id` must be an agent ID (*Command line and start-up*): else `install.sh: --agent-id is not a valid agent ID`, exit 2.
+`--backend-url` must be `http` or `https`, `://`, a host, an optional port of 1 to 65535 without a leading zero and an optional `/`; the host is
+an IPv4 literal (four parts of 0 to 255; a host of digits and dots that is no IPv4 literal is refused), a bracketed IPv6 literal, or a name of
+labels of letters, digits and `-` (1 to 63 bytes, not starting or ending with `-`) of at most 253 bytes: else
+`install.sh: --backend-url is not http(s)://host[:port]`, exit 2. The values are never echoed.
+
+**Order, and what stops it.** Nothing changes before the files are verified.
+1. Arguments (exit 2); then root, systemd as PID 1 and `x86_64`, else `install.sh: must run as root`, `install.sh: needs systemd` or
+   `install.sh: only linux-amd64 is supported`, exit 1.
+2. Configuration: an existing `/etc/vandox/agent.yaml` is kept (`install.sh: keeping existing /etc/vandox/agent.yaml`) and its
+   `spool.directory` is read; without one the spool is `/var/lib/vandox/spool` and an IP literal outside localhost and the tailnet ranges gets
+   `install.sh: WARNING <host> is not a tailnet address; the unit blocks it`. For a host name, each `nameserver` of `/etc/resolv.conf` that is an
+   IP literal outside localhost and the tailnet gets `install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`;
+   any other `nameserver` value is skipped without output.
+3. The token is asked for only when `/etc/vandox/agent-token` is missing: from the terminal without echo, else one line of standard input.
+   It must be 32 to 4096 bytes of `0x21` to `0x7E`, else `install.sh: token rejected: fewer than 32 characters`, `...: more than 4096 characters` or
+   `...: a character outside 0x21-0x7E`, exit 1; the token is never printed. Only bash built-ins handle it: it is no argument, environment
+   variable or here-document of any child process.
+4. The release: `vandox-agent-linux-amd64` and `SHA256SUMS` of the release `--version`, downloaded from this repository's release page with
+   `curl --proto =https --proto-redir =https --fail`, into a private temporary directory removed on every exit; a failed download or an
+   unusable `--from` source (a link, a directory, a FIFO, missing, over the bound) gives `install.sh: download failed: <file>`, exit 1.
+   Both files must be regular files, not links, and at most 4096 bytes (`SHA256SUMS`) and 64 MiB (the binary), checked by size before either is read;
+   `SHA256SUMS` must hold exactly one line `<64 lower-case hex digits>  vandox-agent-linux-amd64` that matches the binary's SHA-256, else
+   `install.sh: checksum mismatch, nothing installed`, exit 1. Only then is the binary run, once, as `nobody` without privileges
+   (`setpriv`) with `-version`; another version gives `install.sh: binary is not <version>`, exit 1. The checksum proves integrity, not who
+   built the binary.
+5. A checkout on a Git tag other than `--version` gets `install.sh: WARNING checkout is <tag>, not <version>` (the unit and scripts come from the
+   checkout; a checkout the Git of root refuses as owned by another user counts as no tag).
+6. Apply: the user and group `vandox-agent`, `/etc/vandox`, `agent.yaml`, the token, the spool directory, the binary, the unit, the
+   MariaDB account (first install only), enable and restart. A link in place of `/etc/vandox`, `agent.yaml`, the token file, the binary or the unit
+   is refused (`install.sh: <path> is a link; not following it`, exit 1), never followed. A start that does not reach `READY=1` ends with
+   `install.sh: vandox-agent did not start; see: journalctl -u vandox-agent`, exit 1; the installed files stay and the unit keeps retrying.
+7. The server checks, then `vandox-agent vX.Y.Z installed and running`.
+
+**What it creates.**
+
+| Path | Owner and mode | Notes |
+| ---- | -------------- | ----- |
+| user and group `vandox-agent` | system user, shell `/usr/sbin/nologin`, password locked, no home, supplementary groups exactly `adm` and `systemd-journal` | An existing user is brought to this state and each change is printed (`install.sh: user vandox-agent: shell set to /usr/sbin/nologin`, `password locked`, `primary group set to vandox-agent`, `groups set to adm,systemd-journal`, `created`; `install.sh: group vandox-agent created`). A home directory it has is named (`home directory <path> is kept in place`) and never removed. |
+| `/usr/local/bin/vandox-agent` | root, 0755 | Written to a temporary file in the same directory and renamed over the old one; never written into a running file. |
+| `/etc/vandox` | root, 0755 | |
+| `/etc/vandox/agent.yaml` | root:vandox-agent, 0640 | The example with the two values; never overwritten. |
+| `/etc/vandox/agent-token` | root:root, 0600 | Written through a temporary file and renamed. |
+| `/var/lib/vandox` | root, 0755 | Must be a real directory owned by root and not group- or other-writable. |
+| `spool.directory` | vandox-agent, 0700 | Exactly one directory below `/var/lib/vandox` (default `/var/lib/vandox/spool`), created by the script, never recursed into. |
+| `/etc/systemd/system/vandox-agent.service` | root, 0644 | A drop-in directory `/etc/systemd/system/vandox-agent.service.d/` or `/run/systemd/system/vandox-agent.service.d/` is named: `install.sh: WARNING drop-in directory <path> changes the unit; check it`. |
+
+**`spool.directory` of a kept configuration** is read by fixed line rules and fails closed: the file must hold only printable ASCII and line
+feeds (no tab, carriage return, byte order mark or byte at or above `0x80`), no line starting with `%`, `---` or `...`, every other
+line at column 0 a comment or `<key>:` of lower-case letters and `_`, and the `spool:` block only comments and `  key: value` lines whose
+value is plain, single-quoted without `''` or double-quoted without a backslash; anything else (a flow mapping, an anchor, a tag, a block
+scalar, a value on the next line, a second `directory` key, another indent) gives `install.sh: cannot read spool.directory from <file>`, exit 2,
+though the agent itself would read the file. A value other than exactly `/var/lib/vandox/<name>` (`<name>` of letters, digits, `.`, `_`, `-`, not `.`
+or `..`) gives `install.sh: spool.directory must be one directory below /var/lib/vandox`, exit 2, because the unit allows writes only below
+`/var/lib/vandox`. An existing `/var/lib/vandox` or spool that is a link, owned by another user (the spool: not by `vandox-agent`) or
+a parent that is writable by others gives `install.sh: <path> is not the agent's directory`, exit 1. The two scripts print the same lines
+with `uninstall.sh:` in front.
+
+**MariaDB.** On the first install the account is created from `deploy/agent/mariadb-user.sql` unchanged, with `plesk db` when `plesk` is on the
+search path, else `mariadb`. When that fails or neither exists, the install continues with
+`install.sh: WARNING MariaDB account not created; run: <plesk db | mariadb> < deploy/agent/mariadb-user.sql`; `--no-mariadb` skips the step silently.
+
+**Checks on the server.** After the start the script prints one line per check, each `check <name>: ok` or `check <name>: WARNING <what to do>`;
+a warning never fails the installation:
+
+| Line | What it checks |
+| ---- | -------------- |
+| `check journal-group` | Every journal file below `/var/log/journal` is readable by the group `systemd-journal` (warns when there is none). |
+| `check journal-clock` | `/proc/uptime` and the monotonic timestamp of a fresh journal entry differ by less than 1 s; else `WARNING /proc/uptime and the journal differ by <n> ms; live kills get no extra snapshots`, and `WARNING could not read the journal timestamp; see deploy/agent/README.md` when either value cannot be read. |
+| `check ipc-filter` | `systemd-analyze syscall-filter @ipc` lists `process_madvise`. |
+| `check capabilities` | The running agent's `CapEff` is `CAP_SYS_PTRACE` (`0000000000080000`) alone (`CapEff is unknown` when it cannot be read). |
+
+**Uninstall and purge.** `uninstall.sh [--purge]` (another argument: `usage: uninstall.sh [--purge]`, exit 2) runs
+`systemctl disable --now vandox-agent` (the agent saves its state), removes the unit and the binary, runs `systemctl daemon-reload` and
+`systemctl reset-failed vandox-agent`, and prints `uninstall.sh: removed <item>` or `uninstall.sh: <item> not present` for each, so an absent or
+partial installation succeeds with exit 0. A plain run keeps the user, `agent.yaml`, the token, the spool and the MariaDB account and says so:
+`uninstall.sh: kept user vandox-agent, /etc/vandox/agent.yaml, /etc/vandox/agent-token, <spool> and the MariaDB account; remove them with --purge`.
+`--purge` additionally removes `agent.yaml` and the token, prints `uninstall.sh: deleting /var/lib/vandox (records not yet sent are lost)` and
+deletes `/var/lib/vandox` with `rm -rf --one-file-system` (which follows no link), drops the MariaDB account with
+`deploy/agent/mariadb-user-remove.sql` (the one statement `DROP USER IF EXISTS 'vandox-agent'@'localhost'`; when that fails:
+`uninstall.sh: WARNING MariaDB account not removed; run: <plesk db | mariadb> < deploy/agent/mariadb-user-remove.sql`), deletes the user (never
+with `-r`, so a home directory stays and is named) and the group, and removes `/etc/vandox` only when it is empty. The spool of a kept
+configuration is read as above; an unreadable one stops the script with exit 2 before anything is removed.
+
+**The unit in short.** `Type=notify`, `User=vandox-agent`, the groups `adm` and `systemd-journal`, `CAP_SYS_PTRACE` as the only ambient
+capability and the whole bounding set, `NoNewPrivileges=yes`, the filesystem and kernel protections of *Rights*, a system-call filter that
+denies the six calls of record 0122, `LoadCredential=agent-token:/etc/vandox/agent-token` with `VANDOX_AGENT_TOKEN_FILE` naming
+`/run/credentials/vandox-agent.service/agent-token` (the token is never an argument or environment value), `IPAddressDeny=any` with
+`IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` (the enforcement of "only over the tailnet"), `MemoryMax=256M`, `GOMEMLIMIT=192MiB`,
+`CPUQuota=50%`, `Nice=5`, `IOWeight=50`, `WatchdogSec=2min`, `Restart=on-failure`, `RestartSec=30s`, `StartLimitIntervalSec=0`.
+
 ## Related decisions
 
 - [0006](../decisions/0006-agent-connects-outbound-only.md) — why outbound only.
@@ -1992,6 +2098,8 @@ by the agent logs nothing.
 - [0110](../decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md) — why one runner per
   collector at a fixed rate, a gap for every missed sample, the notification without a library, the watchdog gated on the runners and the
   log format.
+- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the token is a
+  systemd credential, the unit allows tailnet addresses only, the resource limits and `GOMEMLIMIT=`, the checksum check and remove and purge.
 - [0111](../decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md) — why three system collectors,
   `statfs` and `adjtimex` beside `/proc` and `/sys`, the synchronization rule, the PLL offset only while the PLL is on, and absent
   values left out instead of zero.
@@ -2064,5 +2172,5 @@ check), `internal/agentstate` (the state file, the `state` job and the save at t
 measurements `TestSender_MemoryBound` and, in `internal/spool`, `TestReferenceStream_BackfillRate`), `internal/spool` (the spool: data and meta
 files, sequence numbers, reading, acknowledgements, drops and damage; its tests generate the reference stream and run the hard-kill and
 7-day tests; it uses `wire.MarshalRecord` and `wire.UnmarshalRecord`),
-`internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration, `mariadb-user.sql`; the unit and install
-scripts follow with the collectors).
+`internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration, the unit `vandox-agent.service`, `install.sh`, `uninstall.sh`, `common.sh`, `mariadb-user.sql`,
+`mariadb-user-remove.sql`; a test-only Go package pins the unit and the scripts).

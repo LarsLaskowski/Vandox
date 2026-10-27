@@ -28,6 +28,10 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).
+- **The agent's unit enforces this on the server.** `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the
+  agent's process reach only localhost and the tailnet ranges, so a `backend.url` elsewhere, and a host name resolved by a name server outside
+  localhost and the tailnet, fails as `connection failed`; the install script warns about both. Use the tailnet address or the MagicDNS name
+  ([Agent](agent.md), *Installation*, [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md)).
 - The agent sends its token only in the `Authorization` header of its requests to `backend.url`, connects only to that URL's host and
   port (no proxy from the environment, no redirect followed), verifies the certificate of an `https` URL and never switches the check
   off. Plain `http` is meant only for the backend host's tailnet address or MagicDNS name, where Tailscale encrypts and authenticates
@@ -53,7 +57,8 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 The agent reads the database server's state (status variables, process list) over the **local socket as the MariaDB user
 `vandox-agent`, identified by `unix_socket` and granted only `PROCESS`**. No database password exists on disk. The agent sees the server
 status and the process list, including the query text of running statements, but cannot read tables. Creating the user is part of the
-agent's installation instructions.
+agent's installation: `install.sh` creates it on the first install, `uninstall.sh --purge` drops it with
+`deploy/agent/mariadb-user-remove.sql`.
 
 - **The account.** `deploy/agent/mariadb-user.sql` is its one source: `CREATE OR REPLACE USER 'vandox-agent'@'localhost' IDENTIFIED VIA
   unix_socket WITH MAX_USER_CONNECTIONS 2` and `GRANT PROCESS ON *.* TO 'vandox-agent'@'localhost'`, nothing else. The operator runs it as
@@ -87,6 +92,8 @@ agent's installation instructions.
 ## Related decisions
 
 - [0010](../decisions/0010-tailscale-with-strict-acl.md) — why Tailscale with a strict ACL.
+- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the agent's unit
+  allows only tailnet addresses and localhost.
 - [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the agent sends one batch per
   request with a bearer token and judges the answer by its status and one fixed header value.
 - [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the

@@ -20,10 +20,10 @@
 agent_id: web-1
 
 backend:
-  # Base URL of the vandoxd ingest endpoint (required). Scheme http or https, a host (IP address or
-  # name) and an optional port; no user info, path, query or fragment. Plain http is fine only for the
-  # backend host's tailnet address or MagicDNS name, which the tailnet encrypts; use https for any other
-  # network. The scheme must match the listener. No default.
+  # Base URL of the vandoxd ingest endpoint (required). Scheme http or https, a host and an optional port; no
+  # user info, path, query or fragment. The installed unit lets the agent reach only localhost and the tailnet
+  # (100.64.0.0/10, fd7a:115c:a1e0::/48): use the backend host's tailnet address or its MagicDNS name. Plain http
+  # is fine there, the tailnet encrypts; the scheme must match the listener. No default.
   url: http://100.64.0.1:8081
 
   # Bandwidth the agent may use to send spooled data it has accumulated while the backend was

@@ -65,7 +65,7 @@ the value.
 | `agent_id` | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
 | `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
 | `backend.backfill_bandwidth` | `256KiB` | Bandwidth the agent may use to send spooled data after the backend was unreachable: a whole number followed by `KiB` or `MiB`, from `16KiB` to `1024MiB`, such as `256KiB` or `4MiB`. |
-| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. It holds the spooled records in segment files `segment-<number>.spool` and the spool's bookkeeping file `spool-meta.json`, besides the agent's state file `agent-state.json` (the boot, the position in the journal, the open backup run and the positions of the log shipping collector: a position per journal sequence number ID and per configured file, up to 64 KiB). The agent never creates the directory, the installation does; it must exist, be a real directory (not a link) and be writable for the agent. |
+| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. It holds the spooled records in segment files `segment-<number>.spool` and the spool's bookkeeping file `spool-meta.json`, besides the agent's state file `agent-state.json` (the boot, the position in the journal, the open backup run and the positions of the log shipping collector: a position per journal sequence number ID and per configured file, up to 64 KiB). The agent never creates the directory, `deploy/agent/install.sh` does, and it accepts only one directory directly below `/var/lib/vandox` (a root-owned directory the unit may write to); the directory must exist, be a real directory (not a link) and be writable for the agent. |
 | `spool.max_size` | `2GiB` | Size cap of all spool files: a whole number followed by `MiB` or `GiB`, from `64MiB` to `64GiB`. When the cap or `spool.min_free` leaves no room for new records, the agent drops the oldest spool data first and records the gap. |
 | `spool.min_free` | `1GiB` | Free space that stays available on the file system of the spool: a whole number followed by `MiB` or `GiB`, from `0MiB` to `1024GiB`. `0MiB` (or `0GiB`) switches the check off. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
@@ -150,9 +150,21 @@ release is in [`CHANGELOG.md`](CHANGELOG.md).
 Releases are published from GitHub releases with `v<major>.<minor>.<patch>` tags on `main`
 (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#versioning-and-releases)).
 
-**Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is
-the forensics release and works from imported logs alone. A release also carries a `vandox-agent-linux-amd64` binary built
-from the current code; it starts with its configuration file and the agent token, schedules its own self-metrics and tells systemd that it is ready, but it collects nothing else and sends nothing yet, so there is nothing to install on the monitored server.
+**Agent.** The agent collects on the monitored server and sends to the backend (from v0.2.0). Each release carries a
+`vandox-agent-linux-amd64` binary and its `SHA256SUMS`; the install script of the release's source downloads both over HTTPS, checks the
+checksum before it runs the binary, creates the system user `vandox-agent`, `/etc/vandox`, the spool directory, the systemd unit and the
+MariaDB account, and starts the agent. Run it as root on the monitored server (Ubuntu 22.04, systemd, `x86_64`) from a checkout of the same tag; it asks for
+the agent token on the terminal or on standard input, never as an option:
+
+```
+sudo deploy/agent/install.sh --version vX.Y.Z --agent-id web-1 --backend-url http://100.101.102.103:8081
+```
+
+Run it again with another `--version` to upgrade (only the binary and the unit are replaced), and remove the agent with
+`sudo deploy/agent/uninstall.sh` (it keeps the configuration, token, spool, user and MariaDB account) or `sudo deploy/agent/uninstall.sh --purge`
+(it deletes them, unsent records included). The unit lets the agent reach only localhost and the tailnet, so `--backend-url` names a tailnet
+address or MagicDNS name. The options, messages, server checks and every unit setting are in
+[`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of [`docs/INSTALL.md`](docs/INSTALL.md).
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):

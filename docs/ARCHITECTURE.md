@@ -454,7 +454,7 @@ failed sign-ins) and runs behind a reverse proxy whose forwarded headers are tru
 ([Web login](areas/web-login.md)). The Telegram token
 exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
 via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. The agent runs as the
-dedicated user `vandox-agent`, never as root, with only the groups and capabilities that its installation files under `deploy/agent/` will list (v0.2.0)
+dedicated user `vandox-agent`, never as root, with only the groups and capabilities that its installation files under `deploy/agent/` list: the unit `vandox-agent.service` and the scripts `install.sh` and `uninstall.sh`, which also limit the unit to tailnet addresses and localhost with `IPAddressAllow=` ([record 0131](decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md))
 and, from v0.6.0, a polkit rule that allows restarting only the configured units. The one capability it
 needs to read other users' processes (`CAP_SYS_PTRACE`) is the only one in its bounding set, so its systemd unit denies the process-attach
 system calls and `process_madvise`, grants no write-side capability and keeps every other capability out of the bounding set. Three barriers

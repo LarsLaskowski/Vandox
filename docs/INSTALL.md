@@ -2,7 +2,7 @@
 
 This guide installs the Vandox backend `vandoxd` on a Docker host in the home network, imports the logs of the monitored server and
 opens the first reconstructed outage in the web UI. It is the path for v0.1.0, the forensics release: Vandox works from the logs the
-server already has, and there is **no agent to install** (the agent arrives with v0.2.0). The [README](../README.md) is the reference
+server already has, and there is **no agent is needed** for it (from v0.2.0 on, step 11 installs the agent). The [README](../README.md) is the reference
 for every option, command and limit named here.
 
 The steps are the same on any Docker host. Synology Container Manager and QNAP Container Station are shown as worked examples where
@@ -300,3 +300,23 @@ one the agent presents; `ingest.min_free` (default `1GiB`) is the free space bel
 packets to the tailnet address may reach the ingest port, as it may the web port. The agent token is the boundary: the backend checks
 it before it reads a request, accepts only the agent named in `ingest.agent_id` and bounds what one request may cost. Keep the
 Tailscale ACL strict, so the monitored server reaches only this port ([SECURITY.md](../SECURITY.md)).
+
+## 11. Install the agent on the monitored server
+
+From v0.2.0 on, the agent collects on the monitored server and sends to the backend of step 10. Run the script **as root on the monitored
+server**, from a checkout of the release's source (the script and the unit come from the checkout, the binary and its `SHA256SUMS` from the
+release of the same version, over HTTPS):
+
+```
+git clone --branch vX.Y.Z https://github.com/LarsLaskowski/Vandox.git
+sudo Vandox/deploy/agent/install.sh --version vX.Y.Z --agent-id web-1 --backend-url http://100.101.102.103:8081
+```
+
+It asks for the agent token of step 3 (typed without echo, or one line of standard input; never an option), checks the checksum of the
+binary before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the spool directory, the unit and the MariaDB account (`plesk db` on
+Plesk, else `mariadb`), starts the agent and prints a line per server check. The `--agent-id` must be the `agent_id` of step 10, and the
+`--backend-url` a tailnet address or MagicDNS name: the unit lets the agent reach only localhost and the tailnet. Run it again with another
+`--version` to upgrade: only the binary and the unit are replaced, and the token is not asked for again. Remove the agent with
+`sudo Vandox/deploy/agent/uninstall.sh` (it keeps the configuration, token, spool and user) or `uninstall.sh --purge` (it deletes them,
+unsent records included). Every option, message, check and unit setting is in
+[`deploy/agent/README.md`](../deploy/agent/README.md); the unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).
