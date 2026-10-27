@@ -152,6 +152,8 @@ download, for example). The gate itself checks two SonarQube Cloud shell rules s
 local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings are first
 reported by the *Sonar gate* below.
 
+`shell:S5332` (clear-text `http://` URL, a vulnerability that fails the security rating) follows a URL through variables and command output and exempts loopback; in scripts, use `https://` or pass address and port, and don't suppress it (record 0131).
+
 *Sonar gate* runs SonarQube Cloud's own analysis on the work branch before the pull request (squad step 7):
 `sonar-check.py` runs the scanner with the branch name, waits for the analysis and fails on every open issue or
 security hotspot on a line the branch changed, so the rules no local analyzer has stop surfacing only after the
