@@ -108,30 +108,42 @@ expect_rc() {
 
 # expect_out LINE WHAT / expect_err LINE WHAT: the whole line is on standard output / standard error.
 expect_out() {
-  if ! grep -Fxq -- "$1" <<<"$OUT"; then
+  local line=$1
+  local what=$2
+
+  if ! grep -Fxq -- "$line" <<<"$OUT"; then
     show
-    fail "$2: standard output has no line: $1"
+    fail "$what: standard output has no line: $line"
   fi
 }
 
 expect_err() {
-  if ! grep -Fxq -- "$1" <<<"$ERR"; then
+  local line=$1
+  local what=$2
+
+  if ! grep -Fxq -- "$line" <<<"$ERR"; then
     show
-    fail "$2: standard error has no line: $1"
+    fail "$what: standard error has no line: $line"
   fi
 }
 
 expect_out_re() {
-  if ! grep -Eq -- "$1" <<<"$OUT"; then
+  local pattern=$1
+  local what=$2
+
+  if ! grep -Eq -- "$pattern" <<<"$OUT"; then
     show
-    fail "$2: standard output has no line matching: $1"
+    fail "$what: standard output has no line matching: $pattern"
   fi
 }
 
 expect_no_out() {
-  if grep -Fq -- "$1" <<<"$OUT"; then
+  local text=$1
+  local what=$2
+
+  if grep -Fq -- "$text" <<<"$OUT"; then
     show
-    fail "$2: standard output holds: $1"
+    fail "$what: standard output holds: $text"
   fi
 }
 
@@ -144,31 +156,39 @@ expect_empty_err() {
 
 # expect_before FIRST SECOND WHAT: both lines are on standard output, FIRST earlier.
 expect_before() {
+  local first=$1
+  local second=$2
+  local what=$3
   local a b
 
-  a="$(grep -Fxn -- "$1" <<<"$OUT" | head -n 1 | cut -d: -f1)"
-  b="$(grep -Fxn -- "$2" <<<"$OUT" | head -n 1 | cut -d: -f1)"
+  a="$(grep -Fxn -- "$first" <<<"$OUT" | head -n 1 | cut -d: -f1)"
+  b="$(grep -Fxn -- "$second" <<<"$OUT" | head -n 1 | cut -d: -f1)"
 
   if [[ -z "$a" || -z "$b" ]] || ((a >= b)); then
     show
-    fail "$3: line '$1' is not printed before '$2'"
+    fail "$what: line '$first' is not printed before '$second'"
   fi
 }
 
 # expect_stat PATH OWNER:GROUP MODE
 expect_stat() {
+  local path=$1
+  local owner_group=$2
+  local mode=$3
   local got
 
-  got="$(stat -c '%U:%G %a' -- "$1" 2>/dev/null)" || fail "$1 does not exist"
+  got="$(stat -c '%U:%G %a' -- "$path" 2>/dev/null)" || fail "$path does not exist"
 
-  if [[ "$got" != "$2 $3" ]]; then
-    fail "$1: owner and mode are '$got', want '$2 $3'"
+  if [[ "$got" != "$owner_group $mode" ]]; then
+    fail "$path: owner and mode are '$got', want '$owner_group $mode'"
   fi
 }
 
 expect_absent() {
-  if [[ -e "$1" || -L "$1" ]]; then
-    fail "$1 still exists"
+  local path=$1
+
+  if [[ -e "$path" || -L "$path" ]]; then
+    fail "$path still exists"
   fi
 }
 
@@ -201,9 +221,10 @@ nothing_left() {
 
 # wait_active SECONDS: waits until the unit is active.
 wait_active() {
+  local seconds=$1
   local i
 
-  for ((i = 0; i < $1; i++)); do
+  for ((i = 0; i < seconds; i++)); do
     if systemctl is-active --quiet vandox-agent; then
       return 0
     fi

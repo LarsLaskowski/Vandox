@@ -28,3 +28,4 @@ are quoted in full.
 | 2026-10-27 08:27 | 6 Implement G4 | squad-dev | ci.yml job agent-install added, actionlint passes; row 10 end-to-end not runnable here (needs systemd 249) (sonnet/medium · 20,158 tokens · 6 tool uses · 46 s · continued from 6 Implement G2) |
 | 2026-10-27 08:27 | 6 Test documentation G5 | squad-tester | UNIT_TESTS.md section for deploy script tests (sonnet/medium · 3,785 tokens · 4 tool uses · 14 s · continued from 5 Tests first G3) |
 | 2026-10-27 08:31 | 6 Documentation G5 | squad-dev | Documentation rows written; go test -race ./deploy/agent fully green; decision-check, config-check pass (sonnet/medium · 65,249 tokens · 29 tool uses · 277 s · continued from 6 Implement G2) |
+| 2026-10-27 08:37 | 7 Code check | squad-code-officer | S7679 findings in check-agent-install.sh fixed mechanically; analyzer gate PASS (haiku/medium · usage pending) |
