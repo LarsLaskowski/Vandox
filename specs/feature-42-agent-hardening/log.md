@@ -16,4 +16,4 @@ are quoted in full.
 | 2026-10-27 07:42 | 3 Plan security review (2nd) | squad-security | CHANGES_REQUIRED: B4 size bounds do not hold on curl 7.81 / --from unbounded; N8-N10 non-blocking; B1-B3 fixed (opus/medium · 72,932 tokens · 16 tool uses · 188 s) |
 | 2026-10-27 07:44 | 3 Plan decide | squad-lead | RESULT: DONE, B4 accepted and fixed (defect in plan bounds, complete fix supplied, no scope/criterion change), N8-N10 taken; one Security delta confirmation follows, a further rejection goes to the Product Manager (opus/medium · 59,456 tokens · 29 tool uses · 152 s) |
 | 2026-10-27 07:45 | 3 Plan security review (delta) | squad-security | APPROVED; N11 appended to plan.md as Security notes (opus/medium · 81,909 tokens · 6 tool uses · 36 s · continued from 3 Plan security review) |
-| 2026-10-27 07:50 | 5 Tests first G1 | squad-tester | service_test.go written, 9 tests compile and fail as expected; no deferred (sonnet/medium · usage pending) |
+| 2026-10-27 07:50 | 5 Tests first G1 | squad-tester | service_test.go written, 9 tests compile and fail as expected; no deferred (sonnet/medium · 109,223 tokens · 17 tool uses · 228 s) |
