@@ -2025,7 +2025,7 @@ reads: `VERSION`, `vandox-agent.service`, `mariadb-user.sql`, `agent.yaml` and t
 to the later checks. What remains is the time between a check and the read.
 
 **Order, and what stops it.** Nothing changes before the files are verified.
-1. Arguments (exit 2); the entry check and the bundle files (E15, exit 1); `VERSION` (exit 2); then root, systemd as PID 1 and `x86_64`, else
+1. The entry check (E15, exit 1, before the arguments are read); arguments (exit 2); the other bundle files (E15, exit 1); `VERSION` (exit 2); then root, systemd as PID 1 and `x86_64`, else
    `install.sh: must run as root`, `install.sh: needs systemd` or `install.sh: only linux-amd64 is supported`, exit 1.
 2. Configuration and the early checks: an existing `/etc/vandox/agent.yaml` is kept (`install.sh: keeping existing /etc/vandox/agent.yaml`) and its
    `spool.directory` is read; without one the spool is `/var/lib/vandox/spool` and an IP literal outside localhost and the tailnet ranges gets

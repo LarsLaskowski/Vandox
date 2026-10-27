@@ -181,8 +181,9 @@ d=$(mktemp -d) && cd "$d" &&
   "./vandox-agent-install-$v/install.sh" --from "$d" --agent-id web-1 --backend-url http://100.101.102.103:8081
 ```
 
-Remove the agent from the extracted bundle of the installed version (it keeps the configuration, token, spool, user and MariaDB account;
-`--purge` deletes them, unsent records included):
+Remove the agent from the extracted bundle of the installed version, in the directory of the chain above with `v` set to that version
+(extract it again with the chain up to `tar` when it is gone; it keeps the configuration, token, spool, user and MariaDB account; `--purge`
+deletes them, unsent records included):
 
 ```
 sudo "./vandox-agent-install-$v/uninstall.sh"            # keeps the user, configuration, token, spool and MariaDB account
