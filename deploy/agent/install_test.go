@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1874,7 +1875,11 @@ func treeSnapshot(t *testing.T, root string) string {
 
 	var sb strings.Builder
 
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+
+	err := filepath.WalkDir(root, func(path string, _ os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -1969,56 +1974,71 @@ func TestCheckSpoolDirectory_RefusesBeforeAnyChange(t *testing.T) {
 		}},
 	}
 
-	changing := []string{"mkdir", "chown", "chmod", "useradd", "groupadd", "usermod", "install", "mv", "systemctl"}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			h := newHarness(t)
-
-			users := []string{conformUser}
-			if tc.noUser {
-				users = nil
-			}
-
-			h.accounts(users, append(strings.Split(groupsBase, "\n"), "vandox-agent|998"))
-			h.owners()
-
-			for _, name := range []string{"mkdir", "chmod", "install", "mv", "systemctl"} {
-				h.stub(name, "exit 0")
-			}
-
-			parent := filepath.Join(h.dir, "vandox")
-			spool := filepath.Join(parent, "spool")
-			tc.setup(t, h, parent, spool)
-
-			before := treeSnapshot(t, h.dir+"/vandox")
-
-			got := h.run(`check_spool_directory "$1"`, "", spool)
-
-			if tc.refuse == "" {
-				expectResult(t, "check_spool_directory", got, 0, "", "")
-			} else {
-				path := spool
-				if tc.refuse == "parent" {
-					path = parent
-				}
-
-				expectResult(t, "check_spool_directory", got, 1, "", "install.sh: "+path+" is not the agent's directory\n")
-			}
-
-			for _, name := range changing {
-				if calls := h.calls(name); len(calls) != 0 {
-					t.Errorf("%s calls = %q, want none (the check is read-only)", name, calls)
-				}
-			}
-
-			if after := treeSnapshot(t, h.dir+"/vandox"); after != before {
-				t.Errorf("the tree changed:\nbefore:\n%safter:\n%s", before, after)
-			}
+			runCheckSpoolCase(t, tc)
 		})
 	}
+}
+
+// runCheckSpoolCase runs check_spool_directory on the tree of one case and checks the answer, that no
+// changing command ran and that the tree is unchanged.
+func runCheckSpoolCase(t *testing.T, tc checkSpoolCase) {
+	t.Helper()
+
+	h := newHarness(t)
+
+	users := []string{conformUser}
+	if tc.noUser {
+		users = nil
+	}
+
+	h.accounts(users, append(strings.Split(groupsBase, "\n"), "vandox-agent|998"))
+	h.owners()
+
+	for _, name := range []string{"mkdir", "chmod", "install", "mv", "systemctl"} {
+		h.stub(name, "exit 0")
+	}
+
+	parent := filepath.Join(h.dir, "vandox")
+	spool := filepath.Join(parent, "spool")
+	tc.setup(t, h, parent, spool)
+
+	before := treeSnapshot(t, parent)
+
+	got := h.run(`check_spool_directory "$1"`, "", spool)
+
+	assertCheckSpoolAnswer(t, tc, got, parent, spool)
+
+	for _, name := range []string{"mkdir", "chown", "chmod", "useradd", "groupadd", "usermod", "install", "mv", "systemctl"} {
+		if calls := h.calls(name); len(calls) != 0 {
+			t.Errorf("%s calls = %q, want none (the check is read-only)", name, calls)
+		}
+	}
+
+	if after := treeSnapshot(t, parent); after != before {
+		t.Errorf("the tree changed:\nbefore:\n%safter:\n%s", before, after)
+	}
+}
+
+// assertCheckSpoolAnswer compares the answer of check_spool_directory with the case.
+func assertCheckSpoolAnswer(t *testing.T, tc checkSpoolCase, got shellResult, parent, spool string) {
+	t.Helper()
+
+	if tc.refuse == "" {
+		expectResult(t, "check_spool_directory", got, 0, "", "")
+
+		return
+	}
+
+	path := spool
+	if tc.refuse == "parent" {
+		path = parent
+	}
+
+	expectResult(t, "check_spool_directory", got, 1, "", "install.sh: "+path+" is not the agent's directory\n")
 }
 
 // TestTailnetWarning_OnlyForLiteralsOutsideTheRanges checks E6: only an IP literal outside 100.64.0.0/10 and
