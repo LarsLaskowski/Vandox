@@ -88,9 +88,11 @@ How the scripts, the unit and their files reach the server:
     is attested on its own; the script keeps downloading the binary of the bundle's version.
 27. **A `curl … | bash` one-liner** — runs bytes from the network before any check; never documented.
 28. **`install.sh` checks its own checksum** — a script cannot vouch for the files it is part of; the check belongs before extraction.
-29. **`install.sh` refuses a directory or file of the bundle that is a link, not owned by root or group- or other-writable** (chosen,
-    Security review) — a cheap backstop when a bundle is extracted somewhere shared; it cannot help once `common.sh`, sourced before
-    the check, or the script itself was changed, so the documented extraction stays the control.
+29. **The scripts refuse a bundle that another user could change** (chosen, Security review) — before anything is sourced, the
+    script itself, `common.sh`, the bundle directory and every directory above it are checked (a link, not owned by root, group- or
+    other-writable without the sticky bit for an ancestor, any set-user-ID, set-group-ID or sticky bit on a bundle entry), and the
+    bundle's other files before they are read. A cheap backstop for a bundle extracted somewhere shared: it narrows what another user
+    can swap to the time between the check and the read, and the documented extraction stays the control.
 
 Which checksum `install.sh` checks the binary against:
 30. **The release's `SHA256SUMS`, downloaded at install time** — an operator who verifies the bundle's attestation still installs a
@@ -101,8 +103,9 @@ Which checksum `install.sh` checks the binary against:
 Documented commands:
 32. **Download, check, extract and run as separate lines** — pasted line by line, a failed check does not stop `tar` and `install.sh`.
 33. **One command chained with `&&`, as root in a new `mktemp -d` directory** (chosen, Security review) — a failed check stops it, and
-    no other local user can have created the extraction directory; the bundle's line is selected by an exact string comparison, not a
-    pattern, and `tar` extracts with root as owner and root's umask (`--no-same-owner --no-same-permissions`).
+    no other local user can have created the extraction directory; the bundle's line is selected by an exact comparison of the name
+    field, not a pattern (`sha256sum --strict` alone would still take a line with one space, a tab or leading blanks, and then checks
+    the same file), and `tar` extracts with root as owner and root's umask (`--no-same-owner --no-same-permissions`).
 
 ## Decision
 
