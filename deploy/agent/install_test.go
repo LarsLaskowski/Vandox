@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -18,7 +20,7 @@ import (
 
 const (
 	binaryName    = "vandox-agent-linux-amd64"
-	sumsName      = "SHA256SUMS"
+	pinName       = "vandox-agent-linux-amd64.sha256"
 	maxSumsBytes  = 4096
 	maxBinaryByte = 67108864
 
@@ -328,8 +330,9 @@ func (h *harness) ran() bool {
 	return err == nil
 }
 
-// release writes SHA256SUMS and the binary to a source directory and returns it.
-func (h *harness) release(sums string, binary []byte) string {
+// release writes the binary to a source directory (the --from directory or the download source) and the pin
+// file to the bundle directory, and returns the source directory.
+func (h *harness) release(pin string, binary []byte) string {
 	h.t.Helper()
 
 	src := filepath.Join(h.dir, "src")
@@ -337,13 +340,37 @@ func (h *harness) release(sums string, binary []byte) string {
 		h.t.Fatalf("mkdir src: %v", err)
 	}
 
-	h.writeFile("src/"+sumsName, sums)
+	if err := os.MkdirAll(h.bundle(), 0o755); err != nil {
+		h.t.Fatalf("mkdir bundle: %v", err)
+	}
+
+	h.writeFile("bundle/"+pinName, pin)
 
 	if err := os.WriteFile(filepath.Join(src, binaryName), binary, 0o644); err != nil {
 		h.t.Fatalf("write binary: %v", err)
 	}
 
 	return src
+}
+
+// bundle returns the bundle directory of a test, the one the pin file is read from.
+func (h *harness) bundle() string {
+	return filepath.Join(h.dir, "bundle")
+}
+
+// realPin returns the pin line the real sha256sum writes for the binary in dir, as the release does.
+func realPin(t *testing.T, dir string) string {
+	t.Helper()
+
+	cmd := exec.Command("sha256sum", binaryName)
+	cmd.Dir = dir
+
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("sha256sum %s in %s: %v", binaryName, dir, err)
+	}
+
+	return string(out)
 }
 
 // workDir creates the work directory of a download (mode 0711) and returns it.
@@ -674,44 +701,6 @@ func assertNoAccountChange(t *testing.T, h *harness) {
 	}
 }
 
-// TestCheckoutWarning_OnlyForAnotherTag checks S3: only a checkout on another tag is warned about.
-func TestCheckoutWarning_OnlyForAnotherTag(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		tag  string
-		want string
-	}{
-		{"same tag", "v1.2.3", ""},
-		{"other tag", "v1.2.0", "install.sh: WARNING checkout is v1.2.0, not v1.2.3\n"},
-		{"release candidate of the version", "v1.2.3-rc.1", "install.sh: WARNING checkout is v1.2.3-rc.1, not v1.2.3\n"},
-		{"no tag", "", ""},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			h := newHarness(t)
-			got := h.run(`checkout_warning "$1" "$2"`, "", tc.tag, releaseVersion)
-
-			expectResult(t, "checkout_warning", got, 0, tc.want, "")
-		})
-	}
-
-	t.Run("git exiting 128 gives no output", func(t *testing.T) {
-		t.Parallel()
-
-		h := newHarness(t)
-		h.stub("git", `echo "fatal: detected dubious ownership in repository" >&2; exit 128`)
-
-		got := h.run(`checkout_warning "" "$1"`, "", releaseVersion)
-
-		expectResult(t, "checkout_warning with a failing git", got, 0, "", "")
-	})
-}
-
 // TestNeedsToken_OnlyWithoutTokenFile checks S3: the token is needed exactly when its file is missing.
 func TestNeedsToken_OnlyWithoutTokenFile(t *testing.T) {
 	t.Parallel()
@@ -837,7 +826,7 @@ func TestVerifyChecksum_AcceptsOnlyTheSingleMatchingLine(t *testing.T) {
 			writeBytes(t, filepath.Join(work, binaryName), string(binary))
 
 			if tc.sums != nil {
-				writeBytes(t, filepath.Join(work, sumsName), *tc.sums)
+				writeBytes(t, filepath.Join(work, pinName), *tc.sums)
 			}
 
 			got := h.run(`verify_checksum "$1"`, "", work)
@@ -877,7 +866,7 @@ func TestVerifyChecksum_LeavesTheBinaryExecutableByOthers(t *testing.T) {
 		t.Fatalf("write binary: %v", err)
 	}
 
-	writeBytes(t, filepath.Join(work, sumsName), sumsLine(binary))
+	writeBytes(t, filepath.Join(work, pinName), sumsLine(binary))
 
 	got := h.run(`verify_checksum "$1"`, "", work)
 	expectResult(t, "verify_checksum", got, 0, "", "")
@@ -891,22 +880,42 @@ func TestVerifyChecksum_LeavesTheBinaryExecutableByOthers(t *testing.T) {
 	}
 }
 
-// neverRunsCase is one SHA256SUMS content for the chain of fetch, verify and version check.
+// neverRunsCase is one pin file content for the chain of fetch, verify and version check.
 type neverRunsCase struct {
 	name  string
-	sums  func(binary []byte) string
+	pin   func(binary []byte) string
 	match bool
 }
 
+// fetchAndVerify is the shell text that fetches into $3 from $2 (or the download) with the bundle $4, then verifies.
+const fetchAndVerify = `fetch_release "$1" "$2" "$3" "$4"; verify_checksum "$3"`
+
+// TestPinHelper_MatchesTheRealSha256sum keeps the fixtures honest: the pin line the tests compute equals the
+// line the real sha256sum writes for the same binary.
+func TestPinHelper_MatchesTheRealSha256sum(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	binary := []byte("the binary\n")
+	src := h.release(sumsLine(binary), binary)
+
+	if got := realPin(t, src); got != sumsLine(binary) {
+		t.Errorf("sha256sum writes %q, the helper %q, want them equal", got, sumsLine(binary))
+	}
+}
+
 // TestFetchRelease_NeverRunsABinaryThatFailsTheChecksum runs fetch, verify and version check in turn, from
-// a directory and from a download: a binary that does not match is never run, a matching one is (the control).
+// a directory and from a download: a binary that does not match the bundle's pin is never run, a matching
+// one is (the control).
 func TestFetchRelease_NeverRunsABinaryThatFailsTheChecksum(t *testing.T) {
 	t.Parallel()
 
 	cases := []neverRunsCase{
-		{"matching checksum (control)", sumsLine, true},
+		{"matching pin (control)", sumsLine, true},
 		{"other hash", func([]byte) string { return sha256Hex([]byte("x")) + "  " + binaryName + "\n" }, false},
 		{"two lines", func(b []byte) string { return sumsLine(b) + sumsLine(b) }, false},
+		{"malformed line", func([]byte) string { return "this is not a checksum line\n" }, false},
+		{"hash of another file name", func(b []byte) string { return sha256Hex(b) + "  other-file\n" }, false},
 	}
 
 	for _, source := range []string{"from", "download"} {
@@ -929,7 +938,7 @@ func runNeverRuns(t *testing.T, source string, tc neverRunsCase) {
 	h.setprivStub()
 
 	binary := h.markerBinary(releaseVersion)
-	src := h.release(tc.sums(binary), binary)
+	src := h.release(tc.pin(binary), binary)
 	work := h.workDir()
 	from := ""
 
@@ -939,8 +948,8 @@ func runNeverRuns(t *testing.T, source string, tc neverRunsCase) {
 		h.curlServing(src, "")
 	}
 
-	got := h.run(`fetch_release "$1" "$2" "$3"; verify_checksum "$3"; check_binary_version "$3/`+binaryName+`" "$1"`,
-		"", releaseVersion, from, work)
+	got := h.run(`fetch_release "$1" "$2" "$3" "$4"; verify_checksum "$3"; check_binary_version "$3/`+binaryName+`" "$1"`,
+		"", releaseVersion, from, work, h.bundle())
 
 	if tc.match {
 		expectResult(t, "fetch, verify and check", got, 0, "", "")
@@ -959,30 +968,8 @@ func runNeverRuns(t *testing.T, source string, tc neverRunsCase) {
 	}
 }
 
-// TestFetchRelease_ReportsAMissingFile checks E3: a failed download names the file, exit 1.
+// TestFetchRelease_ReportsAMissingFile checks E3: a failed download of the binary names it, exit 1.
 func TestFetchRelease_ReportsAMissingFile(t *testing.T) {
-	t.Parallel()
-
-	for _, name := range []string{sumsName, binaryName} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			h := newHarness(t)
-
-			binary := []byte("b")
-			src := h.release(sumsLine(binary), binary)
-			work := h.workDir()
-			h.curlServing(src, name)
-
-			got := h.run(`fetch_release "$1" "" "$2"`, "", releaseVersion, work)
-
-			expectResult(t, "fetch_release", got, 1, "", "install.sh: download failed: "+name+"\n")
-		})
-	}
-}
-
-// TestDownload_UsesHTTPSOnly checks the arguments of both curl calls (plan.md, Approach, install.sh order 5).
-func TestDownload_UsesHTTPSOnly(t *testing.T) {
 	t.Parallel()
 
 	h := newHarness(t)
@@ -990,76 +977,158 @@ func TestDownload_UsesHTTPSOnly(t *testing.T) {
 	binary := []byte("b")
 	src := h.release(sumsLine(binary), binary)
 	work := h.workDir()
+	h.curlServing(src, binaryName)
+
+	got := h.run(`fetch_release "$1" "" "$2" "$3"`, "", releaseVersion, work, h.bundle())
+
+	expectResult(t, "fetch_release", got, 1, "", "install.sh: download failed: "+binaryName+"\n")
+}
+
+// TestDownload_UsesHTTPSOnly checks the one curl call of a download: only the binary is downloaded, with
+// the HTTPS-only flags, and the pin file comes from the bundle directory with cp -P.
+func TestDownload_UsesHTTPSOnly(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.passthrough("cp")
+
+	binary := []byte("b")
+	src := h.release(sumsLine(binary), binary)
+	work := h.workDir()
 	h.curlServing(src, "")
 
-	got := h.run(`fetch_release "$1" "" "$2"`, "", releaseVersion, work)
+	got := h.run(`fetch_release "$1" "" "$2" "$3"`, "", releaseVersion, work, h.bundle())
 	expectResult(t, "fetch_release", got, 0, "", "")
 
 	calls := h.calls("curl")
-	if len(calls) != 2 {
-		t.Fatalf("curl calls = %q, want one for %s and one for %s", calls, sumsName, binaryName)
+	if len(calls) != 1 {
+		t.Fatalf("curl calls = %q, want exactly one, for %s", calls, binaryName)
 	}
 
-	base := "https://github.com/LarsLaskowski/Vandox/releases/download/" + releaseVersion + "/"
+	want := []string{
+		"[--proto][=https]", "[--proto-redir][=https]", "[--fail]", "[--location]", "[--silent]", "[--show-error]",
+		"[--max-time][300]", "[--max-filesize][67108864]", "[-o][" + filepath.Join(work, binaryName) + "]",
+		"[https://github.com/LarsLaskowski/Vandox/releases/download/" + releaseVersion + "/" + binaryName + "]",
+	}
 
-	for _, file := range []struct {
-		name  string
-		limit string
-	}{{sumsName, "4096"}, {binaryName, "67108864"}} {
-		call := findCall(calls, base+file.name+"]")
-		if call == "" {
-			t.Errorf("no curl call for %s%s in %q", base, file.name, calls)
-
-			continue
-		}
-
-		for _, want := range []string{
-			"[--proto][=https]", "[--proto-redir][=https]", "[--fail]", "[--location]", "[--silent]", "[--show-error]",
-			"[--max-time][300]", "[--max-filesize][" + file.limit + "]", "[-o][" + filepath.Join(work, file.name) + "]",
-		} {
-			if strings.Contains(call, want) == false {
-				t.Errorf("curl call for %s = %s, want it to hold %s", file.name, call, want)
-			}
-		}
-
-		if strings.Count(call, "[http") != 1 {
-			t.Errorf("curl call for %s = %s, want exactly one URL", file.name, call)
+	for _, w := range want {
+		if strings.Contains(calls[0], w) == false {
+			t.Errorf("curl call = %s, want it to hold %s", calls[0], w)
 		}
 	}
+
+	if strings.Count(calls[0], "[http") != 1 {
+		t.Errorf("curl call = %s, want exactly one URL", calls[0])
+	}
+
+	assertPinCopied(t, h, work, sumsLine(binary))
 }
 
-// findCall returns the recorded call that ends with suffix.
-func findCall(calls []string, suffix string) string {
-	for _, c := range calls {
-		if strings.HasSuffix(c, suffix) {
-			return c
+// assertPinCopied checks that the pin file is in the work directory with the bundle's content, copied with
+// cp -P (a link is copied as a link, which the next check refuses).
+func assertPinCopied(t *testing.T, h *harness, work, content string) {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(work, pinName))
+	if err != nil || string(data) != content {
+		t.Errorf("pin file in the work directory = %q (%v), want %q", data, err, content)
+	}
+
+	for _, call := range h.calls("cp") {
+		if strings.Contains(call, "[-P]") && strings.Contains(call, pinName) {
+			return
 		}
 	}
 
-	return ""
+	t.Errorf("cp calls = %q, want one with -P that copies %s", h.calls("cp"), pinName)
+}
+
+// badPinSetup makes one kind of unusable pin file at path.
+type badPinSetup func(t *testing.T, h *harness, path string)
+
+// badPins are the pin files fetch_release must refuse before reading them, each as the E2 line.
+var badPins = map[string]badPinSetup{
+	"link":      badSources["link"],
+	"directory": badSources["directory"],
+	"FIFO":      badSources["FIFO"],
+	"missing":   badSources["missing"],
+	"4097 bytes": func(t *testing.T, _ *harness, path string) {
+		t.Helper()
+		writeBytes(t, path, sumsLine([]byte("b"))+strings.Repeat("#", maxSumsBytes+1-len(sumsLine([]byte("b")))))
+	},
+	"sparse 64 MiB": func(t *testing.T, _ *harness, path string) {
+		t.Helper()
+		sparseFile(t, path, maxBinaryByte)
+	},
+}
+
+// TestFetchRelease_RefusesABadPinInTheBundle checks that the pin is a regular file, no link, of at most 4096
+// bytes by its size before it is read; any problem is the E2 line, exit 1, for a --from and a download source.
+func TestFetchRelease_RefusesABadPinInTheBundle(t *testing.T) {
+	t.Parallel()
+
+	for kind, prepare := range badPins {
+		for _, source := range []string{"from", "download"} {
+			t.Run(kind+" "+source, func(t *testing.T) {
+				t.Parallel()
+
+				runBadPin(t, source, prepare)
+			})
+		}
+	}
+
+	t.Run("exactly 4096 bytes is copied", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t)
+		h.passthrough("cp")
+
+		binary := []byte("b")
+		pin := sumsLine(binary) + strings.Repeat("#", maxSumsBytes-len(sumsLine(binary)))
+		src := h.release(pin, binary)
+		work := h.workDir()
+
+		got := h.run(`fetch_release "$1" "$2" "$3" "$4"`, "", releaseVersion, src, work, h.bundle())
+
+		expectResult(t, "fetch_release", got, 0, "", "")
+		assertPinCopied(t, h, work, pin)
+	})
+}
+
+// runBadPin replaces the pin file of a bundle by an unusable one and runs fetch_release and verify_checksum.
+func runBadPin(t *testing.T, source string, prepare badPinSetup) {
+	t.Helper()
+
+	h := newHarness(t)
+	h.passthrough("sha256sum")
+
+	binary := []byte("b")
+	src := h.release(sumsLine(binary), binary)
+	bad := filepath.Join(h.bundle(), pinName)
+
+	if err := os.Remove(bad); err != nil {
+		t.Fatalf("remove %s: %v", bad, err)
+	}
+
+	prepare(t, h, bad)
+
+	from := ""
+	if source == "from" {
+		from = src
+	} else {
+		h.curlServing(src, "")
+	}
+
+	got := h.run(fetchAndVerify, "", releaseVersion, from, h.workDir(), h.bundle())
+
+	expectResult(t, "fetch_release and verify_checksum", got, 1, "", checksumMismatch+"\n")
+	assertNotHashed(t, h)
 }
 
 // TestVerifyChecksum_RefusesOversizeOrNonRegularFiles checks the bounds and the link checks of
 // verify_checksum on both paths (fact 18: a curl that ignores --max-filesize must not matter).
 func TestVerifyChecksum_RefusesOversizeOrNonRegularFiles(t *testing.T) {
 	t.Parallel()
-
-	t.Run("download of an oversize SHA256SUMS", func(t *testing.T) {
-		t.Parallel()
-
-		h := newHarness(t)
-		h.passthrough("sha256sum")
-
-		binary := []byte("b")
-		sums := sumsLine(binary) + strings.Repeat("#", maxSumsBytes+1-len(sumsLine(binary)))
-		src := h.release(sums, binary)
-		h.curlServing(src, "")
-
-		got := h.run(`fetch_release "$1" "" "$2"; verify_checksum "$2"`, "", releaseVersion, h.workDir())
-
-		expectResult(t, "download then verify_checksum", got, 1, "", checksumMismatch+"\n")
-		assertNotHashed(t, h)
-	})
 
 	t.Run("download of an oversize binary", func(t *testing.T) {
 		t.Parallel()
@@ -1071,40 +1140,31 @@ func TestVerifyChecksum_RefusesOversizeOrNonRegularFiles(t *testing.T) {
 		sparseFile(t, filepath.Join(src, binaryName), maxBinaryByte+1)
 		h.curlServing(src, "")
 
-		got := h.run(`fetch_release "$1" "" "$2"; verify_checksum "$2"`, "", releaseVersion, h.workDir())
+		got := h.run(fetchAndVerify, "", releaseVersion, "", h.workDir(), h.bundle())
 
 		expectResult(t, "download then verify_checksum", got, 1, "", checksumMismatch+"\n")
 		assertNotHashed(t, h)
 	})
 
-	for _, tc := range []struct{ name, file string }{{"oversize SHA256SUMS", sumsName}, {"oversize binary", binaryName}} {
-		t.Run("--from with an "+tc.name, func(t *testing.T) {
-			t.Parallel()
+	t.Run("--from with an oversize binary", func(t *testing.T) {
+		t.Parallel()
 
-			h := newHarness(t)
-			h.passthrough("sha256sum")
+		h := newHarness(t)
+		h.passthrough("sha256sum")
 
-			binary := []byte("b")
-			src := h.release(sumsLine(binary), binary)
-			size := int64(maxBinaryByte + 1)
+		src := h.release(sumsLine([]byte("b")), []byte("b"))
+		sparseFile(t, filepath.Join(src, binaryName), maxBinaryByte+1)
 
-			if tc.file == sumsName {
-				size = maxSumsBytes + 1
-			}
+		got := h.run(fetchAndVerify, "", releaseVersion, src, h.workDir(), h.bundle())
 
-			sparseFile(t, filepath.Join(src, tc.file), size)
+		if got.code != 1 || got.stdout != "" ||
+			(got.stderr != checksumMismatch+"\n" && got.stderr != "install.sh: download failed: "+binaryName+"\n") {
+			t.Errorf("fetch_release and verify_checksum = (%d, %q, %q), want exit 1 and the E2 line or the E3 line of %s",
+				got.code, got.stdout, got.stderr, binaryName)
+		}
 
-			got := h.run(`fetch_release "$1" "$2" "$3"; verify_checksum "$3"`, "", releaseVersion, src, h.workDir())
-
-			if got.code != 1 || got.stdout != "" ||
-				(got.stderr != checksumMismatch+"\n" && got.stderr != "install.sh: download failed: "+tc.file+"\n") {
-				t.Errorf("fetch_release and verify_checksum = (%d, %q, %q), want exit 1 and the E2 line or the E3 line of %s",
-					got.code, got.stdout, got.stderr, tc.file)
-			}
-
-			assertNotHashed(t, h)
-		})
-	}
+		assertNotHashed(t, h)
+	})
 
 	verifyDirect(t)
 }
@@ -1129,7 +1189,7 @@ func verifyDirect(t *testing.T) {
 
 		binary := []byte("b")
 		writeBytes(t, filepath.Join(work, binaryName), string(binary))
-		writeBytes(t, filepath.Join(work, sumsName), sumsLine(binary))
+		writeBytes(t, filepath.Join(work, pinName), sumsLine(binary))
 	}
 
 	replace := func(name string, prepare func(t *testing.T, path, work string)) workSetup {
@@ -1169,7 +1229,7 @@ func verifyDirect(t *testing.T) {
 		name  string
 		setup workSetup
 	}{
-		{"SHA256SUMS of 4097 bytes", replace(sumsName, func(t *testing.T, path, _ string) {
+		{"pin of 4097 bytes", replace(pinName, func(t *testing.T, path, _ string) {
 			t.Helper()
 			writeBytes(t, path, sumsLine([]byte("b"))+strings.Repeat("#", maxSumsBytes+1-len(sumsLine([]byte("b")))))
 		})},
@@ -1177,7 +1237,7 @@ func verifyDirect(t *testing.T) {
 			t.Helper()
 			sparseFile(t, path, maxBinaryByte+1)
 		})},
-		{"SHA256SUMS a link", replace(sumsName, func(t *testing.T, path, work string) {
+		{"pin a link", replace(pinName, func(t *testing.T, path, work string) {
 			t.Helper()
 			linkTo(t, path, work)
 		})},
@@ -1185,8 +1245,9 @@ func verifyDirect(t *testing.T) {
 			t.Helper()
 			linkTo(t, path, work)
 		})},
-		{"SHA256SUMS a directory", replace(sumsName, dirAt)},
+		{"pin a directory", replace(pinName, dirAt)},
 		{"binary a directory", replace(binaryName, dirAt)},
+		{"pin missing", replace(pinName, func(*testing.T, string, string) {})},
 	}
 
 	for _, tc := range cases {
@@ -1222,7 +1283,7 @@ func verifyDirect(t *testing.T) {
 			hash.Write(chunk)
 		}
 
-		writeBytes(t, filepath.Join(work, sumsName), hex.EncodeToString(hash.Sum(nil))+"  "+binaryName+"\n")
+		writeBytes(t, filepath.Join(work, pinName), hex.EncodeToString(hash.Sum(nil))+"  "+binaryName+"\n")
 
 		got := h.run(`verify_checksum "$1"`, "", work)
 
@@ -1263,24 +1324,22 @@ var badSources = map[string]func(t *testing.T, h *harness, path string){
 	"missing": func(*testing.T, *harness, string) {},
 }
 
-// TestFetchRelease_RefusesALinkOrNonRegularSourceInFrom checks E3 for --from: a source that is a link, a
-// directory, a FIFO or missing stops the script with the line of that file and copies nothing.
+// TestFetchRelease_RefusesALinkOrNonRegularSourceInFrom checks E3 for --from: a binary that is a link, a
+// directory, a FIFO or missing stops the script with its line and copies no binary.
 func TestFetchRelease_RefusesALinkOrNonRegularSourceInFrom(t *testing.T) {
 	t.Parallel()
 
-	for _, file := range []string{sumsName, binaryName} {
-		for kind, prepare := range badSources {
-			t.Run(file+" "+kind, func(t *testing.T) {
-				t.Parallel()
+	for kind, prepare := range badSources {
+		t.Run(binaryName+" "+kind, func(t *testing.T) {
+			t.Parallel()
 
-				runBadSource(t, file, prepare)
-			})
-		}
+			runBadSource(t, prepare)
+		})
 	}
 }
 
-// runBadSource replaces one source file by an unusable one and runs fetch_release.
-func runBadSource(t *testing.T, file string, prepare func(t *testing.T, h *harness, path string)) {
+// runBadSource replaces the source binary by an unusable one and runs fetch_release.
+func runBadSource(t *testing.T, prepare func(t *testing.T, h *harness, path string)) {
 	t.Helper()
 
 	h := newHarness(t)
@@ -1288,7 +1347,7 @@ func runBadSource(t *testing.T, file string, prepare func(t *testing.T, h *harne
 
 	binary := []byte("b")
 	src := h.release(sumsLine(binary), binary)
-	bad := filepath.Join(src, file)
+	bad := filepath.Join(src, binaryName)
 
 	if err := os.Remove(bad); err != nil {
 		t.Fatalf("remove %s: %v", bad, err)
@@ -1297,17 +1356,12 @@ func runBadSource(t *testing.T, file string, prepare func(t *testing.T, h *harne
 	prepare(t, h, bad)
 
 	work := h.workDir()
-	got := h.run(`fetch_release "$1" "$2" "$3"`, "", releaseVersion, src, work)
+	got := h.run(`fetch_release "$1" "$2" "$3" "$4"`, "", releaseVersion, src, work, h.bundle())
 
-	expectResult(t, "fetch_release", got, 1, "", "install.sh: download failed: "+file+"\n")
+	expectResult(t, "fetch_release", got, 1, "", "install.sh: download failed: "+binaryName+"\n")
 
-	entries, err := os.ReadDir(work)
-	if err != nil {
-		t.Fatalf("read work directory: %v", err)
-	}
-
-	if len(entries) != 0 {
-		t.Errorf("work directory holds %d entries after a refused source, want nothing copied", len(entries))
+	if _, err := os.Lstat(filepath.Join(work, binaryName)); err == nil {
+		t.Errorf("work directory holds a binary after a refused source, want none copied")
 	}
 }
 
@@ -1387,24 +1441,19 @@ func runParseArgsCases(t *testing.T) {
 	urlLine := "install.sh: --backend-url is not http(s)://host[:port]"
 
 	cases := []usageCase{
-		{"no arguments", nil, []string{usageLine}},
-		{"no version", []string{"--agent-id", "web-1"}, []string{usageLine}},
-		{"version without a value", []string{"--version"}, []string{usageLine}},
-		{"version without the patch", []string{"--version", "v1.2"}, []string{usageLine}},
-		{"version without the v", []string{"--version", "1.2.3"}, []string{usageLine}},
-		{"version with a suffix other than rc", []string{"--version", "v1.2.3-beta"}, []string{usageLine}},
-		{"release candidate without a number", []string{"--version", "v1.2.3-rc"}, []string{usageLine}},
-		{"version with a trailing newline", []string{"--version", "v1.2.3\n"}, []string{usageLine}},
-		{"token as an option", []string{"--version", "v1.2.3", "--token", "x"}, []string{tokenLine, usageLine}},
-		{"token as an option with equals", []string{"--version", "v1.2.3", "--token=x"}, []string{tokenLine, usageLine}},
-		{"token option without a value", []string{"--version", "v1.2.3", "--token"}, []string{tokenLine, usageLine}},
-		{"positional argument", []string{"--version", "v1.2.3", "extra"}, []string{usageLine}},
-		{"unknown option", []string{"--version", "v1.2.3", "--bogus"}, []string{usageLine}},
-		{"from without a value", []string{"--version", "v1.2.3", "--from"}, []string{usageLine}},
-		{"agent-id without a value", []string{"--version", "v1.2.3", "--agent-id"}, []string{usageLine}},
-		{"backend-url without a value", []string{"--version", "v1.2.3", "--backend-url"}, []string{usageLine}},
-		{"invalid agent ID", []string{"--version", "v1.2.3", "--agent-id", "a b", "--backend-url", "http://h"}, []string{agentLine}},
-		{"invalid backend URL", []string{"--version", "v1.2.3", "--agent-id", "web-1", "--backend-url", "ftp://h"}, []string{urlLine}},
+		{"version option", []string{"--version", "v1.2.3"}, []string{usageLine}},
+		{"version option with agent options", []string{"--version", "v1.2.3", "--agent-id", "web-1", "--backend-url", "https://h"}, []string{usageLine}},
+		{"version option without a value", []string{"--version"}, []string{usageLine}},
+		{"token as an option", []string{"--token", "x"}, []string{tokenLine, usageLine}},
+		{"token as an option with equals", []string{"--token=x"}, []string{tokenLine, usageLine}},
+		{"token option without a value", []string{"--token"}, []string{tokenLine, usageLine}},
+		{"positional argument", []string{"extra"}, []string{usageLine}},
+		{"unknown option", []string{"--bogus"}, []string{usageLine}},
+		{"from without a value", []string{"--from"}, []string{usageLine}},
+		{"agent-id without a value", []string{"--agent-id"}, []string{usageLine}},
+		{"backend-url without a value", []string{"--backend-url"}, []string{usageLine}},
+		{"invalid agent ID", []string{"--agent-id", "a b", "--backend-url", "https://h"}, []string{agentLine}},
+		{"invalid backend URL", []string{"--agent-id", "web-1", "--backend-url", "ftp://h"}, []string{urlLine}},
 	}
 
 	script := `parse_args "$@"; [[ -z "${AGENT_ID:-}" ]] || validate_agent_id "$AGENT_ID"; ` +
@@ -1451,22 +1500,22 @@ func assertLinesInOrder(t *testing.T, text string, want []string) {
 func runParseArgsAccepted(t *testing.T) {
 	t.Helper()
 
-	show := `parse_args "$@"; printf '%s|%s|%s|%s\n' "$VERSION" "${AGENT_ID:-}" "${BACKEND_URL:-}" "${FROM_DIR:-}"; printf '%s\n' "${NO_MARIADB:-}" >&2`
+	show := `parse_args "$@"; printf '%s|%s|%s\n' "${AGENT_ID:-}" "${BACKEND_URL:-}" "${FROM_DIR:-}"; printf '%s\n' "${NO_MARIADB:-}" >&2`
 
 	h := newHarness(t)
 
-	got := h.run(show, "", "--version", "v1.2.3-rc.1", "--agent-id", "web-1", "--backend-url", "http://100.64.0.1:8081", "--from", "/some/dir")
+	got := h.run(show, "", "--agent-id", "web-1", "--backend-url", "https://100.64.0.1:8081", "--from", "/some/dir")
 
-	if got.code != 0 || got.stdout != "v1.2.3-rc.1|web-1|http://100.64.0.1:8081|/some/dir\n" {
+	if got.code != 0 || got.stdout != "web-1|https://100.64.0.1:8081|/some/dir\n" {
 		t.Errorf("parse_args globals = (%d, %q, stderr %q), want 0 and the given values", got.code, got.stdout, got.stderr)
 	}
 
-	without := h.run(show, "", "--version", "v10.20.30")
-	if without.code != 0 || without.stdout != "v10.20.30|||\n" {
-		t.Errorf("parse_args of the version alone = (%d, %q, stderr %q), want 0 and v10.20.30 with empty others", without.code, without.stdout, without.stderr)
+	without := h.run(show, "")
+	if without.code != 0 || without.stdout != "||\n" {
+		t.Errorf("parse_args without arguments = (%d, %q, stderr %q), want 0 and empty values (main asks for the rest)", without.code, without.stdout, without.stderr)
 	}
 
-	with := h.run(show, "", "--version", "v10.20.30", "--no-mariadb")
+	with := h.run(show, "", "--no-mariadb")
 	if with.code != 0 || with.stderr == without.stderr {
 		t.Errorf("--no-mariadb left NO_MARIADB = %q (exit %d), want a value other than the default %q", with.stderr, with.code, without.stderr)
 	}
@@ -1485,8 +1534,8 @@ func runVersionCases(t *testing.T) {
 		h := newHarness(t)
 
 		got := h.run(`validate_version "$1"`, "", v)
-		if got.code != 2 || got.stdout != "" {
-			t.Errorf("validate_version %q: exit status %d, standard output %q, want 2 and empty", v, got.code, got.stdout)
+		if got.code != 2 || got.stdout != "" || got.stderr != "" {
+			t.Errorf("validate_version %q: exit status %d, standard output %q, standard error %q, want 2 and both empty (silent)", v, got.code, got.stdout, got.stderr)
 		}
 	}
 }
@@ -2359,4 +2408,230 @@ func TestCheckCapabilities_ReportsOkAndWarning(t *testing.T) {
 			expectResult(t, "check_capabilities", got, 0, want, "")
 		})
 	}
+}
+
+// bundleVersionLine is the E4 line of a missing or invalid VERSION file.
+const bundleVersionLine = "install.sh: no valid VERSION file next to install.sh; use the install bundle of a release\n"
+
+// versionFileCase is one VERSION file of a bundle.
+type versionFileCase struct {
+	name    string
+	content *string // nil for a file that is not made by content
+	make    func(t *testing.T, h *harness, path string)
+	want    string // the version printed, empty for a refusal
+}
+
+// TestReadBundleVersion_AcceptsOnlyOneValidLine checks E4: VERSION is a regular file, no link, of at most 64
+// bytes (by size, before it is read), with exactly one line that ends in LF and is vX.Y.Z or vX.Y.Z-rc.N.
+func TestReadBundleVersion_AcceptsOnlyOneValidLine(t *testing.T) {
+	t.Parallel()
+
+	long := "v1.2." + strings.Repeat("9", 58) + "\n"
+	cases := []versionFileCase{
+		{name: "release", content: ptr("v1.2.3\n"), want: "v1.2.3"},
+		{name: "release candidate", content: ptr("v1.2.3-rc.1\n"), want: "v1.2.3-rc.1"},
+		{name: "exactly 64 bytes", content: ptr(long), want: strings.TrimSuffix(long, "\n")},
+		{name: "65 bytes", content: ptr("v1.2." + strings.Repeat("9", 59) + "\n")},
+		{name: "empty file", content: ptr("")},
+		{name: "no line feed", content: ptr("v1.2.3")},
+		{name: "two lines", content: ptr("v1.2.3\nv1.2.4\n")},
+		{name: "an empty second line", content: ptr("v1.2.3\n\n")},
+		{name: "CRLF", content: ptr("v1.2.3" + asciiCR + "\n")},
+		{name: "leading space", content: ptr(" v1.2.3\n")},
+		{name: "trailing space", content: ptr("v1.2.3 \n")},
+		{name: "beta suffix", content: ptr("v1.2.3-beta\n")},
+		{name: "byte order mark", content: ptr(byteOrderMark + "v1.2.3\n")},
+		{name: "without the v", content: ptr("1.2.3\n")},
+		{name: "a link to a valid file", make: func(t *testing.T, h *harness, path string) {
+			t.Helper()
+
+			target := h.writeFile("valid-version", "v1.2.3\n")
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatalf("symlink: %v", err)
+			}
+		}},
+		{name: "a directory", make: badSources["directory"]},
+		{name: "a FIFO", make: badSources["FIFO"]},
+		{name: "missing", make: badSources["missing"]},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := newHarness(t)
+			dir := filepath.Join(h.dir, "bundle")
+
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+
+			path := filepath.Join(dir, "VERSION")
+			if tc.content != nil {
+				writeBytes(t, path, *tc.content)
+			} else {
+				tc.make(t, h, path)
+			}
+
+			got := h.run(`read_bundle_version "$1"; printf '%s' "$VERSION"`, "", dir)
+
+			if tc.want == "" {
+				expectResult(t, "read_bundle_version", got, 2, "", bundleVersionLine)
+
+				return
+			}
+
+			expectResult(t, "read_bundle_version", got, 0, tc.want, "")
+		})
+	}
+}
+
+// entryCase is one tree of ancestors, bundle directory and files for the entry check of the scripts.
+type entryCase struct {
+	name   string
+	rows   func(dirs entryDirs) []string // stat rows path|"uid mode"
+	link   bool                          // common.sh is a link
+	refuse func(dirs entryDirs) string   // the path the line names, nil or "" for accepted
+}
+
+// entryDirs are the physical paths an entry-check case can name.
+type entryDirs struct {
+	far    string // an ancestor several levels above the bundle
+	near   string // the parent of the bundle directory
+	bundle string
+	script string
+	common string
+}
+
+// TestEntryCheck_RefusesBeforeSourcing runs a copy of install.sh as a program beside a stub common.sh that
+// prints "sourced": the inline entry check refuses an ancestor, the bundle directory, the script or common.sh
+// that is not root-owned, is writable by others, carries a special bit (or is a link where that is checked)
+// before anything is sourced.
+func TestEntryCheck_RefusesBeforeSourcing(t *testing.T) {
+	t.Parallel()
+
+	row := func(path, answer string) []string { return []string{path + "|" + answer} }
+
+	cases := []entryCase{
+		{name: "all root-owned 0755 and 0644", rows: func(d entryDirs) []string {
+			return []string{d.bundle + "|0 755", d.script + "|0 755", d.common + "|0 644"}
+		}},
+		{name: "private 0700 and 0600", rows: func(d entryDirs) []string {
+			return []string{d.bundle + "|0 700", d.script + "|0 600", d.common + "|0 600"}
+		}},
+		{name: "an ancestor 1777", rows: func(d entryDirs) []string { return row(d.near, "0 1777") }},
+		{name: "an ancestor 1775", rows: func(d entryDirs) []string { return row(d.far, "0 1775") }},
+		{name: "an ancestor 2755", rows: func(d entryDirs) []string { return row(d.near, "0 2755") }},
+		{name: "an ancestor 4755", rows: func(d entryDirs) []string { return row(d.far, "0 4755") }},
+		{name: "an ancestor of uid 1000", rows: func(d entryDirs) []string { return row(d.near, "1000 755") }, refuse: func(d entryDirs) string { return d.near }},
+		{name: "a far ancestor of uid 1000", rows: func(d entryDirs) []string { return row(d.far, "1000 755") }, refuse: func(d entryDirs) string { return d.far }},
+		{name: "an ancestor 0775", rows: func(d entryDirs) []string { return row(d.near, "0 775") }, refuse: func(d entryDirs) string { return d.near }},
+		{name: "an ancestor 0757", rows: func(d entryDirs) []string { return row(d.far, "0 757") }, refuse: func(d entryDirs) string { return d.far }},
+		{name: "an ancestor 0777", rows: func(d entryDirs) []string { return row(d.near, "0 777") }, refuse: func(d entryDirs) string { return d.near }},
+		{name: "the bundle directory 1755", rows: func(d entryDirs) []string { return row(d.bundle, "0 1755") }, refuse: func(d entryDirs) string { return d.bundle }},
+		{name: "the bundle directory 0775", rows: func(d entryDirs) []string { return row(d.bundle, "0 775") }, refuse: func(d entryDirs) string { return d.bundle }},
+		{name: "the bundle directory of uid 1000", rows: func(d entryDirs) []string { return row(d.bundle, "1000 755") }, refuse: func(d entryDirs) string { return d.bundle }},
+		{name: "common.sh 0664", rows: func(d entryDirs) []string { return row(d.common, "0 664") }, refuse: func(d entryDirs) string { return d.common }},
+		{name: "common.sh of uid 1000", rows: func(d entryDirs) []string { return row(d.common, "1000 644") }, refuse: func(d entryDirs) string { return d.common }},
+		{name: "common.sh 4755", rows: func(d entryDirs) []string { return row(d.common, "0 4755") }, refuse: func(d entryDirs) string { return d.common }},
+		{name: "common.sh 2775", rows: func(d entryDirs) []string { return row(d.common, "0 2775") }, refuse: func(d entryDirs) string { return d.common }},
+		{name: "common.sh a link", link: true, rows: func(entryDirs) []string { return nil }, refuse: func(d entryDirs) string { return d.common }},
+		{name: "the script 0646", rows: func(d entryDirs) []string { return row(d.script, "0 646") }, refuse: func(d entryDirs) string { return d.script }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			runEntryCase(t, tc)
+		})
+	}
+}
+
+// runEntryCase builds the bundle of one case, runs install.sh as a program and checks the answer.
+func runEntryCase(t *testing.T, tc entryCase) {
+	t.Helper()
+
+	h := newHarness(t)
+
+	root, err := filepath.EvalSymlinks(h.dir)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", h.dir, err)
+	}
+
+	bundle := filepath.Join(root, "near", "bundle")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", bundle, err)
+	}
+
+	dirs := entryDirs{
+		far:    filepath.Dir(root),
+		near:   filepath.Join(root, "near"),
+		bundle: bundle,
+		script: filepath.Join(bundle, installScript),
+		common: filepath.Join(bundle, commonScript),
+	}
+
+	script, err := os.ReadFile(shippedFile(t, installScript))
+	if err != nil {
+		t.Fatalf("read %s: %v", installScript, err)
+	}
+
+	if err := os.WriteFile(dirs.script, script, 0o755); err != nil {
+		t.Fatalf("write %s: %v", dirs.script, err)
+	}
+
+	stubCommon := "echo sourced\nexit 0\n"
+	if tc.link {
+		target := filepath.Join(root, "elsewhere.sh")
+		writeBytes(t, target, stubCommon)
+
+		if err := os.Symlink(target, dirs.common); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+	} else {
+		writeBytes(t, dirs.common, stubCommon)
+	}
+
+	h.statTable(tc.rows(dirs)...)
+
+	got := runProgram(t, h, dirs.script)
+
+	if tc.refuse == nil {
+		expectResult(t, "install.sh entry check", got, 0, "sourced\n", "")
+
+		return
+	}
+
+	expectResult(t, "install.sh entry check", got, 1, "", bundleDirLine("install.sh", tc.refuse(dirs)))
+}
+
+// runProgram runs a script as a program (bash SCRIPT) with the stubs first on PATH.
+func runProgram(t *testing.T, h *harness, script string) shellResult {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testDeadline)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, h.bash, script)
+	cmd.Dir = h.dir
+	cmd.Env = append([]string{"PATH=" + h.path(), "LC_ALL=C", "HOME=" + h.dir, "STUB_LOG=" + h.logs}, h.env...)
+
+	var stdout, stderr bytes.Buffer
+
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	code := 0
+
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) == false {
+			t.Fatalf("run %s: %v", script, err)
+		}
+
+		code = exitErr.ExitCode()
+	}
+
+	return shellResult{stdout: stdout.String(), stderr: stderr.String(), code: code}
 }

@@ -40,6 +40,12 @@ and `uninstall.sh` and the files they ship (`vandox-agent.service`, `agent.yaml`
 - **Fixtures.** Bytes that an editor or formatter could change (a BOM, a tab, a CR, the ASCII escape, a
   backslash) are built from byte values in the test, never typed into the source. A stub that copies a real
   tool's output (`getent`, `id`, `passwd -S`) names its measurement in the test.
+- **Install bundle and entry check.** The scripts ship in a release bundle, so the tests also cover its rules:
+  `stat` is a stub keyed by path (`statTable`), which lets a test give any directory or file an owner and a mode
+  without root. `TestEntryCheck_RefusesBeforeSourcing` runs a copy of `install.sh` as a program beside a stub
+  `common.sh` that prints `sourced`, so a refusal is visible as the missing word; `TestCheckBundleDir_*` and
+  `TestReadBundleVersion_*` call the functions directly; `TestEntryCheck_IsTheSameInBothScripts` compares the
+  marked block of both scripts; `TestInstallDocuments_UseTheReleaseBundle` reads the documented install chain.
 - **Not unit-testable.** Systemd behavior (enabling and starting the unit, `Type=notify`, the restart loop, the
   address allow-list, `CapEff`, the seccomp filter, `systemd-analyze security`), the real user and file
   ownership changes and a real download need a systemd 249 host as root. The CI job `agent-install` runs

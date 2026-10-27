@@ -191,7 +191,7 @@ func TestDropAccount_RunsPleskOrMariadbAndReportsTheOutcome(t *testing.T) {
 
 	const (
 		removed  = "uninstall.sh: removed MariaDB account\n"
-		warnTpl  = "uninstall.sh: WARNING MariaDB account not removed; run: %s < deploy/agent/mariadb-user-remove.sql\n"
+		warnTpl  = "uninstall.sh: WARNING MariaDB account not removed; run: %s < {SQL}\n"
 		sqlBytes = "DROP USER IF EXISTS 'x'@'localhost';\n"
 	)
 
@@ -236,7 +236,10 @@ func runDropAccountCase(t *testing.T, tc dropAccountCase, sqlBytes string) {
 
 	got := h.runUninstall(`_drop_account "$1"`, sqlPath)
 
-	expectResult(t, "_drop_account", got, 0, tc.want, "")
+	// The warning names the SQL file that was given, not a path of the repository.
+	want := strings.ReplaceAll(tc.want, "{SQL}", sqlPath)
+
+	expectResult(t, "_drop_account", got, 0, want, "")
 
 	for _, tool := range []string{"plesk", "mariadb"} {
 		assertToolCalls(t, h, tool, tc.wantCalled)
@@ -428,4 +431,52 @@ func TestRemoveFile_RemovesAFileOrALinkNeverItsTarget(t *testing.T) {
 
 		expectResult(t, "_remove_file", got, 0, "uninstall.sh: removed token\n", "")
 	})
+}
+
+const (
+	entryStart = "# --- entry check (before anything is sourced) ---"
+	entryEnd   = "# --- end of entry check ---"
+	entryText  = "is not owned by root or is writable by others; extract the bundle as root in a private directory"
+)
+
+// entryBlock returns the text between the two entry-check markers of a script, with the script's name
+// (and the variable names derived from it) normalized.
+func entryBlock(t *testing.T, script string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(shippedFile(t, script))
+	if err != nil {
+		t.Fatalf("read %s: %v", script, err)
+	}
+
+	text := string(data)
+
+	for _, marker := range []string{entryStart, entryEnd} {
+		if strings.Count(text, marker) != 1 {
+			t.Fatalf("%s holds the marker %q %d times, want once", script, marker, strings.Count(text, marker))
+		}
+	}
+
+	block := text[strings.Index(text, entryStart)+len(entryStart) : strings.Index(text, entryEnd)]
+
+	return strings.ReplaceAll(block, "uninstall", "install")
+}
+
+// TestEntryCheck_IsTheSameInBothScripts checks that install.sh and uninstall.sh carry the same inline entry
+// check, apart from the script name, and that it is the real check and not a placeholder.
+func TestEntryCheck_IsTheSameInBothScripts(t *testing.T) {
+	t.Parallel()
+
+	install := entryBlock(t, installScript)
+	uninstall := entryBlock(t, uninstallScript)
+
+	if install != uninstall {
+		t.Errorf("the entry check differs between the scripts:\ninstall.sh:%s\nuninstall.sh:%s", install, uninstall)
+	}
+
+	for name, block := range map[string]string{installScript: install, uninstallScript: uninstall} {
+		if strings.Contains(block, entryText) == false {
+			t.Errorf("the entry check of %s lacks the refusal text %q", name, entryText)
+		}
+	}
 }

@@ -23,7 +23,7 @@ const (
 	installScript = "install.sh"
 
 	// usageLine is the usage text of install.sh (plan.md, Approach, Output).
-	usageLine = "usage: install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]"
+	usageLine = "usage: install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]"
 
 	// testDeadline bounds one bash run so a function that waits for input fails the test instead of hanging.
 	testDeadline = 60 * time.Second
@@ -553,10 +553,10 @@ func TestCheckPlatform_RefusesNonRootNonSystemdAndOtherMachines(t *testing.T) {
 // sqlFileName is the shipped MariaDB account script, which the install script runs unchanged.
 const sqlFileName = "mariadb-user.sql"
 
-// mariadbWarningRE builds the E7 warning line of an account tool.
-func mariadbWarningRE(tool string) *regexp.Regexp {
+// mariadbWarningRE builds the E7 warning line of an account tool: it names the SQL file that was given.
+func mariadbWarningRE(tool, sqlPath string) *regexp.Regexp {
 	return regexp.MustCompile(`^install\.sh: WARNING MariaDB account not created; run: ` + regexp.QuoteMeta(tool) +
-		` < (\S+/)?deploy/agent/mariadb-user\.sql\n$`)
+		` < ` + regexp.QuoteMeta(sqlPath) + `\n$`)
 }
 
 // TestMariadbAccount_UsesPleskWhenPresent checks that plesk db gets the SQL file on standard input and that
@@ -626,7 +626,7 @@ func TestMariadbAccount_WarnsAndContinuesWhenItFails(t *testing.T) {
 				t.Errorf("run_mariadb_sql: exit status = %d, want 0 (the install continues)", got.code)
 			}
 
-			if mariadbWarningRE(tc.warn).MatchString(got.stdout) == false {
+			if mariadbWarningRE(tc.warn, sqlPath).MatchString(got.stdout) == false {
 				t.Errorf("run_mariadb_sql: standard output = %q, want the E7 warning for %q", got.stdout, tc.warn)
 			}
 		})
@@ -647,7 +647,159 @@ func TestMariadbAccount_SkippedWithNoMariadb(t *testing.T) {
 		t.Errorf("run_mariadb_sql: exit status = %d, want 0 (the install continues)", got.code)
 	}
 
-	if mariadbWarningRE("mariadb").MatchString(got.stdout) == false {
+	if mariadbWarningRE("mariadb", sqlPath).MatchString(got.stdout) == false {
 		t.Errorf("run_mariadb_sql: standard output = %q, want the E7 warning for mariadb", got.stdout)
 	}
+}
+
+// statTable installs a stat stand-in that answers `stat -c '%u %a' -- PATH` from a table of path|"uid mode"
+// rows and answers "0 755" for every path not in the table, so a test controls the owner and the mode of
+// each entry without root. Links are not faked: the scripts test them with [[ -L ]].
+func (h *harness) statTable(rows ...string) {
+	h.t.Helper()
+
+	text := strings.Join(rows, "\n")
+	if text != "" {
+		text += "\n"
+	}
+
+	h.writeFile("logs/stat.table", text)
+
+	h.stub("stat", `path=${*: -1}
+answer="0 755"
+while IFS='|' read -r p v; do
+    if [[ $p == "$path" ]]; then answer=$v; fi
+done <"$STUB_LOG/stat.table"
+printf '%s\n' "$answer"`)
+}
+
+// bundleDirLine is the refusal line of an entry that is a link, not owned by root or writable by others.
+func bundleDirLine(script, path string) string {
+	return script + ": " + path + " is not owned by root or is writable by others; extract the bundle as root in a private directory\n"
+}
+
+// bundleDirCase is one tree for check_bundle_dir.
+type bundleDirCase struct {
+	name   string
+	dir    string   // the stat row of the directory, "" for the default "0 755"
+	files  []string // the stat rows "name|uid mode" of the files
+	link   string   // the file that is made a link, or "dir" for the directory itself
+	absent string   // a file that is named but does not exist
+	refuse string   // the entry the line names: a file name, "dir" or "" for accepted
+}
+
+// TestCheckBundleDir_RefusesForeignOrWritableEntries checks E15: the directory and each named existing file
+// must be no link, owned by uid 0, and free of group- and other-write and of every special bit; a missing
+// file is left to the later checks.
+func TestCheckBundleDir_RefusesForeignOrWritableEntries(t *testing.T) {
+	t.Parallel()
+
+	cases := []bundleDirCase{
+		{name: "root-owned 0755 and 0644", files: []string{"install.sh|0 755", "VERSION|0 644"}},
+		{name: "private 0700 and 0600", dir: "0 700", files: []string{"install.sh|0 700", "VERSION|0 600"}},
+		{name: "a missing file", absent: "VERSION"},
+		{name: "directory uid 1000", dir: "1000 755", refuse: "dir"},
+		{name: "directory 0775", dir: "0 775", refuse: "dir"},
+		{name: "directory 0757", dir: "0 757", refuse: "dir"},
+		{name: "directory 1755", dir: "0 1755", refuse: "dir"},
+		{name: "directory 2755", dir: "0 2755", refuse: "dir"},
+		{name: "file 0664", files: []string{"VERSION|0 664"}, refuse: "VERSION"},
+		{name: "file 0646", files: []string{"VERSION|0 646"}, refuse: "VERSION"},
+		{name: "file uid 1000", files: []string{"VERSION|1000 644"}, refuse: "VERSION"},
+		{name: "file 4755", files: []string{"install.sh|0 4755"}, refuse: "install.sh"},
+		{name: "file 2775", files: []string{"install.sh|0 2775"}, refuse: "install.sh"},
+		{name: "file 1644", files: []string{"VERSION|0 1644"}, refuse: "VERSION"},
+		{name: "file a link", link: "VERSION", refuse: "VERSION"},
+		{name: "directory a link", link: "dir", refuse: "dir"},
+		{name: "first bad file is named", files: []string{"install.sh|0 755", "VERSION|0 664", "agent.yaml|1000 644"}, refuse: "VERSION"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			runBundleDirCase(t, tc)
+		})
+	}
+}
+
+// runBundleDirCase builds the bundle directory of one case and runs check_bundle_dir on it.
+func runBundleDirCase(t *testing.T, tc bundleDirCase) {
+	t.Helper()
+
+	h := newHarness(t)
+	dir := filepath.Join(h.dir, "bundle")
+
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+
+	names := []string{"install.sh", "common.sh", "VERSION", "agent.yaml"}
+
+	for _, name := range names {
+		if name != tc.absent {
+			writeBytes(t, filepath.Join(dir, name), "x")
+		}
+	}
+
+	rows := []string{}
+	if tc.dir != "" {
+		rows = append(rows, dir+"|"+tc.dir)
+	}
+
+	for _, row := range tc.files {
+		name, answer, _ := strings.Cut(row, "|")
+		rows = append(rows, filepath.Join(dir, name)+"|"+answer)
+	}
+
+	h.statTable(rows...)
+
+	checked := dir
+	if tc.link != "" {
+		checked = linkAt(t, h, dir, tc.link)
+	}
+
+	got := h.run(`check_bundle_dir "$@"`, "", append([]string{checked}, names...)...)
+
+	if tc.refuse == "" {
+		expectResult(t, "check_bundle_dir", got, 0, "", "")
+
+		return
+	}
+
+	path := filepath.Join(checked, tc.refuse)
+	if tc.refuse == "dir" {
+		path = checked
+	}
+
+	expectResult(t, "check_bundle_dir", got, 1, "", bundleDirLine("install.sh", path))
+}
+
+// linkAt makes the entry of a case a link and returns the directory to check: the directory itself becomes a
+// link to the real one, or one file inside it becomes a link to another file.
+func linkAt(t *testing.T, h *harness, dir, entry string) string {
+	t.Helper()
+
+	if entry == "dir" {
+		alias := filepath.Join(h.dir, "bundle-link")
+		if err := os.Symlink(dir, alias); err != nil {
+			t.Fatalf("symlink %s: %v", alias, err)
+		}
+
+		return alias
+	}
+
+	target := filepath.Join(h.dir, "elsewhere")
+	writeBytes(t, target, "x")
+
+	file := filepath.Join(dir, entry)
+	if err := os.Remove(file); err != nil {
+		t.Fatalf("remove %s: %v", file, err)
+	}
+
+	if err := os.Symlink(target, file); err != nil {
+		t.Fatalf("symlink %s: %v", file, err)
+	}
+
+	return dir
 }

@@ -715,3 +715,165 @@ func TestReadme_NamesNoMissingUnitOrScripts(t *testing.T) {
 		})
 	}
 }
+
+const (
+	bundlePrefix  = "vandox-agent-install-"
+	mktempChain   = `d=$(mktemp -d) && cd "$d"`
+	checkChain    = "sha256sum --check --strict - &&"
+	extractPrefix = "tar --no-same-owner --no-same-permissions -xzf"
+	awkSelect     = "$2 == f"
+)
+
+// codeBlocks returns the fenced code blocks of a Markdown text.
+func codeBlocks(text string) []string {
+	var blocks []string
+
+	parts := strings.Split(text, "```")
+	for i := 1; i < len(parts); i += 2 {
+		blocks = append(blocks, parts[i])
+	}
+
+	return blocks
+}
+
+// chainFindings checks one documented install block: a fresh private directory before the check and before
+// tar, the bundle line selected by exact name comparison, the check chained into tar and tar chained into
+// install.sh. It returns what is missing or out of order.
+func chainFindings(block string) []string {
+	var findings []string
+
+	mk := strings.Index(block, mktempChain)
+	check := strings.Index(block, checkChain)
+	tar := strings.Index(block, extractPrefix)
+
+	if mk < 0 {
+		findings = append(findings, "no `"+mktempChain+"` (mktemp -d before the check and before tar)")
+	}
+
+	if check < 0 || strings.Contains(block, awkSelect) == false || strings.Contains(block, "awk -v f=") == false {
+		findings = append(findings, "no awk selection of the bundle line followed by `"+checkChain+"`")
+	}
+
+	if tar < 0 {
+		findings = append(findings, "no `"+extractPrefix+"` line")
+	}
+
+	if mk >= 0 && check >= 0 && tar >= 0 && (mk > check || check > tar) {
+		findings = append(findings, "mktemp, the check and tar are not in that order")
+	}
+
+	return append(findings, chainTail(block, tar)...)
+}
+
+// chainTail checks the lines after the check: the tar line ends in && and install.sh follows it.
+func chainTail(block string, tar int) []string {
+	if tar < 0 {
+		return nil
+	}
+
+	lines := strings.Split(block[tar:], "\n")
+	if strings.HasSuffix(strings.TrimSpace(lines[0]), "&&") == false {
+		return []string{"the tar line does not end in &&"}
+	}
+
+	if len(lines) < 2 || strings.Contains(lines[1], "install.sh") == false {
+		return []string{"the line after tar is not the install.sh line"}
+	}
+
+	return nil
+}
+
+// forbiddenInDocuments are the ways an install document must not describe the agent install.
+var forbiddenInDocuments = []*regexp.Regexp{
+	regexp.MustCompile(`git clone`),
+	regexp.MustCompile(`install\.sh\s+--version`),
+	regexp.MustCompile(`\|\s*(ba)?sh\b`),
+}
+
+// TestInstallDocuments_UseTheReleaseBundle checks AC11: the install documents show the bundle download, the
+// check before the extraction as one && chain in a fresh mktemp directory, and neither git, --version nor a
+// pipe into a shell.
+func TestInstallDocuments_UseTheReleaseBundle(t *testing.T) {
+	for _, name := range installDocuments {
+		t.Run(name, func(t *testing.T) {
+			checkInstallDocument(t, name)
+		})
+	}
+}
+
+// checkInstallDocument checks one document for the names, the forbidden forms and the install chain.
+func checkInstallDocument(t *testing.T, name string) {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(name)))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+
+	text := string(data)
+
+	for _, want := range []string{bundlePrefix, "sha256sum --check"} {
+		if strings.Contains(text, want) == false {
+			t.Errorf("%s does not contain %q", name, want)
+		}
+	}
+
+	for _, re := range forbiddenInDocuments {
+		if loc := re.FindStringIndex(text); loc != nil {
+			t.Errorf("%s contains %q, want the bundle chain without it", name, text[loc[0]:loc[1]])
+		}
+	}
+
+	assertChainBlocks(t, name, text)
+}
+
+// assertChainBlocks requires at least one block that extracts the bundle and checks each of them.
+func assertChainBlocks(t *testing.T, name, text string) {
+	t.Helper()
+
+	found := 0
+
+	for _, block := range codeBlocks(text) {
+		if strings.Contains(block, extractPrefix) == false && strings.Contains(block, "tar ") == false {
+			continue
+		}
+
+		found++
+
+		for _, finding := range chainFindings(block) {
+			t.Errorf("%s: an install block has a defect: %s\n%s", name, finding, block)
+		}
+	}
+
+	if found == 0 {
+		t.Errorf("%s has no code block that extracts the bundle with tar", name)
+	}
+}
+
+// TestChainFindings_CatchesAWeakChain keeps the document check honest: the approved chain passes and each
+// weakening is found.
+func TestChainFindings_CatchesAWeakChain(t *testing.T) {
+	t.Parallel()
+
+	good := "v=v1.2.3\n" + mktempChain + " &&\n  curl -fsSLO \"$base/x\" &&\n" +
+		"  awk -v f=\"vandox-agent-install-$v.tar.gz\" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&\n" +
+		"  " + extractPrefix + " \"x.tar.gz\" &&\n  \"./vandox-agent-install-$v/install.sh\" --agent-id web-1\n"
+
+	if got := chainFindings(good); len(got) != 0 {
+		t.Fatalf("the approved chain has findings %q, want none", got)
+	}
+
+	weak := map[string]string{
+		"no mktemp":         strings.Replace(good, mktempChain, "cd /tmp", 1),
+		"check not chained": strings.Replace(good, checkChain, "sha256sum --check --strict -;", 1),
+		"tar without &&":    strings.Replace(good, "\"x.tar.gz\" &&", "\"x.tar.gz\"", 1),
+		"no awk":            strings.Replace(good, "awk -v f=", "grep -v f=", 1),
+		"no install line":   strings.Replace(good, "install.sh", "uninstall-notes", 1),
+	}
+
+	for name, block := range weak {
+		if len(chainFindings(block)) == 0 {
+			t.Errorf("chainFindings found nothing wrong with the chain %q", name)
+		}
+	}
+}
