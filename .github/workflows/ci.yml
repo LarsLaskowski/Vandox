@@ -294,8 +294,21 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
             -ldflags "-s -w -X $pkg.Version=$tag -X $pkg.Commit=$commit -X $pkg.Date=$date" \
             -o dist/vandox-agent-linux-amd64 ./cmd/vandox-agent
-          (cd dist && sha256sum vandox-agent-linux-amd64 >SHA256SUMS)
+          .github/scripts/package-agent.sh "$tag" dist
+          .github/scripts/check-agent-bundle.sh dist "$tag"
           cat dist/SHA256SUMS
+
+      # The files the next step installs from, so a server run can install exactly the tested bytes.
+      - name: Upload install files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-install-files
+          path: |
+            dist/vandox-agent-linux-amd64
+            dist/SHA256SUMS
+            dist/vandox-agent-install-v0.0.0-rc.0.tar.gz
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Install, upgrade, uninstall and purge on systemd 249
         run: sudo .github/scripts/check-agent-install.sh dist

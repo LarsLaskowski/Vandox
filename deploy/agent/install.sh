@@ -1,27 +1,66 @@
 #!/usr/bin/env bash
 # Installs or upgrades vandox-agent on a systemd server: user, files, unit and MariaDB account.
-# Run as root from a checkout of the release's source:
-#   deploy/agent/install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]
-# The agent token is read from the terminal (no echo) or from one line of standard input, never from an option.
+# Run as root from the extracted install bundle of a release (vandox-agent-install-<version>.tar.gz):
+#   ./vandox-agent-install-vX.Y.Z/install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]
+# The version is the one in the bundle's VERSION file. The agent token is read from the terminal (no echo) or
+# from one line of standard input, never from an option.
 
 set -euo pipefail
 
 if [[ -z "$(declare -F read_spool_directory)" ]]; then
-    _install_source=${BASH_SOURCE[0]%/*}
-    if [[ $_install_source == "${BASH_SOURCE[0]}" ]]; then
-        _install_source=.
-    fi
     # --- entry check (before anything is sourced) ---
-    exit 99
+    # The physical directory of this script, every ancestor of it, the script and common.sh must belong to
+    # root and not be writable by others, because bash reads this script while it runs and sources common.sh.
+    _entry_refuse() {
+        local path=$1
+
+        echo "${0##*/}: $path is not owned by root or is writable by others; extract the bundle as root in a private directory" >&2
+        exit 1
+    }
+    _entry_stat() {
+        local path=$1
+        local info
+
+        info=$(stat -c '%u %a' -- "$path") || _entry_refuse "$path"
+        _entry_uid=${info%% *}
+        _entry_mode=$((8#${info#* }))
+    }
+    _entry_src=${BASH_SOURCE[0]%/*}
+    if [[ $_entry_src == "${BASH_SOURCE[0]}" ]]; then
+        _entry_src=.
+    fi
+    _entry_dir=$(cd -P -- "$_entry_src" && pwd -P) || exit 1
+    _entry_walk=${_entry_dir%/*}
+    while true; do
+        _entry_stat "${_entry_walk:-/}"
+        if ((_entry_uid != 0 || ((_entry_mode & 01000) == 0 && (_entry_mode & 022) != 0))); then
+            _entry_refuse "${_entry_walk:-/}"
+        fi
+        if [[ -z $_entry_walk ]]; then
+            break
+        fi
+        _entry_walk=${_entry_walk%/*}
+    done
+    for _entry_path in "$_entry_dir" "$_entry_dir/${BASH_SOURCE[0]##*/}" "$_entry_dir/common.sh"; do
+        if [[ -L $_entry_path ]]; then
+            _entry_refuse "$_entry_path"
+        fi
+        _entry_stat "$_entry_path"
+        if ((_entry_uid != 0 || (_entry_mode & 07022) != 0)); then
+            _entry_refuse "$_entry_path"
+        fi
+    done
+    unset -f _entry_refuse _entry_stat
+    unset _entry_dir _entry_walk _entry_path _entry_uid _entry_mode
     # --- end of entry check ---
     # shellcheck source=common.sh disable=SC1091
-    source "$_install_source/common.sh"
+    source "$_entry_src/common.sh"
 fi
 
-readonly USAGE_LINE="usage: install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]"
+readonly USAGE_LINE="usage: install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]"
 readonly RELEASE_BASE="https://github.com/LarsLaskowski/Vandox/releases/download"
 readonly BINARY_NAME="vandox-agent-linux-amd64"
-readonly SUMS_NAME="SHA256SUMS"
+readonly SUMS_NAME="vandox-agent-linux-amd64.sha256"
 readonly MAX_SUMS_BYTES=4096
 readonly MAX_BINARY_BYTES=67108864
 readonly CHECKSUM_MISMATCH="install.sh: checksum mismatch, nothing installed"
@@ -56,9 +95,8 @@ _not_agents() {
     echo "install.sh: $path is not the agent's directory" >&2
 }
 
-# parse_args ARGS...: sets VERSION, AGENT_ID, BACKEND_URL, FROM_DIR and NO_MARIADB; status 2 with the message.
+# parse_args ARGS...: sets AGENT_ID, BACKEND_URL, FROM_DIR and NO_MARIADB; status 2 with the message.
 parse_args() {
-    VERSION=""
     AGENT_ID=""
     BACKEND_URL=""
     FROM_DIR=""
@@ -71,14 +109,13 @@ parse_args() {
         value=${2:-}
 
         case $option in
-        --version | --agent-id | --backend-url | --from)
+        --agent-id | --backend-url | --from)
             if (($# < 2)); then
                 _usage
                 return 2
             fi
 
             case $option in
-            --version) VERSION=$value ;;
             --agent-id) AGENT_ID=$value ;;
             --backend-url) BACKEND_URL=$value ;;
             *) FROM_DIR=$value ;;
@@ -102,8 +139,6 @@ parse_args() {
         esac
     done
 
-    validate_version "$VERSION" || return 2
-
     if [[ -n $AGENT_ID ]]; then
         validate_agent_id "$AGENT_ID" || return 2
     fi
@@ -113,7 +148,7 @@ parse_args() {
     fi
 }
 
-# validate_version VALUE: vX.Y.Z or vX.Y.Z-rc.N; status 2 with the usage line.
+# validate_version VALUE: vX.Y.Z or vX.Y.Z-rc.N; status 2, silent.
 validate_version() {
     local value=$1
     local LC_ALL=C
@@ -123,7 +158,6 @@ validate_version() {
         return 0
     fi
 
-    _usage
     return 2
 }
 
@@ -409,53 +443,69 @@ _within_bound() {
     ((size <= limit))
 }
 
-# read_bundle_version DIR: sets VERSION from DIR/VERSION; status 2 with the E4 line.
+# read_bundle_version DIR: sets VERSION from DIR/VERSION, a regular file (no link) of at most 64 bytes, checked by size
+# before it is read, with exactly one line that ends in a line feed and is vX.Y.Z or vX.Y.Z-rc.N; status 2 with
+# the E4 line.
 read_bundle_version() {
-    return 99
+    local dir=$1
+    local file="$dir/VERSION"
+    local line="" extra=""
+
+    if _within_bound "$file" 64; then
+        {
+            if IFS= read -r line && ! { IFS= read -r extra || [[ -n $extra ]]; }; then
+                if validate_version "$line"; then
+                    VERSION=$line
+                    return 0
+                fi
+            fi
+        } <"$file"
+    fi
+
+    echo "install.sh: no valid VERSION file next to install.sh; use the install bundle of a release" >&2
+    return 2
 }
 
-# fetch_release VERSION FROMDIR WORKDIR BUNDLEDIR: downloads the release files over HTTPS, or copies them from FROMDIR;
-# status 1 with the E3 line of the file that failed (BUNDLEDIR is not used yet).
+# _copy_pin BUNDLEDIR WORKDIR: copies the binary's pin file of the bundle; it must be a regular file, no link,
+# of at most 4096 bytes by its size before it is read; status 1 with the E2 line.
+_copy_pin() {
+    local bundle=$1
+    local work=$2
+
+    if ! _within_bound "$bundle/$SUMS_NAME" "$MAX_SUMS_BYTES" || ! cp -P -- "$bundle/$SUMS_NAME" "$work/$SUMS_NAME"; then
+        echo "$CHECKSUM_MISMATCH" >&2
+        return 1
+    fi
+}
+
+# fetch_release VERSION FROMDIR WORKDIR BUNDLEDIR: copies the binary's pin from the bundle and gets the binary,
+# over HTTPS or from FROMDIR; status 1 with the E2 line of a bad pin or the E3 line of the binary.
 fetch_release() {
     local version=$1
     local from=$2
     local work=$3
-    : "${4:-}"
-    local name limit
+    local bundle=$4
+    local name=$BINARY_NAME
 
-    for name in "$SUMS_NAME" "$BINARY_NAME"; do
-        limit=$MAX_SUMS_BYTES
-        if [[ $name == "$BINARY_NAME" ]]; then
-            limit=$MAX_BINARY_BYTES
-        fi
+    _copy_pin "$bundle" "$work" || return 1
 
-        if [[ -n $from ]]; then
-            if ! _within_bound "$from/$name" "$limit"; then
-                echo "install.sh: download failed: $name" >&2
-                return 1
-            fi
-
-            continue
-        fi
-
-        if ! curl --proto '=https' --proto-redir '=https' --fail --location --silent --show-error \
-            --max-time 300 --max-filesize "$limit" -o "$work/$name" "$RELEASE_BASE/$version/$name"; then
+    if [[ -n $from ]]; then
+        if ! _within_bound "$from/$name" "$MAX_BINARY_BYTES" || ! cp -P -- "$from/$name" "$work/$name"; then
             echo "install.sh: download failed: $name" >&2
             return 1
         fi
-    done
 
-    if [[ -n $from ]]; then
-        for name in "$SUMS_NAME" "$BINARY_NAME"; do
-            if ! cp -P -- "$from/$name" "$work/$name"; then
-                echo "install.sh: download failed: $name" >&2
-                return 1
-            fi
-        done
+        return 0
+    fi
+
+    if ! curl --proto '=https' --proto-redir '=https' --fail --location --silent --show-error \
+        --max-time 300 --max-filesize "$MAX_BINARY_BYTES" -o "$work/$name" "$RELEASE_BASE/$version/$name"; then
+        echo "install.sh: download failed: $name" >&2
+        return 1
     fi
 }
 
-# verify_checksum WORKDIR: both files regular, not links and within their bounds; SHA256SUMS exactly one
+# verify_checksum WORKDIR: both files regular, not links and within their bounds; the pin file exactly one
 # well-formed line for the binary that matches; then the binary is made 0755. Status 1 with the E2 line.
 verify_checksum() {
     local work=$1
@@ -506,16 +556,6 @@ check_binary_version() {
     if [[ $out != "vandox-agent $version ("* ]]; then
         echo "install.sh: binary is not $version" >&2
         return 1
-    fi
-}
-
-# checkout_warning TAG VERSION: warns when the script's checkout is a tag other than VERSION.
-checkout_warning() {
-    local tag=$1
-    local version=$2
-
-    if [[ -n $tag && $tag != "$version" ]]; then
-        echo "install.sh: WARNING checkout is $tag, not $version"
     fi
 }
 
@@ -867,7 +907,7 @@ _server_checks() {
 
 # main ARGS...: the whole installation in the order of the plan; nothing changes before the apply step.
 main() {
-    local script_dir pid1 machine spool tag work first_install=0 write_new_token=0 new_config=0
+    local script_dir pid1 machine spool work first_install=0 write_new_token=0 new_config=0
 
     umask 077
     export LC_ALL=C
@@ -878,6 +918,9 @@ main() {
     script_dir=$(cd -- "$script_dir" && pwd)
 
     parse_args "$@" || exit 2
+
+    check_bundle_dir "$script_dir" install.sh common.sh VERSION vandox-agent.service mariadb-user.sql agent.yaml "$SUMS_NAME" || exit 1
+    read_bundle_version "$script_dir" || exit 2
 
     read -r pid1 </proc/1/comm || pid1=""
     machine=$(uname -m)
@@ -928,16 +971,9 @@ main() {
     trap "rm -rf -- '$work'" EXIT
     chmod 0711 -- "$work"
 
-    fetch_release "$VERSION" "$FROM_DIR" "$work" || exit 1
+    fetch_release "$VERSION" "$FROM_DIR" "$work" "$script_dir" || exit 1
     verify_checksum "$work" || exit 1
     check_binary_version "$work/$BINARY_NAME" "$VERSION" || exit 1
-
-    tag=""
-    if command -v git >/dev/null 2>&1; then
-        tag=$(git -C "$script_dir" describe --tags --exact-match 2>/dev/null) || tag=""
-    fi
-
-    checkout_warning "$tag" "$VERSION"
 
     _refuse_links || exit 1
     ensure_user

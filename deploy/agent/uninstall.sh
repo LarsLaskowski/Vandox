@@ -1,20 +1,58 @@
 #!/usr/bin/env bash
 # Removes vandox-agent from a systemd server; with --purge also its user, configuration, token, spool and MariaDB account.
-# Run as root:
-#   deploy/agent/uninstall.sh [--purge]
+# Run as root from the extracted install bundle of a release (vandox-agent-install-<version>.tar.gz):
+#   ./vandox-agent-install-vX.Y.Z/uninstall.sh [--purge]
 
 set -euo pipefail
 
 if [[ -z "$(declare -F read_spool_directory)" ]]; then
-    _uninstall_source=${BASH_SOURCE[0]%/*}
-    if [[ $_uninstall_source == "${BASH_SOURCE[0]}" ]]; then
-        _uninstall_source=.
-    fi
     # --- entry check (before anything is sourced) ---
-    exit 99
+    # The physical directory of this script, every ancestor of it, the script and common.sh must belong to
+    # root and not be writable by others, because bash reads this script while it runs and sources common.sh.
+    _entry_refuse() {
+        local path=$1
+
+        echo "${0##*/}: $path is not owned by root or is writable by others; extract the bundle as root in a private directory" >&2
+        exit 1
+    }
+    _entry_stat() {
+        local path=$1
+        local info
+
+        info=$(stat -c '%u %a' -- "$path") || _entry_refuse "$path"
+        _entry_uid=${info%% *}
+        _entry_mode=$((8#${info#* }))
+    }
+    _entry_src=${BASH_SOURCE[0]%/*}
+    if [[ $_entry_src == "${BASH_SOURCE[0]}" ]]; then
+        _entry_src=.
+    fi
+    _entry_dir=$(cd -P -- "$_entry_src" && pwd -P) || exit 1
+    _entry_walk=${_entry_dir%/*}
+    while true; do
+        _entry_stat "${_entry_walk:-/}"
+        if ((_entry_uid != 0 || ((_entry_mode & 01000) == 0 && (_entry_mode & 022) != 0))); then
+            _entry_refuse "${_entry_walk:-/}"
+        fi
+        if [[ -z $_entry_walk ]]; then
+            break
+        fi
+        _entry_walk=${_entry_walk%/*}
+    done
+    for _entry_path in "$_entry_dir" "$_entry_dir/${BASH_SOURCE[0]##*/}" "$_entry_dir/common.sh"; do
+        if [[ -L $_entry_path ]]; then
+            _entry_refuse "$_entry_path"
+        fi
+        _entry_stat "$_entry_path"
+        if ((_entry_uid != 0 || (_entry_mode & 07022) != 0)); then
+            _entry_refuse "$_entry_path"
+        fi
+    done
+    unset -f _entry_refuse _entry_stat
+    unset _entry_dir _entry_walk _entry_path _entry_uid _entry_mode
     # --- end of entry check ---
     # shellcheck source=common.sh disable=SC1091
-    source "$_uninstall_source/common.sh"
+    source "$_entry_src/common.sh"
 fi
 
 readonly U_SERVICE="vandox-agent"
@@ -77,7 +115,7 @@ _drop_account() {
         fi
     fi
 
-    echo "uninstall.sh: WARNING MariaDB account not removed; run: $tool_name < deploy/agent/mariadb-user-remove.sql"
+    echo "uninstall.sh: WARNING MariaDB account not removed; run: $tool_name < $sql"
 }
 
 # _purge_user: deletes the user (never its home directory) and a group that remains.
@@ -138,14 +176,14 @@ main() {
     export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
     parse_args "$@" || exit 2
+    script_dir=${BASH_SOURCE[0]%/*}
+    script_dir=$(cd -- "$script_dir" && pwd)
+    check_bundle_dir "$script_dir" uninstall.sh common.sh mariadb-user-remove.sql || exit 1
 
     if [[ $EUID != 0 ]]; then
         echo "uninstall.sh: must run as root" >&2
         exit 1
     fi
-
-    script_dir=${BASH_SOURCE[0]%/*}
-    script_dir=$(cd -- "$script_dir" && pwd)
 
     if [[ -f $U_CONFIG_FILE && ! -L $U_CONFIG_FILE ]]; then
         spool=$(read_spool_directory "$U_CONFIG_FILE") || exit 2

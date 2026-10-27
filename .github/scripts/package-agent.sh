@@ -1,5 +1,65 @@
 #!/usr/bin/env bash
-# Skeleton: not implemented yet.
+# Builds the install bundle of a release from the tagged tree and the built agent binary, and writes the
+# release's SHA256SUMS (record 0131).
+# Usage: package-agent.sh <tag> <dist>
+#   <dist> holds vandox-agent-linux-amd64; it receives vandox-agent-install-<tag>.tar.gz and SHA256SUMS (two
+#   lines: the bundle, then the binary). The bundle has one top directory and nine files; the archive is
+#   byte-reproducible from the tree (fixed order, owner, modes and time).
+set -euo pipefail
+umask 022
+export LC_ALL=C
 
-echo "package-agent.sh: not implemented" >&2
-exit 99
+readonly BINARY="vandox-agent-linux-amd64"
+readonly PIN="vandox-agent-linux-amd64.sha256"
+readonly EXECUTABLES=(install.sh uninstall.sh)
+readonly PLAIN_FILES=(common.sh vandox-agent.service mariadb-user.sql mariadb-user-remove.sql agent.yaml)
+
+fail() {
+  echo "::error::$*" >&2
+  exit 1
+}
+
+[[ $# -eq 2 ]] || fail "usage: package-agent.sh <tag> <dist>"
+
+tag=$1
+dist=$2
+readonly tag dist
+readonly tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
+
+[[ $tag =~ $tag_re ]] || fail "the tag '$tag' is not vX.Y.Z or vX.Y.Z-rc.N, the forms install.sh accepts"
+[[ -f "$dist/$BINARY" && ! -L "$dist/$BINARY" ]] || fail "$dist holds no regular file $BINARY"
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly repo
+readonly source_dir="$repo/deploy/agent"
+readonly top="vandox-agent-install-$tag"
+
+stage="$(mktemp -d)"
+readonly stage
+trap 'rm -rf -- "$stage"' EXIT
+
+mkdir -m 0755 "$stage/$top"
+
+for name in "${EXECUTABLES[@]}"; do
+  install -m 0755 -- "$source_dir/$name" "$stage/$top/$name"
+done
+
+for name in "${PLAIN_FILES[@]}"; do
+  install -m 0644 -- "$source_dir/$name" "$stage/$top/$name"
+done
+
+printf '%s\n' "$tag" >"$stage/$top/VERSION"
+chmod 0644 -- "$stage/$top/VERSION"
+
+(cd "$dist" && sha256sum "$BINARY") >"$stage/$top/$PIN"
+chmod 0644 -- "$stage/$top/$PIN"
+
+mtime="$(git -C "$repo" log -1 --format=%ct HEAD)"
+readonly mtime
+
+tar --create --format=ustar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$mtime" \
+  -C "$stage" "$top" | gzip -9 -n >"$dist/$top.tar.gz"
+
+(cd "$dist" && sha256sum "$top.tar.gz" "$BINARY" >SHA256SUMS)
+
+echo "packaged $dist/$top.tar.gz"

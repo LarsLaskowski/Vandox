@@ -201,11 +201,45 @@ run_mariadb_sql() {
         fi
     fi
 
-    printf '%s: WARNING MariaDB account not created; run: %s < deploy/agent/mariadb-user.sql\n' "$script" "$tool_name"
+    printf '%s: WARNING MariaDB account not created; run: %s < %s\n' "$script" "$tool_name" "$sql"
     return 0
 }
 
-# check_bundle_dir DIR FILE...: refuses a link, a non-root owner or a group- or other-writable entry; status 1.
+# _bundle_entry_ok PATH: PATH is no link, is owned by uid 0 and has no group- or other-write bit and no
+# set-user-ID, set-group-ID or sticky bit (the octal mode is compared as a number, not by digits).
+_bundle_entry_ok() {
+    local path=$1
+    local info owner mode
+
+    if [[ -L $path ]]; then
+        return 1
+    fi
+
+    info=$(stat -c '%u %a' -- "$path") || return 1
+    owner=${info%% *}
+    mode=$((8#${info#* }))
+
+    ((owner == 0 && (mode & 07022) == 0))
+}
+
+# check_bundle_dir DIR FILE...: DIR and each existing FILE (a name relative to DIR) must be no link, be owned by
+# uid 0 and be free of group- and other-write and of every special bit; a missing file is left to the later
+# checks. Status 1 with the message naming the first entry that fails.
 check_bundle_dir() {
-    return 99
+    local dir=$1
+    local path
+
+    shift
+
+    for path in "$dir" "${@/#/$dir/}"; do
+        if [[ $path != "$dir" && ! -e $path && ! -L $path ]]; then
+            continue
+        fi
+
+        if ! _bundle_entry_ok "$path"; then
+            printf '%s: %s is not owned by root or is writable by others; extract the bundle as root in a private directory\n' \
+                "${0##*/}" "$path" >&2
+            return 1
+        fi
+    done
 }
