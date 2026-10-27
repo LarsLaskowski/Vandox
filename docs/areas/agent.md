@@ -1509,7 +1509,9 @@ grows faster until its size bound evicts older data with a recorded gap, bounded
   so systemd restarts an agent whose runners stopped moving. A malformed value disables the watchdog with a warning.
 - For this to work the unit must use `Type=notify`, set `WatchdogSec=` and allow notifications from the main process
   (`NotifyAccess=main`); the installed unit does (*Installation*): `WatchdogSec=2min`, `Restart=on-failure`, `RestartSec=30s` and
-  `StartLimitIntervalSec=0`, so a failed or watchdog-stopped agent is restarted twice a minute at most, for ever.
+  `StartLimitIntervalSec=0`, so a failed, watchdog-stopped or memory-limit-killed agent is restarted twice a minute at most, for
+  ever. The unit also limits the agent's resources: `MemoryMax=256M` with `GOMEMLIMIT=192MiB`, `CPUQuota=50%`, `Nice=5` and
+  `IOWeight=50` (the reasons are in `deploy/agent/README.md`, *Unit*).
 - `NOTIFY_SOCKET`, `WATCHDOG_USEC` or `WATCHDOG_PID` named twice in the environment is treated as malformed (*Logging* for
   `JOURNAL_STREAM`).
 
@@ -2050,9 +2052,9 @@ value is plain, single-quoted without `''` or double-quoted without a backslash;
 scalar, a value on the next line, a second `directory` key, another indent) gives `install.sh: cannot read spool.directory from <file>`, exit 2,
 though the agent itself would read the file. A value other than exactly `/var/lib/vandox/<name>` (`<name>` of letters, digits, `.`, `_`, `-`, not `.`
 or `..`) gives `install.sh: spool.directory must be one directory below /var/lib/vandox`, exit 2, because the unit allows writes only below
-`/var/lib/vandox`. An existing `/var/lib/vandox` or spool that is a link, owned by another user (the spool: not by `vandox-agent`) or
-a parent that is writable by others gives `install.sh: <path> is not the agent's directory`, exit 1. The two scripts print the same lines
-with `uninstall.sh:` in front.
+`/var/lib/vandox`. An existing `/var/lib/vandox` or spool that is a link or not a directory, owned by another user (the spool: not by `vandox-agent`), or a
+`/var/lib/vandox` that is group- or other-writable gives `install.sh: <path> is not the agent's directory`, exit 1. `uninstall.sh`
+prints the two `spool.directory` lines above with `uninstall.sh:` in front; it does not check the directory's owner.
 
 **MariaDB.** On the first install the account is created from `deploy/agent/mariadb-user.sql` unchanged, with `plesk db` when `plesk` is on the
 search path, else `mariadb`. When that fails or neither exists, the install continues with
