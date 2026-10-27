@@ -5,12 +5,9 @@ Status: Draft
 
 ## Problem
 
-From v0.2.0 the agent collects and sends (#35 and the collectors are done), but nothing installs it: the README says "there is nothing to
-install on the monitored server", `deploy/agent/` holds only `agent.yaml`, `mariadb-user.sql` and the list of rights, and the systemd unit
-that the Agent area (*Rights*, *Service manager*), security area 6 and records 0030, 0110, 0111, 0117, 0122 hold to a long list of
-settings does not exist. An operator would have to assemble user, groups, directories, token, unit and MariaDB account by hand, and every
-mistake there either breaks a collector silently or widens what a compromised agent can reach. Several facts the agent relies on are also
-still "to be checked on the server (#42)".
+The agent of v0.2.0 collects and sends, but nothing installs it: `deploy/agent/` has no unit and no scripts, although the Agent area
+(*Rights*, *Service manager*), security area 6 and records 0030, 0110, 0122 require many unit settings. Assembled by hand, every mistake
+breaks a collector silently or widens what a compromised agent reaches; several facts are still "to be checked on the server (#42)".
 
 ## Scenarios
 
@@ -20,13 +17,15 @@ still "to be checked on the server (#42)".
   checks the checksum, and creates: the system user `vandox-agent` (no login shell, no home, supplementary groups exactly `adm` and
   `systemd-journal`), `/usr/local/bin/vandox-agent` (root-owned, 0755), `/etc/vandox/agent.yaml` from the example with the two values
   (root:vandox-agent, 0640), `/etc/vandox/agent-token` (root:root, 0600), `/var/lib/vandox/spool` (vandox-agent, 0700), the unit
-  `vandox-agent.service`, and the MariaDB account from `mariadb-user.sql` (`plesk db` on Plesk, else `mariadb`). It enables and starts the
-  unit and ends with `vandox-agent vX.Y.Z installed and running`.
+  `vandox-agent.service` and the MariaDB account (`plesk db` on Plesk, else `mariadb`); it starts the enabled unit and ends with `vandox-agent vX.Y.Z installed and running`.
 - S2: (reboot) Given an installed agent, when the server reboots, then `vandox-agent.service` starts by itself after the journal flush and
   `systemctl is-active vandox-agent` says `active`.
 - S3: (upgrade, repeat) Given an installed agent, when root runs the install script again with another (or the same) version, then only
-  the binary and the unit are replaced, configuration, token, spool and state are kept, no token is asked for, the agent restarts and
-  continues from its spool and state file.
+  the binary and the unit are replaced, configuration, token, spool and state are kept, the agent restarts and continues from its spool
+  and state file. The token is asked for only when `/etc/vandox/agent-token` is missing, whether or not `agent.yaml` exists. The new
+  binary is written to a temporary file in `/usr/local/bin` and renamed over the old one, never written into the running file. When the
+  script's checkout is a Git tag other than `--version`, it prints `install.sh: WARNING checkout is <tag>, not <version>` (the unit
+  comes from the checkout).
 - S4: (uninstall) When root runs `deploy/agent/uninstall.sh`, then the unit is stopped (the agent saves its state), disabled and removed
   and the binary is removed; user, configuration, token, spool and MariaDB account are kept so a later install continues, and the script
   says so and names `--purge`.
@@ -45,13 +44,18 @@ still "to be checked on the server (#42)".
 - E2: The binary does not match its `SHA256SUMS` line, or `SHA256SUMS` lacks exactly one well-formed line for
   `vandox-agent-linux-amd64`: `install.sh: checksum mismatch, nothing installed`, exit 1; an installed binary stays untouched and nothing
   downloaded is ever run.
-- E3: The download fails (no such release, network, HTTP error, cut short): `install.sh: download failed: <file>`, exit 1, nothing changed.
+- E3: The download fails: `install.sh: download failed: <file>`, exit 1, nothing changed.
 - E4: `--version` missing or not of the form `vX.Y.Z` / `vX.Y.Z-rc.N`: usage text, exit 2. The token given as an option or argument:
   refused with usage text (it would show in `ps` and the shell history).
 - E5: The token read on a first install breaks the secret rules (fewer than 32 or more than 4096 characters, a character outside
   `0x21`–`0x7E`): `install.sh: token rejected: <rule>`, the token never echoed, exit 1, nothing changed.
-- E6: First install without `--agent-id` / `--backend-url` and no `/etc/vandox/agent.yaml`: usage text, exit 2. An existing
-  `agent.yaml` is never overwritten; given values are then ignored with the line `install.sh: keeping existing /etc/vandox/agent.yaml`.
+- E6: First install without `--agent-id` / `--backend-url` and no `/etc/vandox/agent.yaml`: usage text, exit 2. An `--agent-id` outside
+  the wire rule (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`) or a `--backend-url` that is not `http(s)://host[:port][/]` without whitespace,
+  quotes, `#` or control characters: usage text, exit 2. A host that is an IP literal outside the tailnet ranges (NFR *Network*) gets
+  `install.sh: WARNING <host> is not a tailnet address; the unit blocks it`. An existing `agent.yaml` is never overwritten; given values
+  are then ignored with the line `install.sh: keeping existing /etc/vandox/agent.yaml`. The script, uninstall and purge take
+  `spool.directory` from the kept file (default `/var/lib/vandox/spool`); a value not at or below `/var/lib/vandox` stops the script with
+  `install.sh: spool.directory must be below /var/lib/vandox`, exit 2, because the unit allows writes only there.
 - E7: MariaDB not installed or the administrator login fails: the account is not created, the line
   `install.sh: WARNING MariaDB account not created; run: plesk db < deploy/agent/mariadb-user.sql` (or `mariadb <`), install continues.
   `--no-mariadb` skips the step without a warning.
@@ -60,33 +64,35 @@ still "to be checked on the server (#42)".
   cause, and the unit keeps retrying (E9).
 - E9: A start fails at any time (for example the spool directory was removed, comment 2 of #42): systemd restarts the agent at a fixed
   interval without ever giving up (no `start-limit-hit`), so it comes back by itself once the cause is fixed.
-- E10: A collector runner stops moving: the agent withholds the watchdog notification and systemd restarts it after `WatchdogSec=`.
+- E10: A collector runner stops moving: the watchdog is withheld and systemd restarts the agent.
 - E11: The agent exceeds its memory limit: the kernel kills it inside its own cgroup, never another process, and systemd restarts it.
-- E12: `backend.url` names a host whose name server lies outside the addresses the unit allows (NFR): requests fail as
-  `connection failed`; the README says to use the backend's tailnet address or MagicDNS.
-- E13: A user `vandox-agent` already exists: it is reused and set to the S1 state (shell, groups exactly `adm` and `systemd-journal`); the
-  script prints each change it made.
-- E14: Uninstall on a server without the agent, or after a partial install: removes what exists, reports what was absent, exit 0.
+- E12: A `backend.url` host resolved by a name server outside the allowed addresses fails as `connection failed`; the README says to
+  use the tailnet address or MagicDNS.
+- E13: A user `vandox-agent` already exists: it is reused and set to the S1 state — shell `nologin`, password locked, primary group
+  `vandox-agent` (created when missing), supplementary groups exactly `adm` and `systemd-journal` — and the script prints each change.
+  When it has a home directory, the script names it and leaves it in place (also on purge).
+- E14: Uninstall of an absent or partial installation removes what exists, reports the rest absent, exit 0.
 
 ## Non-functional requirements
 
 - Security (area 6, records 0030, 0122): the unit runs the agent as `vandox-agent`, never root, with `CAP_SYS_PTRACE` as its only ambient
-  capability and the only one in the bounding set, and every confinement the Agent area *Rights* and `deploy/agent/README.md` require
-  (`NoNewPrivileges=yes`, the system-call filter with the six named denials and `EPERM`, `SystemCallArchitectures=native`,
-  `ProtectHome=yes`, `InaccessiblePaths=/etc/shadow /etc/gshadow`, `adjtimex` allowed, `ProtectSystem=strict`,
-  `ReadWritePaths=/var/lib/vandox`, `PrivateTmp=yes`), and none of the settings those documents forbid (`ProtectClock=yes`,
-  `PrivateNetwork=`, `ProcSubset=pid`, a `ProtectProc=` other than `default`, hiding `/run/dbus`, `/run/mysqld` or the journal
-  directories). `Type=notify`, `NotifyAccess=main`, `WatchdogSec=`, `After=systemd-journal-flush.service`.
+  capability and the only one in the bounding set, every confinement the Agent area *Rights* and `deploy/agent/README.md` (*Unit settings that
+  must stay as they are*) require, none they forbid, and `ProtectSystem=strict`, `ReadWritePaths=/var/lib/vandox`, `PrivateTmp=yes`. `Type=notify`, `NotifyAccess=main`, `WatchdogSec=`, `After=systemd-journal-flush.service`.
 - Network (records 0006, 0010): the unit allows IP traffic only to the tailnet ranges (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) and
   localhost; the agent listens on nothing.
 - Resources (record 0025, ARCHITECTURE "frugal on the server"): `MemoryMax=`, `CPUQuota=`, `Nice=` and `IOWeight=` are set; each value and
-  its reason (the documented per-collector memory bounds, the scheduler's time limits) is in `deploy/agent/README.md`. A limit must not
+  its reason is in `deploy/agent/README.md`, `MemoryMax=` derived from the documented bounds of the collectors in memory pressure mode
+  (which reads the system's `MemAvailable`, not the cgroup's) plus the Go runtime's GC headroom; the README also states whether the
+  unit sets `GOMEMLIMIT=` below it and why (a unit setting, not an agent option). A limit must not
   make the agent miss its schedule on an idle server.
-- Secrets (area 8, record 0032): the token reaches the agent only as a systemd credential behind `VANDOX_AGENT_TOKEN_FILE`; it is never
-  in the unit, an environment line, a command line, the script's output or a log.
-- Install-script safety: it runs as root, downloads only over HTTPS from this repository's release, works in a private temporary
+- Secrets (area 8, record 0032): the token reaches the agent only as a systemd credential behind `VANDOX_AGENT_TOKEN_FILE`, whose
+  value is written out as `/run/credentials/vandox-agent.service/agent-token`, never with the `%d` specifier; the token is never in the
+  unit, an environment line, a command line, the script's output or a log.
+- Install-script safety: it runs as root, downloads only over HTTPS from this repository's release (`curl --proto =https
+  --proto-redir =https --fail`, since the release URL redirects to another GitHub host), works in a private temporary
   directory removed on every exit, never follows a link it did not create, and changes nothing before every check of E1–E6 passed.
-- Compatibility: Ubuntu 22.04 with systemd 249 and kernel 5.15 is the target; every unit setting must be known to systemd 249.
+- Compatibility: Ubuntu 22.04 with systemd 249 and kernel 5.15 is the target; every unit setting and specifier must be known to systemd
+  249, because systemd ignores an unknown key with a log line only.
   `bash`, `curl`, `sha256sum` and the shadow utilities are the only tools assumed.
 - Verification: the scripts pass the shell analyzers of the *Analyzer gate*; S2, S6, S7 and the reboot can only be run on a systemd host
   by the Product Manager, who notes the results (AC10).
@@ -97,10 +103,11 @@ still "to be checked on the server (#42)".
 - [ ] AC1: On a first install the script creates exactly the files, user, groups, owners and modes of S1, enables and starts the unit, and
   prints the success line; an existing `vandox-agent` user is brought to that state with each change printed (S1, E13).
 - [ ] AC2: A repeated install replaces only binary and unit, keeps configuration, token, spool and state, asks for no token, and an
-  existing `agent.yaml` is never overwritten (S3, E6).
+  existing `agent.yaml` is never overwritten; the token is asked only when its file is missing, the binary is replaced by rename,
+  and a checkout tag other than `--version` is warned about (S3, E6).
 - [ ] AC3: The binary is installed only when its SHA-256 equals the single well-formed `SHA256SUMS` line for it; any mismatch, malformed
   file or failed download stops the script before any change, and nothing downloaded is run before the match (E2, E3).
-- [ ] AC4: Every precondition and input error of E1, E4, E5 and E6 stops the script with its message and exit code before any change; the
+- [ ] AC4: Every precondition and input error of E1, E4, E5 and E6 (agent ID, URL and spool directory included) stops the script with its message and exit code before any change; the
   token is accepted only from the prompt or standard input and never printed (E1, E4, E5, E6).
 - [ ] AC5: The MariaDB account is created from `deploy/agent/mariadb-user.sql` unchanged; when that fails the script warns and continues,
   and `--no-mariadb` skips it (S1, E7).
@@ -109,7 +116,7 @@ still "to be checked on the server (#42)".
 - [ ] AC7: `uninstall.sh` removes unit and binary and keeps the rest; `--purge` removes everything of S1, states before deleting that
   unsent records are lost, and both succeed on a partial or absent installation (S4, S5, E14).
 - [ ] AC8: The unit file holds every setting the NFR *Security*, *Network*, *Resources* and *Secrets* bullets require and none they forbid,
-  and `systemd-analyze verify` accepts it (S6, E12).
+  and `systemd-analyze verify` of systemd 249 (Ubuntu 22.04's package) reports no unknown section, key or specifier (S6, E12).
 - [ ] AC9: `systemd-analyze security` rates the unit `OK` or better, and `deploy/agent/README.md` notes the score, the systemd version it
   was taken with and each remaining flagged item with its reason (S6).
 - [ ] AC10: The script runs and reports, warning only, the server checks the documents leave to #42: journal files readable by group
@@ -122,33 +129,48 @@ still "to be checked on the server (#42)".
 ## Out of scope
 
 - Publishing the scripts or the unit as release assets (the release workflow is unchanged; the scripts come with the tagged source).
-- Verifying the build provenance on the server (`gh attestation verify`): the README shows it for operators who want it; the script
-  checks the checksum the issue asks for. `SHA256SUMS` from the same release proves integrity, not authorship.
+- Provenance on the server (`gh attestation verify`, shown in the README): the script checks the checksum the issue asks for, which
+  proves integrity, not authorship.
 - The polkit rule for self-healing (v0.6.0), other distributions and architectures, a package (`.deb`).
-- Two install runs at once; the rsyslog logrotate check of the Agent area (*Log shipping*), which needs a rotation and stays a manual step
-  in `deploy/agent/README.md`.
+- Two install runs at once; the rsyslog logrotate check (Agent area, *Log shipping*), a manual step in `deploy/agent/README.md`.
 
 ## Open questions
 
-- Which capabilities does the issue's "`/proc/<pid>/fd`, `smaps_rollup` and the journal" need? Answered: `CAP_SYS_PTRACE` alone. The
-  issue's claim is refuted in part: `/proc/<pid>/fd` is not read (record 0115; it would need `CAP_DAC_READ_SEARCH`, which record 0122
-  forbids), and the journal is read through the group `systemd-journal`, not a capability.
-- Can a unit with every required setting reach `OK`? Answered: a draft unit with the settings of the NFR scored 1.8 `OK` with
-  `systemd-analyze security --offline=true` (systemd 255, this session); systemd 249 on the server has no offline mode, so AC9's score
-  is taken there (AC10).
-- What does uninstall remove? Answered: a Lead decision, remove and purge as Debian packages do (S4, S5): a plain uninstall must not destroy
-  unsent records or force a new token and MariaDB account on reinstall.
-- Where does the binary come from? Answered: the GitHub release of the given version, the assets record 0037 publishes
-  (`vandox-agent-linux-amd64`, `SHA256SUMS`); `--version` is required so binary and checksum come from one release.
-- Does the agent start before Tailscale is up? Answered: it needs no ordering; the sender waits and retries (Agent area, *Sending*).
-- Should `IPAddressAllow=` be set (left to #42 by the Agent area)? Answered: yes, to the tailnet ranges and localhost, from the guarantee
-  that agent and backend talk only over Tailscale (ARCHITECTURE, *Security model*; records 0006, 0010).
+- Which capabilities does the issue's "`/proc/<pid>/fd`, `smaps_rollup` and the journal" need? Answered: `CAP_SYS_PTRACE` alone; the
+  claim is refuted in part: `/proc/<pid>/fd` is not read (records 0115, 0122), the journal needs the group `systemd-journal`.
+- Can a unit with every required setting reach `OK`? Answered: a draft unit with the NFR's settings scored 1.8 `OK`
+  offline on systemd 255 (this session); 249 has no offline mode, so AC9's score is taken on the server (AC10).
+- What does uninstall remove? Answered: a Lead decision, remove and purge as Debian packages do (S4, S5), so a plain
+  uninstall never destroys unsent records.
+- Where does the binary come from? Answered: the assets of the given release (record 0037);
+  `--version` is required so binary and checksum come from one release.
+- Should `IPAddressAllow=` be set (left to #42 by the Agent area)? Answered: yes, tailnet ranges and localhost, from the
+  only-over-Tailscale guarantee (ARCHITECTURE, *Security model*; records 0006, 0010).
 
 ## Area documents
 
-- `docs/areas/agent.md`: *Status* names the unit and scripts; *Rights* and *Service manager* name the unit as built (address
+- `docs/areas/agent.md`: *Connection* (the "every other address is `https`" bullet) says the unit limits the agent to tailnet
+  addresses; *Status* names the unit and scripts; *Rights* and *Service manager* name the unit as built (address
   allow-list, restart and watchdog values, resource limits); the "(#42)" notes point to the server checks; a short *Installation*
   section: paths, owners, modes, install/upgrade/uninstall/purge behavior, the checksum rule.
 - `docs/areas/configuration-and-secrets.md`: the agent token as a systemd credential in `/etc/vandox/agent-token`.
 - `docs/areas/network-and-security-model.md`: the agent's outbound address allow-list.
 - `deploy/agent/README.md`: every unit setting with its reason, the resource values, the security score and the server check results.
+
+## Challenge
+
+Devil's Advocate, spec challenge:
+
+1. Major — AC8 checks only on systemd 255; 249 drops unknown keys and `%d`. Accepted: AC8 verifies with systemd 249, the Secrets NFR
+   writes the credential path out and forbids `%d`. How 249's `systemd-analyze` is obtained is left to the plan; the
+   version that brought `%d` was not checked, the rule makes it moot.
+2. Minor — kept `spool.directory` outside `/var/lib/vandox`. Accepted: the scripts read it and stop (exit 2) outside that tree, so
+   `ReadWritePaths=` stays fixed (E6, AC4); uninstall and purge use the same path.
+3. Minor — unchecked `--agent-id` / `--backend-url`. Accepted (E6, AC4), with the tailnet warning; the Agent area's *Connection*
+   bullet is under *Area documents*.
+4. Minor — an existing user. Accepted (E13); a home directory is named and kept, also on purge: the script did not create it.
+5. Minor — upgrade details. Accepted in part (S3, AC2): token only when its file is missing; binary by rename. The checkout check is a
+   warning, not a stop, and only for a Git checkout on a tag: a source archive carries no reliable version to compare.
+6. Minor — redirects. Accepted (Install-script safety NFR).
+7. Minor — `MemoryMax=` basis and `GOMEMLIMIT=`. Accepted (Resources NFR); `GOMEMLIMIT=` is decided in the plan (the agent refuses
+   only unknown `VANDOX_` variables, `internal/config/secret.go`).
