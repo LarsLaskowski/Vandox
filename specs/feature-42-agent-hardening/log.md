@@ -20,3 +20,4 @@ are quoted in full.
 | 2026-10-27 07:51 | 6 Implement G1 | squad-dev | vandox-agent.service written, TestService_* pass, verify clean; Readme test stays red until G5 (sonnet/medium · 82,462 tokens · 8 tool uses · 38 s) |
 | 2026-10-27 07:51 | 4 Skeleton G2 | squad-dev | common.sh and install.sh skeletons, bodies return 99, bash -n passes (sonnet/medium · 62,922 tokens · 3 tool uses · 18 s) |
 | 2026-10-27 08:05 | 5 Tests first G2 | squad-tester | common_test.go and install_test.go written; compile, fail on skeleton; deferred: TestAgentYAML_HoldsTheLinesRenderConfigReplaces (sonnet/medium · 119,503 tokens · 26 tool uses · 797 s · continued from 5 Tests first G1) |
+| 2026-10-27 08:19 | 6 Implement G2 | squad-dev | common.sh and install.sh implemented; all G2 tests pass except README test (G5); shellcheck clean (sonnet/medium · usage pending) |
