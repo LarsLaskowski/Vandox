@@ -61,9 +61,19 @@ Reading `spool.directory` from a kept configuration file:
     directory directly below a root-owned `/var/lib/vandox`: root never creates or changes ownership along a path an
     agent-owned directory could redirect with a link (a deeper path would need a checked walk of every element).
 
+Clear-text URLs in the CI check script (SonarQube Cloud `shell:S5332`, a vulnerability that fails the quality gate's security
+rating; it follows a URL through variables and command output and exempts loopback):
+19. **Suppressing the rule for the script** with `sonar.issue.ignore.multicriteria` in the scanner arguments, or `# NOSONAR` — the
+    first hides every later clear-text finding in the file and changes the CI workflow; whether the shell analyzer honours the
+    second is unmeasured.
+20. **Building the URL from pieces so the rule no longer sees it** — evasion: the traffic would stay what it was.
+21. **No clear-text URL in the script** (chosen) — the backend is unreachable in CI and only rendered and validated, so an
+    `https://` URL, which the scripts and the agent accept alike, tests the same; the address allow-list check concerns the
+    connection, not the protocol, so it takes address and port and opens a socket.
+
 ## Decision
 
-The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16 and 18; the settings, values, paths and messages are
+The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16, 18 and 21; the settings, values, paths and messages are
 in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manager*) and in `deploy/agent/README.md`.
 
 ## Consequences
@@ -80,3 +90,4 @@ in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manag
 - `SHA256SUMS` does not prove who built the binary.
 - The CI job depends on GitHub keeping an `ubuntu-22.04` runner; it fails when the runner's systemd is not 249.
 - A kept configuration whose `spool` block is written in another YAML form is refused by the scripts, though the agent reads it.
+- The CI job does not exercise an `http://` backend URL; the Go tests of the scripts' functions cover both schemes.
