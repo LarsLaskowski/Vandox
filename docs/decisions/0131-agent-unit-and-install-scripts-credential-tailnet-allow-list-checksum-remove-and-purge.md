@@ -1,6 +1,6 @@
 # 0131: Agent unit and install scripts: token as a systemd credential, tailnet-only addresses, fixed resource limits with GOMEMLIMIT, checksum-verified binary, install bundle as a release asset, remove and purge
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-27
 - **Area:** Agent
 - **Source:** Issue #42
@@ -45,8 +45,8 @@ System-call filter:
 
 Binary and scripts:
 11. **Verifying the build provenance with `gh attestation verify` on the server** — needs `gh` and a GitHub login on the server.
-12. **The SHA-256 from `SHA256SUMS` of the same release** (chosen, as the issue asks) — proves integrity, not authorship; the README
-    shows the provenance check for operators who want it.
+12. **A SHA-256 check of the binary by `install.sh` before it runs** (chosen, as the issue asks; options 30–31 decide which SHA-256)
+    — proves integrity, not authorship; the README shows the provenance check for operators who want it.
 
 Uninstall:
 13. **Uninstall removes everything** — destroys unsent records and forces a new token and MariaDB account on reinstall.
