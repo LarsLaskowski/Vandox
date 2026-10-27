@@ -1,10 +1,10 @@
-# 0131: Agent unit and install scripts: token as a systemd credential, tailnet-only addresses, fixed resource limits with GOMEMLIMIT, checksum-verified binary, remove and purge
+# 0131: Agent unit and install scripts: token as a systemd credential, tailnet-only addresses, fixed resource limits with GOMEMLIMIT, checksum-verified binary, install bundle as a release asset, remove and purge
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-10-27
 - **Area:** Agent
 - **Source:** Issue #42
-- **Supersedes:** —
+- **Supersedes:** 0037 (amends it: a release also publishes the agent install bundle `vandox-agent-install-vX.Y.Z.tar.gz`, listed in `SHA256SUMS` beside the binary and attested for build provenance; 0037 is not edited)
 
 ## Context
 
@@ -13,7 +13,9 @@ v0.2.0 is the first release whose agent collects and sends, and nothing installs
 and 0120 add settings the collectors need. The issue asks for a hardened unit with resource limits, install and uninstall scripts,
 and a checksum check of the downloaded binary. The target is Ubuntu 22.04 with systemd 249 on a 2 GB server (0025), which ignores
 a unit key it does not know with only a log line, so a hardening setting can silently vanish. The cloud sessions have no systemd
-as PID 1, and the release workflow (0037) publishes `vandox-agent-linux-amd64` with a one-line `SHA256SUMS`.
+as PID 1, and the release workflow (0037) published `vandox-agent-linux-amd64` with a one-line `SHA256SUMS`. On the pull request the
+Product Manager refused the first delivery of the scripts (a Git checkout of the tag): a production server should not need `git` and a
+whole repository to install one agent.
 
 ## Options considered
 
@@ -43,8 +45,8 @@ System-call filter:
 
 Binary and scripts:
 11. **Verifying the build provenance with `gh attestation verify` on the server** — needs `gh` and a GitHub login on the server.
-12. **The SHA-256 from `SHA256SUMS` of the same release, the scripts from the tagged source** (chosen, as the issue asks) — proves
-    integrity, not authorship; the README shows the provenance check for operators who want it.
+12. **The SHA-256 from `SHA256SUMS` of the same release** (chosen, as the issue asks) — proves integrity, not authorship; the README
+    shows the provenance check for operators who want it.
 
 Uninstall:
 13. **Uninstall removes everything** — destroys unsent records and forces a new token and MariaDB account on reinstall.
@@ -71,9 +73,26 @@ rating; it follows a URL through variables and command output and exempts loopba
     `https://` URL, which the scripts and the agent accept alike, tests the same; the address allow-list check concerns the
     connection, not the protocol, so it takes address and port and opens a socket.
 
+How the scripts, the unit and their files reach the server:
+22. **A Git checkout of the tag** (the first build of this record) — needs `git` and the whole repository on a production server; a
+    checkout on another tag could only be warned about.
+23. **An install bundle as a release asset** (chosen by the Product Manager on PR #324) — one `tar.gz` with the two scripts,
+    `common.sh`, the unit, both SQL files, the example `agent.yaml` and a `VERSION` file, built from the tagged tree by the release
+    workflow and listed in the same `SHA256SUMS`; the server needs `curl`, `tar` and `sha256sum` only, and the version of the scripts and
+    the binary is one value (`VERSION`) instead of an option that can disagree with the files.
+24. **Each file as its own release asset**, fetched and checked by `install.sh` — more downloads and more code in the one script that
+    runs as root, and the first download (`install.sh` itself) is still checked by hand.
+25. **The files embedded in the agent binary** (`vandox-agent install`) — one download, but it changes the binary and adds a root
+    code path to it, which this feature does not.
+26. **The binary inside the bundle** — a second copy of a 64 MiB-bounded file per release, and the bundle would carry an artifact that
+    is attested on its own; the script keeps downloading the binary of the bundle's version.
+27. **A `curl … | bash` one-liner** — runs bytes from the network before any check; never documented.
+28. **`install.sh` checks the bundle itself** (its own checksum or the ownership of its directory) — a script cannot vouch for the
+    files it is part of; the check belongs before extraction, which the documents prescribe.
+
 ## Decision
 
-The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16, 18 and 21; the settings, values, paths and messages are
+The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16, 18, 21 and 23; the settings, values, paths and messages are
 in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manager*) and in `deploy/agent/README.md`.
 
 ## Consequences
@@ -87,7 +106,22 @@ in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manag
   `StartLimitIntervalSec=0` retries forever, at most twice a minute.
 - The resource values rest on the documented per-collector bounds, not on a measurement on the server; the #45 parallel run
   checks the agent's peak RSS against them.
-- `SHA256SUMS` does not prove who built the binary.
+- `SHA256SUMS` does not prove who built the binary or the bundle; `gh attestation verify` covers both for operators who want it.
+- `SHA256SUMS` holds one line per asset (bundle and binary, in that order), so `install.sh` checks the form of every line and the binary's
+  line alone, instead of requiring exactly one line; a later asset needs no script change.
+- The operator's check of the bundle line before extraction is the trust boundary for the scripts and the unit: nothing the scripts do
+  can replace it, so every document shows that check before `tar` and never a pipe into a shell. Extraction runs as root in a fresh
+  private directory, so no other local user can place files into the extracted tree.
+- `install.sh` takes its version only from the bundle's `VERSION`, so the scripts, the unit and the binary come from one release; the
+  `--version` option and the checkout warning are gone, and a run from a source checkout (no `VERSION`) is refused. A developer builds
+  a bundle with the release's packaging script.
+- The release packages only tags `install.sh` accepts (`vX.Y.Z`, `vX.Y.Z-rc.N`): a release with another pre-release form fails instead of
+  publishing a bundle that cannot install.
+- The bundle is byte-for-byte reproducible from the tagged tree with the same `tar` and `gzip` (fixed order, owner, modes and time), which
+  the release checks by packaging twice; it is not reproducible across `gzip` versions.
+- `--from DIR` still takes only the binary and `SHA256SUMS`, for offline installs and CI; the bundle is checked and extracted the same
+  way as online.
 - The CI job depends on GitHub keeping an `ubuntu-22.04` runner; it fails when the runner's systemd is not 249.
 - A kept configuration whose `spool` block is written in another YAML form is refused by the scripts, though the agent reads it.
-- The CI job does not exercise an `http://` backend URL; the Go tests of the scripts' functions cover both schemes.
+- The CI job installs from the bundle it packages exactly as the release does, so the documented path is the tested one; it does not
+  exercise an `http://` backend URL; the Go tests of the scripts' functions cover both schemes.
