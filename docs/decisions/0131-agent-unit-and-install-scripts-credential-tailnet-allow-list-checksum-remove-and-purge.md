@@ -57,7 +57,9 @@ Verification against systemd 249:
 
 Reading `spool.directory` from a kept configuration file:
 17. **A new agent flag that prints the configuration** — changes the binary, which the feature does not.
-18. **A small reader of the block form `spool:` / `directory:`, failing closed on every other form** (chosen).
+18. **A small reader of the block form `spool:` / `directory:`, failing closed on every other form** (chosen), accepting only one
+    directory directly below a root-owned `/var/lib/vandox`: root never creates or changes ownership along a path an
+    agent-owned directory could redirect with a link (a deeper path would need a checked walk of every element).
 
 ## Decision
 
@@ -67,6 +69,12 @@ in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manag
 ## Consequences
 
 - The agent can reach only tailnet addresses and localhost; a `backend.url` elsewhere fails as `connection failed`.
+- `MemoryMax=256M`: the documented worst cases (process run 48 MiB, MariaDB 32 MiB, logs 24 MiB, kernel 4 MiB, sender one 1 MiB
+  batch per stream) sum to about 112 MiB if all peak at once under pressure; `GOMEMLIMIT=192MiB` leaves 64 MiB for page cache and
+  runtime overhead. `CPUQuota=50%` bounds a runaway loop to half a core; the collectors' timeouts are at most 10 s. `Nice=5` and
+  `IOWeight=50` yield to the services without starving the agent while an outage builds. `WatchdogSec=2min` pings every minute while
+  the runners are on time, so a short stall under pressure does not restart the agent. `RestartSec=30s` with
+  `StartLimitIntervalSec=0` retries forever, at most twice a minute.
 - The resource values rest on the documented per-collector bounds, not on a measurement on the server; the #45 parallel run
   checks the agent's peak RSS against them.
 - `SHA256SUMS` does not prove who built the binary.

@@ -1,19 +1,19 @@
 # Plan: Agent hardening and installation
 
 Source: Issue #42 | [spec.md](spec.md)
-Status: Draft
+Status: Revised (1)
 Tier: security — the change creates security controls: the unit's capability and bounding set, system-call filter and address allow-list, and the handling of the agent token, all run by root-owned scripts.
-Security areas touched: 6 Agent privileges (`deploy/agent/vandox-agent.service`, the user and groups `install.sh` creates); 7 MariaDB monitoring user (`install.sh` runs `mariadb-user.sql`, new `mariadb-user-remove.sql`); 8 Secrets handling (`/etc/vandox/agent-token`, `LoadCredential=`); 9 File writes and paths derived from external input (`install.sh` and `uninstall.sh` write and delete as root, `spool.directory` read from `agent.yaml`); 11 Outbound calls (`IPAddressDeny=`/`IPAddressAllow=`; the script's download); CI configuration (new job in `.github/workflows/ci.yml`, new `.github/scripts/check-agent-install.sh`)
+Security areas touched: 6 Agent privileges (`deploy/agent/vandox-agent.service`, the user and groups `install.sh` creates); 7 MariaDB monitoring user (`install.sh` runs `mariadb-user.sql`, new `mariadb-user-remove.sql`); 8 Secrets handling (`/etc/vandox/agent-token`, `LoadCredential=`); 9 File writes and paths derived from external input (`install.sh` and `uninstall.sh` write and delete as root, `spool.directory` read from `agent.yaml`); 10 Parsing of external input (`install.sh` reads its arguments, the downloaded `SHA256SUMS`, `agent.yaml`, `/etc/resolv.conf` and the binary's `-version` output); 11 Outbound calls (`IPAddressDeny=`/`IPAddressAllow=`; the script's download); CI configuration (new job in `.github/workflows/ci.yml`, new `.github/scripts/check-agent-install.sh`)
 
 ## Problem / root cause
 
-See [spec.md](spec.md): nothing installs the agent, and the unit the documents require does not exist.
+See [spec.md](spec.md).
 
 ## Verified facts
 
 | # | Claim | Evidence | Status |
 | - | ----- | -------- | ------ |
-| 1 | The issue's "capabilities for `/proc/<pid>/fd`, `smaps_rollup` and the journal": only `CAP_SYS_PTRACE` is needed | `/proc/<pid>/fd` is never read (record 0115; `docs/areas/agent.md` 1818-1820), the journal needs the group `systemd-journal` (1943-1946) | refuted |
+| 1 | The issue's capabilities for `fd`, `smaps_rollup` and the journal: only `CAP_SYS_PTRACE` is needed | records 0115, 0122; `docs/areas/agent.md` 1818-1820, 1943-1946 | refuted |
 | 2 | A release publishes `vandox-agent-linux-amd64` and a `SHA256SUMS` of exactly one line `^[0-9a-f]{64}  vandox-agent-linux-amd64$` | `.github/workflows/release.yml` 119-133, 364 | confirmed |
 | 3 | `vandox-agent --version` prints `vandox-agent <tag> (commit <sha>, built <date>)`; the tag is set by `-ldflags -X .../internal/version.Version=` | `.github/workflows/ci.yml` 205-227 | confirmed |
 | 4 | The agent never creates `spool.directory`; without it the start ends with exit 1 before `READY=1` | `docs/areas/agent.md` 1576-1578, 1957-1961 | confirmed |
@@ -33,19 +33,19 @@ See [spec.md](spec.md): nothing installs the agent, and the unit the documents r
 
 ## Tests per criterion
 
-Go tests in the test-only package `deploy/agent` run `bash` on the scripts, source them and call one function at a time, with stub
-commands on `PATH`; none needs root, network or systemd. The CI script runs the whole flow on systemd 249.
+Go tests (test-only package `deploy/agent`) source the scripts and call one function at a time with stub commands on `PATH`, without
+root, network or systemd; the CI script runs the whole flow on systemd 249.
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `TestRenderConfig_SetsAgentIDAndURL`, `TestAgentYAML_HoldsTheLinesRenderConfigReplaces`, `TestEnsureUser_ReportsEachChange` (stubbed `getent`, `id`, `useradd`, `usermod`, `groupadd`, `passwd`); CI case "first install" | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
-| AC2 | `TestCheckoutWarning_OnlyForAnotherTag`, `TestNeedsToken_OnlyWithoutTokenFile`; CI case "repeat install" (no token asked, config and token unchanged, binary inode changed, spool files kept) | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
-| AC3 | `TestVerifyChecksum_AcceptsOnlyTheSingleMatchingLine` (table: match, other hash, two lines, other name, upper-case hex, one space, trailing text, empty, missing file), `TestFetchRelease_NeverRunsABinaryThatFailsTheChecksum`, `TestFetchRelease_ReportsAMissingFile`, `TestDownload_UsesHTTPSOnly` (stub `curl` records its arguments), `TestCheckBinaryVersion_RefusesAnotherVersion`; CI case "tampered checksum" (exit 1, nothing created) | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
-| AC4 | `TestInstall_UsageErrorsExitTwo` (table: no `--version`, `v1.2`, `1.2.3`, `v1.2.3-beta`, `--token x`, a positional argument, agent IDs `-a`, 65 characters, `a b`, `a:b`, `a#b`, newline; URLs `ftp://h`, `http://h/x`, `http://u@h`, `http://h:0`, `http://h:65536`, `"http://h"`, `http://h #`, a space, a newline), `TestValidateToken_EnforcesTheSecretRules` (31, 32, 4096, 4097 bytes; space; `0x7F`; a UTF-8 letter; empty), `TestCheckPlatform_RefusesNonRootNonSystemdAndOtherMachines`, `TestReadSpoolDirectory_AcceptsOnlyTheBlockFormBelowVarLibVandox` (table: no file section, no key, plain, single- and double-quoted, trailing comment, `/var/lib/vandox`, `/var/lib/vandox2/x`, `/tmp/x`, `/var/lib/vandox/../x`, `/var/lib/vandox/x/`, `//`, a flow mapping, two `directory` keys, a tab), `TestEnsureSpoolDirectory_RefusesALinkOrAnotherOwner`, `TestTailnetWarning_OnlyForLiteralsOutsideTheRanges` (100.64.0.0, 100.127.255.255, 100.128.0.1, 10.0.0.1, `[fd7a:115c:a1e0::1]`, `[fd7a:115c:a1e1::1]`, a name) | `deploy/agent/install_test.go`, `deploy/agent/common_test.go` |
+| AC1 | `TestRenderConfig_SetsAgentIDAndURL` (a URL with `/`, `:`, `[`, `]` and an ID with `.`, `_`, `-` land unchanged; every other line byte-identical), `TestAgentYAML_HoldsTheLinesRenderConfigReplaces`, `TestEnsureUser_ReportsEachChange` (stubbed `getent`, `id`, `useradd`, `usermod`, `groupadd`, `passwd`); CI case "first install" | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
+| AC2 | `TestCheckoutWarning_OnlyForAnotherTag` (rows: same tag, other tag, no tag, stub `git` exiting 128 gives no output), `TestNeedsToken_OnlyWithoutTokenFile`, `TestDropInWarning_ForEachDropInDirectory`; CI case "repeat install" (no token asked, config and token unchanged, binary inode changed, spool files kept) | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
+| AC3 | `TestVerifyChecksum_AcceptsOnlyTheSingleMatchingLine` (table: match, other hash, two lines, other name, upper-case hex, one space, trailing text, empty, missing file), `TestFetchRelease_NeverRunsABinaryThatFailsTheChecksum`, `TestFetchRelease_ReportsAMissingFile`, `TestDownload_UsesHTTPSOnly` (stub `curl` records its arguments: `--proto =https`, `--proto-redir =https`, `--fail`, `--max-filesize 4096` for `SHA256SUMS`, `67108864` for the binary), `TestCheckBinaryVersion_RefusesAnotherVersion`, `TestVerifyChecksum_LeavesTheBinaryExecutableByOthers` (mode 0755 after a match, work directory 0711); CI case "tampered checksum" (exit 1, nothing created) | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
+| AC4 | `TestInstall_UsageErrorsExitTwo` (table: no `--version`, `v1.2`, `1.2.3`, `v1.2.3-beta`, `--token x`, a positional argument, agent IDs `-a`, 65 characters, `a b`, `a:b`, `a#b`, newline; URLs refused `ftp://h`, `http://h/x`, `http://u@h`, `http://h:0`, `http://h:65536`, `"http://h"`, `http://h #`, a space, a newline, `http://h_x`, `http://[fd7a::1`, `http://1.2.3.4.5`; accepted `http://100.64.0.1:8081`, `https://backend.tail1234.ts.net`, `http://[fd7a:115c:a1e0::1]:8081/`, `http://h`), `TestValidateToken_EnforcesTheSecretRules` (31, 32, 4096, 4097 bytes; leading and trailing space kept and refused (`IFS= read -r`); `0x7F`; a UTF-8 letter; a backslash kept; empty), `TestTokenPath_NeverReachesAChildProcess` (`read_token` from piped input, `validate_token`, `write_token` with every external command stubbed on `PATH`, each stub recording its arguments and environment: the token bytes are in none of them, nor in standard output or error, and the file holds the token and a newline with mode 0600), `TestCheckPlatform_RefusesNonRootNonSystemdAndOtherMachines`, `TestReadSpoolDirectory_AcceptsOnlyOneDirectoryBelowVarLibVandox` (accepted: no `spool:` section, a block without `directory`, plain, single- and double-quoted, a trailing ` # comment`, other keys of the block; exit 2: `/var/lib/vandox`, `/var/lib/vandox/a/b`, `/var/lib/vandox/..`, `/var/lib/vandox/.`, `/var/lib/vandox/a b`, `/var/lib/vandox2/x`, `/tmp/x`, `/var/lib/vandox/x/`, `//`, a flow mapping, two `directory` keys, a tab, a BOM, a `%YAML` line, a `---` or `...` line, a CR, a quoted key, `? directory`, `<<:`, an anchor, an alias, a tag, a block scalar, a value on the next line, a continued plain scalar, `directory` at an indent other than 2, `''` inside single quotes, a backslash inside double quotes, `#` without a space before it), `TestEnsureSpoolDirectory_RefusesALinkOrAnotherOwner` (spool a link, owned by another user, a file; `/var/lib/vandox` a link, owned by another user, group- or other-writable), `TestTailnetWarning_OnlyForLiteralsOutsideTheRanges` (100.64.0.0, 100.127.255.255, 100.128.0.1, 10.0.0.1, `[fd7a:115c:a1e0::1]`, `[fd7a:115c:a1e1::1]`, a name), `TestNameServerWarning_ForServersOutsideLocalhostAndTheTailnet` (a name with `nameserver` 127.0.0.53, 100.100.100.100 and `::1`: nothing; 1.1.1.1: the warning; an IP host: nothing) | `deploy/agent/install_test.go`, `deploy/agent/common_test.go` |
 | AC5 | `TestMariadbAccount_UsesPleskWhenPresent`, `TestMariadbAccount_WarnsAndContinuesWhenItFails`, `TestMariadbAccount_SkippedWithNoMariadb`; `TestUserSQL_CreatesOnlyTheProcessUser` stays unchanged | `deploy/agent/common_test.go`, `deploy/agent/install_test.go` |
-| AC6 | `TestService_RestartsWithoutStartLimit`, `TestService_NotifiesAndHasAWatchdog`; CI cases "E8" and "restart after a removed spool directory" | `deploy/agent/service_test.go`; `.github/scripts/check-agent-install.sh` |
+| AC6 | `TestService_RestartsWithoutStartLimit`, `TestService_NotifiesAndHasAWatchdog`; CI cases "E8" (ends with `--purge`, nothing of S1 left) and "restart after a removed spool directory" | `deploy/agent/service_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC7 | `TestUninstall_UsageErrorsExitTwo`, `TestMariadbRemoveSQL_DropsOnlyTheAgentAccount`; CI cases "uninstall before install", "uninstall", "reinstall", "purge" | `deploy/agent/uninstall_test.go`; `.github/scripts/check-agent-install.sh` |
-| AC8 | `TestService_HoldsTheRequiredSettings`, `TestService_HoldsNoForbiddenSetting`, `TestService_UsesOnlyKeysKnownToSystemd249`, `TestService_HasNoSpecifier`, `TestService_TokenOnlyAsCredential`, `TestService_SystemdAnalyzeVerifyReportsNoUnknownKey` (skipped without `systemd-analyze`); CI cases "verify on 249", "address allow-list" | `deploy/agent/service_test.go`; `.github/scripts/check-agent-install.sh` |
+| AC8 | `TestService_HoldsTheRequiredSettings`, `TestService_HoldsNoForbiddenSetting`, `TestService_UsesOnlyKeysKnownToSystemd249`, `TestService_HasNoSpecifier`, `TestService_TokenOnlyAsCredential`, `TestService_SystemdAnalyzeVerifyReportsNoUnknownKey` (skipped without `systemd-analyze`; fails only on lines with `Unknown`, `ignoring` or `specifier`, not on the exit status); CI cases "verify on 249", "address allow-list" | `deploy/agent/service_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC9 | CI case "security score" (`systemd-analyze security vandox-agent` ends in `OK`, `SAFE` or `PERFECT`); the server score per *Approach*, *Server run* | `.github/scripts/check-agent-install.sh` |
 | AC10 | `TestCheckJournalGroup_ReportsOkAndWarning`, `TestCheckJournalClock_WarnsFromOneSecond` (999,999 µs ok, 1,000,000 warns, either sign), `TestCheckIPCFilter_ReportsOkAndWarning`, `TestCheckCapabilities_ReportsOkAndWarning`; CI case "server checks and ptrace" | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC11 | `TestReadme_NamesNoMissingUnitOrScripts` (no "follow with the collectors", "nothing to install", "will list" left in the files of *Documentation updates* that mention them); the Reviewer reads the rest | `deploy/agent/service_test.go` |
@@ -56,7 +56,7 @@ commands on `PATH`; none needs root, network or systemd. The CI script runs the 
 `deploy/agent/uninstall.sh`, `deploy/agent/mariadb-user-remove.sql` (exactly `DROP USER IF EXISTS 'vandox-agent'@'localhost';` after
 comments). Each script starts with `set -euo pipefail` and calls `main "$@"` only when `[[ "${BASH_SOURCE[0]}" == "$0" ]]`, so tests
 can source it; `main` sets `umask 077`, `LC_ALL=C` and `PATH=/usr/sbin:/usr/bin:/sbin:/bin` first, the functions do not (tests stub
-on `PATH`). `common.sh` is sourced from the script's own directory.
+on `PATH`). `common.sh` is sourced from the script's own directory. `set -x` is never used and `TOKEN` is never exported.
 
 **Unit** (`[Unit]`): `Description=Vandox monitoring agent`, `Documentation=` the README on GitHub, `After=systemd-journal-flush.service`,
 `StartLimitIntervalSec=0`. (`[Service]`): `Type=notify`, `NotifyAccess=main`, `ExecStart=/usr/local/bin/vandox-agent`,
@@ -75,34 +75,51 @@ process_vm_writev pidfd_getfd open_by_handle_at process_madvise`, `SystemCallErr
 `ProtectProc` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `DynamicUser`, any `%`, `VANDOX_AGENT_TOKEN=`,
 `InaccessiblePaths=` naming `/run/dbus`, `/run/mysqld`, `/var/log/journal` or `/run/log/journal`.
 
-**Resource values** (each reason goes into `deploy/agent/README.md`): `MemoryMax=256M` — the documented worst cases (fact 11) sum to
-about 112 MiB if every collector peaks at once under pressure, plus runtime and stacks; `GOMEMLIMIT=192MiB` makes the GC work before
-the hard limit, leaving 64 MiB for page cache and runtime overhead the soft limit does not count. `CPUQuota=50%` bounds a runaway
-loop to half a core; the collectors' timeouts (≤ 10 s) leave room. `Nice=5` and `IOWeight=50` yield to the services under
-contention without starving the agent while an outage builds (a starved agent records gaps, not silence). `WatchdogSec=2min`: pings
-every minute while on time (fact 10); a short stall under memory pressure must not restart the agent. `RestartSec=30s` with
-`StartLimitIntervalSec=0`: retried forever, at most twice a minute.
+**Resource values**: as the unit above; their reasons are in record 0131 (*Consequences*) and go into `deploy/agent/README.md`.
+
+**Unit path.** `/etc/systemd/system/vandox-agent.service` (root 0644). A drop-in directory `/etc/systemd/system/vandox-agent.service.d/`
+or `/run/systemd/system/vandox-agent.service.d/` gets `install.sh: WARNING drop-in directory <path> changes the unit; check it`.
 
 **install.sh order** (no change before step 6): 1 `parse_args` (exit 2); 2 `check_platform "$EUID" "$(cat /proc/1/comm)"
 "$(uname -m)"` (exit 1); 3 config: an existing `/etc/vandox/agent.yaml` is kept (agent ID and URL then only warned as ignored) and
-`read_spool_directory` reads it, else `--agent-id`/`--backend-url` are required and the spool is the default; `tailnet_warning`;
-4 the token: `needs_token` (file missing) → `read_token` (`read -r -s` on a terminal, else one line of standard input) →
-`validate_token`; 5 `fetch_release` into `mktemp -d` (mode 0711, removed by an `EXIT` trap): `curl --proto =https --proto-redir =https
---fail --location --silent --show-error --max-time 300 -o <file> https://github.com/LarsLaskowski/Vandox/releases/download/<version>/<file>`,
-or a copy from `--from`; `verify_checksum`; then `check_binary_version` runs the binary as `setpriv --reuid=nobody --regid=nogroup
---clear-groups --no-new-privs <bin> -version`; `checkout_warning` (`git describe --tags --exact-match` in the script's directory, only
-when Git and a work tree exist); 6 apply: `ensure_user`; `/etc/vandox` (root 0755, refused when a link), `agent.yaml` (via a temporary
-file in `/etc/vandox` and `mv -T`, root:vandox-agent 0640) when new, the token (temporary file, 0600 root, `mv -T`) when needed;
-`/var/lib/vandox` (root 0755) and `ensure_spool_directory`; the binary (temporary file in `/usr/local/bin`, `install -m 0755`,
+`read_spool_directory` reads it, else `--agent-id`/`--backend-url` are required and the spool is the default; `tailnet_warning` and
+`name_server_warning` (`/etc/resolv.conf`; only for a host name);
+4 the token: `needs_token` (file missing) → `read_token` (`IFS= read -r -s` on a terminal, else `IFS= read -r` of one line of standard
+input) → `validate_token`; 5 `fetch_release` into `mktemp -d` (mode 0711, removed by an `EXIT` trap): `curl --proto =https --proto-redir =https
+--fail --location --silent --show-error --max-time 300 --max-filesize <4096 | 67108864> -o <file> https://github.com/LarsLaskowski/Vandox/releases/download/<version>/<file>`,
+or a copy from `--from`; `verify_checksum`, which on a match sets the binary to 0755 (the work directory is 0711, so `nobody` can
+run it); then `check_binary_version` runs the binary as `setpriv --reuid=nobody --regid=nogroup
+--clear-groups --no-new-privs <bin> -version`; `checkout_warning` (`git describe --tags --exact-match` in the script's directory; any failure, such as
+Git's "dubious ownership" refusal for a checkout of another user under `sudo`, counts as no tag, without output); 6 apply: `ensure_user`; `/etc/vandox` (root 0755, refused when a link), `agent.yaml` (via a temporary
+file in `/etc/vandox` and `mv -T`, root:vandox-agent 0640) when new, the token by `write_token` when needed;
+`ensure_spool_directory`; the binary (temporary file in `/usr/local/bin`, `install -m 0755`,
 `mv -T`); the unit (0644 root) and `systemctl daemon-reload`; on a first install (unit file was absent) `run_mariadb_sql` unless
 `--no-mariadb`; `systemctl enable vandox-agent` and `systemctl restart vandox-agent`; on failure the E8 line, exit 1; 7 the server
-checks; 8 the success line. A link in place of any file the script writes is refused (`[[ -L ]]` before the write, `mv -T` onto a
+checks and the drop-in warning; 8 the success line. A link in place of any file the script writes is refused (`[[ -L ]]` before the write, `mv -T` onto a
 plain name), never followed.
 
-**read_spool_directory**: no `spool:` line at column 0 or no `directory:` key in its block → the default; a block line `^  directory:
-<value>` with a plain, single- or double-quoted value (no escapes) and an optional ` # comment` → the value; any other form of
-`spool` (flow, anchor, tag, two keys, a tab) → `install.sh: cannot read spool.directory from /etc/vandox/agent.yaml`, exit 2. The
-value must be absolute and clean and be `/var/lib/vandox` or below it, else the E6 line, exit 2.
+**write_token**: `printf '%s\n' "$TOKEN" >"$tmp"` with the bash builtin (never an external command, a here-string or a here-doc) into
+a temporary file created in `/etc/vandox` under `umask 077`, then `mv -T` onto `/etc/vandox/agent-token` (root:root 0600).
+
+**read_spool_directory** (fails closed): the file must hold no BOM, no CR, no tab, no line starting with `%`, `---` or `...`; else
+exit 2. No `spool:` line at column 0 → the default. Every line of the `spool` block must be blank, a comment line, or
+`  <key>: <value>[ # comment]` with `key` of `a-z_` and a value that is plain (no `'`, `"`, `&`, `*`, `!`, `|`, `>`, `#`, `{`, `[`, `?`
+at its start, ending on the same line), single-quoted without `''` or double-quoted without `\`; `spool:` itself must be followed by
+nothing but a comment; any other line, a second `directory` key or `directory` at another indent → `install.sh: cannot read
+spool.directory from /etc/vandox/agent.yaml`, exit 2. No `directory` key → the default. The value must be exactly
+`/var/lib/vandox/<name>`, `<name>` of `A-Za-z0-9._-` and not `.` or `..`; anything else, `/var/lib/vandox` itself included, gives the E6
+line, exit 2. One element below a root-owned directory means no element on the way is the agent's.
+
+**ensure_spool_directory** (no link followed): `/var/lib/vandox` is created with `mkdir -m 0755` when missing; it must be a directory,
+not a link, owned by root and not group- or other-writable, else the E6 "not the agent's directory" line for that path, exit 1. The
+spool is created with plain `mkdir -m 0700` when missing, then `chown -h vandox-agent:vandox-agent` on that one entry; an existing
+one must be a directory, not a link, owned by `vandox-agent`. Nothing recurses into the spool (`chown -R` is never used); purge removes
+`/var/lib/vandox` with `rm -rf --one-file-system`, which does not follow links.
+
+**--backend-url** is accepted only as `http` or `https`, `://`, a host, an optional `:port` of 1 to 65535 without a leading zero and an
+optional `/`. The host is one of: an IPv4 literal (four decimal parts of 0 to 255), a bracketed IPv6 literal of hex digits and colons
+(`[`, at least two `:`, `]`), or a name of labels of `A-Za-z0-9-` (1 to 63 bytes, not starting or ending with `-`) joined by single `.`,
+253 bytes at most. `render_config` copies the example line by line in bash and replaces the two lines of fact 5 whole.
 
 **Output** (exact; on standard error with exit 1 or 2 for errors, standard output otherwise): the lines of spec E1–E8 and E13, and
 `usage: install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`; `install.sh: the token is read from
@@ -113,20 +130,24 @@ password locked | primary group set to vandox-agent | groups set to adm,systemd-
 vandox-agent created`; checks `check journal-group: ok` / `check journal-group: WARNING journal files not readable by group
 systemd-journal; see deploy/agent/README.md`, `check journal-clock: ok` / `check journal-clock: WARNING /proc/uptime and the journal
 differ by <n> ms; live kills get no extra snapshots`, `check ipc-filter: ok` / `check ipc-filter: WARNING systemd does not list
-process_madvise in @ipc`, `check capabilities: ok` / `check capabilities: WARNING CapEff is <hex>, not CAP_SYS_PTRACE alone`.
+process_madvise in @ipc`, `check capabilities: ok` / `check capabilities: WARNING CapEff is <hex>, not CAP_SYS_PTRACE alone`;
+`install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`.
 uninstall.sh: `usage: uninstall.sh [--purge]`; `uninstall.sh: removed <unit | binary | ...>`, `uninstall.sh: <item> not present`;
 `uninstall.sh: kept user vandox-agent, /etc/vandox/agent.yaml, /etc/vandox/agent-token, <spool> and the MariaDB account; remove them
 with --purge`; `uninstall.sh: deleting /var/lib/vandox (records not yet sent are lost)`; `uninstall.sh: WARNING MariaDB account not
 removed; run: <plesk db | mariadb> < deploy/agent/mariadb-user-remove.sql`. Purge: `userdel vandox-agent` (never `-r`), `groupdel`
-when the group remains, `/etc/vandox` removed only when empty.
+when the group remains, `/etc/vandox` removed only when empty. Uninstall runs `systemctl disable --now`, removes the unit, then
+`systemctl daemon-reload` and `systemctl reset-failed vandox-agent`.
 
 **CI job** `agent-install` in `ci.yml`: `runs-on: ubuntu-22.04`, job permissions `contents: read`, no secrets, checkout (no persisted
-token) and `setup-go` pinned as the other jobs, then `sudo .github/scripts/check-agent-install.sh`. The script builds the agent with
-version `v0.0.0-rc.0`, writes `SHA256SUMS`, and runs these cases in order, failing on the first mismatch: verify on 249 (fact 14,
-then `systemd-analyze verify` of the repository's unit file, failing on `Unknown` or `ignoring`); uninstall before install; tampered
-checksum; E8 (a kept invalid `agent.yaml`, then removed); first install (files, owners, modes, user, groups, `is-enabled`,
+token) and `setup-go` pinned as the other jobs; an unprivileged step builds the agent with version `v0.0.0-rc.0` into `dist/` and
+writes `SHA256SUMS`; then `sudo .github/scripts/check-agent-install.sh dist` installs with `--from` and runs these cases in order, failing on the first mismatch: verify on 249 (fact 14,
+then `systemd-analyze verify` of the repository's unit file, failing on lines with `Unknown`, `ignoring` or `specifier`, not on the
+exit status); uninstall before install; tampered
+checksum; E8 (a kept invalid `agent.yaml`; ends with `uninstall.sh --purge` and asserts nothing of S1 is left); first install (files, owners, modes, user, groups, `is-enabled`,
 `is-active`, the MariaDB warning, the four check lines, `CapEff`/`CapBnd` `0000000000080000`, `NoNewPrivs: 1`, `Seccomp: 2`);
-security score; ptrace (`systemd-run --wait --pipe` with the unit's `User`, capability, `NoNewPrivileges` and filter properties runs
+security score; ptrace (`systemd-run --wait --pipe` with the `User`, `AmbientCapabilities`, `CapabilityBoundingSet`, `NoNewPrivileges`,
+`SystemCallFilter`, `SystemCallErrorNumber` and `SystemCallArchitectures` lines read from the shipped unit file runs
 `python3` calling `ptrace(PTRACE_ATTACH)` on a root `sleep`, expecting `EPERM`); repeat install; restart after a removed spool
 directory (back to `active` within 45 s); address allow-list (fact 16); uninstall; reinstall; purge (nothing of S1 left).
 
@@ -136,17 +157,17 @@ results in `deploy/agent/README.md`.
 
 ## Options considered
 
-Options 1–18 of record 0131 (token delivery, network, memory, filter groups, binary verification, uninstall, the systemd 249 check,
-reading `spool.directory`). Beyond them: **bats** for the scripts — a new test tool and dependency, rejected for Go tests that source
-the scripts; **a `systemd` container in CI** (`ubuntu:22.04` with systemd as PID 1, `--privileged`) — more moving parts than the
-runner, which already boots 249.
+Options 1–18 of record 0131, plus bats (a new test tool, rejected for Go tests that source the scripts) and a systemd container in
+CI (more moving parts than the `ubuntu-22.04` runner, which boots 249).
+
 
 ## Affected projects and types
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
 | deploy | `deploy/agent/vandox-agent.service`, `common.sh`, `install.sh`, `uninstall.sh`, `mariadb-user-remove.sql` | new |
-| deploy | `deploy/agent/agent.yaml`, `mariadb-user.sql` | unchanged (tests pin the replaced lines) |
+| deploy | `deploy/agent/agent.yaml` | the `backend.url` comment (23-26): tailnet addresses and localhost only; lines 20 and 27 byte-identical |
+| deploy | `deploy/agent/mariadb-user.sql` | unchanged |
 | CI | `.github/workflows/ci.yml` (job `agent-install`), `.github/scripts/check-agent-install.sh` | new |
 | Go | `deploy/agent/*_test.go` | new test-only package |
 
@@ -162,7 +183,8 @@ Bash functions; each skeleton body is return 99, so the scripts pass bash -n and
   `needs_token()` (arg: token file; 0 when missing); `read_token()` (sets the global TOKEN); `validate_token()` (arg: token; 0, or 1
   with the rule); `fetch_release()` (args: version, from-dir or empty, work dir; 0 or 1); `verify_checksum()` (arg: work dir; 0 or
   1); `check_binary_version()` (args: binary, version; 0 or 1); `checkout_warning()` (args: checkout tag or empty, version);
-  `render_config()` (args: example, agent ID, URL, output file); `ensure_user()`; `ensure_spool_directory()` (arg: path; 0 or 1);
+  `render_config()` (args: example, agent ID, URL, output file); `name_server_warning()` (args: URL, resolv.conf file);
+  `write_token()` (arg: target file; writes the global TOKEN); `dropin_warning()` (args: the two drop-in directories); `ensure_user()`; `ensure_spool_directory()` (arg: path; 0 or 1);
   `check_journal_group()` (args: journal directory, group); `check_journal_clock()` (args: first field of /proc/uptime, monotonic
   microseconds); `check_ipc_filter()` (reads the output of systemd-analyze syscall-filter @ipc on standard input);
   `check_capabilities()` (arg: status file); `main()`.
@@ -172,41 +194,41 @@ Bash functions; each skeleton body is return 99, so the scripts pass bash -n and
 
 `deploy/agent/common_test.go`, `deploy/agent/install_test.go`, `deploy/agent/uninstall_test.go`, `deploy/agent/service_test.go`
 (package `agent`, test-only; each beside the file it tests), and `.github/scripts/check-agent-install.sh` (Tester; runs only in CI).
-Existing test call sites affected: none (`internal/mariadb` `TestUserSQL_CreatesOnlyTheProcessUser` reads `mariadb-user.sql`, which is
-unchanged).
+Existing test call sites affected: none (`mariadb-user.sql` is unchanged).
 
-Files no unit test can cover: the shell scripts and the unit count for no coverage figure (`COVERAGE_PATHSPECS` is `*.go`, `*.cs`,
-`*.razor`), so no exclusion is needed; their system-changing parts (`main`, `ensure_user`'s real commands, `systemctl`) run only in the
-CI job, because they need root and systemd as PID 1.
+Files no unit test can cover: none for the coverage figure (scripts and unit are outside `COVERAGE_PATHSPECS`); their
+system-changing parts (`main`, the real user commands, `systemctl`) need root and systemd as PID 1 and run only in the CI job.
 
 ## Areas
 
-- Agent: a new *Installation* section (paths, owners, modes, install, upgrade, uninstall, purge, checksum and version rule, the server
-  checks); *Status*; *Rights* and *Service manager* (the unit as built, the address allow-list, restart, watchdog and resource values);
-  *Connection* (http only to tailnet addresses, now enforced); the "(#42)" notes (1062, 1359, 1420, 1578, 1842, 1865, 1947) point to
-  *Checks on the server* or say what the unit does.
-- Configuration and secrets: the agent token installed in `/etc/vandox/agent-token` and passed as a systemd credential.
-- Network and security model: *Agent to backend* — the unit lets the agent reach only tailnet addresses and localhost.
+Agent (a new *Installation* section; *Status*, *Rights*, *Service manager*, *Connection*, the "(#42)" notes 1062, 1359, 1420, 1578,
+1842, 1865, 1947), Configuration and secrets (the token as a credential), Network and security model (*Agent to backend*: the
+allow-list). Details under *Documentation updates*.
 
 ## Documentation updates
 
 All by the Dev once the code is green, except `docs/UNIT_TESTS.md` (Tester).
 
-- `docs/areas/agent.md`, `docs/areas/configuration-and-secrets.md`, `docs/areas/network-and-security-model.md`: as *Areas*; the
+- `docs/areas/agent.md`, `docs/areas/configuration-and-secrets.md`, `docs/areas/network-and-security-model.md`: as *Areas*; agent.md
+  54-55 and 1843 and `deploy/agent/README.md` 121: tailnet addresses and localhost only, a name must resolve through a localhost or
+  tailnet name server (E12); the
   *Implementation* list (2067) names the unit and scripts; record 0131 under *Related decisions* of the agent area.
-- `deploy/agent/README.md`: line 6 (scripts exist); *Unit settings that must stay as they are* (121: the allow-list is set); a new
+- `deploy/agent/README.md`: line 6 (scripts exist); the score of the draft (2.2 `OK` on 255) is replaced by the CI and server results;
+  the checkout check needs a checkout owned by root or a `safe.directory` entry; *Unit settings that must stay as they are* (121: the allow-list is set); a new
   *Unit* section with every setting and its reason, the resource values (*Approach*), the `systemd-analyze security` result (CI on
   249 and the server) with each flagged item and its reason; a new *Install, upgrade, uninstall* section; *Checks on the server*
   with the commands and the Product Manager's results; the provenance check (`gh attestation verify`).
 - `README.md`: *Install* — the *Agent* paragraph (155) replaced by the install, upgrade and uninstall commands and a link to
-  `deploy/agent/README.md`; the `spool.directory` row (68) says the install script creates the directory below `/var/lib/vandox`.
+  `deploy/agent/README.md`; the `spool.directory` row (68) says the install script creates it and accepts only one directory directly below `/var/lib/vandox`.
 - `docs/INSTALL.md`: a step 11 "Install the agent on the monitored server" after step 10; the introduction (5) no longer says there
   is no agent to install.
 - `docs/ARCHITECTURE.md`: *Security model* (457) — "lists" instead of "will list (v0.2.0)", and the address allow-list with link to
   record 0131.
 - `.squad/project.md`: area 6 names `install.sh`, `uninstall.sh`, `common.sh` and their guards (checksum before run, `setpriv` for the
   version check, no link followed, the token never in an argument or output) and the unit's address allow-list; area 7
-  `mariadb-user-remove.sql`; area 8 the credential; area 11 the allow-list as the enforcement of "only over the tailnet".
+  `mariadb-user-remove.sql`; area 9 the spool rule (one directory below a root-owned `/var/lib/vandox`, no link followed, no
+  recursion); area 10 the script's readers and bounds (arguments, `SHA256SUMS` of one line and at most 4 KiB, the binary at most
+  64 MiB, `agent.yaml` by the fail-closed line rules, `/etc/resolv.conf` `nameserver` lines, the `-version` line); area 8 the credential; area 11 the allow-list as the enforcement of "only over the tailnet".
 - `.squad/stack.md`: *Layout* — `deploy/agent` is a test-only Go package; *Not checkable in a cloud session* — a row for
   `deploy/agent/*.sh` and the unit: local substitute the Go tests, `bash -n`, `systemd-analyze verify` (255); authoritative the CI job
   `agent-install`.
@@ -214,14 +236,15 @@ All by the Dev once the code is green, except `docs/UNIT_TESTS.md` (Tester).
 
 ## Architecture check
 
-The guarantees of `.squad/project.md` (never root, `CAP_SYS_PTRACE` alone, the six denied calls, `adjtimex` allowed, AF_UNIX, the bus,
-MariaDB and journal paths reachable; secrets never in files, arguments or logs; outbound only over the tailnet) are implemented by the
-unit, not weakened; the allow-list adds enforcement to the last one. `docs/ARCHITECTURE.md` changes as listed, owner Dev.
+The guarantees of `.squad/project.md` areas 6, 8 and 11 are implemented by the unit and the scripts, not weakened; the allow-list
+enforces "only over the tailnet". `docs/ARCHITECTURE.md` changes as listed (Dev).
+
 
 ## Security considerations
 
 - [ ] Limits: the token is checked in the C locale, so its 32 to 4096 limits are bytes, before anything is written; `SHA256SUMS` must be
-  one line; `agent.yaml` is read only by the line rules of `read_spool_directory`.
+  one line and at most 4 KiB, the binary at most 64 MiB (`--max-filesize`, before any parse); `agent.yaml` is read only by the
+  fail-closed line rules of `read_spool_directory`; the token reaches no child process (`write_token`, `TestTokenPath_…`).
 - [ ] Messages that reach the user: only the fixed lines of *Approach*; no token, no configuration value but the validated host of the
   tailnet warning and the path in E6, no `curl` error body (`--silent --show-error` prints curl's own message, which names the URL of a
   public release only).
@@ -234,27 +257,20 @@ unit, not weakened; the allow-list adds enforcement to the last one. `docs/ARCHI
 
 As the spec. No follow-up issue.
 
-## Challenge notes
+## Challenge
 
-Devil's Advocate, plan challenge: 0 major, 8 minor objections, appended verbatim.
+Devil's Advocate, 8 minor notes: all accepted and folded into *Tests per criterion*, *Approach* and *Documentation updates* (binary
+0755 after the checksum; one spool directory below `/var/lib/vandox`; documents that named non-tailnet backends; `name_server_warning`;
+E8 ends with `--purge`; `verify` judged by its lines; unprivileged build; a failing `git describe` is no tag).
 
-1. **minor — the version check cannot execute the downloaded binary.** `main` sets `umask 077`, so `curl -o` (and the copy from `--from`) creates the binary as 0600 root without an execute bit. The 0711 work directory does not help: `setpriv --reuid=nobody … <bin> -version` then fails with `EACCES`, and every real install would end with `binary is not <version>` (plan *Approach*, install.sh step 5).
-   - Instruction: after `verify_checksum` passes, `chmod 0755` the binary in the work directory before `check_binary_version`.
-   - A unit test should pin that the function is called on a file that `nobody` can execute.
-2. **minor — `spool.directory: /var/lib/vandox` (accepted as "at or below") breaks step 6.** Step 6 first creates `/var/lib/vandox` as root 0755. `ensure_spool_directory` then refuses it as "not the agent's directory", after user, token and binary have already been written.
-   - The plan also leaves open who creates and owns the directories in between for a deeper path (`/var/lib/vandox/a/b`).
-   - Instruction: `read_spool_directory` accepts only paths strictly below `/var/lib/vandox` (E6 message unchanged). Either create missing intermediate directories as root 0755, or allow exactly one level below. Name the chosen rule in the `TestReadSpoolDirectory_…` table, where `/var/lib/vandox` currently has no stated outcome.
-3. **minor — documents that still recommend a backend outside the tailnet are not on the update list.** `deploy/agent/agent.yaml` 23-26 ("use https for any other network") and `docs/areas/agent.md` 54-55 ("every other address is `https`") describe a configuration that `IPAddressDeny=any` now blocks. Yet the plan lists `agent.yaml` as "unchanged" (*Affected projects*).
-   - The same applies to `docs/areas/agent.md` 1843 and `deploy/agent/README.md` 121: both say an `IPAddressAllow=` "must include" the `/etc/resolv.conf` name server, and the plan does not include it.
-   - Instruction: change the `backend.url` comment in `deploy/agent/agent.yaml`. Keep the lines that `render_config` replaces (20, 27) byte-identical so `TestAgentYAML_HoldsTheLinesRenderConfigReplaces` holds. Rewrite agent.md 54-55 and 1843 and README 121 to: tailnet addresses and localhost only; a name must resolve through a localhost or tailnet name server (E12).
-4. **minor — a host name in `backend.url` can install "successfully" while the agent can never send.** Readiness does not depend on the connection, so S1's success line prints even when `/etc/resolv.conf` names a provider DNS outside the allow-list (E12).
-   - Instruction: extend `tailnet_warning` (or add a S7-style check `check name-server`). When the host is a name and a `nameserver` line of `/etc/resolv.conf` is neither loopback nor in the tailnet ranges, print `install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`, warning only.
-   - Add test rows for `127.0.0.53`, `100.100.100.100` and `1.1.1.1`.
-5. **minor — the E8 CI case leaves the "first install" case not a first install.** In the CI case order, "E8 (a kept invalid `agent.yaml`, then removed)" runs right before "first install". If only `agent.yaml` is removed, the unit file, token and user remain. The next case then asks for no token and skips the MariaDB step (it runs only when the unit file was absent), so its assertions ("the MariaDB warning", token prompt) fail or test the wrong path.
-   - Instruction: end the E8 case with `uninstall.sh --purge` and assert that nothing of S1 is left before "first install".
-6. **minor — `systemd-analyze verify` of the repository's unit fails before the binary exists.** It reports `/usr/local/bin/vandox-agent` as not executable and exits non-zero. That happens in the CI "verify on 249" case, which runs before any install, and in `TestService_SystemdAnalyzeVerifyReportsNoUnknownKey` locally.
-   - Instruction: in both, fail only on lines that contain `Unknown` or `ignoring` (or the specifier messages), not on the exit status. Or run the CI case after "first install". Also name the unit's install path (`/etc/systemd/system/vandox-agent.service`) in *Approach*, and have uninstall run `systemctl daemon-reload` and `reset-failed` after removing it.
-7. **minor — under `sudo`, the CI script probably cannot find the Go from `setup-go`, and its build cache would land in `/root`.** The plan has `sudo .github/scripts/check-agent-install.sh` build the agent itself; `sudo`'s `secure_path` likely lacks the `setup-go` toolchain.
-   - Instruction: build `vandox-agent` and write `SHA256SUMS` in an unprivileged workflow step (or a non-sudo part of the script). Pass the directory to the sudo part, which installs with `--from`.
-8. **minor — `checkout_warning` silently does nothing in the common case.** It runs `git describe` as root. When the operator clones as a normal user and runs `sudo install.sh`, Ubuntu 22.04's Git (with the safe.directory fix) refuses the repository as "dubious ownership", so the warning of S3 is skipped.
-   - Instruction: treat a failing `git describe` as "no tag", without output. Say in `deploy/agent/README.md` that the check needs a checkout owned by root (or `git config --global --add safe.directory`). Add a test row where the stub `git` exits 128.
+## Security review
+
+CHANGES_REQUIRED, revision 1, all resolved in *Approach* and *Tests per criterion*:
+
+- B1: `spool.directory` is exactly one directory below a root-owned, not group- or other-writable, non-link `/var/lib/vandox`
+  (`/var/lib/vandox` itself is exit 2), created with plain `mkdir`, only that entry chowned with `chown -h`, no recursion; so no
+  element on the way can be the agent's. Test rows for a link and another owner at both levels and for `/var/lib/vandox/a/b`.
+- B2: `write_token` with the builtin `printf`, `TOKEN` never exported, no `set -x`; `TestTokenPath_NeverReachesAChildProcess`.
+- B3: area 10 listed, its `.squad/project.md` entry under *Documentation updates*.
+- N1–N7 taken: fail-closed `read_spool_directory` rules and rows; the positive host grammar and whole-line replacement;
+  `--max-filesize`; ptrace properties read from the unit; `dropin_warning`; `IFS= read -r`; the spec's score aligned to 2.2.

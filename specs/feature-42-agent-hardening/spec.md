@@ -55,8 +55,8 @@ breaks a collector silently or widens what a compromised agent reaches; several 
   quotes, `#` or control characters: usage text, exit 2. A host that is an IP literal outside the tailnet ranges (NFR *Network*) gets
   `install.sh: WARNING <host> is not a tailnet address; the unit blocks it`. An existing `agent.yaml` is never overwritten; given values
   are then ignored with the line `install.sh: keeping existing /etc/vandox/agent.yaml`. The script, uninstall and purge take
-  `spool.directory` from the kept file (default `/var/lib/vandox/spool`); a value not at or below `/var/lib/vandox` stops the script with
-  `install.sh: spool.directory must be below /var/lib/vandox`, exit 2, because the unit allows writes only there; an existing spool
+  `spool.directory` from the kept file (default `/var/lib/vandox/spool`); a value other than one directory directly below `/var/lib/vandox` stops the script with
+  `install.sh: spool.directory must be one directory below /var/lib/vandox`, exit 2, because the unit allows writes only there; an existing spool
   directory that is a link or not owned by `vandox-agent` stops it with `install.sh: <path> is not the agent's directory`, exit 1.
 - E7: MariaDB not installed or the administrator login fails: the account is not created, the line
   `install.sh: WARNING MariaDB account not created; run: plesk db < deploy/agent/mariadb-user.sql` (or `mariadb <`), install continues.
@@ -140,7 +140,7 @@ breaks a collector silently or widens what a compromised agent reaches; several 
 
 - Which capabilities does the issue's "`/proc/<pid>/fd`, `smaps_rollup` and the journal" need? Answered: `CAP_SYS_PTRACE` alone; the
   claim is refuted in part: `/proc/<pid>/fd` is not read (records 0115, 0122), the journal needs the group `systemd-journal`.
-- Can a unit with every required setting reach `OK`? Answered: a draft unit with the NFR's settings scored 1.8 `OK`
+- Can a unit with every required setting reach `OK`? Answered: a draft unit with the NFR's settings scored 2.2 `OK`
   offline on systemd 255 (this session); 249 has no offline mode, so AC9's score is taken on the server (AC10).
 - What does uninstall remove? Answered: a Lead decision, remove and purge as Debian packages do (S4, S5), so a plain
   uninstall never destroys unsent records.
@@ -172,5 +172,5 @@ Devil's Advocate, spec challenge (answers folded into the sections named):
 6. Minor — redirects. Accepted: Install-script safety NFR.
 7. Minor — `MemoryMax=` basis and `GOMEMLIMIT=`. Accepted: Resources NFR; `GOMEMLIMIT=` is decided in `plan.md`.
 
-Lead, while planning: added `--from <dir>` (S1; the end-to-end check installs a local build), the `-version` check (E3) and the
+Lead, planning: added `--from <dir>` (S1; for the end-to-end check), the `-version` check (E3) and the
 existing-spool check (E6).
