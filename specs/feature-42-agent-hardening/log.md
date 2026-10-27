@@ -23,4 +23,4 @@ are quoted in full.
 | 2026-10-27 08:19 | 6 Implement G2 | squad-dev | common.sh and install.sh implemented; all G2 tests pass except README test (G5); shellcheck clean (sonnet/medium · 206,155 tokens · 21 tool uses · 861 s) |
 | 2026-10-27 08:20 | 4 Skeleton G3 | squad-dev | uninstall.sh skeleton (parse_args, main return 99) (sonnet/medium · 70,226 tokens · 4 tool uses · 14 s) |
 | 2026-10-27 08:21 | 5 Tests first G3 | squad-tester | uninstall_test.go: usage + SQL tests fail as intended, agentyaml pin passes; main/purge sequence left to CI cases (sonnet/medium · 85,279 tokens · 8 tool uses · 55 s) |
-| 2026-10-27 08:23 | 6 Implement G3 | squad-dev | uninstall.sh and mariadb-user-remove.sql implemented; only README test red (G5) (sonnet/medium · usage pending) |
+| 2026-10-27 08:23 | 6 Implement G3 | squad-dev | uninstall.sh and mariadb-user-remove.sql implemented; only README test red (G5) (sonnet/medium · 13,283 tokens · 8 tool uses · 109 s · continued from 6 Implement G2) |
