@@ -2635,3 +2635,72 @@ func runProgram(t *testing.T, h *harness, script string) shellResult {
 
 	return shellResult{stdout: stdout.String(), stderr: stderr.String(), code: code}
 }
+
+// physicalStubCommon is a common.sh stand-in that shows what the script does after its entry check: the path
+// it was sourced from, and the directory main hands to check_bundle_dir (which stops the run there).
+const physicalStubCommon = `echo "sourced ${BASH_SOURCE[0]}"
+DEFAULT_SPOOL=/var/lib/vandox/spool
+check_bundle_dir() { echo "script_dir $1"; exit 0; }
+`
+
+// TestEntryCheck_ReadsThroughThePhysicalDirectoryOnly runs each script through a link that sits in a directory
+// of another user and points to a root-owned bundle: the entry check looks at the physical directory, so
+// everything after it must use that physical directory too — common.sh is sourced from it and main's script
+// directory is it — or the user could re-point the link after the check.
+func TestEntryCheck_ReadsThroughThePhysicalDirectoryOnly(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{installScript, uninstallScript} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			runPhysicalCase(t, name)
+		})
+	}
+}
+
+// runPhysicalCase builds the root-owned bundle and the link of another user's directory for one script and
+// checks what the script reads after its entry check.
+func runPhysicalCase(t *testing.T, name string) {
+	t.Helper()
+
+	h := newHarness(t)
+
+	root, err := filepath.EvalSymlinks(h.dir)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", h.dir, err)
+	}
+
+	bundle := filepath.Join(root, "bundle")
+	alice := filepath.Join(root, "alice")
+
+	for _, dir := range []string{bundle, alice} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	script, err := os.ReadFile(shippedFile(t, name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(bundle, name), script, 0o755); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+
+	writeBytes(t, filepath.Join(bundle, commonScript), physicalStubCommon)
+
+	link := filepath.Join(alice, "b")
+	if err := os.Symlink(bundle, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// The directory holding the link belongs to uid 1000; it is no ancestor of the physical bundle.
+	h.statTable(alice + "|1000 755")
+
+	got := runProgram(t, h, filepath.Join(link, name))
+
+	want := "sourced " + filepath.Join(bundle, commonScript) + "\nscript_dir " + bundle + "\n"
+	expectResult(t, name+" through a link", got, 0, want, "")
+}
