@@ -2,7 +2,7 @@
 
 This guide installs the Vandox backend `vandoxd` on a Docker host in the home network, imports the logs of the monitored server and
 opens the first reconstructed outage in the web UI. It is the path for v0.1.0, the forensics release: Vandox works from the logs the
-server already has, and there is **no agent is needed** for it (from v0.2.0 on, step 11 installs the agent). The [README](../README.md) is the reference
+server already has, and **no agent is needed** for it (from v0.2.0 on, step 11 installs the agent). The [README](../README.md) is the reference
 for every option, command and limit named here.
 
 The steps are the same on any Docker host. Synology Container Manager and QNAP Container Station are shown as worked examples where

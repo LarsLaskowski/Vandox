@@ -351,10 +351,10 @@ Backend:
 - [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the backfill has its own,
   configurable bandwidth.
 - [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
+  backend binds the one token to `ingest.agent_id` and stops ingest below `ingest.min_free`.
+- [0129](../decisions/0129-configuration-and-secret-files-opened-without-blocking.md) — why the configuration file and a `_FILE` secret file are opened without blocking and their type is checked on the opened file.
 - [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the agent token
   reaches the agent as a systemd credential and not as an environment value or a file the agent's group reads.
-- [0129](../decisions/0129-configuration-and-secret-files-opened-without-blocking.md) — why the configuration file and a `_FILE` secret file are opened without blocking and their type is checked on the opened file.
-  backend binds the one token to `ingest.agent_id` and stops ingest below `ingest.min_free`.
 
 ## Not here
 
