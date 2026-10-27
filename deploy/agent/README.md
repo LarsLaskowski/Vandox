@@ -252,12 +252,37 @@ a `ProtectProc=` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `D
 `InaccessiblePaths=` over `/run/dbus`, `/run/mysqld`, `/var/log/journal` or `/run/log/journal`.
 
 **`systemd-analyze security vandox-agent`.** Required: the overall exposure level `OK` or better (record 0131). A draft with these settings scored 2.2
-`OK` offline on systemd 255 in a development session; that is not the score of the shipped unit on 249.
+`OK` offline on systemd 255 in a development session; the shipped unit was measured on 249 as below.
 
-| Where | systemd | Overall exposure level | Items still flagged, with the collector that needs each |
-| ----- | ------- | ---------------------- | -------------------------------------------------------- |
-| CI job `agent-install` (Ubuntu 22.04 runner) | 249 | to be measured (first CI run) | to be entered from the run |
-| the monitored server | 249 | to be measured (Product Manager's server run) | to be entered from the run |
+| Where | systemd | Overall exposure level |
+| ----- | ------- | ---------------------- |
+| CI job `agent-install`, Ubuntu 22.04 runner (PR #324, head `a0d92a6`, run 40480331990) | 249 (`249.11-0ubuntu3.22`) | `Overall exposure level for vandox-agent.service: 2.2 OK` |
+| the monitored server | 249 | to be measured (Product Manager's server run) |
+
+Items the CI run still flags (the exposure each adds), with the reason the unit keeps them open:
+
+| Item | Exposure | Reason |
+| ---- | -------- | ------ |
+| `PrivateNetwork=` | 0.5 | The sender needs the network, and the connection collector reads the host's `/proc/net` (see *Unit settings that must stay as they are*). |
+| `CapabilityBoundingSet=~CAP_SYS_PTRACE` | 0.3 | `CAP_SYS_PTRACE` is the one capability the process and connection collectors need (record 0122); the bounding set holds nothing else. |
+| `RestrictAddressFamilies=~AF_(INET\|INET6)` | 0.3 | The sender's connection to the backend needs Internet sockets; `IPAddressAllow=` limits where they may go. |
+| `PrivateUsers=` | 0.2 | Not set on purpose: the collectors read other users' processes, which a private user namespace would hide or change (see the forbidden settings above). |
+| `ProtectClock=` | 0.2 | The `clock` collector calls `adjtimex` (record 0111), which `ProtectClock=` would deny. |
+| `ProtectProc=` | 0.2 | Must stay `default`: a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`. |
+| `SystemCallFilter=~@clock` | 0.2 | The `clock` collector calls `adjtimex`, which `@clock` holds. |
+| `SystemCallFilter=~@privileged` | 0.2 | `@privileged` holds `@clock`, so `adjtimex` (record 0131, option 9). |
+| `SystemCallFilter=~@resources` | 0.2 | `@resources` holds calls the Go runtime may make at start (record 0131, option 9). |
+| `IPAddressDeny=` | 0.1 | Flagged because the allow-list has entries other than localhost: the tailnet ranges are the point of the setting. |
+| `AmbientCapabilities=` | 0.1 | The unprivileged process holds `CAP_SYS_PTRACE` through it. |
+| `RootDirectory=` / `RootImage=` | 0.1 | Not applicable to this unit: the agent reads the host's `/proc`, journal and sockets. |
+| `SupplementaryGroups=` | 0.1 | The groups `adm` and `systemd-journal` give the log and journal reads. |
+| `RestrictAddressFamilies=~AF_UNIX` | 0.1 | `AF_UNIX` is needed by the socket probe, the notification socket, the system bus and the MariaDB socket. |
+| `ProcSubset=` | 0.1 | `ProcSubset=pid` hides `/proc/net`, which the connection collector reads. |
+
+**What the CI run measured on that runner** (not the server: the runner has no real journal or rsyslog setup, so its check results say nothing about
+the server): `ptrace(PTRACE_ATTACH)` under the unit's confinement printed `EPERM`, the running agent's `CapEff` and `CapBnd` were `0000000000080000`;
+the address allow-list blocked the runner's non-tailnet address and reached loopback; the four install-time checks printed `ok`; and install,
+repeat install, restart after a removed spool directory, uninstall, reinstall and purge all passed.
 
 ## Checks on the server
 
@@ -276,5 +301,5 @@ the server, with its results, is entered below.
 | rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
 | Peak memory | the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | to be measured |
 
-The same cases, on a throw-away runner with systemd 249, run in the CI job `agent-install` (`.github/scripts/check-agent-install.sh`); the results of
-its first run are to be entered in *Unit*.
+The same cases, on a throw-away runner with systemd 249, run in the CI job `agent-install` (`.github/scripts/check-agent-install.sh`); its results
+are in *Unit*. They are the runner's, not the server's: the table above stays "to be measured" until the server run.
