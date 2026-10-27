@@ -22,3 +22,4 @@ are quoted in full.
 | 2026-10-27 08:05 | 5 Tests first G2 | squad-tester | common_test.go and install_test.go written; compile, fail on skeleton; deferred: TestAgentYAML_HoldsTheLinesRenderConfigReplaces (sonnet/medium · 119,503 tokens · 26 tool uses · 797 s · continued from 5 Tests first G1) |
 | 2026-10-27 08:19 | 6 Implement G2 | squad-dev | common.sh and install.sh implemented; all G2 tests pass except README test (G5); shellcheck clean (sonnet/medium · 206,155 tokens · 21 tool uses · 861 s) |
 | 2026-10-27 08:20 | 4 Skeleton G3 | squad-dev | uninstall.sh skeleton (parse_args, main return 99) (sonnet/medium · 70,226 tokens · 4 tool uses · 14 s) |
+| 2026-10-27 08:21 | 5 Tests first G3 | squad-tester | uninstall_test.go: usage + SQL tests fail as intended, agentyaml pin passes; main/purge sequence left to CI cases (sonnet/medium · usage pending) |
