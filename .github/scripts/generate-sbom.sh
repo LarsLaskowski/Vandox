@@ -10,7 +10,7 @@ export LC_ALL=C
 
 # The only generator reference: a release tag of syft and the index digest of that tag on ghcr.io
 # (docker buildx imagetools inspect ghcr.io/anchore/syft:<tag>, "Digest:" line). Never "latest".
-syft_image='ghcr.io/anchore/syft:v1.54.1@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa'
+syft_image='ghcr.io/anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a'
 
 agent_name=vandox-agent-linux-amd64
 agent_sbom=vandox-agent-linux-amd64.spdx.json
