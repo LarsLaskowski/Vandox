@@ -25,6 +25,27 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
 - Go: colocated `_test.go` files, one per source file under test (`foo.go` → `foo_test.go`), in the same
   package (white-box) unless the test exercises only the exported API (`package foo_test`).
 
+## Deploy scripts (Go tests of shell scripts)
+
+`deploy/agent` is a test-only Go package: its `_test.go` files test the shell scripts `common.sh`, `install.sh`
+and `uninstall.sh` and the files they ship (`vandox-agent.service`, `agent.yaml`, `mariadb-user.sql`,
+`mariadb-user-remove.sql`), and it holds no production Go code.
+
+- **Harness.** `common_test.go` starts `bash`, sources the scripts and calls one function at a time
+  (`parse_args`, `read_spool_directory`, `verify_checksum`, ...), then compares exit status, standard output and
+  standard error exactly. Every external command (`curl`, `plesk`, `mariadb`, `systemctl`, `getent`, `useradd`,
+  `setpriv`, ...) is a stub script on `PATH` that records its arguments and environment; `PATH` holds the stubs and
+  a short list of real tools only, so a function that calls an unstubbed command fails. Nothing needs root, the
+  network or systemd, and each bash run has a deadline.
+- **Fixtures.** Bytes that an editor or formatter could change (a BOM, a tab, a CR, the ASCII escape, a
+  backslash) are built from byte values in the test, never typed into the source. A stub that copies a real
+  tool's output (`getent`, `id`, `passwd -S`) names its measurement in the test.
+- **Not unit-testable.** Systemd behavior (enabling and starting the unit, `Type=notify`, the restart loop, the
+  address allow-list, `CapEff`, the seccomp filter, `systemd-analyze security`), the real user and file
+  ownership changes and a real download need a systemd 249 host as root. The CI job `agent-install` runs
+  `.github/scripts/check-agent-install.sh` for them: install, repeat install, uninstall, reinstall and purge on the
+  runner, with exact message lines asserted. The Go tests are the local substitute, that script the authority.
+
 ## Naming
 
 - .NET: `<TypeUnderTest><Behavior>` in plain English, e.g. `PingCheckerSharesRunningPingAndTimesOut`; every
