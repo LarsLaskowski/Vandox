@@ -1,7 +1,7 @@
 # Plan: Agent hardening and installation
 
 Source: Issue #42 | [spec.md](spec.md)
-Status: Revised (2, Lead decision after the 2nd Security rejection)
+Status: Revised (3, Lead decision after review round 1)
 Plan size: the scope is one security-tier unit with two root-run scripts and a CI job, and the plan must enumerate every input form each of their guards accepts or refuses (fail-closed parsers, bounds, link checks) for the Tester and Security.
 Tier: security — the change creates security controls: the unit's capability and bounding set, system-call filter and address allow-list, and the handling of the agent token, all run by root-owned scripts.
 Security areas touched: 6 Agent privileges (`deploy/agent/vandox-agent.service`, the user and groups `install.sh` creates); 7 MariaDB monitoring user (`install.sh` runs `mariadb-user.sql`, new `mariadb-user-remove.sql`); 8 Secrets handling (`/etc/vandox/agent-token`, `LoadCredential=`); 9 File writes and paths derived from external input (`install.sh` and `uninstall.sh` write and delete as root, `spool.directory` read from `agent.yaml`); 10 Parsing of external input (`install.sh` reads its arguments, the downloaded `SHA256SUMS`, `agent.yaml`, `/etc/resolv.conf` and the binary's `-version` output); 11 Outbound calls (`IPAddressDeny=`/`IPAddressAllow=`; the script's download); CI configuration (new job in `.github/workflows/ci.yml`, new `.github/scripts/check-agent-install.sh`)
@@ -43,13 +43,13 @@ root, network or systemd; the CI script runs the whole flow on systemd 249.
 | AC1 | `TestRenderConfig_SetsAgentIDAndURL` (a URL with `/`, `:`, `[`, `]` and an ID with `.`, `_`, `-` land unchanged; every other line byte-identical), `TestAgentYAML_HoldsTheLinesRenderConfigReplaces`, `TestEnsureUser_ReportsEachChange` (stubbed `getent`, `id`, `useradd`, `usermod`, `groupadd`, `passwd`); CI case "first install" | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC2 | `TestCheckoutWarning_OnlyForAnotherTag` (rows: same tag, other tag, no tag, stub `git` exiting 128 gives no output), `TestNeedsToken_OnlyWithoutTokenFile`, `TestDropInWarning_ForEachDropInDirectory`; CI case "repeat install" (no token asked, config and token unchanged, binary inode changed, spool files kept) | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC3 | `TestVerifyChecksum_AcceptsOnlyTheSingleMatchingLine` (table: match, other hash, two lines, other name, upper-case hex, one space, trailing text, empty, missing file), `TestFetchRelease_NeverRunsABinaryThatFailsTheChecksum`, `TestFetchRelease_ReportsAMissingFile`, `TestDownload_UsesHTTPSOnly` (stub `curl` records its arguments: `--proto =https`, `--proto-redir =https`, `--fail`, `--max-filesize 4096` for `SHA256SUMS`, `67108864` for the binary), `TestVerifyChecksum_RefusesOversizeOrNonRegularFiles` (through both paths, the download with a stub `curl` that writes the file and ignores `--max-filesize`, and `--from`: a 4097-byte `SHA256SUMS` and a 67108865-byte binary (sparse, `truncate`) give E2 without `sha256sum` running (stub records calls); 4096 and 67108864 bytes pass the bound; either file a link or a directory in the work directory gives E2), `TestFetchRelease_RefusesALinkOrNonRegularSourceInFrom` (`--from` file a link to a valid file, a directory, a FIFO, missing: E3 line, nothing copied), `TestCheckBinaryVersion_RefusesAnotherVersion`, `TestVerifyChecksum_LeavesTheBinaryExecutableByOthers` (mode 0755 after a match, work directory 0711); CI case "tampered checksum" (exit 1, nothing created) | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
-| AC4 | `TestInstall_UsageErrorsExitTwo` (table: no `--version`, `v1.2`, `1.2.3`, `v1.2.3-beta`, `--token x`, a positional argument, agent IDs `-a`, 65 characters, `a b`, `a:b`, `a#b`, newline; URLs refused `ftp://h`, `http://h/x`, `http://u@h`, `http://h:0`, `http://h:65536`, `"http://h"`, `http://h #`, a space, a newline, `http://h_x`, `http://[fd7a::1`, `http://1.2.3.4.5`; accepted `http://100.64.0.1:8081`, `https://backend.tail1234.ts.net`, `http://[fd7a:115c:a1e0::1]:8081/`, `http://h`), `TestValidateToken_EnforcesTheSecretRules` (31, 32, 4096, 4097 bytes; leading and trailing space kept and refused (`IFS= read -r`); `0x7F`; a UTF-8 letter; a backslash kept; empty), `TestTokenPath_NeverReachesAChildProcess` (`read_token` from piped input, `validate_token`, `write_token` with every external command stubbed on `PATH`, each stub recording its arguments and environment: the token bytes are in none of them, nor in standard output or error, and the file holds the token and a newline with mode 0600), `TestCheckPlatform_RefusesNonRootNonSystemdAndOtherMachines`, `TestReadSpoolDirectory_AcceptsOnlyOneDirectoryBelowVarLibVandox` (accepted: no `spool:` section, a block without `directory`, plain, single- and double-quoted, a trailing ` # comment`, other keys of the block; exit 2: `/var/lib/vandox`, `/var/lib/vandox/a/b`, `/var/lib/vandox/..`, `/var/lib/vandox/.`, `/var/lib/vandox/a b`, `/var/lib/vandox2/x`, `/tmp/x`, `/var/lib/vandox/x/`, `//`, a flow mapping, two `directory` keys, a tab, a BOM, a `%YAML` line, a `---` or `...` line, a CR, a quoted key, `? directory`, `<<:`, an anchor, an alias, a tag, a block scalar, a value on the next line, a continued plain scalar, `directory` at an indent other than 2, `''` inside single quotes, a backslash inside double quotes, `#` without a space before it; and at column 0 `"spool":`, `'spool':`, `spool :`, `? spool`, `{spool: {directory: /tmp/d}}`, and a byte at or above `0x80`: NEL (`\xc2\x85`), LS (`\xe2\x80\xa8`) and PS (`\xe2\x80\xa9`) inside a comment line followed by `  directory: /x`, a UTF-8 letter in a comment), `TestEnsureSpoolDirectory_RefusesALinkOrAnotherOwner` (spool a link, owned by another user, a file; `/var/lib/vandox` a link, owned by another user, group- or other-writable), `TestTailnetWarning_OnlyForLiteralsOutsideTheRanges` (100.64.0.0, 100.127.255.255, 100.128.0.1, 10.0.0.1, `[fd7a:115c:a1e0::1]`, `[fd7a:115c:a1e1::1]`, a name), `TestNameServerWarning_ForServersOutsideLocalhostAndTheTailnet` (a name with `nameserver` 127.0.0.53, 100.100.100.100 and `::1`: nothing; 1.1.1.1: the warning; an IP host: nothing; `nameserver` values `1.1.1.1;x`, `$(id)`, an ANSI escape (`\x1b[31m`), `999.1.1.1`: skipped, no output; `fe80::1%eth0`: the warning naming `fe80::1`) | `deploy/agent/install_test.go`, `deploy/agent/common_test.go` |
+| AC4 | `TestInstall_UsageErrorsExitTwo` (table: no `--version`, `v1.2`, `1.2.3`, `v1.2.3-beta`, `--token x`, a positional argument, agent IDs `-a`, 65 characters, `a b`, `a:b`, `a#b`, newline; URLs refused `ftp://h`, `http://h/x`, `http://u@h`, `http://h:0`, `http://h:65536`, `"http://h"`, `http://h #`, a space, a newline, `http://h_x`, `http://[fd7a::1`, `http://1.2.3.4.5`; accepted `http://100.64.0.1:8081`, `https://backend.tail1234.ts.net`, `http://[fd7a:115c:a1e0::1]:8081/`, `http://h`), `TestValidateToken_EnforcesTheSecretRules` (31, 32, 4096, 4097 bytes; leading and trailing space kept and refused (`IFS= read -r`); `0x7F`; a UTF-8 letter; a backslash kept; empty), `TestTokenPath_NeverReachesAChildProcess` (`read_token` from piped input, `validate_token`, `write_token` with every external command stubbed on `PATH`, each stub recording its arguments and environment: the token bytes are in none of them, nor in standard output or error, and the file holds the token and a newline with mode 0600), `TestCheckPlatform_RefusesNonRootNonSystemdAndOtherMachines`, `TestReadSpoolDirectory_AcceptsOnlyOneDirectoryBelowVarLibVandox` (accepted: no `spool:` section, a block without `directory`, plain, single- and double-quoted, a trailing ` # comment`, other keys of the block; exit 2: `/var/lib/vandox`, `/var/lib/vandox/a/b`, `/var/lib/vandox/..`, `/var/lib/vandox/.`, `/var/lib/vandox/a b`, `/var/lib/vandox2/x`, `/tmp/x`, `/var/lib/vandox/x/`, `//`, a flow mapping, two `directory` keys, a tab, a BOM, a `%YAML` line, a `---` or `...` line, a CR, a quoted key, `? directory`, `<<:`, an anchor, an alias, a tag, a block scalar, a value on the next line, a continued plain scalar, `directory` at an indent other than 2, `''` inside single quotes, a backslash inside double quotes, `#` without a space before it; and at column 0 `"spool":`, `'spool':`, `spool :`, `? spool`, `{spool: {directory: /tmp/d}}`, and a byte at or above `0x80`: NEL (`\xc2\x85`), LS (`\xe2\x80\xa8`) and PS (`\xe2\x80\xa9`) inside a comment line followed by `  directory: /x`, a UTF-8 letter in a comment), `TestEnsureSpoolDirectory_RefusesALinkOrAnotherOwner` (spool a link, owned by another user, a file; `/var/lib/vandox` a link, owned by another user, group- or other-writable), `TestCheckSpoolDirectory_RefusesBeforeAnyChange` (table; refused with the E6 line for that path, status 1: `/var/lib/vandox` a link, a file, owned by another user, group-writable, other-writable; the spool a link, a file, owned by another user, existing while the user `vandox-agent` does not; accepted: neither exists, `/var/lib/vandox` valid and the spool missing, the spool owned by `vandox-agent`; in every row stubs of `mkdir`, `chown`, `chmod`, `useradd`, `groupadd`, `usermod`, `install`, `mv` and `systemctl` record no call and the tree is unchanged), `TestTailnetWarning_OnlyForLiteralsOutsideTheRanges` (100.64.0.0, 100.127.255.255, 100.128.0.1, 10.0.0.1, `[fd7a:115c:a1e0::1]`, `[fd7a:115c:a1e1::1]`, a name), `TestNameServerWarning_ForServersOutsideLocalhostAndTheTailnet` (a name with `nameserver` 127.0.0.53, 100.100.100.100 and `::1`: nothing; 1.1.1.1: the warning; an IP host: nothing; `nameserver` values `1.1.1.1;x`, `$(id)`, an ANSI escape (`\x1b[31m`), `999.1.1.1`: skipped, no output; `fe80::1%eth0`: the warning naming `fe80::1`) | `deploy/agent/install_test.go`, `deploy/agent/common_test.go` |
 | AC5 | `TestMariadbAccount_UsesPleskWhenPresent`, `TestMariadbAccount_WarnsAndContinuesWhenItFails`, `TestMariadbAccount_SkippedWithNoMariadb`; `TestUserSQL_CreatesOnlyTheProcessUser` stays unchanged | `deploy/agent/common_test.go`, `deploy/agent/install_test.go` |
 | AC6 | `TestService_RestartsWithoutStartLimit`, `TestService_NotifiesAndHasAWatchdog`; CI cases "E8" (ends with `--purge`, nothing of S1 left) and "restart after a removed spool directory" | `deploy/agent/service_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC7 | `TestUninstall_UsageErrorsExitTwo`, `TestMariadbRemoveSQL_DropsOnlyTheAgentAccount`; CI cases "uninstall before install", "uninstall", "reinstall", "purge" | `deploy/agent/uninstall_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC8 | `TestService_HoldsTheRequiredSettings`, `TestService_HoldsNoForbiddenSetting`, `TestService_UsesOnlyKeysKnownToSystemd249`, `TestService_HasNoSpecifier`, `TestService_TokenOnlyAsCredential`, `TestService_SystemdAnalyzeVerifyReportsNoUnknownKey` (skipped without `systemd-analyze`; fails only on lines with `Unknown`, `ignoring` or `specifier`, not on the exit status); CI cases "verify on 249", "address allow-list" | `deploy/agent/service_test.go`; `.github/scripts/check-agent-install.sh` |
-| AC9 | CI case "security score" (`systemd-analyze security vandox-agent` ends in `OK`, `SAFE` or `PERFECT`); the server score per *Approach*, *Server run* | `.github/scripts/check-agent-install.sh` |
-| AC10 | `TestCheckJournalGroup_ReportsOkAndWarning`, `TestCheckJournalClock_WarnsFromOneSecond` (999,999 µs ok, 1,000,000 warns, either sign), `TestCheckIPCFilter_ReportsOkAndWarning`, `TestCheckCapabilities_ReportsOkAndWarning`; CI case "server checks and ptrace" | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
+| AC9 | CI case "security score" (`systemd-analyze security vandox-agent` ends in `OK`, `SAFE` or `PERFECT`); the CI and server scores entered in step 11 per *Approach*, *Server run* | `.github/scripts/check-agent-install.sh` |
+| AC10 | `TestCheckJournalGroup_ReportsOkAndWarning`, `TestCheckJournalClock_WarnsFromOneSecond` (999,999 µs ok, 1,000,000 warns, either sign), `TestCheckIPCFilter_ReportsOkAndWarning`, `TestCheckCapabilities_ReportsOkAndWarning`; CI case "server checks and ptrace"; the server run entered in step 11 per *Approach*, *Server run* | `deploy/agent/install_test.go`; `.github/scripts/check-agent-install.sh` |
 | AC11 | `TestReadme_NamesNoMissingUnitOrScripts` (no "follow with the collectors", "nothing to install", "will list" left in the files of *Documentation updates* that mention them); the Reviewer reads the rest | `deploy/agent/service_test.go` |
 
 ## Approach
@@ -85,7 +85,8 @@ or `/run/systemd/system/vandox-agent.service.d/` gets `install.sh: WARNING drop-
 **install.sh order** (no change before step 6): 1 `parse_args` (exit 2); 2 `check_platform "$EUID" "$(cat /proc/1/comm)"
 "$(uname -m)"` (exit 1); 3 config: an existing `/etc/vandox/agent.yaml` is kept (agent ID and URL then only warned as ignored) and
 `read_spool_directory` reads it, else `--agent-id`/`--backend-url` are required and the spool is the default; `tailnet_warning` and
-`name_server_warning` (`/etc/resolv.conf`; only for a host name);
+`name_server_warning` (`/etc/resolv.conf`; only for a host name); then `check_spool_directory "$spool"` (read-only, exit 1, below)
+and the refusal of an existing `/etc/vandox` that is a link or not a directory, so every E1–E6 check precedes the first change;
 4 the token: `needs_token` (file missing) → `read_token` (`IFS= read -r -s` on a terminal, else `IFS= read -r` of one line of standard
 input) → `validate_token`; 5 `fetch_release` into `mktemp -d` (mode 0711, removed by an `EXIT` trap): `curl --proto =https --proto-redir =https
 --fail --location --silent --show-error --max-time 300 --max-filesize <4096 | 67108864> -o <file> https://github.com/LarsLaskowski/Vandox/releases/download/<version>/<file>`,
@@ -96,11 +97,11 @@ file and, by `stat -c %s`, at most 4096 bytes (`SHA256SUMS`) or 67108864 bytes (
 either; on a match it sets the binary to 0755 (the work directory is 0711, so `nobody` can
 run it); then `check_binary_version` runs the binary as `setpriv --reuid=nobody --regid=nogroup
 --clear-groups --no-new-privs <bin> -version`; `checkout_warning` (`git describe --tags --exact-match` in the script's directory; any failure, such as
-Git's "dubious ownership" refusal for a checkout of another user under `sudo`, counts as no tag, without output); 6 apply: `ensure_user`; `/etc/vandox` (root 0755, refused when a link), `agent.yaml` (via a temporary
+Git's "dubious ownership" refusal for a checkout of another user under `sudo`, counts as no tag, without output); 6 apply: `_refuse_links`, then `ensure_user`; `/etc/vandox` (root 0755, refused when a link), `agent.yaml` (via a temporary
 file in `/etc/vandox` and `mv -T`, root:vandox-agent 0640) when new, the token by `write_token` when needed;
 `ensure_spool_directory`; the binary (temporary file in `/usr/local/bin`, `install -m 0755`,
 `mv -T`); the unit (0644 root) and `systemctl daemon-reload`; on a first install (unit file was absent) `run_mariadb_sql` unless
-`--no-mariadb`; `systemctl enable vandox-agent` and `systemctl restart vandox-agent`; on failure the E8 line, exit 1; 7 the server
+`--no-mariadb`; `systemctl enable --quiet vandox-agent` (no `|| true`: a failure prints `install.sh: vandox-agent could not be enabled` after systemctl's own message, exit 1, the installation left in place) and `systemctl restart vandox-agent`; on failure the E8 line, exit 1; 7 the server
 checks and the drop-in warning; 8 the success line. A link in place of any file the script writes is refused (`[[ -L ]]` before the write, `mv -T` onto a
 plain name), never followed.
 
@@ -120,6 +121,14 @@ nothing but a comment; any other line, a second `directory` key or `directory` a
 spool.directory from /etc/vandox/agent.yaml`, exit 2. No `directory` key → the default. The value must be exactly
 `/var/lib/vandox/<name>`, `<name>` of `A-Za-z0-9._-` and not `.` or `..`; anything else, `/var/lib/vandox` itself included, gives the E6
 line, exit 2. One element below a root-owned directory means no element on the way is the agent's.
+
+**main** starts with `umask 077`, `LC_ALL=C`, the fixed `PATH` and `unset TMPDIR TOKEN`, so `mktemp -d` never follows a caller's
+`TMPDIR` (Security N12, kept under `sudo -E`).
+
+**check_spool_directory** (read-only, no link followed, nothing created): an existing `/var/lib/vandox` must be a directory, not a
+link, owned by root and not group- or other-writable; an existing spool must be a directory, not a link, owned by `vandox-agent`
+(when that user does not exist, any existing spool fails); else the E6 "not the agent's directory" line for that path, status 1.
+Missing entries pass. `ensure_spool_directory` keeps all its checks after creating.
 
 **ensure_spool_directory** (no link followed): `/var/lib/vandox` is created with `mkdir -m 0755` when missing; it must be a directory,
 not a link, owned by root and not group- or other-writable, else the E6 "not the agent's directory" line for that path, exit 1. The
@@ -159,12 +168,19 @@ checksum; E8 (a kept invalid `agent.yaml`; ends with `uninstall.sh --purge` and 
 `is-active`, the MariaDB warning, the four check lines, `CapEff`/`CapBnd` `0000000000080000`, `NoNewPrivs: 1`, `Seccomp: 2`);
 security score; ptrace (`systemd-run --wait --pipe` with the `User`, `AmbientCapabilities`, `CapabilityBoundingSet`, `NoNewPrivileges`,
 `SystemCallFilter`, `SystemCallErrorNumber` and `SystemCallArchitectures` lines read from the shipped unit file runs
-`python3` calling `ptrace(PTRACE_ATTACH)` on a root `sleep`, expecting `EPERM`); repeat install; restart after a removed spool
+`python3` that prints its `CapEff` line from `/proc/self/status` and calls `ptrace(PTRACE_ATTACH)` on a root `sleep`, expecting
+`CapEff:` `0000000000080000` and `EPERM`, Security N13); repeat install; restart after a removed spool
 directory (back to `active` within 45 s); address allow-list (fact 16); uninstall; reinstall; purge (nothing of S1 left).
 
-**Server run** (spec AC10): before step 9 the Product Manager installs the branch's build on the server with `--from` and runs the
-README's *Checks on the server* (the script's checks, `systemd-analyze security`, the `ptrace` command, a reboot); the Dev enters the
-results in `deploy/agent/README.md`.
+**Server run** (spec AC9, AC10; *Criteria verified only in CI*): the CI score exists only from the first `agent-install` run, on the
+draft PR, and the server run needs the final scripts, so both are step-11 work. Until then `deploy/agent/README.md` keeps its
+"to be measured" cells and `docs/INSTALL.md` its "not yet run on the server" clause; step 9 checks everything else. When the draft PR
+is open the orchestrator asks the Product Manager to install the PR head on the server with `--from` and run the README's *Checks on
+the server* (the script's checks, `systemd-analyze security`, the `ptrace` command, a reboot). In one step-11 commit the Dev enters the
+CI score (systemd 249, level, each flagged item with its reason), the server results, and removes the INSTALL clause; a Reviewer delta
+round and the step-9 re-approval follow, and the PR stays a draft until then. A score below `OK`, `ptrace` not refused, `CapEff`
+other than `0000000000080000` or no autostart after the reboot is a defect worked in step 11 (Lead when it needs a design change); a
+check's `WARNING` is a result to note. The rows *rsyslog's logrotate* and *Peak memory* are outside AC10 (#45) and stay open.
 
 ## Options considered
 
@@ -195,7 +211,7 @@ Bash functions; each skeleton body is return 99, so the scripts pass bash -n and
   with the rule); `fetch_release()` (args: version, from-dir or empty, work dir; 0 or 1); `verify_checksum()` (arg: work dir; 0 or
   1); `check_binary_version()` (args: binary, version; 0 or 1); `checkout_warning()` (args: checkout tag or empty, version);
   `render_config()` (args: example, agent ID, URL, output file); `name_server_warning()` (args: URL, resolv.conf file);
-  `write_token()` (arg: target file; writes the global TOKEN); `dropin_warning()` (args: the two drop-in directories); `ensure_user()`; `ensure_spool_directory()` (arg: path; 0 or 1);
+  `write_token()` (arg: target file; writes the global TOKEN); `dropin_warning()` (args: the two drop-in directories); `ensure_user()`; `check_spool_directory()` (arg: spool path; read-only; 0, or 1 with the E6 line); `ensure_spool_directory()` (arg: path; 0 or 1);
   `check_journal_group()` (args: journal directory, group); `check_journal_clock()` (args: first field of /proc/uptime, monotonic
   microseconds); `check_ipc_filter()` (reads the output of systemd-analyze syscall-filter @ipc on standard input);
   `check_capabilities()` (arg: status file); `main()`.
@@ -224,7 +240,8 @@ All by the Dev once the code is green, except `docs/UNIT_TESTS.md` (Tester).
   54-55 and 1843 and `deploy/agent/README.md` 121: tailnet addresses and localhost only, a name must resolve through a localhost or
   tailnet name server (E12); the
   *Implementation* list (2067) names the unit and scripts; record 0131 under *Related decisions* of the agent area.
-- `deploy/agent/README.md`: line 6 (scripts exist); the score of the draft (2.2 `OK` on 255) is replaced by the CI and server results;
+- `deploy/agent/README.md`: the `IPAddressAllow=` row of *Unit* (Security N14): localhost allows loopback TCP (a backend on the same
+  host, the CI test target); unix sockets (MariaDB, the bus, the journal) are not subject to `IPAddressAllow=`. Line 6 (scripts exist); the score of the draft (2.2 `OK` on 255) is replaced by the CI and server results;
   the checkout check needs a checkout owned by root or a `safe.directory` entry; *Unit settings that must stay as they are* (121: the allow-list is set); a new
   *Unit* section with every setting and its reason, the resource values (*Approach*), the `systemd-analyze security` result (CI on
   249 and the server) with each flagged item and its reason; a new *Install, upgrade, uninstall* section; *Checks on the server*
@@ -290,6 +307,17 @@ one Security delta confirmation):
 - N8 taken: ASCII only and the column-0 `[a-z_]+:` rule; rows per class in AC4.
 - N9 taken: the builtins-only statement in *Approach*.
 - N10 taken: `name_server_warning` prints only an IP literal and skips any other value; *Messages* updated; rows in AC4.
+
+## Review round 1 (Lead decision)
+
+- AC9/AC10 "not met" (blocking): accepted as *Criteria verified only in CI*, not a defect of this head; *Approach*, *Server run*. The PR
+  says in *Reviewer Notes* and *Test Plan* that the `systemd-analyze security` score on systemd 249 comes from the first `agent-install`
+  run and the server run from the Product Manager on the PR head, both entered in `deploy/agent/README.md` before the draft is marked
+  ready, and lists both under *Next Steps*. The Product Manager is asked at step 10, not now: no decision is open, only the measurement.
+- Change before the spool check (blocking): the plan's order disagreed with spec NFR *Install-script safety* and AC4; fixed with
+  `check_spool_directory` in step 3 and the `/etc/vandox` refusal moved before `ensure_user`.
+- Non-blocking, all taken: `systemctl enable --quiet` without `|| true`; `unset TMPDIR` (N12); `CapEff` in the ptrace case (N13); the
+  `IPAddressAllow=` row (N14). `main` has no unit test; the CI cases "first install" (`is-enabled`) and the Reviewer cover them.
 
 ## Security notes
 
