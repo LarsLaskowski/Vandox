@@ -2007,11 +2007,14 @@ labels of letters, digits and `-` (1 to 63 bytes, not starting or ending with `-
 **Order, and what stops it.** Nothing changes before the files are verified.
 1. Arguments (exit 2); then root, systemd as PID 1 and `x86_64`, else `install.sh: must run as root`, `install.sh: needs systemd` or
    `install.sh: only linux-amd64 is supported`, exit 1.
-2. Configuration: an existing `/etc/vandox/agent.yaml` is kept (`install.sh: keeping existing /etc/vandox/agent.yaml`) and its
+2. Configuration and the early checks: an existing `/etc/vandox/agent.yaml` is kept (`install.sh: keeping existing /etc/vandox/agent.yaml`) and its
    `spool.directory` is read; without one the spool is `/var/lib/vandox/spool` and an IP literal outside localhost and the tailnet ranges gets
    `install.sh: WARNING <host> is not a tailnet address; the unit blocks it`. For a host name, each `nameserver` of `/etc/resolv.conf` that is an
    IP literal outside localhost and the tailnet gets `install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`;
-   any other `nameserver` value is skipped without output.
+   any other `nameserver` value is skipped without output. Then, read-only and before the token prompt and before any change, the spool
+   directory is checked (`/var/lib/vandox` and the spool, when they exist, must be real directories, the first owned by root and not group- or
+   other-writable, the second owned by `vandox-agent`, which an existing spool cannot be while the user does not exist; missing entries pass) and an
+   existing `/etc/vandox` that is a link or not a directory is refused, so every check of the steps above precedes the first change.
 3. The token is asked for only when `/etc/vandox/agent-token` is missing: from the terminal without echo, else one line of standard input.
    It must be 32 to 4096 bytes of `0x21` to `0x7E`, else `install.sh: token rejected: fewer than 32 characters`, `...: more than 4096 characters` or
    `...: a character outside 0x21-0x7E`, exit 1; the token is never printed. Only bash built-ins handle it: it is no argument, environment
@@ -2028,7 +2031,9 @@ labels of letters, digits and `-` (1 to 63 bytes, not starting or ending with `-
    checkout; a checkout the Git of root refuses as owned by another user counts as no tag).
 6. Apply: the user and group `vandox-agent`, `/etc/vandox`, `agent.yaml`, the token, the spool directory, the binary, the unit, the
    MariaDB account (first install only), enable and restart. A link in place of `/etc/vandox`, `agent.yaml`, the token file, the binary or the unit
-   is refused (`install.sh: <path> is a link; not following it`, exit 1), never followed. A start that does not reach `READY=1` ends with
+   is refused (`install.sh: <path> is a link; not following it`, exit 1), never followed (checked first in this step, before the user is touched).
+   `systemctl enable` must succeed: a failure prints `install.sh: vandox-agent could not be enabled` after systemctl's own message, exit 1, and the installed
+   files stay. A start that does not reach `READY=1` ends with
    `install.sh: vandox-agent did not start; see: journalctl -u vandox-agent`, exit 1; the installed files stay and the unit keeps retrying.
 7. The server checks, then `vandox-agent vX.Y.Z installed and running`.
 

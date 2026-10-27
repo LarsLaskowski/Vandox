@@ -624,16 +624,10 @@ ensure_user() {
     fi
 }
 
-# ensure_spool_directory PATH: the spool directory one level below a root-owned, non-writable parent; no link
-# is followed and nothing recurses; status 1 with the message.
-ensure_spool_directory() {
-    local spool=$1
-    local parent=${spool%/*}
+# _check_parent PARENT: an existing parent must be a real directory owned by root and not group- or other-writable.
+_check_parent() {
+    local parent=$1
     local info owner mode
-
-    if [[ ! -e $parent && ! -L $parent ]]; then
-        mkdir -m 0755 -- "$parent"
-    fi
 
     if [[ -L $parent || ! -d $parent ]]; then
         _not_agents "$parent"
@@ -648,13 +642,19 @@ ensure_spool_directory() {
         _not_agents "$parent"
         return 1
     fi
+}
 
-    if [[ ! -e $spool && ! -L $spool ]]; then
-        mkdir -m 0700 -- "$spool"
-        chown -h "$AGENT_USER:$AGENT_USER" "$spool"
-    fi
+# _check_spool SPOOL: an existing spool must be a real directory owned by the agent's user.
+_check_spool() {
+    local spool=$1
+    local owner
 
     if [[ -L $spool || ! -d $spool ]]; then
+        _not_agents "$spool"
+        return 1
+    fi
+
+    if ! getent passwd "$AGENT_USER" >/dev/null; then
         _not_agents "$spool"
         return 1
     fi
@@ -665,6 +665,41 @@ ensure_spool_directory() {
         _not_agents "$spool"
         return 1
     fi
+}
+
+# check_spool_directory PATH: the read-only form of ensure_spool_directory; missing entries pass, nothing is
+# created or changed; status 1 with the message.
+check_spool_directory() {
+    local spool=$1
+    local parent=${spool%/*}
+
+    if [[ -e $parent || -L $parent ]]; then
+        _check_parent "$parent" || return 1
+    fi
+
+    if [[ -e $spool || -L $spool ]]; then
+        _check_spool "$spool" || return 1
+    fi
+}
+
+# ensure_spool_directory PATH: the spool directory one level below a root-owned, non-writable parent; no link
+# is followed and nothing recurses; status 1 with the message.
+ensure_spool_directory() {
+    local spool=$1
+    local parent=${spool%/*}
+
+    if [[ ! -e $parent && ! -L $parent ]]; then
+        mkdir -m 0755 -- "$parent"
+    fi
+
+    _check_parent "$parent" || return 1
+
+    if [[ ! -e $spool && ! -L $spool ]]; then
+        mkdir -m 0700 -- "$spool"
+        chown -h "$AGENT_USER:$AGENT_USER" "$spool"
+    fi
+
+    _check_spool "$spool"
 }
 
 # --- server checks (warnings only) -------------------------------------------------------------------
@@ -828,7 +863,7 @@ main() {
     umask 077
     export LC_ALL=C
     export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-    unset TOKEN
+    unset TMPDIR TOKEN
 
     script_dir=${BASH_SOURCE[0]%/*}
     script_dir=$(cd -- "$script_dir" && pwd)
@@ -861,6 +896,18 @@ main() {
         name_server_warning "$BACKEND_URL" /etc/resolv.conf
     fi
 
+    check_spool_directory "$spool" || exit 1
+
+    if [[ -L $CONFIG_DIR ]]; then
+        _refuse_link "$CONFIG_DIR"
+        exit 1
+    fi
+
+    if [[ -e $CONFIG_DIR && ! -d $CONFIG_DIR ]]; then
+        echo "install.sh: $CONFIG_DIR is not a directory" >&2
+        exit 1
+    fi
+
     if needs_token "$TOKEN_FILE"; then
         write_new_token=1
         read_token
@@ -890,11 +937,6 @@ main() {
         mkdir -m 0755 -- "$CONFIG_DIR"
     fi
 
-    if [[ ! -d $CONFIG_DIR ]]; then
-        echo "install.sh: $CONFIG_DIR is not a directory" >&2
-        exit 1
-    fi
-
     if ((new_config == 1)); then
         _write_config "$script_dir" || exit 1
     fi
@@ -918,7 +960,10 @@ main() {
         run_mariadb_sql "$script_dir/mariadb-user.sql" install.sh
     fi
 
-    systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+    if ! systemctl enable --quiet "$SERVICE_NAME"; then
+        echo "install.sh: vandox-agent could not be enabled" >&2
+        exit 1
+    fi
 
     if ! systemctl restart "$SERVICE_NAME"; then
         echo "install.sh: vandox-agent did not start; see: journalctl -u vandox-agent" >&2
