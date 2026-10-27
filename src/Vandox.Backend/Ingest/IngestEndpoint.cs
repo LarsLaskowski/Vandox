@@ -833,6 +833,33 @@ internal sealed class IngestEndpoint : IDisposable
         }
 
         _logger.IngestBatchStored(batch.AgentId, request.Header?.Mode ?? string.Empty, batch.Records.Count, result.Stored, result.Duplicates);
+
+        if (result.Timeline is not null)
+        {
+            LogTimeline(batch.AgentId, result.Timeline);
+        }
+    }
+
+    /// <summary>
+    /// Logs what a batch changed in the gaps and the clock state of its agent: the gap line once per batch that changed a gap, and the clock line when the offset crossed the allowance.
+    /// </summary>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="change">What the batch changed</param>
+    private void LogTimeline(string agentId, TimelineChange change)
+    {
+        if (change.Opened + change.Closed + change.Final > 0)
+        {
+            _logger.IngestGapsChanged(agentId, change.Opened, change.Closed, change.Final, change.Open);
+        }
+
+        if (change.ClockOff is true)
+        {
+            _logger.AgentClockOff(agentId, (change.OffsetNs ?? 0) / 1e9);
+        }
+        else if (change.ClockOff is false)
+        {
+            _logger.AgentClockInStep(agentId);
+        }
     }
 
     #endregion // Methods

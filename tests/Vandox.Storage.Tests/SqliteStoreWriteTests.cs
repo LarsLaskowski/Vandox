@@ -223,7 +223,7 @@ public class SqliteStoreWriteTests
         var batch = Samples.Batch(Samples.Metric(RecordOrigin.Backend, 0, 0, "cpu"));
 
         // Act and assert
-        Assert.ThrowsExactly<OperationCanceledException>(() => writer.Write(batch, batch.Records[0], cancelled.Token), "cancelled write");
+        Assert.ThrowsExactly<OperationCanceledException>(() => writer.Write(batch, batch.Records[0], false, cancelled.Token), "cancelled write");
     }
 
     /// <summary>

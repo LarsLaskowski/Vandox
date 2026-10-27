@@ -16,9 +16,9 @@ internal static class RecordQueries
 
     private const string RecordColumns = "SELECT r.id, r.kind, r.origin, r.source, r.agent_id, r.seq, r.captured_at, r.received_at, r.boot_id, r.clock_offset_ns, r.data, ";
     private const string MetricColumns = "m.name, m.value, m.unit, m.labels, ";
-    private const string LogColumns = "l.log, l.program, l.pid, l.priority, l.message, l.truncated, l.host, l.event";
+    private const string LogColumns = "l.log, l.program, l.pid, l.priority, l.message, l.truncated, l.host, l.event, r.live";
     private const string NoMetric = "NULL, NULL, NULL, NULL, ";
-    private const string NoLog = "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL";
+    private const string NoLog = "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, r.live";
 
     #endregion // Constants
 
@@ -190,7 +190,8 @@ internal static class RecordQueries
                    AgentId = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
                    ReceivedAt = StorageTime.FromNanoseconds(reader.GetInt64(7)),
                    BootId = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
-                   ClockOffsetNs = reader.IsDBNull(9) ? null : reader.GetInt64(9)
+                   ClockOffsetNs = reader.IsDBNull(9) ? null : reader.GetInt64(9),
+                   Live = reader.GetInt64(23) == 1
                };
     }
 

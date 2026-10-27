@@ -34,7 +34,7 @@ added by the backend and cannot be supplied by the agent.
 | `agent_id` | string | `^[A-Za-z0-9][A-Za-z0-9._-]*$`, 1 to 64 bytes |
 | `boot_id` | string | lower-case UUID, `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` |
 | `clock_offset_ns` | integer, optional | agent clock minus the reference time of its time synchronization, in nanoseconds; positive means the agent is ahead; omitted means unknown |
-| `mode` | string | `live` or `backfill`; a hint only, the backend classifies records itself (0022). The agent's sender sets `live` on the stream that sends current records and `backfill` on the throttled stream that sends the spool's older ones ([Agent](agent.md), *Sending*) |
+| `mode` | string | `live` or `backfill`; a hint only, logged and never stored or used: the backend classifies records itself (0022, 0130) by lateness and gaps. The agent's sender sets `live` on the stream that sends current records and `backfill` on the throttled stream that sends the spool's older ones ([Agent](agent.md), *Sending*) |
 
 ### Capture context (0046)
 
@@ -53,9 +53,9 @@ increase strictly and stay below 2^63 - 1. A spool that lost its counter (a rein
 file of another agent ID or a damaged one) and a spool after an unclean stop in an earlier boot start at least at the
 **clock bound**, the wall clock's microseconds since the Unix epoch plus 1,000,000, so the agent keeps its ID and its
 new numbers lie above every number it issued before, unless the clock was set back by more than the time in between
-(record 0123, amending 0045). Two consequences for the backend's sequence detection (#41): an agent's first number is
+(record 0123, amending 0045). Two consequences for the backend's sequence detection ([Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*): an agent's first number is
 large, so numbers below the first number the backend received from an agent are never reported as missing; and a fresh
-start or a crash leaves a jump in the numbers, which is reported as `sequence_missing` like any other gap in them.
+start or a crash leaves a jump in the numbers, which is reported as a `sequence_missing` gap like any other gap in them and becomes final after 5 minutes in which no record arrives into it.
 
 ## Records
 
@@ -67,7 +67,7 @@ start or a crash leaves a jump in the numbers, which is reported as `sequence_mi
 | ----- | ---- |
 | `kind` | one of the kinds below, exact lower-case match; an unknown kind rejects the batch |
 | `source` | name pattern (collector or parser, e.g. `proc.meminfo`, `journal`) |
-| `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, #41); the backend stores at most 2^63 - 1 ([0063](../decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)) |
+| `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, 0130); the backend stores at most 2^63 - 1 ([0063](../decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)) |
 | `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded, which its `to` may follow, see *`gap`*); the backend stores instants from 1677-09-21 to 2262-04-11 (nanoseconds in an int64, 0063) |
 | `data` | the payload object of the kind; required, not `null` |
 
@@ -488,6 +488,7 @@ host](backend-host.md), *Ingest endpoint*) meets them:
 - **Check the header's `agent_id`** against `ingest.agent_id`, the agent the token belongs to, ordinally, before any record is read
   (`403` otherwise).
 - **Deduplicate** by (agent ID, `seq`): the store's partial unique index ([Storage](storage.md), *Writing*).
+- **Detect gaps and classify** each record, ignoring the header's `mode` and `clock_offset_ns`: the store keeps the agent's sequence and time gaps and stores each record live or backfilled in the batch's transaction ([Storage](storage.md), *Writing*, *Agent timeline*); the backend's own gap causes are `sequence_missing` and `no_data`, and a `gap` record that names numbers below its own makes them final.
 - **Commit only after the end**: the endpoint reads `NextAsync` to the end into a list and writes nothing when any read fails.
 - **Lower the limits and cap the decoders** from the measured peak: the endpoint decodes with `MaxBatchBytes` 2 MiB (instead of the
   16 MiB default), `MaxLineBytes` 1 MiB and `MaxRecords` 20,000, which every batch of the agent's sender fits, and lets at most two

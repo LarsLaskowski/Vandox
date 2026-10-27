@@ -322,13 +322,16 @@ which the backend sends after its commit ([Backend host](areas/backend-host.md),
 refused on its own was replaced by a recorded gap.
 Every agent record carries a sequence number from a persistent per-agent counter, and every batch the
 agent's ID; a batch is identified by the agent ID and the sequence numbers of its records, so a resend is
-idempotent (the backend stores each agent ID and sequence number once) and the backend can detect gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
-gaps in the sequence numbers; alert rules are evaluated on live data only, and backfilled data is stored and
-analyzed but never alerts. The nightly report waits for the backfill if the backend host was off at 06:00. Data that is
+idempotent (the backend stores each agent ID and sequence number once) and the backend can detect gaps. `vandoxd` classifies every record as live or backfilled when it stores it: a record is live when its capture time, corrected by the agent's
+clock offset that the backend measures from caught-up `self` samples (the agent sends none), lies within an allowance of the receive time
+and no open sequence gap of the agent lies below its number. The backend keeps the agent's sequence gaps and time gaps (open, closed or final: an
+unfilled jump becomes final after 5 minutes without a record arriving into it) as rows of its own, in the batch's transaction. Alert rules are evaluated on live data only, and backfilled data is stored and
+analyzed but never alerts ([Detection, alerts and reports](areas/detection-and-reports.md), *Live data and backfill*). The nightly report waits for the backfill if the backend host was off at 06:00. Data that is
 nevertheless lost (agent stopped, spool full, collector timed out) is recorded as a gap, so there are no
 data gaps unless explicitly recorded.
 
 Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
+[0130](decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md),
 [0024](decisions/0024-nightly-report-timing.md),
 [0028](decisions/0028-data-gaps-are-always-recorded.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
