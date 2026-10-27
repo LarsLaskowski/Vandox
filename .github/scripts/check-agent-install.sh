@@ -33,6 +33,9 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly repo
 readonly agent_dir="$repo/deploy/agent"
 readonly unit_source="$agent_dir/vandox-agent.service"
+# The transient unit of the address allow-list case and the file its client writes the result to.
+readonly IPCHECK_UNIT="/run/systemd/system/vandox-agent-ipcheck.service"
+readonly IPCHECK_OUT="/run/vandox-agent-ipcheck.out"
 
 OUT=""
 ERR=""
@@ -58,6 +61,11 @@ cleanup() {
 
   if [[ -n "$work" ]]; then
     rm -rf -- "$work"
+  fi
+
+  if [[ -e "$IPCHECK_UNIT" ]]; then
+    rm -f -- "$IPCHECK_UNIT" "$IPCHECK_OUT"
+    systemctl daemon-reload >/dev/null 2>&1 || true
   fi
 
   # The host is left without the agent whatever happened.
@@ -510,21 +518,44 @@ start_listener() {
 start_listener "$own_ip" 18081 "$work/listener-own.log"
 start_listener 127.0.0.1 18082 "$work/listener-loopback.log"
 
-mapfile -t net_props < <(unit_properties IPAddressDeny IPAddressAllow)
-[[ ${#net_props[@]} -eq 4 ]] || fail "read ${#net_props[@]} words of IP properties from the unit file, want 4"
+# systemd-run -p does not know the keyword localhost of IPAddressAllow= (its command-line parser takes
+# prefixes only), so the shipped lines are tested literally in a transient unit file.
+mapfile -t net_lines < <(grep -E '^IPAddress(Deny|Allow)=' "$unit_source")
+[[ ${#net_lines[@]} -eq 2 ]] || fail "read ${#net_lines[@]} IPAddress lines from the unit file, want 2"
 
-get_code='import sys,urllib.request
-try:
-    urllib.request.urlopen(sys.argv[1], timeout=5).read()
-    print("reached")
-except Exception:
-    print("blocked")'
+cat >"$work/ipcheck.py" <<'PY'
+import sys
+import urllib.request
 
-own_result="$(systemd-run --wait --pipe --collect --quiet "${net_props[@]}" python3 -c "$get_code" "http://$own_ip:18081/" 2>&1)" || true
-loop_result="$(systemd-run --wait --pipe --collect --quiet "${net_props[@]}" python3 -c "$get_code" "http://127.0.0.1:18082/" 2>&1)" || true
-echo "non-tailnet address $own_ip: $own_result; loopback: $loop_result"
-[[ "$own_result" == "blocked" ]] || fail "a request to $own_ip was not blocked: $own_result"
-[[ "$loop_result" == "reached" ]] || fail "a request to 127.0.0.1 was not allowed: $loop_result"
+for name, url in (("own", sys.argv[1]), ("loopback", sys.argv[2])):
+    try:
+        urllib.request.urlopen(url, timeout=5).read()
+        print(name + "=reached", flush=True)
+    except Exception:
+        print(name + "=blocked", flush=True)
+PY
+
+python_path="$(command -v python3)"
+
+{
+  printf '%s\n' "[Unit]" "Description=Address allow-list check of the Vandox agent unit" "" "[Service]" "Type=oneshot"
+  printf '%s\n' "${net_lines[@]}"
+  printf '%s\n' "StandardOutput=truncate:$IPCHECK_OUT" "StandardError=journal"
+  printf '%s\n' "ExecStart=$python_path $work/ipcheck.py http://$own_ip:18081/ http://127.0.0.1:18082/"
+} >"$IPCHECK_UNIT"
+
+systemctl daemon-reload
+systemctl start vandox-agent-ipcheck.service || {
+  journalctl -u vandox-agent-ipcheck.service --no-pager || true
+  fail "the address check unit failed"
+}
+
+ip_result="$(<"$IPCHECK_OUT")"
+echo "non-tailnet address $own_ip and loopback: $(tr '\n' ' ' <<<"$ip_result")"
+[[ "$(grep -F 'own=' <<<"$ip_result")" == "own=blocked" ]] || fail "a request to $own_ip was not blocked: $ip_result"
+[[ "$(grep -F 'loopback=' <<<"$ip_result")" == "loopback=reached" ]] || fail "a request to 127.0.0.1 was not allowed: $ip_result"
+rm -f -- "$IPCHECK_UNIT" "$IPCHECK_OUT"
+systemctl daemon-reload
 grep -q 'GET /' "$work/listener-loopback.log" || fail "the loopback listener got no request"
 
 if grep -q 'GET /' "$work/listener-own.log"; then
