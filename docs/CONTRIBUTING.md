@@ -131,11 +131,11 @@ Then, on the repository page, *Releases → Draft a new release*:
 3. *Set as a pre-release* exactly for a pre-release tag (`vX.Y.Z-rc.N`); the workflow refuses a mismatch. Leave
    *Set as the latest release* as it is: the workflow sets it from the tags.
 4. *Publish release*. The tag is created and the workflow starts (Actions, *Release*). The release has no assets until the
-   workflow attaches `vandox-agent-linux-amd64` and `SHA256SUMS` at the end; if the workflow fails, it turns the release
+   workflow attaches `vandox-agent-linux-amd64`, `vandox-agent-install-<version>.tar.gz` and `SHA256SUMS` at the end; if the workflow fails, it turns the release
    back into a draft.
 
 Do not *Save draft* to start a release: a draft creates no tag and starts nothing until it is published. Pre-release
-tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
+tags look like `vX.Y.Z-rc.N`; the install bundle is packaged only for `vX.Y.Z` and `vX.Y.Z-rc.N`, so a release with any other pre-release suffix fails at the packaging step. Build metadata (`+...`) is not allowed.
 
 ### What the release workflow does
 
@@ -143,13 +143,13 @@ tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
    the tag, and that its commit is reachable from `origin/main`.
 2. Runs `go tool govulncheck ./...` and `dotnet list package --vulnerable --include-transitive`; a finding stops
    the release.
-3. Builds `vandox-agent` (Go, linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
+3. Builds `vandox-agent` (Go, linux/amd64, static, `-trimpath`), packages the install bundle with `.github/scripts/package-agent.sh` and writes the two-line `SHA256SUMS` (bundle, binary), and builds the image from
    `deploy/backend/Dockerfile` (the backend, published by the .NET SDK) with `docker build --no-cache`. Nothing is restored from a CI cache.
    After the image is saved, `.github/scripts/generate-sbom.sh` generates SPDX 2.3 SBOMs for the binary and
    the image with a syft container pinned by digest (*SBOM generator* below), run without network and
    without access to `dist/`.
 4. Verifies both binaries' `--version` output against the tag, the full commit SHA and the commit time, the
-   checksum, that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder and runtime tags
+   checksum and the bundle (`.github/scripts/check-agent-bundle.sh`: nine files, owner 0/0, fixed modes, `VERSION` equal to the tag, files equal to the tree, reproducible), that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder and runtime tags
    name the .NET version of the target framework, and that the image runs as `65532:65532`. The SBOM script
    checks its own output (SPDX 2.3; for the agent the Go standard library and the main module, for the image
    NuGet packages; at most 16 MiB each).
@@ -158,15 +158,15 @@ tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
    exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
    never overwritten.
 6. Creates SLSA build provenance attestations and SBOM attestations (`sbom-path`, SPDX) for the binary and
-   the image digest (GitHub artifact attestations, stored on GitHub, not in Docker Hub) in the `attest` job,
+   the install bundle and the image digest (GitHub artifact attestations, stored on GitHub, not in Docker Hub) in the `attest` job,
    which holds only `id-token: write` and `attestations: write`, has no environment and reads no secret, and
    verifies all of them with the README's flags, the SBOM ones with `--predicate-type
    https://spdx.dev/Document/v2.3` (the image by its published tag, see *Verifying a release*).
-7. Completes the GitHub release, only after the attestations exist and verify: attaches `vandox-agent-linux-amd64`
+7. Completes the GitHub release, only after the attestations exist and verify: attaches `vandox-agent-linux-amd64`, the install bundle
    and `SHA256SUMS`, generates the notes if they are empty, appends the image digest, and marks the release as latest
    exactly when the tag is the highest stable `v*.*.*` tag.
 8. If any job fails or the run is cancelled, turns the release back into a draft, so no published release lacks its
-   assets. A release that is already complete from an earlier run (both assets and the image digest in the notes)
+   assets. A release that is already complete from an earlier run (all three assets and the image digest in the notes)
    stays published (a republish or re-run of a
    complete release stops at the never-overwrite check).
 

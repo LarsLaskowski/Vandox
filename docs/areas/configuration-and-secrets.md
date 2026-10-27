@@ -291,7 +291,7 @@ Backend:
 - A secret value has 1 to 4096 bytes of printable ASCII (`0x21` to `0x7E`). A BOM, spaces, other line endings and
   control characters are rejected instead of becoming part of the secret. A secret that needs other characters must
   be encoded, for example as base64. The agent token has at least 32 characters.
-- **On a server installed with `deploy/agent/install.sh` the agent token is a systemd credential.** The script writes it to
+- **On a server installed with the `install.sh` of the release's install bundle the agent token is a systemd credential.** The script writes it to
   `/etc/vandox/agent-token` (root:root, mode 0600, one line with a newline) and the unit hands it to the agent with
   `LoadCredential=agent-token:/etc/vandox/agent-token`; the unit sets `VANDOX_AGENT_TOKEN_FILE` to the written-out path
   `/run/credentials/vandox-agent.service/agent-token` (never the `%d` specifier) and never `VANDOX_AGENT_TOKEN`, so the token is in no unit

@@ -496,7 +496,7 @@ The agent is released as a binary for the monitored server, the backend as a Doc
 Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docker-image.md)). See the
 *Versioning and releases* section in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-- The agent binary `vandox-agent-linux-amd64` and `SHA256SUMS` are GitHub release assets.
+- The agent binary `vandox-agent-linux-amd64`, the install bundle `vandox-agent-install-<version>.tar.gz` (the install and uninstall scripts, the unit, the example configuration, the MariaDB scripts, `VERSION` and the binary's checksum; built reproducibly and attested, [record 0131](decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md)) and `SHA256SUMS` (the bundle's and the binary's line) are GitHub release assets.
 - The image is built from `deploy/backend/Dockerfile` (the .NET SDK image publishes the application onto the
   chiseled ASP.NET runtime image, [0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md)) and runs as UID 65532.
   The builder and runtime base images are pinned by digest: each `FROM` names an image and a digest from

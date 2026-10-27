@@ -827,6 +827,13 @@ func checkInstallDocument(t *testing.T, name string) {
 	assertChainBlocks(t, name, text)
 }
 
+// isInstallBlock reports whether a code block installs the agent from the bundle: it has the extraction line,
+// or it names the bundle and runs tar (a weakened extraction). A log archive (tar without the bundle) and an
+// uninstall block (the bundle without tar) are not install blocks.
+func isInstallBlock(block string) bool {
+	return strings.Contains(block, extractPrefix) || (strings.Contains(block, bundlePrefix) && strings.Contains(block, "tar "))
+}
+
 // assertChainBlocks requires at least one block that extracts the bundle and checks each of them.
 func assertChainBlocks(t *testing.T, name, text string) {
 	t.Helper()
@@ -834,7 +841,7 @@ func assertChainBlocks(t *testing.T, name, text string) {
 	found := 0
 
 	for _, block := range codeBlocks(text) {
-		if strings.Contains(block, extractPrefix) == false && strings.Contains(block, "tar ") == false {
+		if isInstallBlock(block) == false {
 			continue
 		}
 
@@ -875,5 +882,32 @@ func TestChainFindings_CatchesAWeakChain(t *testing.T) {
 		if len(chainFindings(block)) == 0 {
 			t.Errorf("chainFindings found nothing wrong with the chain %q", name)
 		}
+	}
+}
+
+// TestIsInstallBlock_IgnoresOtherTarCommands keeps the heuristic honest: an unrelated tar -czf block is not an
+// install block, while a block that names the bundle but has a weak chain is one and its defect is found.
+func TestIsInstallBlock_IgnoresOtherTarCommands(t *testing.T) {
+	t.Parallel()
+
+	logs := "sudo tar -czf ~/vandox-logs.tar.gz --exclude=var/log/journal /var/log\n"
+	if isInstallBlock(logs) {
+		t.Errorf("a log archive block is taken for an install block")
+	}
+
+	weak := mktempChain + " &&\n  awk -v f=\"vandox-agent-install-$v.tar.gz\" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&\n" +
+		"  " + extractPrefix + " \"x.tar.gz\"\n  \"./vandox-agent-install-$v/install.sh\"\n"
+
+	uninstall := "sudo \"./vandox-agent-install-$v/uninstall.sh\" --purge\n"
+	if isInstallBlock(uninstall) {
+		t.Errorf("an uninstall block is taken for an install block")
+	}
+
+	if isInstallBlock(weak) == false {
+		t.Fatalf("a block that names the bundle is not taken for an install block")
+	}
+
+	if len(chainFindings(weak)) == 0 {
+		t.Errorf("a chain without && before the install line was not caught")
 	}
 }

@@ -1988,25 +1988,45 @@ by the agent logs nothing.
 
 ## Installation
 
-`deploy/agent/install.sh` installs or upgrades the agent, `deploy/agent/uninstall.sh` removes it; both run as root from a checkout of the
-tagged source, on Ubuntu 22.04 with systemd 249 on `x86_64`, and use `deploy/agent/common.sh`. The unit is `deploy/agent/vandox-agent.service`.
-Every setting of the unit with its reason is in `deploy/agent/README.md`; the reasons for the choices are in
+`install.sh` installs or upgrades the agent, `uninstall.sh` removes it. Both come from the **install bundle** of a release,
+`vandox-agent-install-<version>.tar.gz`, run as root from its extracted directory on Ubuntu 22.04 with systemd 249 on `x86_64`
+(`bash`, `curl`, `sha256sum`, `tar`, `gzip` and the shadow utilities; no `git`). The bundle has one directory and nine files: `install.sh`,
+`uninstall.sh`, `common.sh`, `vandox-agent.service`, `mariadb-user.sql`, `mariadb-user-remove.sql`, `agent.yaml` (the example), `VERSION` (the tag and one
+line feed) and `vandox-agent-linux-amd64.sha256` (the checksum line of the binary). It is built reproducibly from the tagged source, is listed with the
+binary in the release's two-line `SHA256SUMS` (the bundle first), and carries a build-provenance attestation. Only tags `vX.Y.Z` and `vX.Y.Z-rc.N` are packaged. The operator
+downloads the bundle and `SHA256SUMS` over HTTPS in a new private directory and extracts the bundle only after the check, as one `&&` chain
+(`deploy/agent/README.md`, *Install, upgrade, uninstall*): `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field and
+`sha256sum --check --strict -` checks that file against it. The unit is `vandox-agent.service`. Every setting of the unit with its reason is in
+`deploy/agent/README.md`; the reasons for the choices are in
 [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md).
 
-**Command.** `install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`. `--version` is `vX.Y.Z` or
-`vX.Y.Z-rc.N`. `--agent-id` and `--backend-url` are required while no `/etc/vandox/agent.yaml` exists and are ignored when it does.
-`--from DIR` takes the two release files from a directory instead of downloading them. The token is never an option: `--token` and
+**Command.** `install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`; the version is the one in `VERSION`, there is no
+`--version`. `--agent-id` and `--backend-url` are required while no `/etc/vandox/agent.yaml` exists and are ignored when it does.
+`--from DIR` takes the binary from a directory instead of downloading it. The token is never an option: `--token` and
 `--token=...` are refused with `install.sh: the token is read from standard input, never from an option` and the usage line, exit 2.
-A wrong argument prints `usage: install.sh --version vX.Y.Z [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`, exit 2.
+A wrong argument (`--version` included) prints `usage: install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`, exit 2.
 `--agent-id` must be an agent ID (*Command line and start-up*): else `install.sh: --agent-id is not a valid agent ID`, exit 2.
 `--backend-url` must be `http` or `https`, `://`, a host, an optional port of 1 to 65535 without a leading zero and an optional `/`; the host is
 an IPv4 literal (four parts of 0 to 255; a host of digits and dots that is no IPv4 literal is refused), a bracketed IPv6 literal, or a name of
 labels of letters, digits and `-` (1 to 63 bytes, not starting or ending with `-`) of at most 253 bytes: else
 `install.sh: --backend-url is not http(s)://host[:port]`, exit 2. The values are never echoed.
 
+**The `VERSION` file.** `VERSION` next to `install.sh` must be a regular file, not a link, of at most 64 bytes (checked by size before it is read),
+with exactly one line that ends in a line feed and is `vX.Y.Z` or `vX.Y.Z-rc.N`; else
+`install.sh: no valid VERSION file next to install.sh; use the install bundle of a release`, exit 2. A source checkout has no `VERSION` and is refused.
+
+**The entry check (E15).** Before anything is sourced or read, `install.sh` and `uninstall.sh` check, with `stat` and the physical path of the script
+(`cd -P`), every ancestor directory up to `/`, then the bundle directory, the running script and `common.sh`. Each must be owned by uid 0 and no link;
+an ancestor must not be group- or other-writable unless its sticky bit is set (`/tmp`; set-user-ID and set-group-ID bits of ancestors are ignored); the
+bundle directory, the script and `common.sh` must have no group- or other-write bit and no set-user-ID, set-group-ID or sticky bit (the mode is compared
+as an octal number, `mode & 07022 == 0`). A failure prints `<script>: <path> is not owned by root or is writable by others; extract the bundle as root in
+a private directory`, exit 1, with nothing sourced or changed. `main` then checks, with the same per-entry rule (`check_bundle_dir`), the other files it
+reads: `VERSION`, `vandox-agent.service`, `mariadb-user.sql`, `agent.yaml` and the pin file (`uninstall.sh`: `mariadb-user-remove.sql`); a missing file is left
+to the later checks. What remains is the time between a check and the read.
+
 **Order, and what stops it.** Nothing changes before the files are verified.
-1. Arguments (exit 2); then root, systemd as PID 1 and `x86_64`, else `install.sh: must run as root`, `install.sh: needs systemd` or
-   `install.sh: only linux-amd64 is supported`, exit 1.
+1. Arguments (exit 2); the entry check and the bundle files (E15, exit 1); `VERSION` (exit 2); then root, systemd as PID 1 and `x86_64`, else
+   `install.sh: must run as root`, `install.sh: needs systemd` or `install.sh: only linux-amd64 is supported`, exit 1.
 2. Configuration and the early checks: an existing `/etc/vandox/agent.yaml` is kept (`install.sh: keeping existing /etc/vandox/agent.yaml`) and its
    `spool.directory` is read; without one the spool is `/var/lib/vandox/spool` and an IP literal outside localhost and the tailnet ranges gets
    `install.sh: WARNING <host> is not a tailnet address; the unit blocks it`. For a host name, each `nameserver` of `/etc/resolv.conf` that is an
@@ -2019,23 +2039,21 @@ labels of letters, digits and `-` (1 to 63 bytes, not starting or ending with `-
    It must be 32 to 4096 bytes of `0x21` to `0x7E`, else `install.sh: token rejected: fewer than 32 characters`, `...: more than 4096 characters` or
    `...: a character outside 0x21-0x7E`, exit 1; the token is never printed. Only bash built-ins handle it: it is no argument, environment
    variable or here-document of any child process.
-4. The release: `vandox-agent-linux-amd64` and `SHA256SUMS` of the release `--version`, downloaded from this repository's release page with
-   `curl --proto =https --proto-redir =https --fail`, into a private temporary directory removed on every exit; a failed download or an
-   unusable `--from` source (a link, a directory, a FIFO, missing, over the bound) gives `install.sh: download failed: <file>`, exit 1.
-   Both files must be regular files, not links, and at most 4096 bytes (`SHA256SUMS`) and 64 MiB (the binary), checked by size before either is read;
-   `SHA256SUMS` must hold exactly one line `<64 lower-case hex digits>  vandox-agent-linux-amd64` that matches the binary's SHA-256, else
-   `install.sh: checksum mismatch, nothing installed`, exit 1. Only then is the binary run, once, as `nobody` without privileges
-   (`setpriv`) with `-version`; another version gives `install.sh: binary is not <version>`, exit 1. The checksum proves integrity, not who
-   built the binary.
-5. A checkout on a Git tag other than `--version` gets `install.sh: WARNING checkout is <tag>, not <version>` (the unit and scripts come from the
-   checkout; a checkout the Git of root refuses as owned by another user counts as no tag).
-6. Apply: the user and group `vandox-agent`, `/etc/vandox`, `agent.yaml`, the token, the spool directory, the binary, the unit, the
+4. The binary: `vandox-agent-linux-amd64` of the release `VERSION`, downloaded from this repository's release page with
+   `curl --proto =https --proto-redir =https --fail` (nothing else is downloaded), or taken from `--from`, into a private temporary directory removed
+   on every exit; a failed download or an unusable `--from` source (a link, a directory, a FIFO, missing, over 64 MiB) gives
+   `install.sh: download failed: vandox-agent-linux-amd64`, exit 1. The bundle's `vandox-agent-linux-amd64.sha256` (the pin) must be a regular file, not a
+   link, of at most 4096 bytes, checked by size before it is read, and hold exactly one line `<64 lower-case hex digits>  vandox-agent-linux-amd64` that
+   matches the binary's SHA-256, else `install.sh: checksum mismatch, nothing installed`, exit 1. Only then is the binary run, once, as `nobody` without
+   privileges (`setpriv`) with `-version`; a version other than `VERSION` gives `install.sh: binary is not <version>`, exit 1. The pin lies inside the
+   verified bundle, so checking the bundle (or its attestation) covers the binary; the checksum proves integrity, not who built the binary.
+5. Apply: the user and group `vandox-agent`, `/etc/vandox`, `agent.yaml`, the token, the spool directory, the binary, the unit, the
    MariaDB account (first install only), enable and restart. A link in place of `/etc/vandox`, `agent.yaml`, the token file, the binary or the unit
    is refused (`install.sh: <path> is a link; not following it`, exit 1), never followed (checked first in this step, before the user is touched).
    `systemctl enable` must succeed: a failure prints `install.sh: vandox-agent could not be enabled` after systemctl's own message, exit 1, and the installed
    files stay. A start that does not reach `READY=1` ends with
    `install.sh: vandox-agent did not start; see: journalctl -u vandox-agent`, exit 1; the installed files stay and the unit keeps retrying.
-7. The server checks, then `vandox-agent vX.Y.Z installed and running`.
+6. The server checks, then `vandox-agent vX.Y.Z installed and running`.
 
 **What it creates.**
 
@@ -2063,7 +2081,7 @@ prints the two `spool.directory` lines above with `uninstall.sh:` in front; it d
 
 **MariaDB.** On the first install the account is created from `deploy/agent/mariadb-user.sql` unchanged, with `plesk db` when `plesk` is on the
 search path, else `mariadb`. When that fails or neither exists, the install continues with
-`install.sh: WARNING MariaDB account not created; run: <plesk db | mariadb> < deploy/agent/mariadb-user.sql`; `--no-mariadb` skips the step silently.
+`install.sh: WARNING MariaDB account not created; run: <plesk db | mariadb> < <bundle>/mariadb-user.sql` (the path of the file the script ran); `--no-mariadb` skips the step silently.
 
 **Checks on the server.** After the start the script prints one line per check, each `check <name>: ok` or `check <name>: WARNING <what to do>`;
 a warning never fails the installation:
@@ -2083,7 +2101,7 @@ partial installation succeeds with exit 0. A plain run keeps the user, `agent.ya
 `--purge` additionally removes `agent.yaml` and the token, prints `uninstall.sh: deleting /var/lib/vandox (records not yet sent are lost)` and
 deletes `/var/lib/vandox` with `rm -rf --one-file-system` (which follows no link), drops the MariaDB account with
 `deploy/agent/mariadb-user-remove.sql` (the one statement `DROP USER IF EXISTS 'vandox-agent'@'localhost'`; when that fails:
-`uninstall.sh: WARNING MariaDB account not removed; run: <plesk db | mariadb> < deploy/agent/mariadb-user-remove.sql`), deletes the user (never
+`uninstall.sh: WARNING MariaDB account not removed; run: <plesk db | mariadb> < <bundle>/mariadb-user-remove.sql`), deletes the user (never
 with `-r`, so a home directory stays and is named) and the group, and removes `/etc/vandox` only when it is empty. The spool of a kept
 configuration is read as above; an unreadable one stops the script with exit 2 before anything is removed.
 

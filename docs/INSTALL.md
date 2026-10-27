@@ -303,20 +303,47 @@ Tailscale ACL strict, so the monitored server reaches only this port ([SECURITY.
 
 ## 11. Install the agent on the monitored server
 
-From v0.2.0 on, the agent collects on the monitored server and sends to the backend of step 10. Run the script **as root on the monitored
-server**, from a checkout of the release's source (the script and the unit come from the checkout, the binary and its `SHA256SUMS` from the
-release of the same version, over HTTPS):
+From v0.2.0 on, the agent collects on the monitored server and sends to the backend of step 10. The release publishes an install bundle,
+`vandox-agent-install-vX.Y.Z.tar.gz`, with the scripts, the unit and the example configuration, and a `SHA256SUMS` that lists the bundle and the binary.
+The server needs `bash`, `curl`, `sha256sum`, `tar` and `gzip`, not `git`. Run this **as root on the monitored server**, with `vX.Y.Z` the release
+you install, in a new private directory (every step is chained with `&&`, so nothing runs after a failed check):
 
 ```
-git clone --branch vX.Y.Z https://github.com/LarsLaskowski/Vandox.git
-sudo Vandox/deploy/agent/install.sh --version vX.Y.Z --agent-id web-1 --backend-url http://100.101.102.103:8081
+sudo -i
+v=vX.Y.Z; base=https://github.com/LarsLaskowski/Vandox/releases/download/$v
+d=$(mktemp -d) && cd "$d" &&
+  curl --proto '=https' --proto-redir '=https' -fsSLO "$base/vandox-agent-install-$v.tar.gz" &&
+  curl --proto '=https' --proto-redir '=https' -fsSLO "$base/SHA256SUMS" &&
+  awk -v f="vandox-agent-install-$v.tar.gz" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&
+  tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
+  "./vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.101.102.103:8081
 ```
 
-It asks for the agent token of step 3 (typed without echo, or one line of standard input; never an option), checks the checksum of the
-binary before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the spool directory, the unit and the MariaDB account (`plesk db` on
-Plesk, else `mariadb`), starts the agent and prints a line per server check. The `--agent-id` must be the `agent_id` of step 10, and the
-`--backend-url` a tailnet address or MagicDNS name: the unit lets the agent reach only localhost and the tailnet. Run it again with another
-`--version` to upgrade: only the binary and the unit are replaced, and the token is not asked for again. Remove the agent with
-`sudo Vandox/deploy/agent/uninstall.sh` (it keeps the configuration, token, spool and user) or `uninstall.sh --purge` (it deletes them,
-unsent records included). Every option, message, check and unit setting is in
-[`deploy/agent/README.md`](../deploy/agent/README.md); the unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).
+`awk` picks the bundle's line from `SHA256SUMS` by its exact file name and `sha256sum` checks that file; if the line is missing it fails and the
+bundle is not extracted. The `--agent-id` must be the `agent_id` of step 10, and the `--backend-url` a tailnet address or MagicDNS name: the
+unit lets the agent reach only localhost and the tailnet. The script reads the version from the bundle's `VERSION` file, asks for the agent
+token of step 3 (typed without echo, or one line of standard input; never an option), downloads the binary and checks it against the checksum
+in the bundle before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the spool directory, the unit and the MariaDB account (`plesk db` on
+Plesk, else `mariadb`), starts the agent and prints a line per server check.
+
+**Upgrade:** run the same commands with the new `vX.Y.Z`; only the binary and the unit are replaced and the token is not asked for again.
+**Offline:** copy the bundle, `SHA256SUMS` and `vandox-agent-linux-amd64` of the release to the server and run:
+
+```
+v=vX.Y.Z
+d=$(mktemp -d) && cd "$d" &&
+  cp /path/to/vandox-agent-install-$v.tar.gz /path/to/SHA256SUMS /path/to/vandox-agent-linux-amd64 . &&
+  awk -v f="vandox-agent-install-$v.tar.gz" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&
+  tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
+  "./vandox-agent-install-$v/install.sh" --from "$d" --agent-id web-1 --backend-url http://100.101.102.103:8081
+```
+
+**Remove** the agent from the extracted bundle of the installed version (plain: keeps the configuration, token, spool and user; `--purge`
+deletes them, unsent records included):
+
+```
+sudo "./vandox-agent-install-$v/uninstall.sh"            # keeps the user, configuration, token, spool and MariaDB account
+sudo "./vandox-agent-install-$v/uninstall.sh" --purge    # deletes them too, unsent records included
+```
+
+Every option, message, check and unit setting is in [`deploy/agent/README.md`](../deploy/agent/README.md); the unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).
