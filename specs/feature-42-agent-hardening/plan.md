@@ -290,3 +290,9 @@ one Security delta confirmation):
 - N8 taken: ASCII only and the column-0 `[a-z_]+:` rule; rows per class in AC4.
 - N9 taken: the builtins-only statement in *Approach*.
 - N10 taken: `name_server_warning` prints only an IP literal and skips any other value; *Messages* updated; rows in AC4.
+
+## Security notes
+
+Squad-security, plan delta confirmation: APPROVED. Non-blocking note, appended verbatim.
+
+- **N11:** the plan changes the `backend.url` comment in `agent.yaml` (lines 23–26). A non-ASCII character there, such as an em dash, would make every repeat install end with exit 2. Add a `TestReadSpoolDirectory_…` row that runs the shipped `deploy/agent/agent.yaml` and expects `/var/lib/vandox/spool`.
