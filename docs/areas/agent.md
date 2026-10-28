@@ -55,8 +55,7 @@ rules below for the parts not implemented are the target the implementation is h
   authenticates the transport; every other address is `https`. The installed unit lets the agent reach only localhost and the tailnet
   ranges (`IPAddressAllow=`, *Installation*), so any other address, and a host name resolved by a name server outside localhost and the
   tailnet, fails as `connection failed`: use the tailnet address. A MagicDNS name works only while Tailscale manages the server's DNS, which the documented setup turns off
-(`tailscale set --accept-dns=false`): with a policy that lets the server reach only the ingest port, Tailscale's name servers are out
-of reach and every lookup on the server would fail. The scheme must match the listener: an `https` URL at a plain-http
+(`tailscale set --accept-dns=false`): with a policy that lets the server reach only the ingest port, Tailscale's name servers can be out of reach and lookups on the server can fail. The scheme must match the listener: an `https` URL at a plain-http
   listener fails as `connection failed`, and an `http` URL at a TLS port gets a `400` without the refusal header (*Sending*), which
   counts as a backend that does not accept batches, so the agent only waits and gives no record up.
 - Commands for the server (a later feature) are fetched by the agent from the backend, never pushed to it, so they reach the server

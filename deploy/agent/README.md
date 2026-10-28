@@ -64,10 +64,7 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    have key expiry turned off by default (<https://tailscale.com/kb/1068/acl-tags>), so the server stays in the tailnet. The agent
    needs neither Tailscale SSH (`--ssh`) nor any other option.
 
-   **Turn off Tailscale's DNS on this server.** On Linux, Tailscale takes over the server's name resolution by default and sends
-   lookups to the tailnet's name servers. The policy of step 2 lets this server reach only the ingest port, so with Tailscale's DNS
-   every lookup fails: the install lines cannot reach `github.com` (`curl: (6) Could not resolve host`), and nothing else on the
-   server can resolve a name either. Keep the server's own name server:
+   **Turn off Tailscale's DNS on this server.** On Linux, Tailscale takes over the server's name resolution by default and resolves names through the tailnet's DNS settings. With the narrow policy of step 2, lookups can then fail: the install lines cannot reach `github.com` (`curl: (6) Could not resolve host`), and nothing else on the server can resolve a name either. Keep the server's own name server:
 
    ```
    tailscale set --accept-dns=false
@@ -117,7 +114,7 @@ where Tailscale's pages differ from this summary, follow Tailscale.
      - The policy lets this server reach port 22: `Connection refused` with `1`, or `0` (connected). The policy is too wide,
        usually because the default rule is still there or the server has no tag; correct step 2 or 3.
 
-      Use the backend's tailnet address, not its MagicDNS name: with Tailscale's DNS turned off (step 3), MagicDNS names do not
+   Use the backend's tailnet address, not its MagicDNS name: with Tailscale's DNS turned off (step 3), MagicDNS names do not
    resolve on this server.
 
 ## Install the agent
@@ -191,8 +188,7 @@ curl --proto '=https' --proto-redir '=https' -fsSLO "$u/vandox-agent-linux-amd64
 
 Copy the three files to the server into `/root/vandox-files`. Then check their names: `ls /root/vandox-files` must show exactly
 `vandox-agent-install-vX.Y.Z.tar.gz`, `SHA256SUMS` and `vandox-agent-linux-amd64`, with this spelling and case. Some upload tools
-change a name, for example to lower case. A file `sha256sums` makes the check below fail with `awk: fatal: cannot open file
-'SHA256SUMS'` and `sha256sum: 'standard input': no properly formatted SHA256 checksum lines found`, and nothing is unpacked. Fix
+change a name, for example to lower case. A file `sha256sums` makes the check below fail: `awk` reports that it cannot open `SHA256SUMS` (gawk: `awk: fatal: cannot open file 'SHA256SUMS'`; mawk, Ubuntu's default `awk`, words it differently), then `sha256sum: 'standard input': no properly formatted SHA256 checksum lines found`, and nothing is unpacked. Fix
 the name with `mv /root/vandox-files/sha256sums /root/vandox-files/SHA256SUMS`. The check does not accept other spellings on
 purpose: it selects the bundle's line by its exact name. On the server run lines 1, 2, 3 and 5 of the block above (`sudo -i`,
 `v=`, `f=` and the `mktemp` line), then (`web` stands for the `agent_id` of this server):
@@ -292,6 +288,7 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
   GitHub release, so the online lines cannot install it: the script would try to download the binary and end with `install.sh:
   download failed: vandox-agent-linux-amd64`. Follow the offline install of step 2 with `v=v0.0.0-rc.0` and `--from .`; the
   binary in the artifact is checked against the bundle's SHA-256.
+
 ## Rights per collector
 
 `vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are

@@ -40,8 +40,7 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 - **The agent's unit enforces this on the server.** `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the
   agent's process reach only localhost and the tailnet ranges, so a `backend.url` elsewhere, and a host name resolved by a name server outside
   localhost and the tailnet, fails as `connection failed`; the install script warns about both. Use the tailnet address: the documented setup turns Tailscale's DNS off on the monitored server (`tailscale set --accept-dns=false`),
-  because its policy lets the server reach only the ingest port, so Tailscale's name servers would be out of reach and every lookup
-  would fail; MagicDNS names then do not resolve there
+  because its policy lets the server reach only the ingest port, so Tailscale's name servers can be out of reach and lookups can fail; MagicDNS names then do not resolve there
   ([Agent](agent.md), *Installation*, [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md)).
 - The agent sends its token only in the `Authorization` header of its requests to `backend.url`, connects only to that URL's host and
   port (no proxy from the environment, no redirect followed), verifies the certificate of an `https` URL and never switches the check

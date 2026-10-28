@@ -250,7 +250,7 @@ Backend:
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
   the host is a tailnet address is not checked; the network ACL is the boundary (see the network area). `http` is meant only for
-  the backend host's tailnet address or MagicDNS name, and the scheme must match the listener ([Agent](agent.md), *Connection*).
+  the backend host's tailnet address (MagicDNS names do not resolve once Tailscale's DNS is off on the server), and the scheme must match the listener ([Agent](agent.md), *Connection*).
 - `backend.backfill_bandwidth` is the bandwidth of the agent's backfill: the bytes a second of compressed request body it sends
   while it catches up on the spool after an outage ([Agent](agent.md), *Sending*; the live stream is not limited). It is checked right
   after `backend.url`; the value is written as `256KiB`, not as a number of bytes, and a decimal point, a unit other than `KiB` or `MiB`,
