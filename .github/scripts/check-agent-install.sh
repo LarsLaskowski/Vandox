@@ -38,6 +38,7 @@ readonly repo
 readonly repo_agent_dir="$repo/deploy/agent"
 readonly BUNDLE_NAME="vandox-agent-install-$VERSION"
 readonly PIN_NAME="vandox-agent-linux-amd64.sha256"
+readonly FILES_DIR="/root/vandox-files"
 # The extracted bundle (set by the case "bundle verification") and the unit file inside it.
 agent_dir=""
 unit_source=""
@@ -85,6 +86,8 @@ cleanup() {
   if [[ -n "$agent_dir" && -x "$agent_dir/uninstall.sh" ]]; then
     "$agent_dir/uninstall.sh" --purge >/dev/null 2>&1 || true
   fi
+
+  rm -rf -- "$FILES_DIR"
 
   if [[ -n "$work" ]]; then
     rm -rf -- "$work"
@@ -322,91 +325,219 @@ fi
 nothing_left "before the cases"
 
 # --- case: bundle verification ---------------------------------------------------------------------------
-note "case: bundle verification (the documented chain, without the curl steps)"
+note "case: bundle verification (the documented offline lines, fed to bash -s without -e)"
 bundle_file="$BUNDLE_NAME.tar.gz"
 
-# chain SRC: the documented command chain verbatim except that the two curl steps are a copy from SRC; it ends
-# in the install script of the extracted bundle, called with an option it refuses, so reaching it is visible
-# as its usage line. The temporary directory comes from TMPDIR, which tells the case where to look afterwards.
-read -r -d '' documented_chain <<'CHAIN' || true
-d=$(mktemp -d) && cd "$d" &&
-  cp -- "$src/$bundle_file" "$src/SHA256SUMS" . &&
-  awk -v f="vandox-agent-install-$v.tar.gz" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&
-  tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
-  "./vandox-agent-install-$v/install.sh" --bogus
-CHAIN
+# split_blocks FILE DIR: writes every fenced code block of FILE to DIR/block-NN.
+split_blocks() {
+  local file=$1
+  local dir=$2
 
-# run_chain SRC TMP: runs the chain under umask 022 with TMPDIR=TMP; sets OUT, ERR and RC.
-run_chain() {
-  local src=$1
-  local tmp=$2
-
-  mkdir -p -- "$tmp"
-  RC=0
-  (umask 022 && export TMPDIR="$tmp" CHAIN_SRC="$src" CHAIN_VERSION="$VERSION" CHAIN_BUNDLE_FILE="$bundle_file" &&
-    bash -c "src=\$CHAIN_SRC; v=\$CHAIN_VERSION; bundle_file=\$CHAIN_BUNDLE_FILE; $documented_chain") >"$work/out" 2>"$work/err" || RC=$?
-  OUT="$(<"$work/out")"
-  ERR="$(<"$work/err")"
+  awk -v dir="$dir" '/^```/ { if (inb) { inb = 0; close(out) } else { inb = 1; n++; out = sprintf("%s/block-%02d", dir, n) } next }
+    inb { print > out }' "$file"
 }
 
-# Good row: the chain reaches install.sh, which refuses the option (usage, exit 2) after its entry check passed.
-run_chain "$dist" "$work/chain-good"
-expect_rc 2 "bundle verification, good bundle"
-expect_err "usage: install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]" "bundle verification, good bundle"
-extracted="$(find "$work/chain-good" -mindepth 2 -maxdepth 2 -name "$BUNDLE_NAME" -type d)"
-[[ -n "$extracted" ]] || fail "bundle verification: the good bundle was not extracted"
-agent_dir="$extracted"
+# find_block DIR PATTERN...: prints the one block file of DIR that holds every PATTERN (fixed strings).
+find_block() {
+  local dir=$1
+  shift
+  local block pattern ok found=""
+  local count=0
+
+  for block in "$dir"/block-*; do
+    ok=1
+    for pattern in "$@"; do
+      grep -qF -- "$pattern" "$block" || ok=0
+    done
+
+    if ((ok == 1)); then
+      found=$block
+      count=$((count + 1))
+    fi
+  done
+
+  ((count == 1)) || fail "deploy/agent/README.md has $count blocks holding: $*; want exactly one"
+  printf '%s\n' "$found"
+}
+
+mkdir "$work/readme-blocks"
+split_blocks "$repo_agent_dir/README.md" "$work/readme-blocks"
+mapfile -t online_lines < <(grep -v '^[[:space:]]*$' "$(find_block "$work/readme-blocks" 'sudo -i' 'mktemp -d' 'curl ')")
+mapfile -t offline_lines < <(grep -v '^[[:space:]]*$' "$(find_block "$work/readme-blocks" 'cp /root/vandox-files/')")
+((${#online_lines[@]} == 8)) || fail "the online block of deploy/agent/README.md has ${#online_lines[@]} lines, want 8"
+((${#offline_lines[@]} == 3)) || fail "the offline server block of deploy/agent/README.md has ${#offline_lines[@]} lines, want 3"
+
+# write_documented FILE WITH_VARIABLES: the documented offline lines of the server (lines 2, 3 and 5 of the online
+# block, then the offline block), unchanged except that v is set to the CI version; no "sudo -i" (this case runs
+# as root). Added around them: a line that prints d, a line that prints the status of the check line, and, right
+# after the install line, the agent token for the prompt (a failed run line runs it as a command instead).
+# shellcheck disable=SC2016  # the echo lines are text for the other shell, not expansions here
+write_documented() {
+  local file=$1
+  local with_variables=$2
+  local line
+
+  {
+    if [[ "$with_variables" == yes ]]; then
+      printf '%s\n' "v=$VERSION" "${online_lines[2]}"
+    fi
+
+    printf '%s\n' "${online_lines[4]}" 'echo "D=$d"'
+
+    for line in "${offline_lines[@]}"; do
+      printf '%s\n' "$line"
+
+      if [[ "$line" == *"sha256sum -c"* ]]; then
+        printf '%s\n' 'echo "CHECK=$?"'
+      fi
+    done
+
+    printf '%s\n' "$CI_TOKEN"
+  } >"$file"
+}
+
+# run_documented FILE TMP CWD: feeds FILE to bash -s (no -e: a failed line is followed by the next one, as
+# when all lines are pasted) in the empty directory CWD under umask 022 with TMPDIR=TMP; sets OUT, ERR, RC,
+# DIR (the d of the run) and CHECK (the status of the check line).
+run_documented() {
+  local file=$1
+  local tmp=$2
+  local cwd=$3
+
+  mkdir -p -- "$tmp" "$cwd"
+  RC=0
+  (cd "$cwd" && umask 022 && TMPDIR="$tmp" bash -s <"$file") >"$work/out" 2>"$work/err" || RC=$?
+  OUT="$(<"$work/out")"
+  ERR="$(<"$work/err")"
+  DIR="$(sed -n 's/^D=//p' <<<"$OUT")"
+  CHECK="$(sed -n 's/^CHECK=//p' <<<"$OUT")"
+}
+
+# stage_files SRC: the three release files in /root/vandox-files, as the offline instructions have them.
+stage_files() {
+  rm -rf -- "$FILES_DIR"
+  mkdir -m 0700 -- "$FILES_DIR"
+  cp -- "$1"/* "$FILES_DIR/"
+}
+
+# Good row: the offline lines install the agent; the extracted files are root-owned, the scripts 0755 and the rest
+# 0644 (F3), and the agent runs. Afterwards it is purged with the extracted bundle's uninstall.sh.
+write_documented "$work/documented-good.sh" yes
+write_documented "$work/documented-lost.sh" no
+stage_files "$dist"
+run_documented "$work/documented-good.sh" "$work/tmp-good" "$work/cwd-good"
+show
+[[ "$CHECK" == 0 ]] || fail "bundle verification: the check line of the good bundle exited $CHECK"
+expect_rc 0 "bundle verification, documented offline lines"
+expect_out "vandox-agent $VERSION installed and running" "bundle verification, good bundle"
+[[ -n "$DIR" && -d "$DIR/$BUNDLE_NAME" ]] || fail "bundle verification: the good bundle was not extracted into d ($DIR)"
+agent_dir="$DIR/$BUNDLE_NAME"
 unit_source="$agent_dir/vandox-agent.service"
 
-# F3: as root under umask 022 the files are root-owned, the scripts 0755 and the rest 0644.
 for name in install.sh uninstall.sh; do
   expect_stat "$agent_dir/$name" root:root 755
 done
 
-for name in common.sh vandox-agent.service mariadb-user.sql mariadb-user-remove.sql agent.yaml VERSION "$PIN_NAME"; do
+for name in common.sh vandox-agent.service mariadb-user.sql mariadb-user-remove.sql agent.yaml VERSION MANIFEST.sha256 "$PIN_NAME"; do
   expect_stat "$agent_dir/$name" root:root 644
 done
 
 expect_stat "$agent_dir" root:root 755
-[[ "$(find "$agent_dir" -mindepth 1 | wc -l)" -eq 9 ]] || fail "bundle verification: the bundle does not hold exactly its 9 files: $(ls -A "$agent_dir")"
+[[ "$(find "$agent_dir" -mindepth 1 | wc -l)" -eq 10 ]] || fail "bundle verification: the bundle does not hold exactly its 10 files: $(ls -A "$agent_dir")"
 [[ "$(<"$agent_dir/VERSION")" == "$VERSION" ]] || fail "bundle verification: VERSION is not $VERSION"
+(cd "$agent_dir" && sha256sum --check --strict --quiet MANIFEST.sha256) || fail "bundle verification: MANIFEST.sha256 does not match the extracted files"
+run "" "$agent_dir/uninstall.sh" --purge
+expect_rc 0 "bundle verification, purge of the documented install"
+nothing_left "bundle verification, good bundle"
 
-# Failure rows: the chain stops before tar, so nothing is extracted and install.sh never runs.
-chain_failure() {
+# documented_failure WHAT SCRIPT TMP IN_CWD: runs the documented lines on the staged files of a failure row.
+# It must show all of: the check line exits non-zero (except where the private directory could not be made and
+# the lines ran in the working directory, IN_CWD=yes); no vandox-agent-install-* entry in d or in the working
+# directory; the install line fails with "No such file or directory"; nothing of S1 is created.
+documented_failure() {
   local what=$1
-  local src=$2
-  local tmp="$work/chain-$what"
+  local script=$2
+  local tmp=$3
+  local in_cwd=$4
+  local cwd="$work/cwd-$what"
 
-  run_chain "$src" "$tmp"
+  run_documented "$script" "$tmp" "$cwd"
 
-  if [[ "$RC" == 0 ]]; then
+  if [[ "$in_cwd" == no ]] && { [[ -z "$CHECK" ]] || [[ "$CHECK" == 0 ]]; }; then
     show
-    fail "bundle verification, $what: the chain succeeded"
+    fail "bundle verification, $what: the check line did not fail (status '$CHECK')"
   fi
 
-  if find "$tmp" -name 'vandox-agent-install-*' -type d | grep -q .; then
-    fail "bundle verification, $what: a vandox-agent-install-* directory was extracted"
+  if ! grep -Fq "No such file or directory" <<<"$ERR"; then
+    show
+    fail "bundle verification, $what: the install line did not fail with 'No such file or directory'"
+  fi
+
+  if [[ -n "$DIR" ]] && find "$DIR" -maxdepth 1 -name 'vandox-agent-install-*' | grep -q .; then
+    fail "bundle verification, $what: a vandox-agent-install-* entry is in d ($DIR)"
+  fi
+
+  if [[ "$in_cwd" == no ]] && find "$cwd" -maxdepth 1 -name 'vandox-agent-install-*' | grep -q .; then
+    fail "bundle verification, $what: a vandox-agent-install-* entry is in the working directory"
   fi
 
   nothing_left "bundle verification, $what"
 }
 
-mkdir "$work/changed" "$work/nobundleline"
-cp -- "$dist/SHA256SUMS" "$work/changed/"
-cp -- "$dist/SHA256SUMS" "$work/nobundleline/"
-
-# One changed byte of the bundle (the byte is replaced by a different one).
-cp -- "$dist/$bundle_file" "$work/changed/$bundle_file"
+# One changed byte of the bundle (replaced by a different one).
+mkdir "$work/changed" "$work/nobundleline" "$work/nobundle"
+cp -- "$dist"/* "$work/changed/"
 orig="$(dd if="$work/changed/$bundle_file" bs=1 skip=100 count=1 2>/dev/null | od -An -tx1 | tr -d ' ')"
 [[ "$orig" == "00" ]] && replacement='\001' || replacement='\000'
 printf '%b' "$replacement" | dd of="$work/changed/$bundle_file" bs=1 seek=100 conv=notrunc 2>/dev/null
 cmp -s "$dist/$bundle_file" "$work/changed/$bundle_file" && fail "the changed bundle equals the original"
-chain_failure "one changed byte" "$work/changed"
+stage_files "$work/changed"
+documented_failure "one changed byte" "$work/documented-good.sh" "$work/tmp-changed" no
 
 # A SHA256SUMS without the bundle line: awk prints nothing and sha256sum fails on empty input (F2).
-cp -- "$dist/$bundle_file" "$work/nobundleline/$bundle_file"
+cp -- "$dist"/* "$work/nobundleline/"
 grep -vF "$bundle_file" "$dist/SHA256SUMS" >"$work/nobundleline/SHA256SUMS" || true
-chain_failure "SHA256SUMS without the bundle line" "$work/nobundleline"
+stage_files "$work/nobundleline"
+documented_failure "SHA256SUMS without the bundle line" "$work/documented-good.sh" "$work/tmp-nobundleline" no
+
+# The bundle is missing.
+cp -- "$dist"/* "$work/nobundle/"
+rm -- "$work/nobundle/$bundle_file"
+stage_files "$work/nobundle"
+documented_failure "bundle missing" "$work/documented-good.sh" "$work/tmp-nobundle" no
+
+# mktemp fails (TMPDIR is a missing directory): the lines run in the working directory, where the files pass
+# the check and are unpacked, but the install line names the directory d, which is empty, and does not exist.
+stage_files "$dist"
+documented_failure "mktemp fails" "$work/documented-good.sh" "$work/does-not-exist" yes
+[[ -z "$DIR" ]] || fail "bundle verification, mktemp fails: d is '$DIR', want it empty"
+expect_absent "/$BUNDLE_NAME"
+
+# Variables lost (lines 5 to 8 only): f is empty, nothing matches, sha256sum fails on empty input.
+stage_files "$dist"
+documented_failure "variables lost" "$work/documented-lost.sh" "$work/tmp-lost" no
+rm -rf -- "$FILES_DIR"
+
+# Interrupted extraction: only the members before the scripts, or all but common.sh, are there.
+interrupted="$(mktemp -d "$work/interrupted.XXXXXX")"
+tar -xzf "$dist/$bundle_file" -C "$interrupted" --exclude="$BUNDLE_NAME/install.sh"
+run "" "$interrupted/$BUNDLE_NAME/install.sh" --agent-id "$AGENT_ID" --backend-url "$BACKEND_URL" --from "$dist"
+[[ "$RC" == 127 ]] || fail "interrupted extraction without install.sh: exit status $RC, want 127"
+grep -Fq "No such file or directory" <<<"$ERR" || fail "interrupted extraction without install.sh: no 'No such file or directory'"
+nothing_left "interrupted extraction without install.sh"
+
+interrupted="$(mktemp -d "$work/interrupted.XXXXXX")"
+tar -xzf "$dist/$bundle_file" -C "$interrupted" --exclude="$BUNDLE_NAME/common.sh"
+run "$CI_TOKEN"$'\n' "$interrupted/$BUNDLE_NAME/install.sh" --agent-id "$AGENT_ID" --backend-url "$BACKEND_URL" --from "$dist"
+expect_rc 1 "interrupted extraction without common.sh"
+
+if [[ "$ERR" != "install.sh: the bundle is incomplete or changed; extract it again in a new directory" &&
+  "$ERR" != "install.sh: $(cd -P "$interrupted/$BUNDLE_NAME" && pwd -P)/common.sh is not owned by root or is writable by others; extract the bundle as root in a private directory" ]]; then
+  show
+  fail "interrupted extraction without common.sh: unexpected standard error"
+fi
+
+nothing_left "interrupted extraction without common.sh"
 
 # --- case: uninstall before install ----------------------------------------------------------------------
 note "case: uninstall before install"
@@ -482,6 +613,36 @@ run "$CI_TOKEN"$'\n' "$copy/install.sh" "${install_agent_args[@]}"
 expect_rc 1 "install.sh with another VERSION"
 expect_err "install.sh: binary is not v0.0.0-rc.1" "another VERSION"
 nothing_left "another VERSION"
+
+# A common.sh cut after its first complete function (a part-way extraction): the manifest refuses it before
+# anything is sourced, for the install script and for the uninstall script.
+manifest_line_re="the bundle is incomplete or changed; extract it again in a new directory"
+copy="$(bundle_copy)"
+cut_line="$(grep -n '^}$' "$copy/common.sh" | head -n 1 | cut -d: -f1)"
+head -n "$cut_line" "$copy/common.sh" >"$copy/common.sh.cut"
+mv -- "$copy/common.sh.cut" "$copy/common.sh"
+chmod 0644 "$copy/common.sh"
+run "$CI_TOKEN"$'\n' "$copy/install.sh" "${install_agent_args[@]}"
+expect_rc 1 "install.sh with a truncated common.sh"
+expect_err "install.sh: $manifest_line_re" "truncated common.sh"
+nothing_left "truncated common.sh"
+run "" "$copy/uninstall.sh" --purge
+expect_rc 1 "uninstall.sh with a truncated common.sh"
+expect_err "uninstall.sh: $manifest_line_re" "truncated common.sh, uninstall.sh"
+
+if [[ -n "$OUT" ]]; then
+  show
+  fail "uninstall.sh with a truncated common.sh printed on standard output, so it ran"
+fi
+
+# A unit file cut in half.
+copy="$(bundle_copy)"
+unit_size="$(stat -c %s "$copy/vandox-agent.service")"
+truncate -s "$((unit_size / 2))" "$copy/vandox-agent.service"
+run "$CI_TOKEN"$'\n' "$copy/install.sh" "${install_agent_args[@]}"
+expect_rc 1 "install.sh with a truncated unit"
+expect_err "install.sh: $manifest_line_re" "truncated unit"
+nothing_left "truncated unit"
 
 # A missing VERSION.
 copy="$(bundle_copy)"
