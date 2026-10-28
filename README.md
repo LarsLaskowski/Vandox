@@ -177,9 +177,7 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 "$d/vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.64.0.1:8081
 ```
 
-The variables live only in this shell; in a new shell, start again at step 1. The script first checks every file of the bundle against
-`MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is missing or different, for example after
-an interrupted unpacking.
+The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
 
 To remove the agent, run the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade, offline install, the options and the checks are in [`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of
 [`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names a tailnet address or MagicDNS name.
@@ -448,7 +446,7 @@ The traditional format also has no time zone. Set `import.time_zone` in `vandoxd
 server the logs come from (for example `Europe/Berlin`); there is no default, because a wrong zone would shift every
 time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
 "import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
-Set the option and run the import again: the file is completed. files in RFC 3339 form and journal exports carry their
+Set the option and run the import again: the file is completed. Files in RFC 3339 form and journal exports carry their
 offset and need no option. MariaDB error logs, Dovecot's log file, the Plesk panel, nginx and Apache error logs and the legacy monitoring log also write local time without a zone and are read in the same zone;
 without the option such a file fails at its first entry with the same reason.
 

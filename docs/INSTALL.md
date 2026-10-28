@@ -274,7 +274,7 @@ User-defined script*, user `root`, event *Boot-up*, script
 `/var/packages/Tailscale/target/bin/tailscale configure-host; synosystemctl restart pkgctl-Tailscale.service`.
 
 **The bind address and the agent ID.** Set `INGEST_BIND_ADDRESS` in `.env` to the address `tailscale ip -4` prints (for example
-`INGEST_BIND_ADDRESS=100.101.102.103`, beside a `WEB_BIND_ADDRESS` line if you have one), and the agent's `agent_id` in
+`INGEST_BIND_ADDRESS=100.64.0.1`, beside a `WEB_BIND_ADDRESS` line if you have one), and the agent's `agent_id` in
 `vandoxd.yaml` (uncomment `agent_id: web-1` in the existing `ingest:` section and change the name; a second `ingest:` block stops the
 start). Then recreate the container:
 
@@ -334,9 +334,7 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 "$d/vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.64.0.1:8081
 ```
 
-The variables live only in this shell; in a new shell, start again at step 1. The script first checks every file of the bundle against
-`MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is missing or different, for example after
-an interrupted unpacking.
+The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
 
 The `--agent-id` must be the `agent_id` of step 10, and the backend URL a tailnet address or MagicDNS name: the unit lets the agent reach only localhost and
 the tailnet. The script reads the version from the bundle's `VERSION` file, asks for the agent token of step 3 (typed without echo, or one line of standard input;

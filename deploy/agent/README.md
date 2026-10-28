@@ -98,9 +98,7 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 "$d/vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.64.0.1:8081
 ```
 
-The variables live only in this shell; in a new shell, start again at step 1. The script first checks every file of the bundle against
-`MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is missing or different, for example after
-an interrupted unpacking.
+The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
 
 Without internet access on the server, download the release files on a machine that has it:
 
@@ -157,7 +155,7 @@ The release publishes the install bundle `vandox-agent-install-vX.Y.Z.tar.gz` an
 bundle has one directory and ten files (eleven archive entries): `install.sh`, `uninstall.sh`, `common.sh`, `vandox-agent.service`, `mariadb-user.sql`,
 `mariadb-user-remove.sql`, `agent.yaml`, `VERSION` (the tag and one line feed), `vandox-agent-linux-amd64.sha256` (the binary's checksum line) and
 `MANIFEST.sha256` (the checksums of the seven files the scripts read before they run anything).
-It is byte-reproducible from the tagged source. The commands are in *Install the agent*; the whole install is one `&&` chain, so nothing after a failed step runs.
+It is byte-reproducible from the tagged source. The commands are in *Install the agent*: single lines, of which only the check line unpacks, and only after a passed check, so after a failed step the script's full path does not exist and nothing runs.
 
 - **The check.** `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field, and `sha256sum --check --strict -` checks that
   file against it; with no such line it fails on empty input and `tar` never runs. The check proves the bundle is the file the release published; for the
@@ -182,7 +180,7 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
   `nobody` with `-version` and requires it to equal `VERSION`, and only then changes the server: user and groups, `/etc/vandox`, `agent.yaml`, the token (root:root 0600), the
   spool directory, the binary (written beside the old one and renamed over it), the unit, the MariaDB account, enable and restart.
 - **Upgrade.** Run the command again with the new version. Only the binary and the unit are replaced; configuration, token, spool and state stay.
-- **Offline.** The variant of *Install the agent* with `--from "$d"`.
+- **Offline.** The variant of *Install the agent* with `--from .` (the new directory the lines changed into).
 - **Uninstall.** The commands are in *Install the agent*, step 5.
   The plain run stops and disables the agent (it saves its state), removes the unit and the binary, and keeps the user, `agent.yaml`, the token, the spool and the
   MariaDB account so a later install continues. `--purge` also removes them (it says that unsent records are lost before it deletes `/var/lib/vandox`) and drops

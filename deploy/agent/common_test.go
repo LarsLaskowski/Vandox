@@ -652,7 +652,7 @@ func TestMariadbAccount_SkippedWithNoMariadb(t *testing.T) {
 	}
 }
 
-// statTable installs a stat stand-in that answers `stat -c '%u %a' -- PATH` (and `stat -c %s`, from the real file) from a table of path|"uid mode"
+// statTable installs a stat stand-in that answers `stat -c '%u %a' -- PATH` from a table of path|"uid mode"
 // rows and answers "0 755" for every path not in the table, so a test controls the owner and the mode of
 // each entry without root. Links are not faked: the scripts test them with [[ -L ]].
 func (h *harness) statTable(rows ...string) {
@@ -665,14 +665,7 @@ func (h *harness) statTable(rows ...string) {
 
 	h.writeFile("logs/stat.table", text)
 
-	realStat, err := exec.LookPath("stat")
-	if err != nil {
-		h.t.Fatalf("stat not found: %v", err)
-	}
-
-	// A size request (stat -c %s) is answered by the real tool: the entry check bounds the manifest by its size.
-	h.stub("stat", `if [[ ${2:-} == %s ]]; then exec `+shellQuote(realStat)+` "$@"; fi
-path=${*: -1}
+	h.stub("stat", `path=${*: -1}
 answer="0 755"
 while IFS='|' read -r p v; do
     if [[ $p == "$path" ]]; then answer=$v; fi

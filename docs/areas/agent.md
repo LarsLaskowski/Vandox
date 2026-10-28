@@ -2024,18 +2024,17 @@ with exactly one line that ends in a line feed and is `vX.Y.Z` or `vX.Y.Z-rc.N`;
 an ancestor must not be group- or other-writable unless its sticky bit is set (`/tmp`; set-user-ID and set-group-ID bits of ancestors are ignored); the
 bundle directory, the script and `common.sh` must have no group- or other-write bit and no set-user-ID, set-group-ID or sticky bit (the mode is compared
 as an octal number, `mode & 07022 == 0`). A failure prints `<script>: <path> is not owned by root or is writable by others; extract the bundle as root in
-a private directory`, exit 1, with nothing sourced or changed. `main` then checks, with the same per-entry rule (`check_bundle_dir`), the other files it
-reads: `VERSION`, `vandox-agent.service`, `mariadb-user.sql`, `agent.yaml` and the pin file (`uninstall.sh`: `mariadb-user-remove.sql`); a missing file is left
+a private directory`, exit 1, with nothing sourced or changed; a bundle member that does not exist at all (the script, `common.sh` or the manifest) gets the message of E16 below instead. `main` then checks, with the same per-entry rule (`check_bundle_dir`), the other files it
+reads: `VERSION`, `vandox-agent.service`, `mariadb-user.sql`, `agent.yaml` and the pin file (`uninstall.sh`: `mariadb-user-remove.sql`); a missing file is left to the later checks. Everything after the check, `common.sh` and the bundle files included, is read through the physical directory the check looked at, never through the path as typed (which may run through a link). What remains is the time between a check and the read.
+
 **The manifest (E16).** Still before `common.sh` is sourced, the entry check reads `MANIFEST.sha256` with a bounded reader: not a link, a regular file of at most
-4096 bytes (checked by size before any read), exactly seven lines that each end in a line feed, a further read finding nothing (not even a partial line), line *i* matching
+4096 bytes (its size taken with `wc -c`, which for a regular file reads nothing, before any read), exactly seven lines that each end in a line feed, a further read finding nothing (not even a partial line), line *i* matching
 `<64 lower-case hex digits>  <name i>` with the names compared as fixed strings in the order `VERSION`, `agent.yaml`, `common.sh`, `mariadb-user-remove.sql`,
 `mariadb-user.sql`, `vandox-agent-linux-amd64.sha256`, `vandox-agent.service` (no other name, no path, none twice). Then
 `sha256sum --check --strict --quiet MANIFEST.sha256` must pass in the physical bundle directory. The manifest is also covered by the owner and mode rule. Any failure prints
 `<script>: the bundle is incomplete or changed; extract it again in a new directory`, exit 1, with nothing sourced or changed. The scripts are not listed (a script cannot hash itself);
 a truncated script never runs, because bash parses its closing `if` whole. The manifest proves the unpacking is complete and unchanged, not authenticity, which stays with the
-operator's check of the bundle. `stat` and `sha256sum` come from the caller's `PATH`.
-
-to the later checks. Everything after the check, `common.sh` and the bundle files included, is read through the physical directory the check looked at, never through the path as typed (which may run through a link). What remains is the time between a check and the read.
+operator's check of the bundle. `stat`, `wc` and `sha256sum` come from the caller's `PATH`, because `main` has not set its own yet.
 
 **Order, and what stops it.** Nothing changes before the files are verified.
 1. The entry check (E15, exit 1, before the arguments are read); arguments (exit 2); the other bundle files (E15, exit 1); `VERSION` (exit 2); then root, systemd as PID 1 and `x86_64`, else

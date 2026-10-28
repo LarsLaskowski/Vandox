@@ -957,7 +957,7 @@ func checkInstallDocument(t *testing.T, name string) string {
 	}
 
 	for _, stale := range staleCounts {
-		if strings.Contains(text, stale) {
+		if regexp.MustCompile(`\b` + regexp.QuoteMeta(stale) + `\b`).MatchString(text) {
 			t.Errorf("%s contains the stale count %q, want 10 files in 11 entries", name, stale)
 		}
 	}
