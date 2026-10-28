@@ -110,7 +110,7 @@ where Tailscale's pages differ from this summary, follow Tailscale.
        `docker port vandoxd 8081`. The ingest port is container port 8081 and the web port 8080 (step 10 of
        [`docs/INSTALL.md`](../../docs/INSTALL.md)).
    - The fourth must print `401`: the ingest endpoint refuses a batch without a token, so the backend has the ingest API and ingest
-     is enabled. The backend logs one `ingest token refused` warning for it.
+     is enabled. The backend logs an `ingest token refused` warning for it (at most one a minute).
      - `503` means ingest is disabled: set `ingest.agent_id` and the token on the backend.
      - `404` means the backend has no ingest API (v0.1.0 or older), a proxy is in front of the port, or the port is the wrong one.
    - The last two try another port of the backend host, SSH (22), and mean something only after the third line printed `404` and the fourth `401`.
@@ -519,7 +519,7 @@ a `ProtectProc=` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `D
 | Where | systemd | Overall exposure level |
 | ----- | ------- | ---------------------- |
 | CI job `agent-install`, Ubuntu 22.04 runner (PR #324, head `a0d92a6`, run 40480331990) | 249 (`249.11-0ubuntu3.22`) | `Overall exposure level for vandox-agent.service: 2.2 OK` |
-| the monitored server (the Product Manager's server run, the artifact `agent-install-files` of the `agent-install` run of PR #324, bundled files identical from commit 7105e8c on) | not recorded | `Overall exposure level for vandox-agent.service: 2.2 OK` |
+| the monitored server (the Product Manager's server run, the artifact `agent-install-files` of the `agent-install` run of PR #324) | not recorded | `Overall exposure level for vandox-agent.service: 2.2 OK` |
 
 Items the CI run and the server run both still flag (the same 15 items; the exposure each adds), with the reason the unit keeps them open:
 
@@ -550,10 +550,9 @@ repeat install, restart after a removed spool directory, uninstall, reinstall an
 
 The install script prints these four checks (a warning never fails the installation); the rest are run by hand. The Product Manager
 ran them on a monitored server (the systemd version of the server was not recorded) with the artifact `agent-install-files` of the
-`agent-install` run of PR #324 (version `v0.0.0-rc.0`, bundled files identical from commit 7105e8c on), installed with the offline
-lines and `--from .`. The results are in the last column. The user `vandox-agent` already existed from an earlier attempt: the script
-set its primary group and its groups to `adm,systemd-journal`, kept its home directory in place, and ended with
-`vandox-agent v0.0.0-rc.0 installed and running`.
+`agent-install` run of PR #324 (version `v0.0.0-rc.0`), installed from that artifact. The results are in the last column. The user
+`vandox-agent` already existed: the script kept its primary group `vandox-agent`, set its supplementary groups to `adm` and
+`systemd-journal`, kept its home directory in place, and ended with `vandox-agent v0.0.0-rc.0 installed and running`.
 
 | Check | Command or line | Result to expect | Result of the server run |
 | ----- | --------------- | ---------------- | ------------------------ |
@@ -565,7 +564,7 @@ set its primary group and its groups to `adm,systemd-journal`, kept its home dir
 | `ptrace` attach is refused | run `sleep 300 &` as root, then `sudo systemd-run --wait --pipe -p User=vandox-agent -p AmbientCapabilities=CAP_SYS_PTRACE -p CapabilityBoundingSet=CAP_SYS_PTRACE -p NoNewPrivileges=yes -p 'SystemCallFilter=@system-service adjtimex' -p 'SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise' -p SystemCallErrorNumber=EPERM -p SystemCallArchitectures=native python3 -c 'import ctypes,sys; l=ctypes.CDLL(None,use_errno=True); r=l.ptrace(16,int(sys.argv[1]),0,0); print("EPERM" if r==-1 and ctypes.get_errno()==1 else "NOT REFUSED")' <PID of the sleep>` | prints `EPERM` | `EPERM` |
 | Reboot | `sudo reboot`, then `systemctl is-active vandox-agent` | `active`, started by itself after the journal flush | `active` and enabled, started by itself after the reboot; memory 25.8M of `MemoryMax=256M` |
 | Files and modes | `stat -c '%U:%G %a %n' /etc/vandox/agent-token /etc/vandox/agent.yaml /var/lib/vandox/spool` | `root:root 600`, `root:vandox-agent 640`, `vandox-agent:vandox-agent 700` | as expected |
-| Transmission to the backend | the agent's log (`journalctl -u vandox-agent`) after the start; the fourth line of *Tailscale on the monitored server*, step 4 | the line prints `401`; the agent logs no `backend not accepting batches`, and the backend stores its batches | not part of this run: the backend was `vandoxd` v0.1.0, which has no ingest API (it came with PR #316 and is first released in v0.2.0), so the agent logged `backend not accepting batches reason=status status=404` and kept its records in the spool. The other log lines of the run (`mariadb down`, then `mariadb answering again`; `socket owners partly unknown`) are the collectors' normal reports. |
+| Transmission to the backend | the agent's log (`journalctl -u vandox-agent`) after the start; the fourth line of *Tailscale on the monitored server*, step 4 | the line prints `401`; the agent logs no `backend not accepting batches`, and the backend stores its batches | not part of this run: the backend was `vandoxd` v0.1.0, which has no ingest API (it came with PR #316 and will first be released in v0.2.0), so the agent logged `backend not accepting batches reason=status status=404` and kept its records in the spool. The other log lines seen in the run were `mariadb down`, then `mariadb answering again`, and `socket owners partly unknown`. |
 | rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
 | Peak memory | the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | to be measured |
 
