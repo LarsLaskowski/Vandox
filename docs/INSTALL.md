@@ -304,47 +304,38 @@ Tailscale ACL strict, so the monitored server reaches only this port ([SECURITY.
 ## 11. Install the agent on the monitored server
 
 From v0.2.0 on, the agent collects on the monitored server and sends to the backend of step 10. The release publishes an install bundle,
-`vandox-agent-install-vX.Y.Z.tar.gz`, with the scripts, the unit and the example configuration, and a `SHA256SUMS` that lists the bundle and the binary.
-The server needs `bash`, `curl`, `sha256sum`, `tar` and `gzip`, not `git`. Run this **as root on the monitored server**, with `vX.Y.Z` the release
-you install, in a new private directory (every step is chained with `&&`, so nothing runs after a failed check):
+`vandox-agent-install-vX.Y.Z.tar.gz`, with the scripts, the unit, the example configuration and a manifest, and a `SHA256SUMS` that lists the bundle and the binary.
+The server needs `bash`, `curl`, `sha256sum`, `tar` and `gzip`, not `git`. Run these lines **as root on the monitored server**, one at a time, with `vX.Y.Z`
+the release you install:
+
+1. Become root (run this line on its own: it may ask for your password).
+2. Set the version to install (replace `vX.Y.Z` by the release, for example `v0.2.0`).
+3. Set the bundle's file name.
+4. Set the release's download address.
+5. Create a new private directory and change into it (start every attempt here, with a new directory).
+6. Download the bundle and the checksum file of the release.
+7. Check the bundle against its line in `SHA256SUMS`, and only if it matches, unpack it; if this prints anything but `...: OK`, stop and start again at step 5.
+8. Run the install script from the unpacked bundle; it asks for the agent token. Replace `web-1` by the name of this server (its `agent_id`) and the address by the backend's tailnet address and ingest port.
 
 ```
 sudo -i
-v=vX.Y.Z; base=https://github.com/LarsLaskowski/Vandox/releases/download/$v
-d=$(mktemp -d) && cd "$d" &&
-  curl --proto '=https' --proto-redir '=https' -fsSLO "$base/vandox-agent-install-$v.tar.gz" &&
-  curl --proto '=https' --proto-redir '=https' -fsSLO "$base/SHA256SUMS" &&
-  awk -v f="vandox-agent-install-$v.tar.gz" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&
-  tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
-  "./vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.101.102.103:8081
-```
-
-`awk` picks the bundle's line from `SHA256SUMS` by its exact file name and `sha256sum` checks that file; if the line is missing it fails and the
-bundle is not extracted. The `--agent-id` must be the `agent_id` of step 10, and the `--backend-url` a tailnet address or MagicDNS name: the
-unit lets the agent reach only localhost and the tailnet. The script reads the version from the bundle's `VERSION` file, asks for the agent
-token of step 3 (typed without echo, or one line of standard input; never an option), downloads the binary and checks it against the checksum
-in the bundle before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the spool directory, the unit and the MariaDB account (`plesk db` on
-Plesk, else `mariadb`), starts the agent and prints a line per server check.
-
-**Upgrade:** run the same commands with the new `vX.Y.Z`; only the binary and the unit are replaced and the token is not asked for again.
-**Offline:** copy the bundle, `SHA256SUMS` and `vandox-agent-linux-amd64` of the release to the server and run:
-
-```
 v=vX.Y.Z
-d=$(mktemp -d) && cd "$d" &&
-  cp /path/to/vandox-agent-install-$v.tar.gz /path/to/SHA256SUMS /path/to/vandox-agent-linux-amd64 . &&
-  awk -v f="vandox-agent-install-$v.tar.gz" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&
-  tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
-  "./vandox-agent-install-$v/install.sh" --from "$d" --agent-id web-1 --backend-url http://100.101.102.103:8081
+f=vandox-agent-install-$v.tar.gz
+u=https://github.com/LarsLaskowski/Vandox/releases/download/$v
+d=$(mktemp -d) && cd "$d"
+curl --proto '=https' --proto-redir '=https' -fsSL -O "$u/$f" -O "$u/SHA256SUMS"
+awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
+"$d/vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.64.0.1:8081
 ```
 
-**Remove** the agent from the extracted bundle of the installed version, in the directory of the chain above with `v` set to that version
-(extract it again with the chain up to `tar` when it is gone; plain: keeps the configuration, token, spool and user; `--purge` deletes them,
-unsent records included):
+The variables live only in this shell; in a new shell, start again at step 1. The script first checks every file of the bundle against
+`MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is missing or different, for example after
+an interrupted unpacking.
 
-```
-sudo "./vandox-agent-install-$v/uninstall.sh"            # keeps the user, configuration, token, spool and MariaDB account
-sudo "./vandox-agent-install-$v/uninstall.sh" --purge    # deletes them too, unsent records included
-```
+The `--agent-id` must be the `agent_id` of step 10, and the backend URL a tailnet address or MagicDNS name: the unit lets the agent reach only localhost and
+the tailnet. The script reads the version from the bundle's `VERSION` file, asks for the agent token of step 3 (typed without echo, or one line of standard input;
+never an option), downloads the binary and checks it against the checksum in the bundle before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the
+spool directory, the unit and the MariaDB account (`plesk db` on Plesk, else `mariadb`), starts the agent and prints a line per server check.
 
-Every option, message, check and unit setting is in [`deploy/agent/README.md`](../deploy/agent/README.md); the unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).
+Upgrade, uninstall and an install without internet access on the server are in [`deploy/agent/README.md`](../deploy/agent/README.md), which also lists every option,
+message, check and unit setting. The unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).
