@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Checks the install bundle that package-agent.sh wrote (record 0131): the two-line SHA256SUMS, the nine files
-# of the archive with their owner and modes, VERSION, the files against the tree, the binary's pin, and that
+# Checks the install bundle that package-agent.sh wrote (record 0131): the two-line SHA256SUMS, the ten files
+# of the archive in their fixed order with their owner and modes, VERSION, the manifest, the files against the tree, the binary's pin, and that
 # packaging again gives the same bytes.
 # Usage: check-agent-bundle.sh <dist> <tag>
 set -euo pipefail
@@ -10,6 +10,8 @@ readonly BINARY="vandox-agent-linux-amd64"
 readonly PIN="vandox-agent-linux-amd64.sha256"
 readonly EXECUTABLES=(install.sh uninstall.sh)
 readonly PLAIN_FILES=(common.sh vandox-agent.service mariadb-user.sql mariadb-user-remove.sql agent.yaml)
+readonly MANIFEST="MANIFEST.sha256"
+readonly MANIFEST_NAMES=(VERSION agent.yaml common.sh mariadb-user-remove.sql mariadb-user.sql "$PIN" vandox-agent.service)
 
 fail() {
   echo "::error::$*" >&2
@@ -46,18 +48,20 @@ sums_lines="$(wc -l <"$dist/SHA256SUMS")"
 [[ "$(sed -n 2p "$dist/SHA256SUMS")" =~ ^[0-9a-f]{64}\ \ vandox-agent-linux-amd64$ ]] || fail "the second line of SHA256SUMS is not well formed"
 (cd "$dist" && sha256sum --check --strict SHA256SUMS)
 
-# The archive: exactly the directory and nine files, owner 0/0, fixed modes, no other entry type.
+# The archive: exactly the directory and ten files in this order, owner 0/0, fixed modes, no other entry type.
 expected="$work/expected"
 {
   printf 'drwxr-xr-x 0/0 %s/\n' "$top"
-  for name in "${EXECUTABLES[@]}"; do printf -- '-rwxr-xr-x 0/0 %s/%s\n' "$top" "$name"; done
-  for name in "${PLAIN_FILES[@]}" VERSION "$PIN"; do printf -- '-rw-r--r-- 0/0 %s/%s\n' "$top" "$name"; done
-} | sort >"$expected"
+  for name in "${MANIFEST_NAMES[@]}"; do printf -- '-rw-r--r-- 0/0 %s/%s\n' "$top" "$name"; done
+  printf -- '-rw-r--r-- 0/0 %s/%s\n' "$top" "$MANIFEST"
+  printf -- '-rwxr-xr-x 0/0 %s/uninstall.sh\n' "$top"
+  printf -- '-rwxr-xr-x 0/0 %s/install.sh\n' "$top"
+} >"$expected"
 
-tar -tvzf "$dist/$bundle" --numeric-owner | awk '{ print $1, $2, $NF }' | sort >"$work/actual"
+tar -tvzf "$dist/$bundle" --numeric-owner | awk '{ print $1, $2, $NF }' >"$work/actual"
 
 if ! diff -u "$expected" "$work/actual"; then
-  fail "the archive does not hold exactly the ten entries (directory and nine files) with the modes above"
+  fail "the archive does not hold exactly the eleven entries (directory and ten files) in the order and with the modes above"
 fi
 
 # Extract unprivileged into a scratch directory, then compare with the tree.
@@ -71,6 +75,20 @@ readonly root="$work/extract/$top"
 for name in "${EXECUTABLES[@]}" "${PLAIN_FILES[@]}"; do
   cmp -s -- "$source_dir/$name" "$root/$name" || fail "$name of the bundle differs from deploy/agent/$name"
 done
+
+# The manifest: seven lines in order, each the sha256sum of the source file, and the check passes in the extracted directory.
+manifest_expected="$work/manifest.expected"
+for name in "${MANIFEST_NAMES[@]}"; do
+  if [[ $name == "$PIN" ]]; then
+    printf '%s  %s\n' "$(sha256sum <"$root/$PIN" | cut -d' ' -f1)" "$name"
+  elif [[ $name == VERSION ]]; then
+    printf '%s  %s\n' "$(printf '%s\n' "$tag" | sha256sum | cut -d' ' -f1)" "$name"
+  else
+    printf '%s  %s\n' "$(sha256sum <"$source_dir/$name" | cut -d' ' -f1)" "$name"
+  fi
+done >"$manifest_expected"
+cmp -s -- "$root/$MANIFEST" "$manifest_expected" || fail "$MANIFEST does not hold the seven expected lines in order"
+(cd "$root" && sha256sum --check --strict --quiet "$MANIFEST") || fail "$MANIFEST does not match the extracted files"
 
 # The pin equals the binary's line of SHA256SUMS and the binary's real hash.
 cmp -s -- "$root/$PIN" <(sed -n 2p "$dist/SHA256SUMS") || fail "the pin differs from the binary line of SHA256SUMS"

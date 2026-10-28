@@ -41,7 +41,7 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
         fi
         _entry_walk=${_entry_walk%/*}
     done
-    for _entry_path in "$_entry_dir" "$_entry_dir/${BASH_SOURCE[0]##*/}" "$_entry_dir/common.sh"; do
+    for _entry_path in "$_entry_dir" "$_entry_dir/${BASH_SOURCE[0]##*/}" "$_entry_dir/common.sh" "$_entry_dir/MANIFEST.sha256"; do
         if [[ -L $_entry_path ]]; then
             _entry_refuse "$_entry_path"
         fi
@@ -50,10 +50,36 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
             _entry_refuse "$_entry_path"
         fi
     done
-    # --- manifest step (STUB, record 0131 option 34): not implemented; the bounded reader of MANIFEST.sha256 and
-    # the sha256sum --check belong here, before the unset below ---
-    unset -f _entry_refuse _entry_stat
-    unset _entry_walk _entry_path _entry_uid _entry_mode
+    # The manifest lists the seven members the scripts read; it proves the extraction is complete and unchanged.
+    # Its reader is bounded: a regular file of at most 4096 bytes, exactly seven lines in a fixed order.
+    _entry_fail() {
+        echo "${BASH_SOURCE[0]##*/}: the bundle is incomplete or changed; extract it again in a new directory" >&2
+        exit 1
+    }
+    _entry_manifest=$_entry_dir/MANIFEST.sha256
+    if [[ -L $_entry_manifest || ! -f $_entry_manifest ]]; then
+        _entry_fail
+    fi
+    _entry_size=$(wc -c <"$_entry_manifest") || _entry_fail
+    if ((${_entry_size// /} > 4096)); then
+        _entry_fail
+    fi
+    _entry_names=(VERSION agent.yaml common.sh mariadb-user-remove.sql mariadb-user.sql vandox-agent-linux-amd64.sha256 vandox-agent.service)
+    _entry_re='^[0-9a-f]{64}  (.*)$'
+    {
+        for _entry_name in "${_entry_names[@]}"; do
+            IFS= read -r _entry_line || _entry_fail
+            if [[ ! $_entry_line =~ $_entry_re || ${BASH_REMATCH[1]} != "$_entry_name" ]]; then
+                _entry_fail
+            fi
+        done
+        if IFS= read -r _entry_line || [[ -n $_entry_line ]]; then
+            _entry_fail
+        fi
+    } <"$_entry_manifest"
+    (cd -- "$_entry_dir" && sha256sum --check --strict --quiet MANIFEST.sha256) >/dev/null 2>&1 || _entry_fail
+    unset -f _entry_refuse _entry_stat _entry_fail
+    unset _entry_walk _entry_path _entry_uid _entry_mode _entry_manifest _entry_size _entry_names _entry_name _entry_line _entry_re
     # --- end of entry check ---
     # shellcheck source=common.sh disable=SC1091
     source "$_entry_dir/common.sh"
