@@ -1062,7 +1062,7 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
   gaps while it is refused. The compact layout is read as checked against systemd-journal-remote 255 output; files journald itself
   writes in that layout on the server are not yet checked.
 - Whether a kill is live compares `/proc/uptime`, which counts time in suspend, with the journal's monotonic clock, which does not.
-  They agree on a server that never suspends (to be checked on the server, `check journal-clock` of the install script, *Installation*); after a suspend every kill reads as late and gets no
+  They agree on a server that never suspends (checked by `check journal-clock` of the install script, *Installation*; `ok` in the Product Manager's server run); after a suspend every kill reads as late and gets no
   snapshots, never a snapshot too many.
 - After a restart the files of another ID without a readable header time are read again from their start (their kills return with
   the same identities), and a refused file gives its gap again once per agent start.

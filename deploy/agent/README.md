@@ -94,6 +94,7 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    tailscale ip -4
    tailscale ping 100.64.0.1
    curl -s -o /dev/null -w '%{http_code}\n' http://100.64.0.1:8081/
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST http://100.64.0.1:8081/v1/batches
    timeout 5 bash -c '</dev/tcp/100.64.0.1/22'
    echo $?
    ```
@@ -101,16 +102,20 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    - The first line prints this server's tailnet address (a `100.x.y.z` address).
    - The second must get a pong from the backend host. It checks the tailnet path, not the policy.
    - The third must print `404`. Only the ingest port answers like that: it answers every request except the agent's own batches
-     with `404`, so a `404` shows that the policy lets this server reach the ingest port. The other answers:
+     with `404`, so a `404` shows that the policy lets this server reach the ingest port. This `404` proves only that the ingest port is reachable, not that the backend has the ingest API: that is the fourth line. The other answers:
      - `302` (a redirect to `/login`) means the web listener answered, not the ingest port. The address or port is wrong.
      - `000` means no connection: check the grant of step 2, and that the backend host carries `tag:vandox-backend` (without it
        the grant matches nothing).
      - In both cases, check on the backend host that `.env` sets `INGEST_BIND_ADDRESS` to its tailnet address, and run
        `docker port vandoxd 8081`. The ingest port is container port 8081 and the web port 8080 (step 10 of
        [`docs/INSTALL.md`](../../docs/INSTALL.md)).
-   - The last two try another port of the backend host, SSH (22), and mean something only after the third line printed `404`.
-     - Blocked by the policy, as it should be: `No route to host`, or `124` (a timeout). Both were seen in runs on a real
-       tailnet.
+   - The fourth must print `401`: the ingest endpoint refuses a batch without a token, so the backend has the ingest API and ingest
+     is enabled. The backend logs one `ingest token refused` warning for it.
+     - `503` means ingest is disabled: set `ingest.agent_id` and the token on the backend.
+     - `404` means the backend has no ingest API (v0.1.0 or older), a proxy is in front of the port, or the port is the wrong one.
+   - The last two try another port of the backend host, SSH (22), and mean something only after the third line printed `404` and the fourth `401`.
+     - Blocked by the policy, as it should be: `No route to host`, or `124` (a timeout). In the Product Manager's server run the blocked attempt printed `No route to host` in one policy state and timed out (`124`) in
+       another, and the allowed one, before the default rule was replaced, printed `Connection refused`.
      - The policy lets this server reach port 22: `Connection refused` with `1`, or `0` (connected). The policy is too wide,
        usually because the default rule is still there or the server has no tag; correct step 2 or 3.
 
@@ -126,6 +131,11 @@ where Tailscale's pages differ from this summary, follow Tailscale.
 - The backend, already running with its ingest port on its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)): you
   need that address and port, for example `http://100.64.0.1:8081`. Use the address, not a host name: the agent can reach nothing but localhost and the tailnet, and with Tailscale's DNS turned off on
 this server (*Tailscale on the monitored server*, step 3) MagicDNS names do not resolve.
+- A backend with the ingest API: `vandoxd` v0.2.0 or later. v0.1.0 has no ingest endpoint and answers `404`; until v0.2.0 is
+  released, use an image built from `main` since PR #316. Ingest must also be enabled: `ingest.agent_id` and the agent token set
+  on the backend (`deploy/backend/vandoxd.yaml`, step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)). Until both are set, it
+  answers every batch with `503`. An agent sending to a backend without the ingest API logs
+  `backend not accepting batches reason=status status=404` and keeps its records in the spool.
 - The agent token. You create it on the backend host (step 3 of [`docs/INSTALL.md`](../../docs/INSTALL.md): `openssl rand -hex 32 > secrets/vandox_agent_token`)
   and the backend accepts it only for the `agent_id` set under `ingest` (step 10). Have the same token value ready; the installer asks for it and never takes it as an option.
 - The release version, for example `v0.2.0`: find it on <https://github.com/LarsLaskowski/Vandox/releases> (use the same version as the backend where you can).
@@ -509,9 +519,9 @@ a `ProtectProc=` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `D
 | Where | systemd | Overall exposure level |
 | ----- | ------- | ---------------------- |
 | CI job `agent-install`, Ubuntu 22.04 runner (PR #324, head `a0d92a6`, run 40480331990) | 249 (`249.11-0ubuntu3.22`) | `Overall exposure level for vandox-agent.service: 2.2 OK` |
-| the monitored server | 249 | to be measured (Product Manager's server run) |
+| the monitored server (the Product Manager's server run, the artifact `agent-install-files` of the `agent-install` run of PR #324, bundled files identical from commit 7105e8c on) | not recorded | `Overall exposure level for vandox-agent.service: 2.2 OK` |
 
-Items the CI run still flags (the exposure each adds), with the reason the unit keeps them open:
+Items the CI run and the server run both still flag (the same 15 items; the exposure each adds), with the reason the unit keeps them open:
 
 | Item | Exposure | Reason |
 | ---- | -------- | ------ |
@@ -538,20 +548,26 @@ repeat install, restart after a removed spool directory, uninstall, reinstall an
 
 ## Checks on the server
 
-The install script prints these four checks (a warning never fails the installation); the rest are run by hand. The Product Manager's run on
-the server, with its results, is entered below.
+The install script prints these four checks (a warning never fails the installation); the rest are run by hand. The Product Manager
+ran them on a monitored server (the systemd version of the server was not recorded) with the artifact `agent-install-files` of the
+`agent-install` run of PR #324 (version `v0.0.0-rc.0`, bundled files identical from commit 7105e8c on), installed with the offline
+lines and `--from .`. The results are in the last column. The user `vandox-agent` already existed from an earlier attempt: the script
+set its primary group and its groups to `adm,systemd-journal`, kept its home directory in place, and ended with
+`vandox-agent v0.0.0-rc.0 installed and running`.
 
 | Check | Command or line | Result to expect | Result of the server run |
 | ----- | --------------- | ---------------- | ------------------------ |
-| Journal files readable by the group | `check journal-group: ok` | `ok`; the `WARNING` means a file below `/var/log/journal` is not group-readable by `systemd-journal` (or there is none: a volatile journal only under `/run/log/journal`; then the `kernel` and `logs` collectors read that one, check it by hand with `ls -l /run/log/journal/*/`) | to be measured |
-| Clock of the journal | `check journal-clock: ok` | `/proc/uptime` and the journal's monotonic clock differ by less than 1 s; `WARNING ... differ by <n> ms` means every live kill reads as late and gets no extra snapshots; `WARNING could not read the journal timestamp` means `logger` or `journalctl` failed | to be measured |
-| `process_madvise` in `@ipc` | `check ipc-filter: ok` | systemd lists the name, so the system-call filter entry takes effect | to be measured |
-| Capabilities of the running agent | `check capabilities: ok` | `CapEff` is `0000000000080000` (`CAP_SYS_PTRACE` alone) | to be measured |
-| Security score | `systemd-analyze security vandox-agent` | `OK` or better (see *Unit*) | to be measured |
-| `ptrace` attach is refused | run `sleep 300 &` as root, then `sudo systemd-run --wait --pipe -p User=vandox-agent -p AmbientCapabilities=CAP_SYS_PTRACE -p CapabilityBoundingSet=CAP_SYS_PTRACE -p NoNewPrivileges=yes -p 'SystemCallFilter=@system-service adjtimex' -p 'SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise' -p SystemCallErrorNumber=EPERM -p SystemCallArchitectures=native python3 -c 'import ctypes,sys; l=ctypes.CDLL(None,use_errno=True); r=l.ptrace(16,int(sys.argv[1]),0,0); print("EPERM" if r==-1 and ctypes.get_errno()==1 else "NOT REFUSED")' <PID of the sleep>` | prints `EPERM` | to be measured |
-| Reboot | `sudo reboot`, then `systemctl is-active vandox-agent` | `active`, started by itself after the journal flush | to be measured |
+| Journal files readable by the group | `check journal-group: ok` | `ok`; the `WARNING` means a file below `/var/log/journal` is not group-readable by `systemd-journal` (or there is none: a volatile journal only under `/run/log/journal`; then the `kernel` and `logs` collectors read that one, check it by hand with `ls -l /run/log/journal/*/`) | `check journal-group: ok` |
+| Clock of the journal | `check journal-clock: ok` | `/proc/uptime` and the journal's monotonic clock differ by less than 1 s; `WARNING ... differ by <n> ms` means every live kill reads as late and gets no extra snapshots; `WARNING could not read the journal timestamp` means `logger` or `journalctl` failed | `check journal-clock: ok` |
+| `process_madvise` in `@ipc` | `check ipc-filter: ok` | systemd lists the name, so the system-call filter entry takes effect | `check ipc-filter: ok` |
+| Capabilities of the running agent | `check capabilities: ok` | `CapEff` is `0000000000080000` (`CAP_SYS_PTRACE` alone) | `check capabilities: ok` |
+| Security score | `systemd-analyze security vandox-agent` | `OK` or better (see *Unit*) | `2.2 OK`, the same items flagged as in the CI run (*Unit*) |
+| `ptrace` attach is refused | run `sleep 300 &` as root, then `sudo systemd-run --wait --pipe -p User=vandox-agent -p AmbientCapabilities=CAP_SYS_PTRACE -p CapabilityBoundingSet=CAP_SYS_PTRACE -p NoNewPrivileges=yes -p 'SystemCallFilter=@system-service adjtimex' -p 'SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise' -p SystemCallErrorNumber=EPERM -p SystemCallArchitectures=native python3 -c 'import ctypes,sys; l=ctypes.CDLL(None,use_errno=True); r=l.ptrace(16,int(sys.argv[1]),0,0); print("EPERM" if r==-1 and ctypes.get_errno()==1 else "NOT REFUSED")' <PID of the sleep>` | prints `EPERM` | `EPERM` |
+| Reboot | `sudo reboot`, then `systemctl is-active vandox-agent` | `active`, started by itself after the journal flush | `active` and enabled, started by itself after the reboot; memory 25.8M of `MemoryMax=256M` |
+| Files and modes | `stat -c '%U:%G %a %n' /etc/vandox/agent-token /etc/vandox/agent.yaml /var/lib/vandox/spool` | `root:root 600`, `root:vandox-agent 640`, `vandox-agent:vandox-agent 700` | as expected |
+| Transmission to the backend | the agent's log (`journalctl -u vandox-agent`) after the start; the fourth line of *Tailscale on the monitored server*, step 4 | the line prints `401`; the agent logs no `backend not accepting batches`, and the backend stores its batches | not part of this run: the backend was `vandoxd` v0.1.0, which has no ingest API (it came with PR #316 and is first released in v0.2.0), so the agent logged `backend not accepting batches reason=status status=404` and kept its records in the spool. The other log lines of the run (`mariadb down`, then `mariadb answering again`; `socket owners partly unknown`) are the collectors' normal reports. |
 | rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
 | Peak memory | the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | to be measured |
 
 The same cases, on a throw-away runner with systemd 249, run in the CI job `agent-install` (`.github/scripts/check-agent-install.sh`); its results
-are in *Unit*. They are the runner's, not the server's: the table above stays "to be measured" until the server run.
+are in *Unit*. They are the runner's, not the server's; the server's results are in the table above.

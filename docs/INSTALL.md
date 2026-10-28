@@ -345,4 +345,7 @@ on the server for that (*Tailscale on the monitored server*, step 3). A console 
 token from a file on standard input (*The token prompt* in [`deploy/agent/README.md`](../deploy/agent/README.md)).
 
 Remove the agent with the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade and an install without internet access on the server are in [`deploy/agent/README.md`](../deploy/agent/README.md), which also lists every option,
-message, check and unit setting. The unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).
+message, check and unit setting. The unit and the scripts ran on a monitored server in the Product Manager's server run; the results
+are in *Checks on the server* of [`deploy/agent/README.md`](../deploy/agent/README.md). The transmission to a backend with the
+ingest API was not part of that run, because no release has the ingest API yet (it comes with v0.2.0). Check it on your own setup
+with the `POST` line of *Tailscale on the monitored server*, step 4, which must print `401`.
