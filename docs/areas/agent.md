@@ -1990,12 +1990,12 @@ by the agent logs nothing.
 
 `install.sh` installs or upgrades the agent, `uninstall.sh` removes it. Both come from the **install bundle** of a release,
 `vandox-agent-install-<version>.tar.gz`, run as root from its extracted directory on Ubuntu 22.04 with systemd 249 on `x86_64`
-(`bash`, `curl`, `sha256sum`, `tar`, `gzip` and the shadow utilities; no `git`). The bundle has one directory and nine files: `install.sh`,
+(`bash`, `curl`, `sha256sum`, `tar`, `gzip` and the shadow utilities; no `git`). The bundle has one directory and ten files (eleven archive entries, in a fixed order): `install.sh`,
 `uninstall.sh`, `common.sh`, `vandox-agent.service`, `mariadb-user.sql`, `mariadb-user-remove.sql`, `agent.yaml` (the example), `VERSION` (the tag and one
-line feed) and `vandox-agent-linux-amd64.sha256` (the checksum line of the binary). It is built reproducibly from the tagged source, is listed with the
+line feed), `vandox-agent-linux-amd64.sha256` (the checksum line of the binary) and `MANIFEST.sha256` (seven `sha256sum` lines for the members the scripts read). It is built reproducibly from the tagged source, is listed with the
 binary in the release's two-line `SHA256SUMS` (the bundle first), and carries a build-provenance attestation. Only tags `vX.Y.Z` and `vX.Y.Z-rc.N` are packaged. The operator
-downloads the bundle and `SHA256SUMS` over HTTPS in a new private directory and extracts the bundle only after the check, as one `&&` chain
-(`deploy/agent/README.md`, *Install the agent*): `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field and
+downloads the bundle and `SHA256SUMS` over HTTPS in a new private directory and unpacks the bundle only after the check, with single commands, the check line being
+the only one that joins the check and `tar` with `&&` (`deploy/agent/README.md`, *Install the agent*): `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field and
 `sha256sum --check --strict -` checks that file against it. The unit is `vandox-agent.service`. Every setting of the unit with its reason is in
 `deploy/agent/README.md`; the reasons for the choices are in
 [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md).
@@ -2022,6 +2022,15 @@ bundle directory, the script and `common.sh` must have no group- or other-write 
 as an octal number, `mode & 07022 == 0`). A failure prints `<script>: <path> is not owned by root or is writable by others; extract the bundle as root in
 a private directory`, exit 1, with nothing sourced or changed. `main` then checks, with the same per-entry rule (`check_bundle_dir`), the other files it
 reads: `VERSION`, `vandox-agent.service`, `mariadb-user.sql`, `agent.yaml` and the pin file (`uninstall.sh`: `mariadb-user-remove.sql`); a missing file is left
+**The manifest (E16).** Still before `common.sh` is sourced, the entry check reads `MANIFEST.sha256` with a bounded reader: not a link, a regular file of at most
+4096 bytes (checked by size before any read), exactly seven lines that each end in a line feed, a further read finding nothing (not even a partial line), line *i* matching
+`<64 lower-case hex digits>  <name i>` with the names compared as fixed strings in the order `VERSION`, `agent.yaml`, `common.sh`, `mariadb-user-remove.sql`,
+`mariadb-user.sql`, `vandox-agent-linux-amd64.sha256`, `vandox-agent.service` (no other name, no path, none twice). Then
+`sha256sum --check --strict --quiet MANIFEST.sha256` must pass in the physical bundle directory. The manifest is also covered by the owner and mode rule. Any failure prints
+`<script>: the bundle is incomplete or changed; extract it again in a new directory`, exit 1, with nothing sourced or changed. The scripts are not listed (a script cannot hash itself);
+a truncated script never runs, because bash parses its closing `if` whole. The manifest proves the unpacking is complete and unchanged, not authenticity, which stays with the
+operator's check of the bundle. `stat` and `sha256sum` come from the caller's `PATH`.
+
 to the later checks. Everything after the check, `common.sh` and the bundle files included, is read through the physical directory the check looked at, never through the path as typed (which may run through a link). What remains is the time between a check and the read.
 
 **Order, and what stops it.** Nothing changes before the files are verified.

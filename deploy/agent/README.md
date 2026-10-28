@@ -105,16 +105,15 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
 
 - **The check.** `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field, and `sha256sum --check --strict -` checks that
   file against it; with no such line it fails on empty input and `tar` never runs. The check proves the bundle is the file the release published; for the
-  provenance too, see *Provenance* below. `d=$(mktemp -d) && cd "$d"` (not `cd "$(mktemp -d)"`) stops the chain when `mktemp` fails.
-- **Extraction as root.** `tar --no-same-owner --no-same-permissions` makes root the owner and applies root's umask to the archived modes; under the usual
-  `umask 022` the scripts stay executable and nothing becomes group- or other-writable. A umask that leaves group or other write makes the entry check
-  (below) refuse.
+  provenance too, see *Provenance* below. A new directory per attempt (`d=$(mktemp -d) && cd "$d"`) means a failed check leaves nothing to run: the script's full path does not exist.
+- **Extraction as root.** `tar` run by root restores the owner and modes of the archive, which the release check pins to owner 0/0, 0755 for the scripts and 0644 for the rest,
+  without special bits; the entry check verifies them. A tar made by someone else or a mode changed afterwards makes the entry check refuse.
 - **The entry check.** Before anything is sourced or read, `install.sh` and `uninstall.sh` check the physical directory of the script, each of its
   ancestors, the script and `common.sh`: owned by uid 0, no link, and not writable by group or others (an ancestor with the sticky bit, like `/tmp`, may be;
   the directory, the script and `common.sh` may carry no set-user-ID, set-group-ID or sticky bit). A failure prints
   `<script>: <path> is not owned by root or is writable by others; extract the bundle as root in a private directory`, exit 1, nothing changed. The
-  scripts also check the other bundle files they read the same way before reading them. Running a script from a source checkout, owned by a user,
-  therefore fails; use the bundle. What is left is the time between a check and the read of the file.
+  scripts also check `MANIFEST.sha256` and the other bundle files they read the same way before reading them. Running a script from a source checkout, owned by a user,
+  therefore fails; use the bundle. Then the manifest: a regular file of at most 4096 bytes with exactly seven `sha256sum` lines for `VERSION`, `agent.yaml`, `common.sh`, `mariadb-user-remove.sql`, `mariadb-user.sql`, `vandox-agent-linux-amd64.sha256` and `vandox-agent.service`, in that order, and `sha256sum --check --strict` of them must pass; else `<script>: the bundle is incomplete or changed; extract it again in a new directory`, exit 1, before `common.sh` is sourced. The manifest proves the unpacking is complete and unchanged, not who made the bundle (that is the operator's check line). What is left is the time between a check and the read of the file.
 - **Options.** `--agent-id` and `--backend-url` (required while `/etc/vandox/agent.yaml` does not exist, ignored when it does), `--from DIR` (take
   `vandox-agent-linux-amd64` from a directory instead of downloading it), `--no-mariadb` (skip the MariaDB account without a warning). There is no
   `--version`: the version is the first line of the bundle's `VERSION` (a file that is missing, a link, over 64 bytes or not one `vX.Y.Z` or `vX.Y.Z-rc.N` line
@@ -147,8 +146,8 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
   outside localhost and the tailnet (`install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`). Use the
   tailnet address or the MagicDNS name (whose resolver is the tailnet's `100.100.100.100`).
 - **The server run from the CI artifact.** For the Product Manager's run of a pull request's head: download the artifact `agent-install-files` of the `agent-install` run of
-  the approved head SHA (the run ID and the SHA are given with the request); as root in a new `mktemp -d` unpack it and run `sha256sum --check --strict SHA256SUMS` (it checks both lines);
-  then run the offline command of *Install the agent* with `v=v0.0.0-rc.0`, with the three files already in the directory (without the `cp` step) and `--from "$d"`.
+  the approved head SHA (the run ID and the SHA are given with the request) into `/root/vandox-files` and run `sha256sum --check --strict SHA256SUMS` there (it checks both lines);
+  then follow the offline install of step 2 with `v=v0.0.0-rc.0`.
 
 ## Rights per collector
 
