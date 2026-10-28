@@ -48,6 +48,8 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
             _entry_refuse "$_entry_path"
         fi
     done
+    # --- manifest step (STUB, record 0131 option 34): not implemented; the bounded reader of MANIFEST.sha256 and
+    # the sha256sum --check belong here, before the unset below ---
     unset -f _entry_refuse _entry_stat
     unset _entry_walk _entry_path _entry_uid _entry_mode
     # --- end of entry check ---

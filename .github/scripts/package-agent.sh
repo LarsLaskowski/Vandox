@@ -3,7 +3,7 @@
 # release's SHA256SUMS (record 0131).
 # Usage: package-agent.sh <tag> <dist>
 #   <dist> holds vandox-agent-linux-amd64; it receives vandox-agent-install-<tag>.tar.gz and SHA256SUMS (two
-#   lines: the bundle, then the binary). The bundle has one top directory and nine files; the archive is
+#   lines: the bundle, then the binary). The bundle has one top directory and ten files (eleven archive entries, MANIFEST.sha256 before the scripts); the archive is
 #   byte-reproducible from the tree (fixed order, owner, modes and time).
 set -euo pipefail
 umask 022
@@ -12,6 +12,8 @@ export LC_ALL=C
 readonly BINARY="vandox-agent-linux-amd64"
 readonly PIN="vandox-agent-linux-amd64.sha256"
 readonly EXECUTABLES=(install.sh uninstall.sh)
+readonly MANIFEST="MANIFEST.sha256"
+readonly MANIFEST_NAMES=(VERSION agent.yaml common.sh mariadb-user-remove.sql mariadb-user.sql "$PIN" vandox-agent.service)
 readonly PLAIN_FILES=(common.sh vandox-agent.service mariadb-user.sql mariadb-user-remove.sql agent.yaml)
 
 fail() {
@@ -54,11 +56,18 @@ chmod 0644 -- "$stage/$top/VERSION"
 (cd "$dist" && sha256sum "$BINARY") >"$stage/$top/$PIN"
 chmod 0644 -- "$stage/$top/$PIN"
 
+(cd "$stage/$top" && sha256sum -- "${MANIFEST_NAMES[@]}") >"$stage/$top/$MANIFEST"
+chmod 0644 -- "$stage/$top/$MANIFEST"
+
 mtime="$(git -C "$repo" log -1 --format=%ct HEAD)"
 readonly mtime
 
-tar --create --format=ustar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$mtime" \
-  -C "$stage" "$top" | gzip -9 -n >"$dist/$top.tar.gz"
+# The member order is fixed: the manifest sits before both scripts, so a script that exists was extracted
+# after an attempted manifest (record 0131, option 34).
+tar --create --format=ustar --no-recursion --owner=0 --group=0 --numeric-owner --mtime="@$mtime" \
+  -C "$stage" "$top" "$top/VERSION" "$top/agent.yaml" "$top/common.sh" "$top/mariadb-user-remove.sql" \
+  "$top/mariadb-user.sql" "$top/$PIN" "$top/vandox-agent.service" "$top/$MANIFEST" \
+  "$top/uninstall.sh" "$top/install.sh" | gzip -9 -n >"$dist/$top.tar.gz"
 
 (cd "$dist" && sha256sum "$top.tar.gz" "$BINARY" >SHA256SUMS)
 
