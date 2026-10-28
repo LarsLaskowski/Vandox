@@ -677,8 +677,13 @@ var documentsOfAC11 = []string{
 // installDocuments must name both scripts, because they describe installing and uninstalling the agent.
 var installDocuments = []string{"README.md", "docs/INSTALL.md", "deploy/agent/README.md"}
 
-// readDocument reads a repository file with every whitespace run (line breaks included) as one space and lower case.
-func readDocument(t *testing.T, name string) string {
+// normalizeLineEnds turns CRLF line ends into LF: .gitattributes checks *.md, *.cs and *.razor out with CRLF.
+func normalizeLineEnds(text string) string {
+	return strings.ReplaceAll(text, "\r\n", "\n")
+}
+
+// readRepositoryText reads a repository text file with LF line ends, whatever the checkout's line ends are.
+func readRepositoryText(t *testing.T, name string) string {
 	t.Helper()
 
 	data, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(name)))
@@ -686,7 +691,33 @@ func readDocument(t *testing.T, name string) string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 
-	return strings.ToLower(strings.Join(strings.Fields(string(data)), " "))
+	return normalizeLineEnds(string(data))
+}
+
+// TestNormalizeLineEnds_MakesACrlfCheckoutReadLikeLf keeps the document tests independent of the checkout's
+// line ends: CRLF becomes LF, LF and a lone CR stay as they are.
+func TestNormalizeLineEnds_MakesACrlfCheckoutReadLikeLf(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeLineEnds("a\r\nb\r\n\r\nc"); got != "a\nb\n\nc" {
+		t.Errorf("normalizeLineEnds(CRLF text) = %q, want LF only", got)
+	}
+
+	if got := normalizeLineEnds("a\nb\rc"); got != "a\nb\rc" {
+		t.Errorf("normalizeLineEnds(LF text with a lone CR) = %q, want it unchanged", got)
+	}
+
+	crlf := strings.ReplaceAll(mktempLine+"\n"+checkLine+"\n", "\n", "\r\n")
+	if got := blockFindings(normalizeLineEnds(crlf), false); len(got) != 0 {
+		t.Errorf("a CRLF block has findings %q after normalizing, want none", got)
+	}
+}
+
+// readDocument reads a repository file with every whitespace run (line breaks included) as one space and lower case.
+func readDocument(t *testing.T, name string) string {
+	t.Helper()
+
+	return strings.ToLower(strings.Join(strings.Fields(readRepositoryText(t, name)), " "))
 }
 
 func TestReadme_NamesNoMissingUnitOrScripts(t *testing.T) {
@@ -917,13 +948,7 @@ func TestInstallDocuments_UseTheReleaseBundle(t *testing.T) {
 func checkInstallDocument(t *testing.T, name string) string {
 	t.Helper()
 
-	data, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(name)))
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
-
-	// A checkout with CRLF line ends (.gitattributes: *.md) holds the same lines.
-	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	text := readRepositoryText(t, name)
 
 	for _, re := range forbiddenInDocuments {
 		if loc := re.FindStringIndex(text); loc != nil {
