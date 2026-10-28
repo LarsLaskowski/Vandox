@@ -45,7 +45,8 @@ and `uninstall.sh` and the files they ship (`vandox-agent.service`, `agent.yaml`
   without root. `TestEntryCheck_RefusesBeforeSourcing` runs a copy of `install.sh` as a program beside a stub
   `common.sh` that prints `sourced`, so a refusal is visible as the missing word; `TestCheckBundleDir_*` and
   `TestReadBundleVersion_*` call the functions directly; `TestEntryCheck_IsTheSameInBothScripts` compares the
-  marked block of both scripts; `TestInstallDocuments_UseTheReleaseBundle` reads the documented install chain.
+  marked block of both scripts; `TestManifest_RefusesAnIncompleteOrChangedBundle` runs both scripts as programs on a bundle
+  with a good `MANIFEST.sha256` and then with each missing, reordered, malformed or changed member; `TestInstallDocuments_UseTheReleaseBundle` reads the documented install chain.
 - **Not unit-testable.** Systemd behavior (enabling and starting the unit, `Type=notify`, the restart loop, the
   address allow-list, `CapEff`, the seccomp filter, `systemd-analyze security`), the real user and file
   ownership changes and a real download need a systemd 249 host as root. The CI job `agent-install` runs
