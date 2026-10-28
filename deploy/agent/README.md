@@ -64,6 +64,23 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    have key expiry turned off by default (<https://tailscale.com/kb/1068/acl-tags>), so the server stays in the tailnet. The agent
    needs neither Tailscale SSH (`--ssh`) nor any other option.
 
+   **Turn off Tailscale's DNS on this server.** On Linux, Tailscale takes over the server's name resolution by default and sends
+   lookups to the tailnet's name servers. The policy of step 2 lets this server reach only the ingest port, so with Tailscale's DNS
+   every lookup fails: the install lines cannot reach `github.com` (`curl: (6) Could not resolve host`), and nothing else on the
+   server can resolve a name either. Keep the server's own name server:
+
+   ```
+   tailscale set --accept-dns=false
+   tailscale dns status
+   getent hosts github.com
+   ```
+
+   The second line must no longer show Tailscale's DNS as enabled. The third must print an address. MagicDNS names then no longer
+   resolve on this server, so give the agent the backend's tailnet address (`http://100.x.y.z:8081`), never a MagicDNS name.
+   In a run on a real tailnet, `getent hosts github.com` printed nothing while Tailscale's DNS was on, and the server's own name
+   server answered once it was off. The other way, a grant that lets this server reach the tailnet's name servers on port 53,
+   opens more than the ingest port and has not been tested in this project.
+
    **Check that the server carries the tag.** In the admin console's list of machines, the server shows `tag:vandox-agent` and no
    user. Or run this on the backend host, with this server's tailnet address in place of `100.64.0.2`:
 
@@ -100,9 +117,8 @@ where Tailscale's pages differ from this summary, follow Tailscale.
      - The policy lets this server reach port 22: `Connection refused` with `1`, or `0` (connected). The policy is too wide,
        usually because the default rule is still there or the server has no tag; correct step 2 or 3.
 
-   Use the backend's MagicDNS name instead of `100.64.0.1` if you want to give the agent a name
-   (<https://tailscale.com/kb/1081/magicdns>). The install script warns about a name server outside localhost and the tailnet,
-   because the unit would block it.
+      Use the backend's tailnet address, not its MagicDNS name: with Tailscale's DNS turned off (step 3), MagicDNS names do not
+   resolve on this server.
 
 ## Install the agent
 
@@ -111,8 +127,8 @@ where Tailscale's pages differ from this summary, follow Tailscale.
 - The monitored server: Ubuntu 22.04 with systemd on `x86_64`, `root` access (`sudo`), and `curl`, `sha256sum`, `tar` and `gzip` (no `git`).
 - Tailscale on this server, logged in to the same tailnet as the backend host (see *Tailscale on the monitored server* below).
 - The backend, already running with its ingest port on its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)): you
-  need that address and port, for example `http://100.64.0.1:8081`. A host name only works if it is a MagicDNS name; the agent can reach
-  nothing but localhost and the tailnet.
+  need that address and port, for example `http://100.64.0.1:8081`. Use the address, not a host name: the agent can reach nothing but localhost and the tailnet, and with Tailscale's DNS turned off on
+this server (*Tailscale on the monitored server*, step 3) MagicDNS names do not resolve.
 - The agent token. You create it on the backend host (step 3 of [`docs/INSTALL.md`](../../docs/INSTALL.md): `openssl rand -hex 32 > secrets/vandox_agent_token`)
   and the backend accepts it only for the `agent_id` set under `ingest` (step 10). Have the same token value ready; the installer asks for it and never takes it as an option.
 - The release version, for example `v0.2.0`: find it on <https://github.com/LarsLaskowski/Vandox/releases> (use the same version as the backend where you can).
@@ -121,8 +137,7 @@ where Tailscale's pages differ from this summary, follow Tailscale.
 `agent_id`, the one the backend expects) and `http://100.64.0.1:8081` with the backend's tailnet address and ingest port.
 
 **Step 2 - run the lines as root, one at a time.** They download the install bundle and its checksum list over HTTPS, check the bundle, unpack it only if the
-check passes, and start the installer. The installer asks for the token (typed without echo; or pipe one line to it), downloads the binary and checks it before it
-runs it, then creates the user, the files, the unit and the MariaDB account, and starts the agent:
+check passes, and start the installer. The installer asks for the token (it shows nothing while you type; see *The token prompt* below), downloads the binary and checks it before it runs it, then creates the user, the files, the unit and the MariaDB account, and starts the agent:
 
 1. Become root (run this line on its own: it may ask for your password).
 2. Set the version to install (replace `vX.Y.Z` by the release, for example `v0.2.0`).
@@ -146,6 +161,24 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 
 The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
 
+**The binary comes from the release.** The bundle does not contain the agent binary, only its SHA-256. The install script downloads
+`vandox-agent-linux-amd64` from the GitHub release of the bundle's version and installs it only if it matches. So the server needs
+HTTPS access to `github.com`, with a working name server (*Tailscale on the monitored server*, step 3). A bundle without a GitHub
+release, such as a test build, cannot be installed this way; its download ends with `install.sh: download failed: vandox-agent-linux-amd64`.
+Use the offline variant below, with the binary beside the bundle and `--from .`.
+
+**The token prompt.** The script asks `Agent token:` and then shows nothing while you type or paste: no characters, no asterisks.
+That is deliberate. Paste or type the token and press Enter. The token has 32 to 4096 characters of `0x21` to `0x7E` (a token from
+`openssl rand -hex 32` has 64); otherwise the script stops with `install.sh: token rejected: <rule>` and changes nothing. If your
+console cannot paste into a hidden prompt, give the token on standard input instead:
+1. Create a file only root can read with `install -m 0600 /dev/null /root/agent-token`.
+2. Write the token into it as its one line, with an editor such as `nano /root/agent-token`.
+3. Add ` < /root/agent-token` to the end of the last line of the block.
+4. Delete the file afterwards with `rm /root/agent-token`.
+
+Write the file with Unix line endings: a carriage return is a character outside `0x21` to `0x7E`, and the token is refused. The token
+is asked for only while `/etc/vandox/agent-token` does not exist, so an upgrade does not ask for it.
+
 Without internet access on the server, download the release files on a machine that has it:
 
 ```
@@ -156,8 +189,13 @@ curl --proto '=https' --proto-redir '=https' -fsSL -O "$u/$f" -O "$u/SHA256SUMS"
 curl --proto '=https' --proto-redir '=https' -fsSLO "$u/vandox-agent-linux-amd64"
 ```
 
-Copy the three files to the server into `/root/vandox-files`. On the server run lines 1, 2, 3 and 5 of the block above (`sudo -i`, `v=`, `f=` and the `mktemp` line),
-then (`web` stands for the `agent_id` of this server):
+Copy the three files to the server into `/root/vandox-files`. Then check their names: `ls /root/vandox-files` must show exactly
+`vandox-agent-install-vX.Y.Z.tar.gz`, `SHA256SUMS` and `vandox-agent-linux-amd64`, with this spelling and case. Some upload tools
+change a name, for example to lower case. A file `sha256sums` makes the check below fail with `awk: fatal: cannot open file
+'SHA256SUMS'` and `sha256sum: 'standard input': no properly formatted SHA256 checksum lines found`, and nothing is unpacked. Fix
+the name with `mv /root/vandox-files/sha256sums /root/vandox-files/SHA256SUMS`. The check does not accept other spellings on
+purpose: it selects the bundle's line by its exact name. On the server run lines 1, 2, 3 and 5 of the block above (`sudo -i`,
+`v=`, `f=` and the `mktemp` line), then (`web` stands for the `agent_id` of this server):
 
 ```
 cp /root/vandox-files/* .
@@ -165,7 +203,8 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 "$d/vandox-agent-install-$v/install.sh" --from . --agent-id web --backend-url http://100.64.0.1:8081
 ```
 
-The binary is checked against the SHA-256 inside the checked bundle.
+Here the binary comes from the directory (`--from .`) and is not downloaded; it is checked against the SHA-256 inside the checked
+bundle. Without `--from .` the script would download it from the release of the bundle's version.
 
 **Step 3 - check that it runs.** The installer ends with `vandox-agent vX.Y.Z installed and running` and prints four lines
 `check journal-group`, `check journal-clock`, `check ipc-filter` and `check capabilities`, each `ok` or `WARNING <what to do>`. A warning does not fail the
@@ -242,13 +281,17 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
 - **Provenance.** The two checks above prove integrity, not who built the files. At a release the bundle carries a build-provenance attestation, and
   because the bundle holds the binary's checksum, verifying the bundle also covers the binary:
   `gh attestation verify vandox-agent-install-vX.Y.Z.tar.gz --repo LarsLaskowski/Vandox` (and the same for `vandox-agent-linux-amd64`).
-- **The name server.** A `backend.url` with a host name is resolved by the name server of `/etc/resolv.conf`; the unit blocks every name server
-  outside localhost and the tailnet (`install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`). Use the
-  tailnet address or the MagicDNS name (whose resolver is the tailnet's `100.100.100.100`).
-- **The server run from the CI artifact.** For the Product Manager's run of a pull request's head: download the artifact `agent-install-files` of the `agent-install` run of
-  the approved head SHA (the run ID and the SHA are given with the request) into `/root/vandox-files` and run `sha256sum --check --strict SHA256SUMS` there (it checks both lines);
-  then follow the offline install of step 2 with `v=v0.0.0-rc.0`.
-
+- **The name server.** With Tailscale's DNS turned off (*Tailscale on the monitored server*, step 3), the server keeps its own name
+  server and MagicDNS names do not resolve, so `backend.url` uses the backend's tailnet address. A host name would be resolved by
+  the name server of `/etc/resolv.conf`, and the unit blocks every name server outside localhost and the tailnet (`install.sh:
+  WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`).
+- **The server run from the CI artifact.** For the Product Manager's run of a pull request's head, download the artifact
+  `agent-install-files` of the `agent-install` run of the approved head SHA (the run ID and the SHA are given with the request).
+  Put its three files into `/root/vandox-files`, check their names as in the offline variant, and run
+  `sha256sum --check --strict SHA256SUMS` there (it checks both lines). Its bundle has the version `v0.0.0-rc.0`, which has no
+  GitHub release, so the online lines cannot install it: the script would try to download the binary and end with `install.sh:
+  download failed: vandox-agent-linux-amd64`. Follow the offline install of step 2 with `v=v0.0.0-rc.0` and `--from .`; the
+  binary in the artifact is checked against the bundle's SHA-256.
 ## Rights per collector
 
 `vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are

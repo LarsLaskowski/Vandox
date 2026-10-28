@@ -336,10 +336,13 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 
 The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
 
-The `--agent-id` must be the `agent_id` of step 10, and the backend URL a tailnet address or MagicDNS name: the unit lets the agent reach only localhost and
-the tailnet. The script reads the version from the bundle's `VERSION` file, asks for the agent token of step 3 (typed without echo, or one line of standard input;
-never an option), downloads the binary and checks it against the checksum in the bundle before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the
+The `--agent-id` must be the `agent_id` of step 10, and the backend URL the backend's tailnet address: the unit lets the agent reach only localhost and the tailnet, and MagicDNS names do not resolve once Tailscale's DNS is turned off on the server. The script reads the version from the bundle's `VERSION` file, asks for the agent token of step 3 (the prompt `Agent token:` shows nothing while you type or paste; press Enter after it; it is never an option), downloads the binary and checks it against the checksum in the bundle before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the
 spool directory, the unit and the MariaDB account (`plesk db` on Plesk, else `mariadb`), starts the agent and prints a line per server check.
+
+The bundle does not contain the agent binary, only its SHA-256: the script downloads `vandox-agent-linux-amd64` from the GitHub
+release of the bundle's version, so the server needs HTTPS access to `github.com` and a working name server. Turn off Tailscale's DNS
+on the server for that (*Tailscale on the monitored server*, step 3). A console that cannot paste into a hidden prompt can give the
+token from a file on standard input (*The token prompt* in [`deploy/agent/README.md`](../deploy/agent/README.md)).
 
 Remove the agent with the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade and an install without internet access on the server are in [`deploy/agent/README.md`](../deploy/agent/README.md), which also lists every option,
 message, check and unit setting. The unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).

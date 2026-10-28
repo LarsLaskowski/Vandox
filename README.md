@@ -179,8 +179,14 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 
 The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
 
+The bundle does not contain the agent binary, only its SHA-256: the script downloads `vandox-agent-linux-amd64` from the GitHub
+release of the bundle's version, so the server needs HTTPS access to `github.com` and a working name server (turn off Tailscale's
+DNS on it, see [*Tailscale on the monitored server*](deploy/agent/README.md#tailscale-on-the-monitored-server)). The script asks
+`Agent token:` and shows nothing while you type or paste; press Enter after the token. If your console cannot paste into a hidden
+prompt, see *The token prompt* in [`deploy/agent/README.md`](deploy/agent/README.md).
+
 To remove the agent, run the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade, offline install, the options and the checks are in [`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of
-[`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names a tailnet address or MagicDNS name.
+[`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names the backend's tailnet address (MagicDNS names do not resolve once Tailscale's DNS is off on the server).
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
