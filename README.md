@@ -446,7 +446,7 @@ The traditional format also has no time zone. Set `import.time_zone` in `vandoxd
 server the logs come from (for example `Europe/Berlin`); there is no default, because a wrong zone would shift every
 time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
 "import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
-Set the option and run the import again: the file is completed. RFC 3339 files and journal exports carry their
+Set the option and run the import again: the file is completed. files in RFC 3339 form and journal exports carry their
 offset and need no option. MariaDB error logs, Dovecot's log file, the Plesk panel, nginx and Apache error logs and the legacy monitoring log also write local time without a zone and are read in the same zone;
 without the option such a file fails at its first entry with the same reason.
 
