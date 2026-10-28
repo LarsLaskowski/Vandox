@@ -401,7 +401,7 @@ write_documented() {
   } >"$file"
 }
 
-# run_documented FILE TMP CWD: feeds FILE to bash -s (no -e: a failed line is followed by the next one, as
+# run_documented FILE TMP CWD: (CWD is created, TMP is not) feeds FILE to bash -s (no -e: a failed line is followed by the next one, as
 # when all lines are pasted) in the empty directory CWD under umask 022 with TMPDIR=TMP; sets OUT, ERR, RC,
 # DIR (the d of the run) and CHECK (the status of the check line).
 run_documented() {
@@ -409,7 +409,7 @@ run_documented() {
   local tmp=$2
   local cwd=$3
 
-  mkdir -p -- "$tmp" "$cwd"
+  mkdir -p -- "$cwd"
   RC=0
   (cd "$cwd" && umask 022 && TMPDIR="$tmp" bash -s <"$file") >"$work/out" 2>"$work/err" || RC=$?
   OUT="$(<"$work/out")"
@@ -430,6 +430,7 @@ stage_files() {
 write_documented "$work/documented-good.sh" yes
 write_documented "$work/documented-lost.sh" no
 stage_files "$dist"
+mkdir -p -- "$work/tmp-good"
 run_documented "$work/documented-good.sh" "$work/tmp-good" "$work/cwd-good"
 show
 [[ "$CHECK" == 0 ]] || fail "bundle verification: the check line of the good bundle exited $CHECK"
@@ -466,6 +467,11 @@ documented_failure() {
   local in_cwd=$4
   local cwd="$work/cwd-$what"
 
+  # The directory for mktemp exists, except in the row where mktemp must fail.
+  if [[ "$in_cwd" == no ]]; then
+    mkdir -p -- "$tmp"
+  fi
+
   run_documented "$script" "$tmp" "$cwd"
 
   if [[ "$in_cwd" == no ]] && { [[ -z "$CHECK" ]] || [[ "$CHECK" == 0 ]]; }; then
@@ -478,12 +484,13 @@ documented_failure() {
     fail "bundle verification, $what: the install line did not fail with 'No such file or directory'"
   fi
 
-  if [[ -n "$DIR" ]] && find "$DIR" -maxdepth 1 -name 'vandox-agent-install-*' | grep -q .; then
-    fail "bundle verification, $what: a vandox-agent-install-* entry is in d ($DIR)"
+  # The copied bundle file vandox-agent-install-<v>.tar.gz is expected in d; an extracted directory is not.
+  if [[ -n "$DIR" ]] && find "$DIR" -mindepth 1 -maxdepth 1 -type d -name 'vandox-agent-install-*' | grep -q .; then
+    fail "bundle verification, $what: an extracted vandox-agent-install-* directory is in d ($DIR)"
   fi
 
-  if [[ "$in_cwd" == no ]] && find "$cwd" -maxdepth 1 -name 'vandox-agent-install-*' | grep -q .; then
-    fail "bundle verification, $what: a vandox-agent-install-* entry is in the working directory"
+  if [[ "$in_cwd" == no ]] && find "$cwd" -mindepth 1 -maxdepth 1 -type d -name 'vandox-agent-install-*' | grep -q .; then
+    fail "bundle verification, $what: an extracted vandox-agent-install-* directory is in the working directory"
   fi
 
   nothing_left "bundle verification, $what"
@@ -580,6 +587,15 @@ bundle_copy() {
   printf '%s\n' "$copy"
 }
 
+# rewrite_manifest COPY: writes MANIFEST.sha256 of a bundle copy again for its seven members, so that a change
+# made on purpose reaches the checks behind the manifest check.
+rewrite_manifest() {
+  local copy=$1
+
+  (cd "$copy" && sha256sum -- VERSION agent.yaml common.sh mariadb-user-remove.sql mariadb-user.sql "$PIN_NAME" \
+    vandox-agent.service >MANIFEST.sha256)
+}
+
 entry_line_re='^install\.sh: (/.+) is not owned by root or is writable by others; extract the bundle as root in a private directory$'
 
 # A bundle extracted into a directory that belongs to another user: its parent is refused, by name.
@@ -614,6 +630,7 @@ nothing_left "the repository's install.sh"
 # A VERSION the binary does not match.
 copy="$(bundle_copy)"
 printf 'v0.0.0-rc.1\n' >"$copy/VERSION"
+rewrite_manifest "$copy"
 run "$CI_TOKEN"$'\n' "$copy/install.sh" "${install_agent_args[@]}"
 expect_rc 1 "install.sh with another VERSION"
 expect_err "install.sh: binary is not v0.0.0-rc.1" "another VERSION"
@@ -623,7 +640,8 @@ nothing_left "another VERSION"
 # anything is sourced, for the install script and for the uninstall script.
 manifest_line_re="the bundle is incomplete or changed; extract it again in a new directory"
 copy="$(bundle_copy)"
-cut_line="$(grep -n '^}$' "$copy/common.sh" | head -n 1 | cut -d: -f1)"
+cut_line="$(awk '/^}$/ { print NR; exit }' "$copy/common.sh")"
+[[ -n "$cut_line" ]] || fail "common.sh has no function end to cut after"
 head -n "$cut_line" "$copy/common.sh" >"$copy/common.sh.cut"
 mv -- "$copy/common.sh.cut" "$copy/common.sh"
 chmod 0644 "$copy/common.sh"
@@ -649,12 +667,12 @@ expect_rc 1 "install.sh with a truncated unit"
 expect_err "install.sh: $manifest_line_re" "truncated unit"
 nothing_left "truncated unit"
 
-# A missing VERSION.
+# A missing VERSION is a missing member of the manifest: refused before VERSION is read.
 copy="$(bundle_copy)"
 rm -- "$copy/VERSION"
 run "$CI_TOKEN"$'\n' "$copy/install.sh" "${install_agent_args[@]}"
-expect_rc 2 "install.sh without VERSION"
-expect_err "install.sh: no valid VERSION file next to install.sh; use the install bundle of a release" "missing VERSION"
+expect_rc 1 "install.sh without VERSION"
+expect_err "install.sh: $manifest_line_re" "missing VERSION"
 nothing_left "missing VERSION"
 
 # --version is gone: usage, exit 2.
@@ -667,6 +685,7 @@ nothing_left "--version option"
 copy="$(bundle_copy)"
 sed 's/^0/1/; t; s/^./0/' "$agent_dir/$PIN_NAME" >"$copy/$PIN_NAME"
 cmp -s "$agent_dir/$PIN_NAME" "$copy/$PIN_NAME" && fail "the tampered pin equals the original"
+rewrite_manifest "$copy"
 run "$CI_TOKEN"$'\n' "$copy/install.sh" "${install_agent_args[@]}"
 expect_rc 1 "install.sh with a tampered pin"
 expect_err "install.sh: checksum mismatch, nothing installed" "tampered pin"
