@@ -113,8 +113,9 @@ Documented commands:
     that failed part-way (a write error on one member, space freed later) could leave a complete script beside a truncated
     `common.sh` or unit that is still valid; a truncated `common.sh` turns a missing guard function into a false condition and so
     fails open. So the bundle carries `MANIFEST.sha256`, the SHA-256 of every other member but the two scripts, and both scripts check
-    it before they source anything (its size is taken with `wc -c`, which for a regular file uses `fstat` and `lseek` and reads
-    nothing, measured by Security on a 2 GiB sparse file; a FIFO, device or directory is refused by the regular-file test first;
+    it before they source anything (its size is taken with `wc -c`: GNU `wc -c` on a regular file calls `fstat`, seeks to near
+    the end and reads at most the last block, never the whole file, so the bound holds (measured by Security on a 2 GiB sparse
+    file: 128 bytes read); a FIFO, device or directory is refused by the regular-file test first;
     `wc`, `stat` and `sha256sum` come from the caller's `PATH`, as `main` has not set its own yet); the member order (the manifest before the scripts, `install.sh` last) only keeps a truncated
     script from running, as bash never reaches its last line. `tar` restores the verified archive's owner (root) and modes, so it
     needs no extra flags.
