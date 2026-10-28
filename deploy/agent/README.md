@@ -1,18 +1,26 @@
-# Installing the agent: rights per collector
+# Installing the agent
 
-`vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are
-listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent area names (*Rights*: `CAP_SYS_PTRACE` and the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent area
-(`docs/areas/agent.md`, *Rights*) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
-`security`-tier change. The example configuration is `agent.yaml` in this folder; the unit is `vandox-agent.service`, installed by
-`install.sh` and removed by `uninstall.sh` (both in this folder, with `common.sh`); see *Install, upgrade, uninstall* and *Unit*.
+This folder holds what installs the Vandox agent on the monitored server: the install scripts, the systemd unit and the example configuration. The
+steps to install, upgrade and remove the agent come first; the reference after them explains the options, the checks and what the script does; the rights
+the agent holds, each with the collector that needs it, follow under *Rights per collector*.
 
-## Install, upgrade, uninstall
+## Install the agent
 
-The release publishes the install bundle `vandox-agent-install-vX.Y.Z.tar.gz` and a `SHA256SUMS` with two lines, the bundle's and the binary's. The
-bundle has one directory and nine files: `install.sh`, `uninstall.sh`, `common.sh`, `vandox-agent.service`, `mariadb-user.sql`,
-`mariadb-user-remove.sql`, `agent.yaml`, `VERSION` (the tag and one line feed) and `vandox-agent-linux-amd64.sha256` (the binary's checksum line).
-It is byte-reproducible from the tagged source. Run as root on the monitored server (Ubuntu 22.04, systemd 249, `x86_64`; `bash`, `curl`,
-`sha256sum`, `tar` and `gzip`, no `git`), in a new private directory, as one `&&` chain, so nothing after a failed step runs:
+**What you need**
+
+- The monitored server: Ubuntu 22.04 with systemd on `x86_64`, `root` access (`sudo`), and `curl`, `sha256sum`, `tar` and `gzip` (no `git`).
+- The backend, already running and reachable over Tailscale (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)): you need its tailnet address and
+  ingest port, for example `http://100.101.102.103:8081`. A host name only works if it is a MagicDNS name; the agent can reach nothing but localhost and the tailnet.
+- The agent token. You create it on the backend host (step 3 of [`docs/INSTALL.md`](../../docs/INSTALL.md): `openssl rand -hex 32 > secrets/vandox_agent_token`)
+  and the backend accepts it only for the `agent_id` set under `ingest` (step 10). Have the same token value ready; the installer asks for it and never takes it as an option.
+- The release version, for example `v0.2.0`: find it on <https://github.com/LarsLaskowski/Vandox/releases> (use the same version as the backend where you can).
+
+**Step 1 - choose the version and the names.** In the command below replace `vX.Y.Z` with the release version, `web-1` with the name of this server (the
+`agent_id`, the one the backend expects) and `http://100.101.102.103:8081` with the backend's tailnet address and ingest port.
+
+**Step 2 - run the command as root.** It downloads the install bundle and its checksum list over HTTPS, checks the bundle, extracts it only if the check passes,
+and starts the installer. The installer asks for the token (typed without echo; or pipe one line to it), downloads the binary and checks it before it runs it, then
+creates the user, the files, the unit and the MariaDB account, and starts the agent:
 
 ```
 sudo -i
@@ -24,6 +32,52 @@ d=$(mktemp -d) && cd "$d" &&
   tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
   "./vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.101.102.103:8081
 ```
+
+Without internet access on the server, copy the bundle, `SHA256SUMS` and `vandox-agent-linux-amd64` of the release to it and use this variant (`--from "$d"`
+takes the binary from that directory):
+
+```
+v=vX.Y.Z
+d=$(mktemp -d) && cd "$d" &&
+  cp /path/to/vandox-agent-install-$v.tar.gz /path/to/SHA256SUMS /path/to/vandox-agent-linux-amd64 . &&
+  awk -v f="vandox-agent-install-$v.tar.gz" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&
+  tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
+  "./vandox-agent-install-$v/install.sh" --from "$d" --agent-id web-1 --backend-url http://100.101.102.103:8081
+```
+
+**Step 3 - check that it runs.** The installer ends with `vandox-agent vX.Y.Z installed and running` and prints four lines
+`check journal-group`, `check journal-clock`, `check ipc-filter` and `check capabilities`, each `ok` or `WARNING <what to do>`. A warning does not fail the
+installation; it names something to look at (see *Checks on the server*). Then:
+
+```
+systemctl status vandox-agent
+journalctl -u vandox-agent -n 50
+```
+
+If the installer printed `vandox-agent did not start`, the journal shows why (a wrong `agent.yaml` value, an unreadable token, the spool directory); fix it and
+run `systemctl restart vandox-agent`, the unit keeps retrying by itself. The backend shows the server once the first batch arrives.
+
+**Step 4 - upgrade.** Run the command of step 2 again with the new version. Only the binary and the unit are replaced; the configuration, token, spool and state stay, and
+the token is not asked for again.
+
+**Step 5 - uninstall.** From the extracted bundle of the installed version (extract it again with the command of step 2 up to the `tar` line when it is gone):
+
+```
+sudo "./vandox-agent-install-$v/uninstall.sh"            # keeps the user, configuration, token, spool and MariaDB account
+sudo "./vandox-agent-install-$v/uninstall.sh" --purge    # deletes them too, unsent records included
+```
+
+The first command removes the unit and the binary and keeps the user, `agent.yaml`, the token, the spool and the MariaDB account; `--purge` deletes them too, unsent
+records included.
+
+The options, what the script checks and in which order, the messages and the provenance check are in *Install reference* below.
+
+## Install reference: options, checks and what the script does
+
+The release publishes the install bundle `vandox-agent-install-vX.Y.Z.tar.gz` and a `SHA256SUMS` with two lines, the bundle's and the binary's. The
+bundle has one directory and nine files: `install.sh`, `uninstall.sh`, `common.sh`, `vandox-agent.service`, `mariadb-user.sql`,
+`mariadb-user-remove.sql`, `agent.yaml`, `VERSION` (the tag and one line feed) and `vandox-agent-linux-amd64.sha256` (the binary's checksum line).
+It is byte-reproducible from the tagged source. The commands are in *Install the agent*; the whole install is one `&&` chain, so nothing after a failed step runs.
 
 - **The check.** `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field, and `sha256sum --check --strict -` checks that
   file against it; with no such line it fails on empty input and `tar` never runs. The check proves the bundle is the file the release published; for the
@@ -48,26 +102,9 @@ d=$(mktemp -d) && cd "$d" &&
   file, no link, one line, at most 4096 bytes) to match the binary (a link, a non-regular file or more than 64 MiB is refused), runs the verified binary once as
   `nobody` with `-version` and requires it to equal `VERSION`, and only then changes the server: user and groups, `/etc/vandox`, `agent.yaml`, the token (root:root 0600), the
   spool directory, the binary (written beside the old one and renamed over it), the unit, the MariaDB account, enable and restart.
-- **Upgrade.** Run the chain again with the new version. Only the binary and the unit are replaced; configuration, token, spool and state stay.
-- **Offline.** Copy `vandox-agent-install-vX.Y.Z.tar.gz`, `SHA256SUMS` and `vandox-agent-linux-amd64` of the release into the new directory, drop the two `curl`
-  steps and give `install.sh` `--from "$d"`:
-
-```
-v=vX.Y.Z
-d=$(mktemp -d) && cd "$d" &&
-  cp /path/to/vandox-agent-install-$v.tar.gz /path/to/SHA256SUMS /path/to/vandox-agent-linux-amd64 . &&
-  awk -v f="vandox-agent-install-$v.tar.gz" 'NF == 2 && $2 == f' SHA256SUMS | sha256sum --check --strict - &&
-  tar --no-same-owner --no-same-permissions -xzf "vandox-agent-install-$v.tar.gz" &&
-  "./vandox-agent-install-$v/install.sh" --from "$d" --agent-id web-1 --backend-url http://100.101.102.103:8081
-```
-
-- **Uninstall.** From the extracted bundle of the installed version (extract it again with the chain above up to `tar` when it is gone):
-
-```
-sudo "./vandox-agent-install-$v/uninstall.sh"            # keeps the user, configuration, token, spool and MariaDB account
-sudo "./vandox-agent-install-$v/uninstall.sh" --purge    # deletes them too, unsent records included
-```
-
+- **Upgrade.** Run the command again with the new version. Only the binary and the unit are replaced; configuration, token, spool and state stay.
+- **Offline.** The variant of *Install the agent* with `--from "$d"`.
+- **Uninstall.** The commands are in *Install the agent*, step 5.
   The plain run stops and disables the agent (it saves its state), removes the unit and the binary, and keeps the user, `agent.yaml`, the token, the spool and the
   MariaDB account so a later install continues. `--purge` also removes them (it says that unsent records are lost before it deletes `/var/lib/vandox`) and drops
   the MariaDB account with `mariadb-user-remove.sql`; when that fails it prints the command to run with the bundle's path, for example
@@ -87,7 +124,15 @@ sudo "./vandox-agent-install-$v/uninstall.sh" --purge    # deletes them too, uns
   tailnet address or the MagicDNS name (whose resolver is the tailnet's `100.100.100.100`).
 - **The server run from the CI artifact.** For the Product Manager's run of a pull request's head: download the artifact `agent-install-files` of the `agent-install` run of
   the approved head SHA (the run ID and the SHA are given with the request); as root in a new `mktemp -d` unpack it and run `sha256sum --check --strict SHA256SUMS` (it checks both lines);
-  then run the offline chain above with `v=v0.0.0-rc.0`, with the three files already in the directory (without the `cp` step) and `--from "$d"`.
+  then run the offline command of *Install the agent* with `v=v0.0.0-rc.0`, with the three files already in the directory (without the `cp` step) and `--from "$d"`.
+
+## Rights per collector
+
+`vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are
+listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent area names (*Rights*: `CAP_SYS_PTRACE` and the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent area
+(`docs/areas/agent.md`, *Rights*) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
+`security`-tier change. The example configuration is `agent.yaml` in this folder; the unit is `vandox-agent.service`, installed by
+`install.sh` and removed by `uninstall.sh` (both in this folder, with `common.sh`); see *Install the agent*, *Install reference* and *Unit*.
 
 ## Capabilities
 

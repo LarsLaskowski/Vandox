@@ -1995,7 +1995,7 @@ by the agent logs nothing.
 line feed) and `vandox-agent-linux-amd64.sha256` (the checksum line of the binary). It is built reproducibly from the tagged source, is listed with the
 binary in the release's two-line `SHA256SUMS` (the bundle first), and carries a build-provenance attestation. Only tags `vX.Y.Z` and `vX.Y.Z-rc.N` are packaged. The operator
 downloads the bundle and `SHA256SUMS` over HTTPS in a new private directory and extracts the bundle only after the check, as one `&&` chain
-(`deploy/agent/README.md`, *Install, upgrade, uninstall*): `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field and
+(`deploy/agent/README.md`, *Install the agent*): `awk` selects the bundle's line of `SHA256SUMS` by exact comparison of the name field and
 `sha256sum --check --strict -` checks that file against it. The unit is `vandox-agent.service`. Every setting of the unit with its reason is in
 `deploy/agent/README.md`; the reasons for the choices are in
 [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md).
