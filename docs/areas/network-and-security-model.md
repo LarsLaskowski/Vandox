@@ -32,7 +32,7 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   rule's source may match it: the tailnet's default rule with `*` as source matches tagged nodes too and is replaced before the server
   joins, and neither `autogroup:tagged` nor `tag:vandox-agent` may be the source of another rule. It needs no Tailscale SSH, no
   accepted subnet routes and no rule with it as destination, because the agent listens on no port. The setup steps and the checks
-  (the tag, a `404` from the ingest port, a refused probe of another port) are in `deploy/agent/README.md` (*Tailscale on the
+  (the tag, a `404` from the ingest port, a probe of another port that the policy blocks, with `No route to host` or a timeout) are in `deploy/agent/README.md` (*Tailscale on the
   monitored server*).
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.

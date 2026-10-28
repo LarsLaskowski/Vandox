@@ -46,7 +46,7 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    - No other rule may have a source that matches this server: not `*`, not `autogroup:tagged`, and not `tag:vandox-agent` with
      another destination. The agent itself never listens on a port, so it needs no rule with this server as destination. If you also manage the
      server over Tailscale (SSH or anything else over the tailnet, not over the normal network), that needs an extra rule with your
-     devices as source and `tag:vandox-agent` as destination; no rule may have `tag:vandox-agent` as source.
+     devices as source and `tag:vandox-agent` as destination; no rule but the first grant may have `tag:vandox-agent` as source.
 
    Tailscale now recommends the `grants` form. Our understanding is that the older `acls` form still works, with
    `{"action": "accept", "src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend:8081"]}` as the agent's rule, but this project
