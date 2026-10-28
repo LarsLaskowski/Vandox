@@ -14,21 +14,11 @@ differ from this summary, follow Tailscale.
 1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
    Use the package repository method that the guide describes. Check what a script does before you run it, as you would with any
    download.
-2. **Log in to the tailnet of the backend host.** Run as root:
-
-   ```
-   tailscale up --advertise-tags=tag:vandox-agent
-   ```
-
-   It prints a URL; open it in a browser and sign in to the same tailnet as the backend host. The tag only works when the tailnet
-   policy names it under `tagOwners` (step 3). Without a tag, run plain `tailscale up`. In that case, turn off key expiry for this
-   machine in the admin console, or it loses the tailnet when its key expires
-   (<https://tailscale.com/kb/1028/key-expiry>). Tailscale documents that tagged devices have key expiry turned off by default
-   (<https://tailscale.com/kb/1068/acl-tags>). The agent needs neither Tailscale SSH (`--ssh`) nor any other option.
-3. **Limit what the server may reach.** The tailnet policy must allow this server only the ingest port on the backend host
-   ([SECURITY.md](../../SECURITY.md)). Tailscale's default policy lets every device reach every other, so replace that rule as
-   Tailscale's policy guide describes (<https://tailscale.com/kb/1018/acls>). The rule for the agent, with the backend host tagged
-   `tag:vandox-backend` and the ingest port 8081, is:
+2. **Prepare the tailnet policy, before this server joins.** The policy must allow this server only the ingest port on the backend
+   host ([SECURITY.md](../../SECURITY.md)). That is possible only when the server joins with a tag: a device without a tag acts as
+   the user who logged it in, and the policy only adds permissions, so every rule for that user would apply to the server too. Tag
+   the backend host `tag:vandox-backend` as Tailscale's guide to tags describes (<https://tailscale.com/kb/1068/acl-tags>), and
+   add to the policy (<https://tailscale.com/kb/1018/acls>), with the ingest port 8081:
 
    ```
    "tagOwners": {
@@ -40,20 +30,40 @@ differ from this summary, follow Tailscale.
    ],
    ```
 
-   Keep the rules your own devices need, for example for the web UI. The agent never listens on a port, so this server needs no
-   rule that lets others reach it.
-4. **Check the connection.** On this server:
+   No other rule may have a source that matches this server: not `*`, not `autogroup:tagged`, and not `tag:vandox-agent` with
+   another destination. Tailscale's default policy lets every device reach every other with `*`, so replace that rule, and keep
+   the rules your own devices need, for example for the web UI. The agent never listens on a port, so no rule needs this server
+   as its destination.
+3. **Join the tailnet with the tag.** Run as root:
+
+   ```
+   tailscale up --advertise-tags=tag:vandox-agent
+   ```
+
+   It prints a URL; open it in a browser and sign in, as an admin of the tailnet, to the tailnet of the backend host. The request
+   fails if the policy of step 2 does not name the tag. Tailscale documents that tagged devices have key expiry turned off by
+   default (<https://tailscale.com/kb/1068/acl-tags>), so the server stays in the tailnet. The agent needs neither Tailscale SSH
+   (`--ssh`) nor any other option.
+4. **Check the connection.** On this server, with the backend host's tailnet address in place of `100.64.0.1`:
 
    ```
    tailscale ip -4
    tailscale ping 100.64.0.1
    curl -s -o /dev/null -w '%{http_code}\n' http://100.64.0.1:8081/
+   timeout 5 bash -c '</dev/tcp/100.64.0.1/22'
+   echo $?
    ```
 
-   The first prints this server's tailnet address (a `100.x.y.z` address). The second must get a pong from the backend host. It
-   checks the tailnet path, not the policy. The third must print `404`: the ingest port answers every request except the agent's
-   own batches with `404`, so a `404` shows that the policy lets this server reach the port. `000` means no connection: check the
-   policy, and that the backend binds the ingest port to its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)).
+   - The first line prints this server's tailnet address (a `100.x.y.z` address).
+   - The second must get a pong from the backend host. It checks the tailnet path, not the policy.
+   - The third must print `404`: the ingest port answers every request except the agent's own batches with `404`, so a `404` shows
+     that the policy lets this server reach the port. `000` means no connection: check the policy, and that the backend binds the
+     ingest port to its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)).
+   - The last two try another port of the backend host, SSH (22), which a host with SSH turned on usually accepts on all its
+     addresses. They must print `124`: the attempt timed out because the policy blocks it. `0` means the policy lets this server
+     reach the port; narrow it as in step 2. Any other number is not conclusive. (That a blocked port times out rather than being
+     refused is our reading of Tailscale's documentation and has not been tested in this project.)
+
    Use the backend's MagicDNS name instead of `100.64.0.1` if you want to give the agent a name
    (<https://tailscale.com/kb/1081/magicdns>). The install script warns about a name server outside localhost and the tailnet,
    because the unit would block it.
