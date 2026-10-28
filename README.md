@@ -179,7 +179,7 @@ The variables live only in this shell; in a new shell, start again at step 1. Th
 `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is missing or different, for example after
 an interrupted unpacking.
 
-Upgrade, uninstall, offline install, the options and the checks are in [`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of
+To remove the agent, run the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade, offline install, the options and the checks are in [`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of
 [`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names a tailnet address or MagicDNS name.
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes

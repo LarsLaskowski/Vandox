@@ -337,5 +337,5 @@ the tailnet. The script reads the version from the bundle's `VERSION` file, asks
 never an option), downloads the binary and checks it against the checksum in the bundle before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the
 spool directory, the unit and the MariaDB account (`plesk db` on Plesk, else `mariadb`), starts the agent and prints a line per server check.
 
-Upgrade, uninstall and an install without internet access on the server are in [`deploy/agent/README.md`](../deploy/agent/README.md), which also lists every option,
+Remove the agent with the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade and an install without internet access on the server are in [`deploy/agent/README.md`](../deploy/agent/README.md), which also lists every option,
 message, check and unit setting. The unit and the scripts have not yet run on the server (the Product Manager's server run is to be done).

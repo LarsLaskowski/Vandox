@@ -57,12 +57,12 @@ curl --proto '=https' --proto-redir '=https' -fsSLO "$u/vandox-agent-linux-amd64
 ```
 
 Copy the three files to the server into `/root/vandox-files`. On the server run lines 1, 2, 3 and 5 of the block above (`sudo -i`, `v=`, `f=` and the `mktemp` line),
-then:
+then (`web` stands for the `agent_id` of this server):
 
 ```
 cp /root/vandox-files/* .
 awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
-"$d/vandox-agent-install-$v/install.sh" --from . --agent-id web-1 --backend-url http://100.64.0.1:8081
+"$d/vandox-agent-install-$v/install.sh" --from . --agent-id web --backend-url http://100.64.0.1:8081
 ```
 
 The binary is checked against the SHA-256 inside the checked bundle.

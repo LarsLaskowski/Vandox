@@ -149,7 +149,7 @@ tags look like `vX.Y.Z-rc.N`; the install bundle is packaged only for `vX.Y.Z` a
    the image with a syft container pinned by digest (*SBOM generator* below), run without network and
    without access to `dist/`.
 4. Verifies both binaries' `--version` output against the tag, the full commit SHA and the commit time, the
-   checksum and the bundle (`.github/scripts/check-agent-bundle.sh`: nine files, owner 0/0, fixed modes, `VERSION` equal to the tag, files equal to the tree, reproducible), that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder and runtime tags
+   checksum and the bundle (`.github/scripts/check-agent-bundle.sh`: ten files in eleven entries in a fixed order, a manifest, owner 0/0, fixed modes, `VERSION` equal to the tag, files equal to the tree, reproducible), that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder and runtime tags
    name the .NET version of the target framework, and that the image runs as `65532:65532`. The SBOM script
    checks its own output (SPDX 2.3; for the agent the Go standard library and the main module, for the image
    NuGet packages; at most 16 MiB each).
