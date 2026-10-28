@@ -25,6 +25,12 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
         _entry_uid=${info%% *}
         _entry_mode=$((8#${info#* }))
     }
+    # The manifest lists the seven members the scripts read; it proves the extraction is complete and unchanged.
+    # A bundle member that does not exist at all is the same refusal.
+    _entry_fail() {
+        echo "${BASH_SOURCE[0]##*/}: the bundle is incomplete or changed; extract it again in a new directory" >&2
+        exit 1
+    }
     _entry_src=${BASH_SOURCE[0]%/*}
     if [[ $_entry_src == "${BASH_SOURCE[0]}" ]]; then
         _entry_src=.
@@ -42,6 +48,9 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
         _entry_walk=${_entry_walk%/*}
     done
     for _entry_path in "$_entry_dir" "$_entry_dir/${BASH_SOURCE[0]##*/}" "$_entry_dir/common.sh" "$_entry_dir/MANIFEST.sha256"; do
+        if [[ ! -e $_entry_path && ! -L $_entry_path ]]; then
+            _entry_fail
+        fi
         if [[ -L $_entry_path ]]; then
             _entry_refuse "$_entry_path"
         fi
@@ -50,12 +59,7 @@ if [[ -z "$(declare -F read_spool_directory)" ]]; then
             _entry_refuse "$_entry_path"
         fi
     done
-    # The manifest lists the seven members the scripts read; it proves the extraction is complete and unchanged.
-    # Its reader is bounded: a regular file of at most 4096 bytes, exactly seven lines in a fixed order.
-    _entry_fail() {
-        echo "${BASH_SOURCE[0]##*/}: the bundle is incomplete or changed; extract it again in a new directory" >&2
-        exit 1
-    }
+    # The manifest reader is bounded: a regular file of at most 4096 bytes, exactly seven lines in a fixed order.
     _entry_manifest=$_entry_dir/MANIFEST.sha256
     if [[ -L $_entry_manifest || ! -f $_entry_manifest ]]; then
         _entry_fail

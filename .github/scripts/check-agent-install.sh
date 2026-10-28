@@ -420,9 +420,11 @@ run_documented() {
 
 # stage_files SRC: the three release files in /root/vandox-files, as the offline instructions have them.
 stage_files() {
+  local src=$1
+
   rm -rf -- "$FILES_DIR"
   mkdir -m 0700 -- "$FILES_DIR"
-  cp -- "$1"/* "$FILES_DIR/"
+  cp -- "$src"/* "$FILES_DIR/"
 }
 
 # Good row: the offline lines install the agent; the extracted files are root-owned, the scripts 0755 and the rest
