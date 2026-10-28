@@ -307,8 +307,8 @@ Tailscale ACL strict, so the monitored server reaches only this port ([SECURITY.
 
 From v0.2.0 on, the agent collects on the monitored server and sends to the backend of step 10. The release publishes an install bundle,
 `vandox-agent-install-vX.Y.Z.tar.gz`, with the scripts, the unit, the example configuration and a manifest, and a `SHA256SUMS` that lists the bundle and the binary.
-First put the monitored server into the backend host's tailnet: install Tailscale there, log in, limit the server to the ingest port
-in the tailnet policy, and check the connection, as
+First put the monitored server into the backend host's tailnet: install Tailscale there, limit the server to the ingest port
+in the tailnet policy, join the tailnet with the server's tag, and check the connection, as
 [`deploy/agent/README.md`](../deploy/agent/README.md#tailscale-on-the-monitored-server) (*Tailscale on the monitored server*) describes.
 
 The server needs `bash`, `curl`, `sha256sum`, `tar` and `gzip`, not `git`. Run these lines **as root on the monitored server**, one at a time, with `vX.Y.Z`

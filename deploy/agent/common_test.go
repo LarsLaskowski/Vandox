@@ -653,7 +653,7 @@ func TestMariadbAccount_SkippedWithNoMariadb(t *testing.T) {
 }
 
 // statTable installs a stat stand-in that answers `stat -c '%u %a' -- PATH` from a table of path|"uid mode"
-// rows and answers "0 755" for every path not in the table, so a test controls the owner and the mode of
+// rows and answers "0 755" for every existing path not in the table (a path that does not exist fails like the real tool), so a test controls the owner and the mode of
 // each entry without root. Links are not faked: the scripts test them with [[ -L ]].
 func (h *harness) statTable(rows ...string) {
 	h.t.Helper()
@@ -666,6 +666,10 @@ func (h *harness) statTable(rows ...string) {
 	h.writeFile("logs/stat.table", text)
 
 	h.stub("stat", `path=${*: -1}
+if [[ ! -e $path && ! -L $path ]]; then
+    echo "stat: cannot statx '$path': No such file or directory" >&2
+    exit 1
+fi
 answer="0 755"
 while IFS='|' read -r p v; do
     if [[ $p == "$path" ]]; then answer=$v; fi

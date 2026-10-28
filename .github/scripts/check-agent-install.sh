@@ -540,18 +540,41 @@ run "" "$interrupted/$BUNDLE_NAME/install.sh" --agent-id "$AGENT_ID" --backend-u
 grep -Fq "No such file or directory" <<<"$ERR" || fail "interrupted extraction without install.sh: no 'No such file or directory'"
 nothing_left "interrupted extraction without install.sh"
 
-interrupted="$(mktemp -d "$work/interrupted.XXXXXX")"
-tar -xzf "$dist/$bundle_file" -C "$interrupted" --exclude="$BUNDLE_NAME/common.sh"
-run "$CI_TOKEN"$'\n' "$interrupted/$BUNDLE_NAME/install.sh" --agent-id "$AGENT_ID" --backend-url "$BACKEND_URL" --from "$dist"
-expect_rc 1 "interrupted extraction without common.sh"
+# Without common.sh or without MANIFEST.sha256, for both scripts: the one-line manifest message and nothing
+# else (no stat error, no owner line), exit 1, nothing changed.
+interrupted_missing() {
+  local member=$1
+  local script=$2
+  local dir
 
-if [[ "$ERR" != "install.sh: the bundle is incomplete or changed; extract it again in a new directory" &&
-  "$ERR" != "install.sh: $(cd -P "$interrupted/$BUNDLE_NAME" && pwd -P)/common.sh is not owned by root or is writable by others; extract the bundle as root in a private directory" ]]; then
-  show
-  fail "interrupted extraction without common.sh: unexpected standard error"
-fi
+  dir="$(mktemp -d "$work/interrupted.XXXXXX")"
+  tar -xzf "$dist/$bundle_file" -C "$dir" --exclude="$BUNDLE_NAME/$member"
 
-nothing_left "interrupted extraction without common.sh"
+  if [[ "$script" == install.sh ]]; then
+    run "$CI_TOKEN"$'\n' "$dir/$BUNDLE_NAME/install.sh" --agent-id "$AGENT_ID" --backend-url "$BACKEND_URL" --from "$dist"
+  else
+    run "" "$dir/$BUNDLE_NAME/uninstall.sh" --purge
+  fi
+
+  expect_rc 1 "interrupted extraction without $member, $script"
+
+  if [[ "$ERR" != "$script: the bundle is incomplete or changed; extract it again in a new directory" ]]; then
+    show
+    fail "interrupted extraction without $member, $script: standard error is not the one manifest line"
+  fi
+
+  if [[ -n "$OUT" ]]; then
+    show
+    fail "interrupted extraction without $member, $script: the script printed on standard output, so it ran"
+  fi
+
+  nothing_left "interrupted extraction without $member, $script"
+}
+
+interrupted_missing common.sh install.sh
+interrupted_missing MANIFEST.sha256 install.sh
+interrupted_missing common.sh uninstall.sh
+interrupted_missing MANIFEST.sha256 uninstall.sh
 
 # --- case: uninstall before install ----------------------------------------------------------------------
 note "case: uninstall before install"

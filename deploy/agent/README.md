@@ -17,8 +17,9 @@ differ from this summary, follow Tailscale.
 2. **Prepare the tailnet policy, before this server joins.** The policy must allow this server only the ingest port on the backend
    host ([SECURITY.md](../../SECURITY.md)). That is possible only when the server joins with a tag: a device without a tag acts as
    the user who logged it in, and the policy only adds permissions, so every rule for that user would apply to the server too. Tag
-   the backend host `tag:vandox-backend` as Tailscale's guide to tags describes (<https://tailscale.com/kb/1068/acl-tags>), and
-   add to the policy (<https://tailscale.com/kb/1018/acls>), with the ingest port 8081:
+   the backend host `tag:vandox-backend` as Tailscale's guide to tags describes (<https://tailscale.com/kb/1068/acl-tags>); a tagged
+   host no longer has its user's permissions, so connections it opens itself over the tailnet need a rule with `tag:vandox-backend`
+   as source. Add to the policy (<https://tailscale.com/kb/1018/acls>), with the ingest port 8081:
 
    ```
    "tagOwners": {

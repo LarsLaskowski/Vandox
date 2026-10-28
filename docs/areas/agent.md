@@ -2028,7 +2028,7 @@ a private directory`, exit 1, with nothing sourced or changed; a bundle member t
 reads: `VERSION`, `vandox-agent.service`, `mariadb-user.sql`, `agent.yaml` and the pin file (`uninstall.sh`: `mariadb-user-remove.sql`); a missing file is left to the later checks. Everything after the check, `common.sh` and the bundle files included, is read through the physical directory the check looked at, never through the path as typed (which may run through a link). What remains is the time between a check and the read.
 
 **The manifest (E16).** Still before `common.sh` is sourced, the entry check reads `MANIFEST.sha256` with a bounded reader: not a link, a regular file of at most
-4096 bytes (its size taken with `wc -c`, which for a regular file reads nothing, before any read), exactly seven lines that each end in a line feed, a further read finding nothing (not even a partial line), line *i* matching
+4096 bytes (its size taken with `wc -c`, which for a regular file seeks to the end and reads at most the last block, never the whole file, before any read), exactly seven lines that each end in a line feed, a further read finding nothing (not even a partial line), line *i* matching
 `<64 lower-case hex digits>  <name i>` with the names compared as fixed strings in the order `VERSION`, `agent.yaml`, `common.sh`, `mariadb-user-remove.sql`,
 `mariadb-user.sql`, `vandox-agent-linux-amd64.sha256`, `vandox-agent.service` (no other name, no path, none twice). Then
 `sha256sum --check --strict --quiet MANIFEST.sha256` must pass in the physical bundle directory. The manifest is also covered by the owner and mode rule. Any failure prints

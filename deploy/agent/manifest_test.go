@@ -121,7 +121,7 @@ func manifestCases() []manifestCase {
 	hashOf := func(s string) string { return sha256Hex([]byte(s)) }
 
 	return []manifestCase{
-		{name: "manifest missing", ownerLineToo: true, change: func(t *testing.T, dir string) {
+		{name: "manifest missing", change: func(t *testing.T, dir string) {
 			t.Helper()
 			removeFile(t, filepath.Join(dir, manifestName))
 		}},
@@ -198,6 +198,10 @@ func manifestCases() []manifestCase {
 		{name: "no final line feed", change: func(t *testing.T, dir string) {
 			t.Helper()
 			writeBytes(t, filepath.Join(dir, manifestName), strings.Join(manifestLines(t, dir), "\n"))
+		}},
+		{name: "common.sh missing", change: func(t *testing.T, dir string) {
+			t.Helper()
+			removeFile(t, filepath.Join(dir, "common.sh"))
 		}},
 		{name: "a member missing", change: func(t *testing.T, dir string) {
 			t.Helper()
