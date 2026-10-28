@@ -109,9 +109,13 @@ Documented commands:
     the scripts exist only after it; everything happens in a new `mktemp -d` directory; and the script is run by its full path in
     that directory, so a failed step, a failed `mktemp` or variables lost in a new shell leave nothing to run. The bundle's line is
     selected by an exact comparison of the name field, not a pattern (`sha256sum --strict` alone would still take a line with one
-    space, a tab or leading blanks, and then checks the same file). The archive holds `install.sh` and `uninstall.sh` last, so an
-    interrupted extraction leaves no complete script. `tar` restores the verified archive's owner (root) and modes, so it needs no
-    extra flags.
+    space, a tab or leading blanks, and then checks the same file). Because the run line follows whatever `tar` did, an extraction
+    that failed part-way (a write error on one member, space freed later) could leave a complete script beside a truncated
+    `common.sh` or unit that is still valid; a truncated `common.sh` turns a missing guard function into a false condition and so
+    fails open. So the bundle carries `MANIFEST.sha256`, the SHA-256 of every other member but the two scripts, and both scripts check
+    it before they source anything; the member order (the manifest before the scripts, `install.sh` last) only keeps a truncated
+    script from running, as bash never reaches its last line. `tar` restores the verified archive's owner (root) and modes, so it
+    needs no extra flags.
 
 ## Decision
 
