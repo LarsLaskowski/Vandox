@@ -1,6 +1,6 @@
 # 0131: Agent unit and install scripts: token as a systemd credential, tailnet-only addresses, fixed resource limits with GOMEMLIMIT, checksum-verified binary, install bundle as a release asset, remove and purge
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-10-27
 - **Area:** Agent
 - **Source:** Issue #42
@@ -102,14 +102,20 @@ Which checksum `install.sh` checks the binary against:
 
 Documented commands:
 32. **Download, check, extract and run as separate lines** — pasted line by line, a failed check does not stop `tar` and `install.sh`.
-33. **One command chained with `&&`, as root in a new `mktemp -d` directory** (chosen, Security review) — a failed check stops it, and
-    no other local user can have created the extraction directory; the bundle's line is selected by an exact comparison of the name
-    field, not a pattern (`sha256sum --strict` alone would still take a line with one space, a tab or leading blanks, and then checks
-    the same file), and `tar` extracts with root as owner and root's umask (`--no-same-owner --no-same-permissions`).
+33. **One command chained with `&&`, as root in a new `mktemp -d` directory** (Security review, then refused by the Product Manager) —
+    fails closed, but a nested block of seven lines is hard to read, and many consoles paste such a block badly.
+34. **Short single commands, with check and extraction as one line** (chosen) — each line is one step with one sentence of
+    explanation, and the sequence fails closed however the lines are pasted: `tar` runs only in the same line after a passed check, so
+    the scripts exist only after it; everything happens in a new `mktemp -d` directory; and the script is run by its full path in
+    that directory, so a failed step, a failed `mktemp` or variables lost in a new shell leave nothing to run. The bundle's line is
+    selected by an exact comparison of the name field, not a pattern (`sha256sum --strict` alone would still take a line with one
+    space, a tab or leading blanks, and then checks the same file). The archive holds `install.sh` and `uninstall.sh` last, so an
+    interrupted extraction leaves no complete script. `tar` restores the verified archive's owner (root) and modes, so it needs no
+    extra flags.
 
 ## Decision
 
-The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16, 18, 21, 23, 29, 31 and 33; the settings, values, paths and messages are
+The unit and the scripts are built as in options 3, 5, 8, 10, 12, 14, 16, 18, 21, 23, 29, 31 and 34; the settings, values, paths and messages are
 in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manager*) and in `deploy/agent/README.md`.
 
 ## Consequences
@@ -128,7 +134,9 @@ in the [Agent](../areas/agent.md) area (*Installation*, *Rights*, *Service manag
 - `SHA256SUMS` holds one line per asset (bundle and binary) and serves the operator's check of the bundle and anyone who downloads the
   binary by hand; `install.sh` no longer reads it.
 - The operator's check of the bundle before extraction is the trust boundary for the scripts, the unit and the binary: every document
-  shows it in one `&&` chain with `tar` and `install.sh`, as root in a new private directory, and never a pipe into a shell.
+  shows it as single commands, as root in a new private directory, with check and extraction in one line and never a pipe into a
+  shell. A repeated check in the same directory after an earlier successful extraction leaves that earlier, checked extraction in
+  place; the documents say to start each attempt in a new directory.
 - `install.sh` takes its version only from the bundle's `VERSION`, so the scripts, the unit and the binary come from one release; the
   `--version` option and the checkout warning are gone, and a run from a source checkout (no `VERSION`) is refused. A developer builds
   a bundle with the release's packaging script.
