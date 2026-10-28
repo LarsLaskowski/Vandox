@@ -2496,11 +2496,12 @@ type entryCase struct {
 
 // entryDirs are the physical paths an entry-check case can name.
 type entryDirs struct {
-	far    string // an ancestor several levels above the bundle
-	near   string // the parent of the bundle directory
-	bundle string
-	script string
-	common string
+	far      string // an ancestor several levels above the bundle
+	near     string // the parent of the bundle directory
+	bundle   string
+	script   string
+	common   string
+	manifest string
 }
 
 // TestEntryCheck_RefusesBeforeSourcing runs a copy of install.sh as a program beside a stub common.sh that
@@ -2535,6 +2536,8 @@ func TestEntryCheck_RefusesBeforeSourcing(t *testing.T) {
 		{name: "common.sh of uid 1000", rows: func(d entryDirs) []string { return row(d.common, "1000 644") }, refuse: func(d entryDirs) string { return d.common }},
 		{name: "common.sh 4755", rows: func(d entryDirs) []string { return row(d.common, "0 4755") }, refuse: func(d entryDirs) string { return d.common }},
 		{name: "common.sh 2775", rows: func(d entryDirs) []string { return row(d.common, "0 2775") }, refuse: func(d entryDirs) string { return d.common }},
+		{name: "MANIFEST.sha256 of uid 1000", rows: func(d entryDirs) []string { return row(d.manifest, "1000 644") }, refuse: func(d entryDirs) string { return d.manifest }},
+		{name: "MANIFEST.sha256 0664", rows: func(d entryDirs) []string { return row(d.manifest, "0 664") }, refuse: func(d entryDirs) string { return d.manifest }},
 		{name: "common.sh a link", link: true, rows: func(entryDirs) []string { return nil }, refuse: func(d entryDirs) string { return d.common }},
 		{name: "the script 0646", rows: func(d entryDirs) []string { return row(d.script, "0 646") }, refuse: func(d entryDirs) string { return d.script }},
 	}
@@ -2565,11 +2568,12 @@ func runEntryCase(t *testing.T, tc entryCase) {
 	}
 
 	dirs := entryDirs{
-		far:    filepath.Dir(root),
-		near:   filepath.Join(root, "near"),
-		bundle: bundle,
-		script: filepath.Join(bundle, installScript),
-		common: filepath.Join(bundle, commonScript),
+		far:      filepath.Dir(root),
+		near:     filepath.Join(root, "near"),
+		bundle:   bundle,
+		script:   filepath.Join(bundle, installScript),
+		common:   filepath.Join(bundle, commonScript),
+		manifest: filepath.Join(bundle, manifestName),
 	}
 
 	script, err := os.ReadFile(shippedFile(t, installScript))
@@ -2581,16 +2585,19 @@ func runEntryCase(t *testing.T, tc entryCase) {
 		t.Fatalf("write %s: %v", dirs.script, err)
 	}
 
-	stubCommon := "echo sourced\nexit 0\n"
+	h.passthrough("sha256sum")
+	writeBundle(t, bundle, entryStubCommon)
+
 	if tc.link {
 		target := filepath.Join(root, "elsewhere.sh")
-		writeBytes(t, target, stubCommon)
+
+		if err := os.Rename(dirs.common, target); err != nil {
+			t.Fatalf("move %s: %v", dirs.common, err)
+		}
 
 		if err := os.Symlink(target, dirs.common); err != nil {
 			t.Fatalf("symlink: %v", err)
 		}
-	} else {
-		writeBytes(t, dirs.common, stubCommon)
 	}
 
 	h.statTable(tc.rows(dirs)...)
@@ -2689,7 +2696,8 @@ func runPhysicalCase(t *testing.T, name string) {
 		t.Fatalf("write %s: %v", name, err)
 	}
 
-	writeBytes(t, filepath.Join(bundle, commonScript), physicalStubCommon)
+	h.passthrough("sha256sum")
+	writeBundle(t, bundle, physicalStubCommon)
 
 	link := filepath.Join(alice, "b")
 	if err := os.Symlink(bundle, link); err != nil {
