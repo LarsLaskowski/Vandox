@@ -53,6 +53,10 @@ readonly CASE_FIRST_INSTALL="first install"
 readonly CASE_REPEAT_INSTALL="repeat install"
 readonly CASE_UNINSTALL="uninstall"
 
+# The install output that several cases expect (SonarQube shelldre:S1192).
+readonly INSTALLED_MSG="vandox-agent $VERSION installed and running"
+readonly KEEPING_MSG="install.sh: keeping existing $CONFIG_FILE"
+
 OUT=""
 ERR=""
 RC=0
@@ -429,7 +433,7 @@ run_documented "$work/documented-good.sh" "$work/tmp-good" "$work/cwd-good"
 show
 [[ "$CHECK" == 0 ]] || fail "bundle verification: the check line of the good bundle exited $CHECK"
 expect_rc 0 "bundle verification, documented offline lines"
-expect_out "vandox-agent $VERSION installed and running" "bundle verification, good bundle"
+expect_out "$INSTALLED_MSG" "bundle verification, good bundle"
 [[ -n "$DIR" && -d "$DIR/$BUNDLE_NAME" ]] || fail "bundle verification: the good bundle was not extracted into d ($DIR)"
 agent_dir="$DIR/$BUNDLE_NAME"
 unit_source="$agent_dir/vandox-agent.service"
@@ -685,7 +689,7 @@ chmod 0644 "$CONFIG_FILE"
 # shellcheck disable=SC2046
 install_run "$CI_TOKEN"$'\n' $(install_args)
 expect_rc 1 "install.sh with an invalid kept agent.yaml"
-expect_out "install.sh: keeping existing $CONFIG_FILE" "E8"
+expect_out "$KEEPING_MSG" "E8"
 expect_err "install.sh: vandox-agent did not start; see: journalctl -u vandox-agent" "E8"
 [[ -x "$BINARY" && -f "$UNIT" ]] || fail "E8: the installed files do not stay in place"
 
@@ -700,7 +704,7 @@ note "case: first install"
 install_run "$CI_TOKEN"$'\n' $(install_args)
 show
 expect_rc 0 "$CASE_FIRST_INSTALL"
-expect_out "vandox-agent $VERSION installed and running" "$CASE_FIRST_INSTALL"
+expect_out "$INSTALLED_MSG" "$CASE_FIRST_INSTALL"
 expect_out "install.sh: user $AGENT_USER: created" "$CASE_FIRST_INSTALL"
 expect_out_re "^install\\.sh: WARNING MariaDB account not created; run: (plesk db|mariadb) < ${agent_dir//./\\.}/mariadb-user\\.sql\$" "$CASE_FIRST_INSTALL"
 
@@ -803,8 +807,8 @@ printf 'kept\n' >"$SPOOL/keep-me"
 run "" "$agent_dir/install.sh" --agent-id other-name --backend-url https://100.64.0.9:9 --from "$dist"
 show
 expect_rc 0 "$CASE_REPEAT_INSTALL"
-expect_out "vandox-agent $VERSION installed and running" "$CASE_REPEAT_INSTALL"
-expect_out "install.sh: keeping existing $CONFIG_FILE" "$CASE_REPEAT_INSTALL"
+expect_out "$INSTALLED_MSG" "$CASE_REPEAT_INSTALL"
+expect_out "$KEEPING_MSG" "$CASE_REPEAT_INSTALL"
 expect_no_out "MariaDB account not created" "$CASE_REPEAT_INSTALL"
 [[ "$(stat -c %i "$BINARY")" != "$inode_before" ]] || fail "repeat install: the binary was not replaced by a rename (same inode)"
 [[ "$(sha256sum "$CONFIG_FILE")" == "$config_before" ]] || fail "repeat install: agent.yaml changed"
@@ -935,8 +939,8 @@ note "case: reinstall"
 run "" "$agent_dir/install.sh" --from "$dist"
 show
 expect_rc 0 "reinstall"
-expect_out "vandox-agent $VERSION installed and running" "reinstall"
-expect_out "install.sh: keeping existing $CONFIG_FILE" "reinstall"
+expect_out "$INSTALLED_MSG" "reinstall"
+expect_out "$KEEPING_MSG" "reinstall"
 [[ "$(sha256sum "$CONFIG_FILE")" == "$config_before" ]] || fail "reinstall: agent.yaml changed"
 [[ "$(sha256sum "$TOKEN_FILE")" == "$token_before" ]] || fail "reinstall: the token file changed"
 [[ -f "$SPOOL/keep-me" ]] || fail "reinstall: a spool file is gone"
