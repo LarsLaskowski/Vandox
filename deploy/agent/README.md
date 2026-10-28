@@ -8,33 +8,49 @@ the agent holds, each with the collector that needs it, follow under *Rights per
 
 The agent sends its data only over Tailscale: its unit lets it reach nothing but localhost and the tailnet ranges `100.64.0.0/10` and
 `fd7a:115c:a1e0::/48`. Without Tailscale on this server, every send fails as `connection failed`; the agent keeps its data in its spool
-and tries again. Do these steps once, before you install the agent. They follow Tailscale's documentation; where Tailscale's pages
-differ from this summary, follow Tailscale.
+and tries again. Do these steps once, before you install the agent. They follow Tailscale's documentation and a run on a real tailnet;
+where Tailscale's pages differ from this summary, follow Tailscale.
 
 1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
    Use the package repository method that the guide describes. Check what a script does before you run it, as you would with any
    download.
-2. **Prepare the tailnet policy, before this server joins.** The policy must allow this server only the ingest port on the backend
+2. **Prepare the tailnet policy, before this server joins.** Both machines carry a tag: this server `tag:vandox-agent`, the backend host
+   `tag:vandox-backend`. The policy must allow this server only the ingest port on the backend
    host ([SECURITY.md](../../SECURITY.md)). That is possible only when the server joins with a tag: a device without a tag acts as
-   the user who logged it in, and the policy only adds permissions, so every rule for that user would apply to the server too. Tag
-   the backend host `tag:vandox-backend` as Tailscale's guide to tags describes (<https://tailscale.com/kb/1068/acl-tags>); a tagged
-   host no longer has its user's permissions, so connections it opens itself over the tailnet need a rule with `tag:vandox-backend`
-   as source. Add to the policy (<https://tailscale.com/kb/1018/acls>), with the ingest port 8081:
+   the user who logged it in, so every rule for that user would apply to the server too. Rules only add permissions, and `*`
+   includes tagged devices, so **the tailnet's default rule must be replaced first**: in the policy file it reads
+   `{"src": ["*"], "dst": ["*"], "ip": ["*"]}` (in the older form `{"action": "accept", "src": ["*"], "dst": ["*:*"]}`). Tag the
+   backend host as Tailscale's guide to tags describes (<https://tailscale.com/kb/1068/acl-tags>). Then write
+   the policy (<https://tailscale.com/kb/1018/acls>) with these entries, with the backend's ingest port in place of `8081`:
 
    ```
    "tagOwners": {
      "tag:vandox-agent":   ["autogroup:admin"],
      "tag:vandox-backend": ["autogroup:admin"],
    },
-   "acls": [
-     {"action": "accept", "src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend:8081"]},
+   "grants": [
+     {"src": ["tag:vandox-agent"],   "dst": ["tag:vandox-backend"], "ip": ["tcp:8081"]},
+     {"src": ["autogroup:member"],   "dst": ["autogroup:self"],     "ip": ["*"]},
+     {"src": ["autogroup:member"],   "dst": ["tag:vandox-backend"], "ip": ["*"]},
    ],
    ```
 
-   No other rule may have a source that matches this server: not `*`, not `autogroup:tagged`, and not `tag:vandox-agent` with
-   another destination. Tailscale's default policy lets every device reach every other with `*`, so replace that rule, and keep
-   the rules your own devices need, for example for the web UI. The agent never listens on a port, so no rule needs this server
-   as its destination.
+   - Whoever replaces the default rule must also think of exit nodes, DNS servers, subnet routers and other tagged devices that
+     it had covered: each needs its own rule.
+   - The first grant is the agent's only rule: TCP to the ingest port of the backend host. Write it exactly as `tcp:<port>`. A
+     port without a protocol (`"8081"`) allows every protocol on that port, and `tcp:*` allows every TCP port.
+   - The second and third replace the default rule for your own devices. Your devices reach each other, and they reach the backend
+     host, whose web UI, SSH and file services stay usable; a tagged host is no longer part of its user's `autogroup:self`.
+   - Optional, and not tested in a run: if the backend host itself opens connections to your devices (for example backups), it
+     needs a fourth grant with `tag:vandox-backend` as source and `autogroup:member` as destination.
+   - No other rule may have a source that matches this server: not `*`, not `autogroup:tagged`, and not `tag:vandox-agent` with
+     another destination. The agent itself never listens on a port, so it needs no rule with this server as destination. If you also manage the
+     server over Tailscale (SSH or anything else over the tailnet, not over the normal network), that needs an extra rule with your
+     devices as source and `tag:vandox-agent` as destination; no rule may have `tag:vandox-agent` as source.
+
+   Tailscale now recommends the `grants` form. Our understanding is that the older `acls` form still works, with
+   `{"action": "accept", "src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend:8081"]}` as the agent's rule, but this project
+   has not tested it.
 3. **Join the tailnet with the tag.** Run as root:
 
    ```
@@ -42,10 +58,23 @@ differ from this summary, follow Tailscale.
    ```
 
    It prints a URL; open it in a browser and sign in, as an admin of the tailnet, to the tailnet of the backend host. The request
-   fails if the policy of step 2 does not name the tag. Tailscale documents that tagged devices have key expiry turned off by
-   default (<https://tailscale.com/kb/1068/acl-tags>), so the server stays in the tailnet. The agent needs neither Tailscale SSH
-   (`--ssh`) nor any other option.
-4. **Check the connection.** On this server, with the backend host's tailnet address in place of `100.64.0.1`:
+   fails if the policy of step 2 does not name the tag. If it also prints that some peers are advertising routes but
+   `--accept-routes` is false, leave it so: do not add `--accept-routes`. The unit lets the agent reach only localhost and the
+   tailnet ranges, so routes into other networks would only carry traffic the unit blocks. Tailscale documents that tagged devices
+   have key expiry turned off by default (<https://tailscale.com/kb/1068/acl-tags>), so the server stays in the tailnet. The agent
+   needs neither Tailscale SSH (`--ssh`) nor any other option.
+
+   **Check that the server carries the tag.** In the admin console's list of machines, the server shows `tag:vandox-agent` and no
+   user. Or run this on the backend host, with this server's tailnet address in place of `100.64.0.2`:
+
+   ```
+   tailscale whois 100.64.0.2
+   ```
+
+   It should name `tag:vandox-agent`, not a user (the exact wording of the output has not been checked in this project). A server
+   without the tag acts as the user who logged it in: remove it from the tailnet and join again with the tag.
+4. **Check the connection.** On this server, with the backend host's tailnet address in place of `100.64.0.1` and its ingest port
+   in place of `8081`:
 
    ```
    tailscale ip -4
@@ -57,13 +86,19 @@ differ from this summary, follow Tailscale.
 
    - The first line prints this server's tailnet address (a `100.x.y.z` address).
    - The second must get a pong from the backend host. It checks the tailnet path, not the policy.
-   - The third must print `404`: the ingest port answers every request except the agent's own batches with `404`, so a `404` shows
-     that the policy lets this server reach the port. `000` means no connection: check the policy, and that the backend binds the
-     ingest port to its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)).
-   - The last two try another port of the backend host, SSH (22), which a host with SSH turned on usually accepts on all its
-     addresses. They must print `124`: the attempt timed out because the policy blocks it. `0` means the policy lets this server
-     reach the port; narrow it as in step 2. Any other number is not conclusive. (That a blocked port times out rather than being
-     refused is our reading of Tailscale's documentation and has not been tested in this project.)
+   - The third must print `404`. Only the ingest port answers like that: it answers every request except the agent's own batches
+     with `404`, so a `404` shows that the policy lets this server reach the ingest port. The other answers:
+     - `302` (a redirect to `/login`) means the web listener answered, not the ingest port. The address or port is wrong.
+     - `000` means no connection: check the grant of step 2, and that the backend host carries `tag:vandox-backend` (without it
+       the grant matches nothing).
+     - In both cases, check on the backend host that `.env` sets `INGEST_BIND_ADDRESS` to its tailnet address, and run
+       `docker port vandoxd 8081`. The ingest port is container port 8081 and the web port 8080 (step 10 of
+       [`docs/INSTALL.md`](../../docs/INSTALL.md)).
+   - The last two try another port of the backend host, SSH (22), and mean something only after the third line printed `404`.
+     - Blocked by the policy, as it should be: `No route to host`, or `124` (a timeout). Both were seen in runs on a real
+       tailnet.
+     - The policy lets this server reach port 22: `Connection refused` with `1`, or `0` (connected). The policy is too wide,
+       usually because the default rule is still there or the server has no tag; correct step 2 or 3.
 
    Use the backend's MagicDNS name instead of `100.64.0.1` if you want to give the agent a name
    (<https://tailscale.com/kb/1081/magicdns>). The install script warns about a name server outside localhost and the tailnet,

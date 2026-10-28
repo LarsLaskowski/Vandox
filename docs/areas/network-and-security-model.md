@@ -26,11 +26,14 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   the backend host** and nothing else, so a compromised server cannot reach the rest of the home network. The ACL is part of the
   deployment documentation and must be kept strict.
 - The monitored server joins the tailnet as a tagged node (`tag:vandox-agent`, requested with `tailscale up --advertise-tags` after
-  the policy names the tag under `tagOwners`). An untagged node acts as the user who logged it in, and the policy only adds
-  permissions, so the rule below could not be its only one. The policy's only rule with a source matching the server is the ingest
-  port on the backend host; no other rule's source may match it (not `*`, not `autogroup:tagged`). It needs no Tailscale SSH and no
-  rule with it as destination, because the agent listens on no port. The setup steps are in `deploy/agent/README.md` (*Tailscale on
-  the monitored server*).
+  the policy names the tag under `tagOwners`). An untagged node acts as the user who logged it in, and rules only add permissions,
+  so the rule below could not be its only one. The policy's only rule with a source matching the server allows TCP to the ingest port
+  on the backend host (in the `grants` form `"ip": ["tcp:<port>"]`; a port without a protocol or `tcp:*` allows more). No other
+  rule's source may match it: the tailnet's default rule with `*` as source matches tagged nodes too and is replaced before the server
+  joins, and neither `autogroup:tagged` nor `tag:vandox-agent` may be the source of another rule. It needs no Tailscale SSH, no
+  accepted subnet routes and no rule with it as destination, because the agent listens on no port. The setup steps and the checks
+  (the tag, a `404` from the ingest port, a refused probe of another port) are in `deploy/agent/README.md` (*Tailscale on the
+  monitored server*).
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).
