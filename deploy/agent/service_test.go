@@ -922,7 +922,8 @@ func checkInstallDocument(t *testing.T, name string) string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 
-	text := string(data)
+	// A checkout with CRLF line ends (.gitattributes: *.md) holds the same lines.
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 
 	for _, re := range forbiddenInDocuments {
 		if loc := re.FindStringIndex(text); loc != nil {

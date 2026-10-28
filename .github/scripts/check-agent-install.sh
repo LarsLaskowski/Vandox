@@ -332,13 +332,14 @@ nothing_left "before the cases"
 note "case: bundle verification (the documented offline lines, fed to bash -s without -e)"
 bundle_file="$BUNDLE_NAME.tar.gz"
 
-# split_blocks FILE DIR: writes every fenced code block of FILE to DIR/block-NN.
+# split_blocks FILE DIR: writes every fenced code block of FILE to DIR/block-NN, without a CR at the line ends
+# (.gitattributes checks *.md out with CRLF).
 split_blocks() {
   local file=$1
   local dir=$2
 
   awk -v dir="$dir" '/^```/ { if (inb) { inb = 0; close(out) } else { inb = 1; n++; out = sprintf("%s/block-%02d", dir, n) } next }
-    inb { print > out }' "$file"
+    inb { sub(/\r$/, ""); print > out }' "$file"
 }
 
 # find_block DIR PATTERN...: prints the one block file of DIR that holds every PATTERN (fixed strings).
