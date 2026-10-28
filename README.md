@@ -153,6 +153,8 @@ Releases are published from GitHub releases with `v<major>.<minor>.<patch>` tags
 **Agent.** The agent collects on the monitored server and sends to the backend (from v0.2.0). Each release publishes an install bundle,
 `vandox-agent-install-vX.Y.Z.tar.gz` (the install and uninstall scripts, the systemd unit, the example configuration, the two MariaDB scripts, a
 `VERSION` file, the binary's checksum and a manifest of the files), and a `SHA256SUMS` that lists the bundle and the binary. A server needs no `git`.
+The server must first be in the backend host's tailnet (Tailscale installed and logged in; see
+[*Tailscale on the monitored server*](deploy/agent/README.md#tailscale-on-the-monitored-server)).
 Run these lines as root on the monitored server (Ubuntu 22.04, systemd, `x86_64`), one at a time:
 
 1. Become root (run this line on its own: it may ask for your password).

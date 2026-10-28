@@ -25,6 +25,9 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 - Agent and backend communicate **only over Tailscale**. The tailnet ACL allows the monitored server to reach **only the ingest port on
   the backend host** and nothing else, so a compromised server cannot reach the rest of the home network. The ACL is part of the
   deployment documentation and must be kept strict.
+- The monitored server joins the tailnet as a node of its own, preferably tagged (`tag:vandox-agent`), so the policy can name it; the
+  policy's only rule for it is the ingest port on the backend host. It needs no Tailscale SSH and no rule that lets other nodes reach
+  it, because the agent listens on no port. The setup steps are in `deploy/agent/README.md` (*Tailscale on the monitored server*).
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).

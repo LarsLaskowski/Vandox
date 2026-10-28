@@ -4,13 +4,69 @@ This folder holds what installs the Vandox agent on the monitored server: the in
 steps to install, upgrade and remove the agent come first; the reference after them explains the options, the checks and what the script does; the rights
 the agent holds, each with the collector that needs it, follow under *Rights per collector*.
 
+## Tailscale on the monitored server
+
+The agent sends its data only over Tailscale: its unit lets it reach nothing but localhost and the tailnet ranges `100.64.0.0/10` and
+`fd7a:115c:a1e0::/48`. Without Tailscale on this server, every send fails as `connection failed`; the agent keeps its data in its spool
+and tries again. Do these steps once, before you install the agent. They follow Tailscale's documentation; where Tailscale's pages
+differ from this summary, follow Tailscale.
+
+1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
+   Use the package repository method that the guide describes. Check what a script does before you run it, as you would with any
+   download.
+2. **Log in to the tailnet of the backend host.** Run as root:
+
+   ```
+   tailscale up --advertise-tags=tag:vandox-agent
+   ```
+
+   It prints a URL; open it in a browser and sign in to the same tailnet as the backend host. The tag only works when the tailnet
+   policy names it under `tagOwners` (step 3). Without a tag, run plain `tailscale up`. In that case, turn off key expiry for this
+   machine in the admin console, or it loses the tailnet when its key expires
+   (<https://tailscale.com/kb/1028/key-expiry>). Tailscale documents that tagged devices have key expiry turned off by default
+   (<https://tailscale.com/kb/1068/acl-tags>). The agent needs neither Tailscale SSH (`--ssh`) nor any other option.
+3. **Limit what the server may reach.** The tailnet policy must allow this server only the ingest port on the backend host
+   ([SECURITY.md](../../SECURITY.md)). Tailscale's default policy lets every device reach every other, so replace that rule as
+   Tailscale's policy guide describes (<https://tailscale.com/kb/1018/acls>). The rule for the agent, with the backend host tagged
+   `tag:vandox-backend` and the ingest port 8081, is:
+
+   ```
+   "tagOwners": {
+     "tag:vandox-agent":   ["autogroup:admin"],
+     "tag:vandox-backend": ["autogroup:admin"],
+   },
+   "acls": [
+     {"action": "accept", "src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend:8081"]},
+   ],
+   ```
+
+   Keep the rules your own devices need, for example for the web UI. The agent never listens on a port, so this server needs no
+   rule that lets others reach it.
+4. **Check the connection.** On this server:
+
+   ```
+   tailscale ip -4
+   tailscale ping 100.64.0.1
+   curl -s -o /dev/null -w '%{http_code}\n' http://100.64.0.1:8081/
+   ```
+
+   The first prints this server's tailnet address (a `100.x.y.z` address). The second must get a pong from the backend host. It
+   checks the tailnet path, not the policy. The third must print `404`: the ingest port answers every request except the agent's
+   own batches with `404`, so a `404` shows that the policy lets this server reach the port. `000` means no connection: check the
+   policy, and that the backend binds the ingest port to its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)).
+   Use the backend's MagicDNS name instead of `100.64.0.1` if you want to give the agent a name
+   (<https://tailscale.com/kb/1081/magicdns>). The install script warns about a name server outside localhost and the tailnet,
+   because the unit would block it.
+
 ## Install the agent
 
 **What you need**
 
 - The monitored server: Ubuntu 22.04 with systemd on `x86_64`, `root` access (`sudo`), and `curl`, `sha256sum`, `tar` and `gzip` (no `git`).
-- The backend, already running and reachable over Tailscale (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)): you need its tailnet address and
-  ingest port, for example `http://100.101.102.103:8081`. A host name only works if it is a MagicDNS name; the agent can reach nothing but localhost and the tailnet.
+- Tailscale on this server, logged in to the same tailnet as the backend host (see *Tailscale on the monitored server* below).
+- The backend, already running with its ingest port on its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)): you
+  need that address and port, for example `http://100.64.0.1:8081`. A host name only works if it is a MagicDNS name; the agent can reach
+  nothing but localhost and the tailnet.
 - The agent token. You create it on the backend host (step 3 of [`docs/INSTALL.md`](../../docs/INSTALL.md): `openssl rand -hex 32 > secrets/vandox_agent_token`)
   and the backend accepts it only for the `agent_id` set under `ingest` (step 10). Have the same token value ready; the installer asks for it and never takes it as an option.
 - The release version, for example `v0.2.0`: find it on <https://github.com/LarsLaskowski/Vandox/releases> (use the same version as the backend where you can).
