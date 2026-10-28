@@ -205,7 +205,9 @@ func manifestCases() []manifestCase {
 		}},
 		{name: "one byte changed", change: replaceMember("VERSION", func(string) string { return "v1.2.4\n" })},
 		{name: "common.sh truncated at a function boundary", change: replaceMember("common.sh", func(old string) string {
-			return old[:strings.Index(old, "echo sourced")]
+			head, _, _ := strings.Cut(old, "echo sourced")
+
+			return head
 		})},
 		{name: "unit truncated", change: replaceMember("vandox-agent.service", func(old string) string {
 			return old[:len(old)/2]
