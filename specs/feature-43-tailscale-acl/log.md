@@ -25,3 +25,4 @@ are quoted in full.
 | 2026-10-29 22:21 | 4 Skeleton | Orchestrator | Skipped: plan adds no API (no production code) |
 | 2026-10-29 22:21 | 5 Tests first (G1) | squad-tester | launched, mode tests-first (sonnet/medium · 121,777 tokens · 15 tool uses · 239 s) |
 | 2026-10-29 22:26 | 5 Tests first (G1) | Orchestrator | Confirmed: compiles, go vet clean, 17 file-dependent tests fail on current tree, helper tests pass; deferred: none |
+| 2026-10-29 22:26 | 6 Implement (G1) | squad-dev | launched, mode implement (policy file, README, area docs) (sonnet/medium · usage pending) |
