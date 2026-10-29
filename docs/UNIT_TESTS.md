@@ -105,6 +105,13 @@ and `uninstall.sh` and the files they ship (`vandox-agent.service`, `agent.yaml`
   Where no plain reference fits, the same rules bound the ratio of the code under test on a multiple of the base
   input (for example twice the base input) to the same code on the base input.
 
+## Tests that read repository documents
+
+`.gitattributes` may check files out with CRLF (`*.md text eol=crlf`), so on a CI runner a document carries
+`\r\n` where the repository blob has `\n`. A test or script that reads a repository document (`*.md`, and the
+other files `.gitattributes` checks out with CRLF) normalizes `\r\n` to `\n` before it compares lines or feeds
+them to a shell. The first such test also tests the normalizer with CRLF input.
+
 ## Code coverage
 
 **Threshold: at least 80 % line coverage on new or changed production code, and at least 80 % overall** —
