@@ -30,5 +30,5 @@ are quoted in full.
 | 2026-10-29 22:31 | 7 Code check | Orchestrator | gofmt clean, go build/vet, golangci-lint 0 issues, scope-check PASS, main not moved |
 | 2026-10-29 22:31 | 7 Sonar gate | Orchestrator | Not run: only test code, docs and a policy file changed (tests excluded from cloud analysis); PR analysis reads it in step 11 |
 | 2026-10-29 22:31 | 8 Review round 1 | squad-reviewer | launched at b7e2f6c (opus/medium · usage pending) |
-| 2026-10-29 22:31 | 8 Security diff review | squad-security | launched at b7e2f6c, mode diff (opus/medium · usage pending) |
+| 2026-10-29 22:31 | 8 Security diff review | squad-security | launched at b7e2f6c, mode diff (opus/medium · 84,669 tokens · 17 tool uses · 126 s) |
 | 2026-10-29 22:33 | 8 Security diff review | Orchestrator | Security verdict CHANGES_REQUIRED: B1 E5 residual inaccurate (answering party can make agent ack/give up records; agent.md:2005 stale), B2 AC3 guard misses dst autogroup:tagged/danger-all; N1, N2. Waiting for Reviewer round 1 |
