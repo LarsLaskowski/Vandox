@@ -34,6 +34,27 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   accepted subnet routes and no rule with it as destination, because the agent listens on no port. The setup steps and the checks
   (the tag, a `404` from the ingest port, a probe of another port that the policy blocks, with `No route to host` or a timeout) are in `deploy/agent/README.md` (*Tailscale on the
   monitored server*).
+- **The example policy file is the source of the rules.** `deploy/agent/tailnet-policy.hujson` is the complete policy the maintainer
+  saves: both tags owned by `autogroup:admin`, the agent's one `tcp:<ingest port>` grant, `autogroup:member` to `autogroup:self`, and a
+  commented SSH opt-in. The README holds no copy. It is not in the install bundle. Go tests in `deploy/agent` read it (a strip helper and a
+  strict token walk that refuses duplicate keys) and fail when a source other than the two known ones appears, when the agent has a second
+  rule, when a grant reaches the backend host but for the agent's ingest port, or when the commented opt-in is anything but SSH
+  ([record 0132](../decisions/0132-example-tailnet-policy-file-pinned-by-tests-no-default-maintainer-grant.md)). The file also carries two policy
+  `tests` entries (the agent reaches the ingest port and not ports 22, 8080 and 443, and not the ingest port over UDP) meant to make the
+  admin console refuse a later edit that widens the server; that the console evaluates them on save is **not yet verified** (issue #338).
+- **A compromised root cannot widen the policy.** With no `ssh` rule, no `autoApprovers` entry and no grant to a subnet or
+  `autogroup:internet` that matches `tag:vandox-agent`, a root that turns on Tailscale SSH, advertises a route or an exit node, accepts
+  routes or selects an exit node still reaches only the ingest port. The README's settings line turns these off anyway and a settings check
+  (`tailscale debug prefs`) shows them; neither has been run on the production server yet (issue #338).
+- **Maintainer devices get nothing on the backend host by default.** The policy grants them no access to the backend host's tailnet address
+  but what the maintainer enables on purpose (a commented SSH line); there is none for the web port.
+- **After a reboot** Tailscale should come up by itself with its tag and settings, and the agent sends again from its spool; the README
+  has the check, not yet run on the production server (issue #338).
+- **Residual while Tailscale is not up.** Tailscale's routes exist only while it runs, and the unit's `IPAddressAllow=` filters by
+  address, not interface. While Tailscale is down (before its network map after a boot, stopped, logged out, the node removed), a send to the
+  backend's tailnet address follows the server's default route and fails as `connection failed` or a timeout, and whoever answers at that
+  address on the provider's path gets the token and the batch in clear. The exposure predates the policy file, is stated in the README, and
+  is not closed; issue #337 adds a control (record 0132). The records stay in the spool and go out once the tailnet is up.
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).
@@ -56,6 +77,9 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 
 - The web UI is reachable **in the home LAN only** and requires a **login**. It is not exposed to the internet and is not offered on the
   tailnet to the monitored server.
+- The example tailnet policy grants no source access to the backend host's tailnet address except the agent's `tcp:<ingest port>`; the
+  maintainer's devices reach the web UI in the home LAN. A grant the maintainer adds to a subnet route of the home LAN gives the devices behind
+  it the web UI at its LAN address, as if they were in the home LAN (record 0016 already allows it there, with the login).
 - The login is one administrator password, stored only as an argon2id hash, with server-side sessions, protection against cross-site
   requests and limits on failed sign-ins; the service trusts `X-Forwarded-For` and `X-Forwarded-Proto` only from the proxy addresses
   the operator lists, and never takes the network position of a request as proof of having passed the proxy. The rules are in the
@@ -111,6 +135,8 @@ agent's installation: `install.sh` creates it on the first install, `uninstall.s
 - [0127](../decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) — why TUN mode and a
   required bind address.
 - [0016](../decisions/0016-web-ui-in-home-lan-with-login.md) — why the web UI is LAN-only with a login.
+- [0132](../decisions/0132-example-tailnet-policy-file-pinned-by-tests-no-default-maintainer-grant.md) — why the example policy is a file
+  pinned by tests, gives maintainer devices nothing by default, and leaves the token's exposure while Tailscale is down to a follow-up.
 - [0013](../decisions/0013-mariadb-access-via-unix-socket-process-privilege.md) — why a `unix_socket` user with only `PROCESS`.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the
   agent's own minimal client, fixed captured statements and a refusal recorded with its error number.

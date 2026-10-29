@@ -34,7 +34,7 @@ files or endpoints.
    record content. The deduplication is implemented by `BatchWriter` in `src/Vandox.Storage` (partial unique index `records_agent_seq`,
    `INSERT ... ON CONFLICT DO NOTHING`, no code path updates a record row). `BatchWriter` also writes the derived listener rows (`ListenerMarkWriter`: `connection_marks` and `listener_comparisons`)
    only for a usable agent snapshot whose record insert returned an ID, in the same transaction, so a resent batch writes none. For a batch with an agent ID the `SqliteStore` write transaction also runs `AgentTimeline` (`src/Vandox.Storage`): it classifies each agent record (`records.live`, set in the insert) and writes the agent's `gaps`, `agent_streams`, `agent_clock_samples` and `agent_sample_times` rows, adding at most three `gaps` rows per stored record (two unless it is an agent `gap` record) with indexed seeks only (`AgentTimelineQueriesUseIndexSearchesOnly`), all time arithmetic in 128-bit integers and sequence ranges clipped in unsigned numbers, so no capture time or number can make the write throw or cost more than a constant number of seeks. The only rows the write path ever updates are `listener_comparisons` rows and these timeline rows, never a `records` row. Records 0032, 0044, 0045, 0063, 0077, 0116, 0126, 0128, 0130.
-2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL):
+2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL: `deploy/agent/tailnet-policy.hujson` and `deploy/agent/README.md`):
    *Goal:* a compromised monitored server can reach only the ingest port on the backend host's tailnet
    address and nothing else in the tailnet or home LAN; the ingest port is bound only to the tailnet
    address; the web UI is not offered on the tailnet to the monitored server.
@@ -43,7 +43,7 @@ files or endpoints.
    import-only setup), so the port is never published on an address the operator did not choose; the Dockerfile has no `EXPOSE`. The host needs Tailscale in TUN
    mode, because in userspace mode the tailnet address is no host interface (record 0127). In the service the ingest listener (`ListenerRoutes.Ingest`) serves
    only `POST /v1/batches` (`PortRoutingMiddleware`, `404` for everything else, the web pipeline never runs on it) over HTTP/1.1 with at most 16 connections. Records 0010,
-   0016, 0017, 0059, 0060, 0081, 0127.
+   0016, 0017, 0059, 0060, 0081, 0127, 0132.
 3. **Web UI login** (implemented): password hashing, sessions, CSRF, rate limiting, reverse-proxy
    trust. *Goal:* the password is stored only as a salted, deliberately slow hash; session IDs are random,
    expire, are invalidated on logout and travel only in `HttpOnly`, `SameSite` cookies that are `Secure`

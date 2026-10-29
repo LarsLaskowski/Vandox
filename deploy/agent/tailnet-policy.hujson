@@ -1,0 +1,52 @@
+// Example tailnet policy for Vandox (HuJSON: comments and trailing commas are allowed).
+//
+// It replaces the WHOLE policy of the tailnet, in the admin console as well as through GitOps. It is not part of the
+// agent's install bundle. Read deploy/agent/README.md, "Tailscale on the monitored server", step 2, before you save it.
+//
+// The monitored server carries tag:vandox-agent, the backend host tag:vandox-backend. If the monitored server is ever
+// compromised, it must reach nothing in the tailnet but TCP to the ingest port of the backend host. Rules only add
+// permissions, so no other rule may have a source that matches the server: never "*", never autogroup:tagged, never
+// tag:vandox-agent in a second grant, and never a covering address, CIDR, host alias or ipset. Never add an
+// autoApprovers entry, an ssh rule, or a grant to a subnet or to autogroup:internet with such a source.
+//
+// No tag may own a tag: the owners below are people (autogroup:admin) only.
+//
+// What the tailnet's default rule covered (subnet routers, exit nodes, DNS servers, other tagged devices, and your own
+// devices) needs its own rule below, written with a source that cannot match the server.
+//
+// The ingest port 8081 is written in two places: the agent's grant and the "tests" entries at the end. If your backend
+// uses another port, change both, and write it as tcp:<port>, never as a bare number and never as tcp:*, which allow
+// more.
+{
+  "tagOwners": {
+    "tag:vandox-agent":   ["autogroup:admin"],
+    "tag:vandox-backend": ["autogroup:admin"],
+  },
+
+  "grants": [
+    // The agent's only rule: TCP to the ingest port of the backend host.
+    {"src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend"], "ip": ["tcp:8081"]},
+
+    // Your own devices reach each other (what the default rule gave them among themselves).
+    {"src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"]},
+
+    // Opt-in, off by default: SSH from the tailnet admins to the backend host. It opens only tcp:22 of the backend
+    // host. The web UI stays reachable in the home LAN only (record 0016), so there is no line for the web port.
+    // {"src": ["autogroup:admin"], "dst": ["tag:vandox-backend"], "ip": ["tcp:22"]},
+  ],
+
+  // Intended to make the admin console refuse a later edit that lets the agent reach more than the ingest port.
+  // NOT YET VERIFIED: whether the console checks these entries against the grants on save is open (issue #338).
+  "tests": [
+    {
+      "src":    "tag:vandox-agent",
+      "accept": ["tag:vandox-backend:8081"],
+      "deny":   ["tag:vandox-backend:22", "tag:vandox-backend:8080", "tag:vandox-backend:443"],
+    },
+    {
+      "src":   "tag:vandox-agent",
+      "proto": "udp",
+      "deny":  ["tag:vandox-backend:8081"],
+    },
+  ],
+}
