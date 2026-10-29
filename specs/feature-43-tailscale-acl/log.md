@@ -44,4 +44,7 @@ are quoted in full.
 | 2026-10-29 22:37 | 9 PR approval | squad-lead | launched, mode approve-pr (open: split decision, DownResidual test vs plan, README:17 nit, record status) (opus/medium · 50,419 tokens · 9 tool uses · 52 s) |
 | 2026-10-29 22:38 | 9 PR approval | Orchestrator | Lead NOT APPROVED: split to #337 stands; fix round 2: README residual paragraph (Dev) + DownResidual needles (Tester), then Reviewer and Security delta |
 | 2026-10-29 22:38 | 8 Fix round 2 (Dev) | squad-dev | README residual paragraph rewrite (sonnet/medium · 1,742 tokens · 2 tool uses · 16 s · continued) |
-| 2026-10-29 22:39 | 8 Fix round 2 (Tester) | squad-tester | needles for DownResidual test (sonnet/medium · usage pending) |
+| 2026-10-29 22:39 | 8 Fix round 2 (Tester) | squad-tester | needles for DownResidual test (sonnet/medium · 1,510 tokens · 3 tool uses · 20 s · continued) |
+| 2026-10-29 22:40 | 8 Code check (fix round 2) | Orchestrator | gofmt, vet, golangci-lint, go test -race deploy/agent, scope-check PASS; main not moved; head 2224c66 |
+| 2026-10-29 22:40 | 8 Delta review 2 (Reviewer) | squad-reviewer | delta round at 2224c66 (opus/medium · usage pending) |
+| 2026-10-29 22:40 | 8 Delta review 2 (Security) | squad-security | delta confirmation at 2224c66 (opus/medium · usage pending) |
