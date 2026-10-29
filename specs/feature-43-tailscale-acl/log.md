@@ -12,4 +12,6 @@ are quoted in full.
 | 2026-10-29 21:57 | 2a Spec challenge | squad-devils-advocate | launched, mode spec (opus/medium · 56,825 tokens · 13 tool uses · 148 s) |
 | 2026-10-29 22:00 | 2a Spec challenge | Orchestrator | Verdict OBJECTIONS: 2 major (M1 LAN probe cannot catch E4; M2 AC3 guarantee too broad given subnet routers), 7 minor; sent to Lead in mode revise |
 | 2026-10-29 22:02 | 2a Spec (challenge revise round) | squad-lead | RESULT: DONE - 9 objections answered (M1, M2 accepted), spec passes plan-check (opus/medium · 18,485 tokens · 14 tool uses · 115 s · continued) |
-| 2026-10-29 22:06 | 2b Plan | squad-lead | RESULT: DONE - tier security; plan.md, tasks.md, record 0132 (Proposed); plan challenge and plan security review apply (opus/medium · usage pending) |
+| 2026-10-29 22:06 | 2b Plan | squad-lead | RESULT: DONE - tier security; plan.md, tasks.md, record 0132 (Proposed); plan challenge and plan security review apply (opus/medium · 46,365 tokens · 37 tool uses · 385 s · continued) |
+| 2026-10-29 22:07 | 2b Plan challenge | squad-devils-advocate | launched, mode plan (opus/medium · usage pending) |
+| 2026-10-29 22:07 | 3 Plan security review | squad-security | launched, mode plan (opus/medium · usage pending) |
