@@ -250,7 +250,7 @@ Backend:
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
   the host is a tailnet address is not checked; the network ACL is the boundary (see the network area). `http` is meant only for
-  the backend host's tailnet address or MagicDNS name, and the scheme must match the listener ([Agent](agent.md), *Connection*).
+  the backend host's tailnet address (MagicDNS names do not resolve once Tailscale's DNS is off on the server), and the scheme must match the listener ([Agent](agent.md), *Connection*).
 - `backend.backfill_bandwidth` is the bandwidth of the agent's backfill: the bytes a second of compressed request body it sends
   while it catches up on the spool after an outage ([Agent](agent.md), *Sending*; the live stream is not limited). It is checked right
   after `backend.url`; the value is written as `256KiB`, not as a number of bytes, and a decimal point, a unit other than `KiB` or `MiB`,
@@ -291,6 +291,13 @@ Backend:
 - A secret value has 1 to 4096 bytes of printable ASCII (`0x21` to `0x7E`). A BOM, spaces, other line endings and
   control characters are rejected instead of becoming part of the secret. A secret that needs other characters must
   be encoded, for example as base64. The agent token has at least 32 characters.
+- **On a server installed with the `install.sh` of the release's install bundle the agent token is a systemd credential.** The script writes it to
+  `/etc/vandox/agent-token` (root:root, mode 0600, one line with a newline) and the unit hands it to the agent with
+  `LoadCredential=agent-token:/etc/vandox/agent-token`; the unit sets `VANDOX_AGENT_TOKEN_FILE` to the written-out path
+  `/run/credentials/vandox-agent.service/agent-token` (never the `%d` specifier) and never `VANDOX_AGENT_TOKEN`, so the token is in no unit
+  line, environment value or command line. The script reads the token from the terminal or one line of standard input, applies the rules
+  above (32 to 4096 bytes of `0x21` to `0x7E`, checked before anything is written) and hands it to no child process; it is never an option
+  ([Agent](agent.md), *Installation*).
 - On the backend an unset secret is not an error when the configuration loads; the feature that needs it decides:
   the web UI refuses to start without the password hash; without `VANDOX_AGENT_TOKEN` (or without `ingest.agent_id`) the service
   starts, logs `ingest disabled` once and answers every ingest request `503` ([Backend host](backend-host.md), *Ingest endpoint*); and
@@ -344,8 +351,10 @@ Backend:
 - [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the backfill has its own,
   configurable bandwidth.
 - [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
-- [0129](../decisions/0129-configuration-and-secret-files-opened-without-blocking.md) — why the configuration file and a `_FILE` secret file are opened without blocking and their type is checked on the opened file.
   backend binds the one token to `ingest.agent_id` and stops ingest below `ingest.min_free`.
+- [0129](../decisions/0129-configuration-and-secret-files-opened-without-blocking.md) — why the configuration file and a `_FILE` secret file are opened without blocking and their type is checked on the opened file.
+- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the agent token
+  reaches the agent as a systemd credential and not as an environment value or a file the agent's group reads.
 
 ## Not here
 

@@ -263,3 +263,52 @@ jobs:
           mkdir "$work/sbom"
           .github/scripts/generate-sbom.sh dist/vandox-agent-linux-amd64 "$work/vandox-image.tar" v0.0.0-dryrun "$work/sbom"
           ls -l "$work/sbom"
+
+  # Installs the agent with deploy/agent/install.sh on a runner whose PID 1 is systemd 249 (Ubuntu 22.04, the
+  # target of the unit) and runs every case of .github/scripts/check-agent-install.sh: install, upgrade,
+  # uninstall, purge, the unit's confinement and address allow-list (record 0131). The binary is built here
+  # without privileges and handed over with --from, so nothing is downloaded; no secret is read.
+  agent-install:
+    name: Agent install (systemd 249)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build agent and checksum file
+        run: |
+          set -euo pipefail
+          tag=v0.0.0-rc.0
+          commit="$(git rev-parse HEAD)"
+          date="$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
+          pkg=github.com/LarsLaskowski/Vandox/internal/version
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X $pkg.Version=$tag -X $pkg.Commit=$commit -X $pkg.Date=$date" \
+            -o dist/vandox-agent-linux-amd64 ./cmd/vandox-agent
+          .github/scripts/package-agent.sh "$tag" dist
+          .github/scripts/check-agent-bundle.sh dist "$tag"
+          cat dist/SHA256SUMS
+
+      # The files the next step installs from, so a server run can install exactly the tested bytes.
+      - name: Upload install files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-install-files
+          path: |
+            dist/vandox-agent-linux-amd64
+            dist/SHA256SUMS
+            dist/vandox-agent-install-v0.0.0-rc.0.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Install, upgrade, uninstall and purge on systemd 249
+        run: sudo .github/scripts/check-agent-install.sh dist

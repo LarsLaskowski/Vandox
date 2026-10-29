@@ -65,7 +65,7 @@ the value.
 | `agent_id` | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
 | `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
 | `backend.backfill_bandwidth` | `256KiB` | Bandwidth the agent may use to send spooled data after the backend was unreachable: a whole number followed by `KiB` or `MiB`, from `16KiB` to `1024MiB`, such as `256KiB` or `4MiB`. |
-| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. It holds the spooled records in segment files `segment-<number>.spool` and the spool's bookkeeping file `spool-meta.json`, besides the agent's state file `agent-state.json` (the boot, the position in the journal, the open backup run and the positions of the log shipping collector: a position per journal sequence number ID and per configured file, up to 64 KiB). The agent never creates the directory, the installation does; it must exist, be a real directory (not a link) and be writable for the agent. |
+| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. It holds the spooled records in segment files `segment-<number>.spool` and the spool's bookkeeping file `spool-meta.json`, besides the agent's state file `agent-state.json` (the boot, the position in the journal, the open backup run and the positions of the log shipping collector: a position per journal sequence number ID and per configured file, up to 64 KiB). The agent never creates the directory, `deploy/agent/install.sh` does, and it accepts only one directory directly below `/var/lib/vandox` (a root-owned directory the unit may write to); the directory must exist, be a real directory (not a link) and be writable for the agent. |
 | `spool.max_size` | `2GiB` | Size cap of all spool files: a whole number followed by `MiB` or `GiB`, from `64MiB` to `64GiB`. When the cap or `spool.min_free` leaves no room for new records, the agent drops the oldest spool data first and records the gap. |
 | `spool.min_free` | `1GiB` | Free space that stays available on the file system of the spool: a whole number followed by `MiB` or `GiB`, from `0MiB` to `1024GiB`. `0MiB` (or `0GiB`) switches the check off. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
@@ -150,9 +150,43 @@ release is in [`CHANGELOG.md`](CHANGELOG.md).
 Releases are published from GitHub releases with `v<major>.<minor>.<patch>` tags on `main`
 (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#versioning-and-releases)).
 
-**Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is
-the forensics release and works from imported logs alone. A release also carries a `vandox-agent-linux-amd64` binary built
-from the current code; it starts with its configuration file and the agent token, schedules its own self-metrics and tells systemd that it is ready, but it collects nothing else and sends nothing yet, so there is nothing to install on the monitored server.
+**Agent.** The agent collects on the monitored server and sends to the backend (from v0.2.0). Each release publishes an install bundle,
+`vandox-agent-install-vX.Y.Z.tar.gz` (the install and uninstall scripts, the systemd unit, the example configuration, the two MariaDB scripts, a
+`VERSION` file, the binary's checksum and a manifest of the files), and a `SHA256SUMS` that lists the bundle and the binary. A server needs no `git`.
+The server must first be in the backend host's tailnet (Tailscale installed and logged in; see
+[*Tailscale on the monitored server*](deploy/agent/README.md#tailscale-on-the-monitored-server)).
+Run these lines as root on the monitored server (Ubuntu 22.04, systemd, `x86_64`), one at a time:
+
+1. Become root (run this line on its own: it may ask for your password).
+2. Set the version to install (replace `vX.Y.Z` by the release, for example `v0.2.0`).
+3. Set the bundle's file name.
+4. Set the release's download address.
+5. Create a new private directory and change into it (start every attempt here, with a new directory).
+6. Download the bundle and the checksum file of the release.
+7. Check the bundle against its line in `SHA256SUMS`, and only if it matches, unpack it; if this prints anything but `...: OK`, stop and start again at step 5.
+8. Run the install script from the unpacked bundle; it asks for the agent token. Replace `web-1` by the name of this server (its `agent_id`) and the address by the backend's tailnet address and ingest port.
+
+```
+sudo -i
+v=vX.Y.Z
+f=vandox-agent-install-$v.tar.gz
+u=https://github.com/LarsLaskowski/Vandox/releases/download/$v
+d=$(mktemp -d) && cd "$d"
+curl --proto '=https' --proto-redir '=https' -fsSL -O "$u/$f" -O "$u/SHA256SUMS"
+awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
+"$d/vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.64.0.1:8081
+```
+
+The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
+
+The bundle does not contain the agent binary, only its SHA-256: the script downloads `vandox-agent-linux-amd64` from the GitHub
+release of the bundle's version, so the server needs HTTPS access to `github.com` and a working name server (turn off Tailscale's
+DNS on it, see [*Tailscale on the monitored server*](deploy/agent/README.md#tailscale-on-the-monitored-server)). The script asks
+`Agent token:` and shows nothing while you type or paste; press Enter after the token. If your console cannot paste into a hidden
+prompt, see *The token prompt* in [`deploy/agent/README.md`](deploy/agent/README.md).
+
+To remove the agent, run the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade, offline install, the options and the checks are in [`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of
+[`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names the backend's tailnet address (MagicDNS names do not resolve once Tailscale's DNS is off on the server).
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
@@ -418,7 +452,7 @@ The traditional format also has no time zone. Set `import.time_zone` in `vandoxd
 server the logs come from (for example `Europe/Berlin`); there is no default, because a wrong zone would shift every
 time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
 "import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
-Set the option and run the import again: the file is completed. RFC 3339 files and journal exports carry their
+Set the option and run the import again: the file is completed. Files in RFC 3339 form and journal exports carry their
 offset and need no option. MariaDB error logs, Dovecot's log file, the Plesk panel, nginx and Apache error logs and the legacy monitoring log also write local time without a zone and are read in the same zone;
 without the option such a file fails at its first entry with the same reason.
 

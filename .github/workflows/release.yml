@@ -50,8 +50,11 @@ jobs:
             echo "::error::the run's ref '$REF' is not the release tag refs/tags/$TAG"
             exit 1
           fi
-          prerelease=false
-          case "$TAG" in *-*) prerelease=true ;; esac
+          case "$TAG" in
+            *-*) prerelease=true ;;
+            v*.*.*) prerelease=false ;;
+            *) echo "::error::tag '$TAG' is neither a MAJOR.MINOR.PATCH nor a pre-release SemVer tag"; exit 1 ;;
+          esac
           if [ "$prerelease" != "$RELEASE_PRERELEASE" ]; then
             echo "::error::the release's pre-release flag ($RELEASE_PRERELEASE) does not match the tag '$TAG': a tag with a pre-release suffix needs 'Set as a pre-release', any other tag must not have it"
             exit 1
@@ -117,7 +120,7 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
             -ldflags "-s -w -X $pkg.Version=$TAG -X $pkg.Commit=$COMMIT -X $pkg.Date=$DATE" \
             -o dist/vandox-agent-linux-amd64 ./cmd/vandox-agent
-          (cd dist && sha256sum vandox-agent-linux-amd64 > SHA256SUMS)
+          .github/scripts/package-agent.sh "$TAG" dist
 
       - name: Verify agent
         env:
@@ -126,11 +129,7 @@ jobs:
           DATE: ${{ steps.version.outputs.date }}
         run: |
           set -euo pipefail
-          (cd dist && sha256sum -c SHA256SUMS)
-          if [ "$(wc -l < dist/SHA256SUMS)" != "1" ] || ! grep -Eq '^[0-9a-f]{64}  vandox-agent-linux-amd64$' dist/SHA256SUMS; then
-            echo "::error::SHA256SUMS must hold exactly the line for vandox-agent-linux-amd64"
-            exit 1
-          fi
+          .github/scripts/check-agent-bundle.sh dist "$TAG"
           info="$(file dist/vandox-agent-linux-amd64)"
           echo "$info"
           for want in "ELF 64-bit" "x86-64" "statically linked"; do
@@ -300,6 +299,11 @@ jobs:
         with:
           subject-path: dist/vandox-agent-linux-amd64
 
+      - name: Attest install bundle
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/vandox-agent-install-${{ needs.build.outputs.tag }}.tar.gz
+
       - name: Attest image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -332,6 +336,7 @@ jobs:
             --source-ref "refs/tags/$TAG"
             --deny-self-hosted-runners)
           gh attestation verify dist/vandox-agent-linux-amd64 "${flags[@]}"
+          gh attestation verify "dist/vandox-agent-install-$TAG.tar.gz" "${flags[@]}"
           gh attestation verify "oci://docker.io/networlddev/vandox:$VERSION" "${flags[@]}"
           sbom_type=https://spdx.dev/Document/v2.3
           gh attestation verify dist/vandox-agent-linux-amd64 "${flags[@]}" --predicate-type "$sbom_type"
@@ -361,7 +366,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          gh release upload "$TAG" vandox-agent-linux-amd64 SHA256SUMS --clobber
+          gh release upload "$TAG" vandox-agent-linux-amd64 "vandox-agent-install-$TAG.tar.gz" SHA256SUMS --clobber
           body="$(gh release view "$TAG" --json body --jq .body)"
           if [ -z "$body" ]; then
             body="$(gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" --jq .body)"
@@ -405,6 +410,7 @@ jobs:
           names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
           body="$(gh release view "$TAG" --json body --jq .body)"
           if printf '%s\n' "$names" | grep -qx vandox-agent-linux-amd64 &&
+            printf '%s\n' "$names" | grep -qx "vandox-agent-install-$TAG.tar.gz" &&
             printf '%s\n' "$names" | grep -qx SHA256SUMS &&
             printf '%s\n' "$body" | grep -q '^Docker image: networlddev/vandox:'; then
             echo "::warning::the release $TAG is already complete from an earlier run; it stays published"

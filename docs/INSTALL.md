@@ -2,7 +2,7 @@
 
 This guide installs the Vandox backend `vandoxd` on a Docker host in the home network, imports the logs of the monitored server and
 opens the first reconstructed outage in the web UI. It is the path for v0.1.0, the forensics release: Vandox works from the logs the
-server already has, and there is **no agent to install** (the agent arrives with v0.2.0). The [README](../README.md) is the reference
+server already has, and **no agent is needed** for it (from v0.2.0 on, step 11 installs the agent). The [README](../README.md) is the reference
 for every option, command and limit named here.
 
 The steps are the same on any Docker host. Synology Container Manager and QNAP Container Station are shown as worked examples where
@@ -20,6 +20,8 @@ they differ.
   NAS interfaces cannot do these steps. On a Synology NAS enable SSH under *Control Panel → Terminal & SNMP*, on a QNAP NAS under
   *Control Panel → Network & File Services → Telnet / SSH*, and sign in as an administrator. Docker commands need `sudo` there.
 - **A shell on the monitored server** with `sudo`, to collect its logs.
+- **Tailscale** on the Docker host and, from v0.2.0, on the monitored server, both logged in to one tailnet: the agent sends to the
+  backend only over it (steps 10 and 11).
 - **A reverse proxy with TLS** for the web UI: the NAS's built-in proxy, nginx or Caddy ([REVERSE_PROXY.md](REVERSE_PROXY.md)).
 - **The IANA time zone of the monitored server**, for example `Europe/Berlin` (`timedatectl show -p Timezone --value` on the
   server). Most of its logs carry no time zone, and a wrong zone shifts every time stamp.
@@ -272,7 +274,7 @@ User-defined script*, user `root`, event *Boot-up*, script
 `/var/packages/Tailscale/target/bin/tailscale configure-host; synosystemctl restart pkgctl-Tailscale.service`.
 
 **The bind address and the agent ID.** Set `INGEST_BIND_ADDRESS` in `.env` to the address `tailscale ip -4` prints (for example
-`INGEST_BIND_ADDRESS=100.101.102.103`, beside a `WEB_BIND_ADDRESS` line if you have one), and the agent's `agent_id` in
+`INGEST_BIND_ADDRESS=100.64.0.1`, beside a `WEB_BIND_ADDRESS` line if you have one), and the agent's `agent_id` in
 `vandoxd.yaml` (uncomment `agent_id: web-1` in the existing `ingest:` section and change the name; a second `ingest:` block stops the
 start). Then recreate the container:
 
@@ -300,3 +302,50 @@ one the agent presents; `ingest.min_free` (default `1GiB`) is the free space bel
 packets to the tailnet address may reach the ingest port, as it may the web port. The agent token is the boundary: the backend checks
 it before it reads a request, accepts only the agent named in `ingest.agent_id` and bounds what one request may cost. Keep the
 Tailscale ACL strict, so the monitored server reaches only this port ([SECURITY.md](../SECURITY.md)).
+
+## 11. Install the agent on the monitored server
+
+From v0.2.0 on, the agent collects on the monitored server and sends to the backend of step 10. The release publishes an install bundle,
+`vandox-agent-install-vX.Y.Z.tar.gz`, with the scripts, the unit, the example configuration and a manifest, and a `SHA256SUMS` that lists the bundle and the binary.
+First put the monitored server into the backend host's tailnet: install Tailscale there, limit the server to the ingest port
+in the tailnet policy, join the tailnet with the server's tag, and check the connection, as
+[`deploy/agent/README.md`](../deploy/agent/README.md#tailscale-on-the-monitored-server) (*Tailscale on the monitored server*) describes.
+
+The server needs `bash`, `curl`, `sha256sum`, `tar` and `gzip`, not `git`. Run these lines **as root on the monitored server**, one at a time, with `vX.Y.Z`
+the release you install:
+
+1. Become root (run this line on its own: it may ask for your password).
+2. Set the version to install (replace `vX.Y.Z` by the release, for example `v0.2.0`).
+3. Set the bundle's file name.
+4. Set the release's download address.
+5. Create a new private directory and change into it (start every attempt here, with a new directory).
+6. Download the bundle and the checksum file of the release.
+7. Check the bundle against its line in `SHA256SUMS`, and only if it matches, unpack it; if this prints anything but `...: OK`, stop and start again at step 5.
+8. Run the install script from the unpacked bundle; it asks for the agent token. Replace `web-1` by the name of this server (its `agent_id`) and the address by the backend's tailnet address and ingest port.
+
+```
+sudo -i
+v=vX.Y.Z
+f=vandox-agent-install-$v.tar.gz
+u=https://github.com/LarsLaskowski/Vandox/releases/download/$v
+d=$(mktemp -d) && cd "$d"
+curl --proto '=https' --proto-redir '=https' -fsSL -O "$u/$f" -O "$u/SHA256SUMS"
+awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
+"$d/vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.64.0.1:8081
+```
+
+The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
+
+The `--agent-id` must be the `agent_id` of step 10, and the backend URL the backend's tailnet address: the unit lets the agent reach only localhost and the tailnet, and MagicDNS names do not resolve once Tailscale's DNS is turned off on the server. The script reads the version from the bundle's `VERSION` file, asks for the agent token of step 3 (the prompt `Agent token:` shows nothing while you type or paste; press Enter after it; it is never an option), downloads the binary and checks it against the checksum in the bundle before it runs it, creates the user `vandox-agent`, `/etc/vandox`, the
+spool directory, the unit and the MariaDB account (`plesk db` on Plesk, else `mariadb`), starts the agent and prints a line per server check.
+
+The bundle does not contain the agent binary, only its SHA-256: the script downloads `vandox-agent-linux-amd64` from the GitHub
+release of the bundle's version, so the server needs HTTPS access to `github.com` and a working name server. Turn off Tailscale's DNS
+on the server for that (*Tailscale on the monitored server*, step 3). A console that cannot paste into a hidden prompt can give the
+token from a file on standard input (*The token prompt* in [`deploy/agent/README.md`](../deploy/agent/README.md)).
+
+Remove the agent with the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade and an install without internet access on the server are in [`deploy/agent/README.md`](../deploy/agent/README.md), which also lists every option,
+message, check and unit setting. The unit and the scripts ran on a monitored server in the Product Manager's server run; the results
+are in *Checks on the server* of [`deploy/agent/README.md`](../deploy/agent/README.md). The transmission to a backend with the
+ingest API was not part of that run, because no release has the ingest API yet (it will come with v0.2.0). Check it on your own setup
+with the `POST` line of *Tailscale on the monitored server*, step 4, which must print `401`.

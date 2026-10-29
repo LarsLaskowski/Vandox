@@ -25,9 +25,23 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 - Agent and backend communicate **only over Tailscale**. The tailnet ACL allows the monitored server to reach **only the ingest port on
   the backend host** and nothing else, so a compromised server cannot reach the rest of the home network. The ACL is part of the
   deployment documentation and must be kept strict.
+- The monitored server joins the tailnet as a tagged node (`tag:vandox-agent`, requested with `tailscale up --advertise-tags` after
+  the policy names the tag under `tagOwners`). An untagged node acts as the user who logged it in, and rules only add permissions,
+  so the rule below could not be its only one. The policy's only rule with a source matching the server allows TCP to the ingest port
+  on the backend host (in the `grants` form `"ip": ["tcp:<port>"]`; a port without a protocol or `tcp:*` allows more). No other
+  rule's source may match it: the tailnet's default rule with `*` as source matches tagged nodes too and is replaced before the server
+  joins, and neither `autogroup:tagged` nor `tag:vandox-agent` may be the source of another rule. It needs no Tailscale SSH, no
+  accepted subnet routes and no rule with it as destination, because the agent listens on no port. The setup steps and the checks
+  (the tag, a `404` from the ingest port, a probe of another port that the policy blocks, with `No route to host` or a timeout) are in `deploy/agent/README.md` (*Tailscale on the
+  monitored server*).
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).
+- **The agent's unit enforces this on the server.** `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the
+  agent's process reach only localhost and the tailnet ranges, so a `backend.url` elsewhere, and a host name resolved by a name server outside
+  localhost and the tailnet, fails as `connection failed`; the install script warns about both. Use the tailnet address: the documented setup turns Tailscale's DNS off on the monitored server (`tailscale set --accept-dns=false`),
+  because its policy lets the server reach only the ingest port, so Tailscale's name servers can be out of reach and lookups can fail; MagicDNS names then do not resolve there
+  ([Agent](agent.md), *Installation*, [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md)).
 - The agent sends its token only in the `Authorization` header of its requests to `backend.url`, connects only to that URL's host and
   port (no proxy from the environment, no redirect followed), verifies the certificate of an `https` URL and never switches the check
   off. Plain `http` is meant only for the backend host's tailnet address or MagicDNS name, where Tailscale encrypts and authenticates
@@ -53,7 +67,8 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 The agent reads the database server's state (status variables, process list) over the **local socket as the MariaDB user
 `vandox-agent`, identified by `unix_socket` and granted only `PROCESS`**. No database password exists on disk. The agent sees the server
 status and the process list, including the query text of running statements, but cannot read tables. Creating the user is part of the
-agent's installation instructions.
+agent's installation: `install.sh` creates it on the first install, `uninstall.sh --purge` drops it with
+`deploy/agent/mariadb-user-remove.sql`.
 
 - **The account.** `deploy/agent/mariadb-user.sql` is its one source: `CREATE OR REPLACE USER 'vandox-agent'@'localhost' IDENTIFIED VIA
   unix_socket WITH MAX_USER_CONNECTIONS 2` and `GRANT PROCESS ON *.* TO 'vandox-agent'@'localhost'`, nothing else. The operator runs it as
@@ -87,6 +102,8 @@ agent's installation instructions.
 ## Related decisions
 
 - [0010](../decisions/0010-tailscale-with-strict-acl.md) — why Tailscale with a strict ACL.
+- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the agent's unit
+  allows only tailnet addresses and localhost.
 - [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the agent sends one batch per
   request with a bearer token and judges the answer by its status and one fixed header value.
 - [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the

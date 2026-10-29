@@ -42,6 +42,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
   `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).
   `tools/Vandox.StorageBenchmark` (console program for the storage write measurement, `docs/BENCHMARKS.md`). Tests in `tests/<Project>.Tests`, mirroring the namespace and file of the class under test
   (`Foo.cs` → `FooTests.cs`).
+- `deploy/agent` is a test-only Go package (`*_test.go` only, package `agent`): its tests source `common.sh`, `install.sh` and `uninstall.sh` into bash with stub commands on `PATH` and read the unit file and the documents; `go build`, `go vet` and `go test ./...` handle it like any package, and it holds no production Go code.
 - Shared by both: `testdata/` (including the golden wire batch `testdata/wire/all-kinds.jsonl`, record 0075).
 
 ## Commands
@@ -151,6 +152,8 @@ download, for example). The gate itself checks two SonarQube Cloud shell rules s
 local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings are first
 reported by the *Sonar gate* below.
 
+`shell:S5332` (clear-text `http://` URL, a vulnerability that fails the security rating) follows a URL through variables and command output and exempts loopback; in scripts, use `https://` or pass address and port, and don't suppress it (record 0131).
+
 *Sonar gate* runs SonarQube Cloud's own analysis on the work branch before the pull request (squad step 7):
 `sonar-check.py` runs the scanner with the branch name, waits for the analysis and fails on every open issue or
 security hotspot on a line the branch changed, so the rules no local analyzer has stop surfacing only after the
@@ -178,6 +181,7 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | Change | Missing locally | Local substitute | Authoritative check |
 | ------ | --------------- | ---------------- | ------------------- |
 | shell scripts (`.github/scripts/*.sh`, `deploy/**/*.sh`) | `shfmt` (`shellcheck` runs in the *Analyzer gate*) | `bash -n <script>`; the *Analyzer gate* runs shellcheck and checks the shell pitfalls below | SonarQube Cloud (`shelldre:*`, step 11) and the CI step that runs the script |
+| `deploy/agent/*.sh` and `deploy/agent/vandox-agent.service` (record 0131) | systemd as PID 1, systemd 249 (the cloud session has none, and its `systemd-analyze` is 255), root, `useradd` and the real user and file changes | the Go tests in `deploy/agent` (sourced functions with stubs, no root or systemd), `bash -n`, the *Analyzer gate* (shellcheck), `systemd-analyze verify` of the unit (255) | the CI job `agent-install` (`.github/scripts/check-agent-install.sh` on `ubuntu-22.04`, systemd 249, installing from the packaged install bundle) and the Product Manager's run on the server |
 | workflows (`.github/workflows/*.yml`) | a GitHub Actions runner (`actionlint` runs in the *Analyzer gate*) | the *Analyzer gate* (actionlint) | the workflow's own run on the pull request |
 | `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | the *Image build check* (restore-order reproduction below), `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
 | own browser scripts and style sheets (`src/Vandox.Backend/wwwroot/js/*.js`, `wwwroot/*.css`) | a JavaScript and CSS analyzer | `WebUiContentTests` (`WebSourceScanner` rules) | SonarQube Cloud (step 11) |
