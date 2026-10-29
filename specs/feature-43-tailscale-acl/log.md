@@ -28,3 +28,6 @@ are quoted in full.
 | 2026-10-29 22:26 | 6 Implement (G1) | squad-dev | launched, mode implement (policy file, README, area docs) (sonnet/medium · 121,300 tokens · 14 tool uses · 157 s) |
 | 2026-10-29 22:31 | 6 Implement (G1) gates | Orchestrator | go test -race deploy/agent green; no production code, no Coverage gate (plan); decision-check PASS |
 | 2026-10-29 22:31 | 7 Code check | Orchestrator | gofmt clean, go build/vet, golangci-lint 0 issues, scope-check PASS, main not moved |
+| 2026-10-29 22:31 | 7 Sonar gate | Orchestrator | Not run: only test code, docs and a policy file changed (tests excluded from cloud analysis); PR analysis reads it in step 11 |
+| 2026-10-29 22:31 | 8 Review round 1 | squad-reviewer | launched at b7e2f6c (opus/medium · usage pending) |
+| 2026-10-29 22:31 | 8 Security diff review | squad-security | launched at b7e2f6c, mode diff (opus/medium · usage pending) |
