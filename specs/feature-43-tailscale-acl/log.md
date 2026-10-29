@@ -14,6 +14,6 @@ are quoted in full.
 | 2026-10-29 22:02 | 2a Spec (challenge revise round) | squad-lead | RESULT: DONE - 9 objections answered (M1, M2 accepted), spec passes plan-check (opus/medium · 18,485 tokens · 14 tool uses · 115 s · continued) |
 | 2026-10-29 22:06 | 2b Plan | squad-lead | RESULT: DONE - tier security; plan.md, tasks.md, record 0132 (Proposed); plan challenge and plan security review apply (opus/medium · 46,365 tokens · 37 tool uses · 385 s · continued) |
 | 2026-10-29 22:07 | 2b Plan challenge | squad-devils-advocate | launched, mode plan (opus/medium · 56,246 tokens · 11 tool uses · 128 s) |
-| 2026-10-29 22:07 | 3 Plan security review | squad-security | launched, mode plan (opus/medium · usage pending) |
+| 2026-10-29 22:07 | 3 Plan security review | squad-security | launched, mode plan (opus/medium · 88,362 tokens · 20 tool uses · 306 s) |
 | 2026-10-29 22:09 | 2b Plan challenge | Orchestrator | Verdict OBJECTIONS 0 major, 5 minor; appended verbatim to plan.md Challenge notes |
 | 2026-10-29 22:12 | 3 Plan security review | Orchestrator | Security verdict CHANGES_REQUIRED: B1 (E5: unreachable routes for 100.64.0.0/10 and fd7a:115c:a1e0::/48 needed), B2 (Go test parser guard: duplicate/case keys, strip helper, BOM), N1-N4; to Lead in revise round with the 5 challenge notes |
