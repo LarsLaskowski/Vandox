@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/netip"
 	"reflect"
 	"regexp"
 	"slices"
@@ -567,33 +565,71 @@ func TestTailnetPolicy_SourcesAreExactlyTheKnownOnes(t *testing.T) {
 	}
 }
 
-// isAddressForm reports whether a destination is an IP address or a CIDR.
-func isAddressForm(destination string) bool {
-	if net.ParseIP(destination) != nil {
-		return true
+// backendReachViolations lists the grants, other than the agent's, whose destinations are not exactly
+// autogroup:self: any other destination (the backend tag, autogroup:tagged, autogroup:danger-all, an
+// address, a wildcard) may cover the tagged backend host.
+func backendReachViolations(t *testing.T, policy map[string]any) []string {
+	t.Helper()
+
+	var violations []string
+	for i, grant := range grantsOf(t, policy) {
+		if slices.Contains(asStrings(t, grant["src"], "grant src"), agentTag) {
+			continue
+		}
+
+		got := asStrings(t, grant["dst"], "grant dst")
+		if !slices.Equal(got, []string{"autogroup:self"}) {
+			violations = append(violations, fmt.Sprintf("grants[%d] has dst %q, want exactly [\"autogroup:self\"]: no grant but the agent's may reach the backend host", i, got))
+		}
 	}
 
-	_, err := netip.ParsePrefix(destination)
-
-	return err == nil
+	return violations
 }
 
 func TestTailnetPolicy_GrantsNothingOnTheBackendButIngest(t *testing.T) {
 	t.Parallel()
 
-	policy := loadPolicy(t)
-	agent := agentGrants(t, policy)
+	for _, violation := range backendReachViolations(t, loadPolicy(t)) {
+		t.Error(violation)
+	}
+}
 
-	for i, grant := range grantsOf(t, policy) {
-		if len(agent) > 0 && reflect.DeepEqual(grant, agent[0]) {
-			continue
-		}
+func TestTailnetPolicy_BackendReachGuardRefusesWideDestinations(t *testing.T) {
+	t.Parallel()
 
-		for _, destination := range asStrings(t, grant["dst"], "grant dst") {
-			if destination == backendTag || destination == "*" || destination == "autogroup:internet" || isAddressForm(destination) {
-				t.Errorf("grants[%d] has dst %q, want no grant but the agent's on the backend, on everything, on the internet or on an address", i, destination)
+	destinations := []string{
+		`"autogroup:tagged"`,
+		`"autogroup:danger-all"`,
+		`"tag:vandox-backend"`,
+		`"*"`,
+		`"autogroup:internet"`,
+		`"100.64.0.0/10"`,
+		`"autogroup:self", "autogroup:tagged", "autogroup:danger-all"`,
+	}
+
+	for _, destination := range destinations {
+		t.Run(destination, func(t *testing.T) {
+			t.Parallel()
+
+			text := `{"grants": [
+				{"src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend"], "ip": ["tcp:8081"]},
+				{"src": ["autogroup:member"], "dst": [` + destination + `], "ip": ["*"]}
+			]}`
+
+			stripped, err := stripHuJSON(text)
+			if err != nil {
+				t.Fatalf("strip inline policy: %v", err)
 			}
-		}
+
+			value, err := decodeStrict(stripped)
+			if err != nil {
+				t.Fatalf("decode inline policy: %v", err)
+			}
+
+			if got := backendReachViolations(t, asObject(t, value, "inline policy")); len(got) != 1 {
+				t.Errorf("violations for dst [%s] = %q, want exactly 1", destination, got)
+			}
+		})
 	}
 }
 
