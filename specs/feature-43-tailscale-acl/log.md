@@ -22,3 +22,5 @@ are quoted in full.
 | 2026-10-29 22:18 | 3 Plan security review (round 2) | Orchestrator | Security verdict CHANGES_REQUIRED (2nd rejection): B1 only partly resolved - B3 networkd deletes foreign unreachable routes on link reconfigure/carrier loss/boot without restarting; NB1, NB2. Next: squad-lead mode decide |
 | 2026-10-29 22:21 | 3 Plan decide (2nd Security rejection) | squad-lead | RESULT: DONE - B1/B3 token control split into follow-up issue 2; residual stated in README/area; no further Security plan round (step-8 diff review still runs); PM question offered: ship now with residual or hold (opus/medium · 25,820 tokens · 7 tool uses · 123 s · continued) |
 | 2026-10-29 22:21 | 3 Follow-up issues | Orchestrator | Opened #337 (token off provider network while Tailscale is down = follow-up 2) and #338 (production run of the checks = follow-up 1) |
+| 2026-10-29 22:21 | 4 Skeleton | Orchestrator | Skipped: plan adds no API (no production code) |
+| 2026-10-29 22:21 | 5 Tests first (G1) | squad-tester | launched, mode tests-first (sonnet/medium · usage pending) |
