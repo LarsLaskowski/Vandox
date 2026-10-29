@@ -40,7 +40,7 @@ README grant of **every** backend-host port to maintainer devices that disagrees
   Tailscale SSH off, no advertised routes, not an exit node, routes not accepted, Tailscale DNS off and the tag `tag:vandox-agent`,
   each with the value to expect; the exact output format of the read command is marked as not checked in this project.
 - S5: Given the set-up server, when it reboots, then Tailscale comes up by itself without a login, the settings of S4 are unchanged,
-  the checks of S2 give the same results, and the agent sends again, records of the window from the spool.
+  the checks of S2 give the same results, and the agent sends again, records of the window from the spool (unless a party answered them, E5).
 - S6: Given the server's entry in the admin console, when the maintainer looks at its key expiry, then it shows expiry disabled as
   the README says, and the README states why (a tagged node, not a person's login) and how to replace the node's key deliberately:
   remove the machine and join again with the tag, which gives the server a new tailnet address and identity, so the `tailscale whois`
@@ -60,9 +60,11 @@ README grant of **every** backend-host port to maintainer devices that disagrees
   exit node: the policy still lets the server reach only the ingest port (no `ssh` rule, no `autoApprovers` entry, no grant to a
   subnet or `autogroup:internet` matches `tag:vandox-agent`); the README says so and names the rules that must never be added.
 - E5: Tailscale is not up (before its netmap after a boot, stopped, logged out, the node removed): a send to the backend's tailnet
-  address follows the server's default route and fails as `connection failed` or `timeout`; whoever answers at that address on the
-  provider's path gets the token and the batch in clear. The README and the network area name this residual and the follow-up issue
-  that adds a control; the records stay in the spool and are sent once the tailnet is up.
+  address follows the server's default route. If nothing answers, it fails as `connection failed` or `timeout` and the records stay
+  in the spool until the tailnet is up. If a party at that address on the provider's path answers, it gets the token and the batch in
+  clear, and a `2xx` answer makes the agent drop those records as acknowledged, a `400`/`413`/`422` refusal makes it give them up
+  (`internal/sender/transport.go:65-66`, `sender.go:597-600`, `:626-628`, `:644-645`). The README and the network area name this
+  residual and the follow-up issue that adds a control.
 - E6: After a reboot Tailscale does not come up: `tailscale status` shows it, the agent keeps spooling as in E5, and the README names
   the check and the fix.
 
@@ -92,7 +94,9 @@ README grant of **every** backend-host port to maintainer devices that disagrees
   the optional reverted subnet-route probe with its caveat), each with the result to expect, the Tailscale page it rests on and the
   cause of a wrong result; their results on the production server are marked as not yet run (S2, E1, E2, E4).
 - [ ] AC3: neither the example policy nor the README grants maintainer devices (`autogroup:member` or any other source) access to
-  `tag:vandox-backend` other than through commented opt-in lines, none of them for the web port; the README's `"ip": ["*"]` grant is
+  `tag:vandox-backend` other than through commented opt-in lines, none of them for the web port; every grant but the agent's has
+  exactly `["autogroup:self"]` as destination, and the README lists the forbidden destinations for a source matching the server or
+  for maintainer devices (`*`, `autogroup:internet`, `autogroup:tagged`, `autogroup:danger-all`, a subnet); the README's `"ip": ["*"]` grant is
   removed, and the README says what the maintainer loses by that and how to opt in. The network area states what the policy
   enforces and the subnet-route case, as *Area documents* outlines; record 0016 stays unchanged (S3).
 - [ ] AC4: the README has the settings command and the settings check of S4, each value with the value to expect, the read

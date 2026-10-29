@@ -55,21 +55,21 @@ The asserts, on the decoded file and on the README section *Tailscale on the mon
 - *GrantsHaveOnlyKnownKeys*: every grant's key set is exactly `{src, dst, ip}`.
 - *AgentHasOnlyTheIngestGrant*: exactly one grant has `tag:vandox-agent` in `src`: `src` `["tag:vandox-agent"]`, `dst` `["tag:vandox-backend"]`, `ip` `["tcp:8081"]`.
 - *SourcesAreExactlyTheKnownOnes*: the set of all `src` values is exactly `{tag:vandox-agent, autogroup:member}`. Tailscale's source forms are `*`, user logins, `group:`, `tag:`, `autogroup:…`, host aliases, IPs and CIDRs, and `ipset:`. Each one that can match the server fails the exact-set comparison: `*`, `autogroup:tagged`, `tag:vandox-agent` in a second grant, a covering IP or CIDR, a host alias or an ipset. `autogroup:member` matches no tagged node (kb/1068, same status as fact 10).
-- *GrantsNothingOnTheBackendButIngest*: no other grant has `tag:vandox-backend` in `dst`. No `dst` is `*`, `autogroup:internet`, an IP or a CIDR.
+- *GrantsNothingOnTheBackendButIngest*: destinations are pinned as an exact set: the agent's grant has `dst` `["tag:vandox-backend"]`, and every other grant has `dst` exactly `["autogroup:self"]`, so `*`, `autogroup:internet`, `autogroup:tagged`, `autogroup:danger-all`, a tag, an IP or a CIDR fails.
 - *OptInLinesAreCommentedSSHOnly*: exactly one comment line contains `"dst"`, the SSH opt-in. It names `tcp:22` and neither `8080` nor `443`.
 - *TestsPinTheIngestPortOnly*: `tests` has exactly two entries:
   - key set `{src, accept, deny}`: `src` `tag:vandox-agent`, `accept` `["tag:vandox-backend:8081"]`, `deny` `["tag:vandox-backend:22", "tag:vandox-backend:8080", "tag:vandox-backend:443"]`;
   - key set `{src, proto, deny}`: `src` `tag:vandox-agent`, `proto` `udp`, `deny` `["tag:vandox-backend:8081"]` (Security N2).
 - README tests, on the section:
   - *ReferThePolicyFile*: it names `tailnet-policy.hujson`.
-  - *HoldNoWideGrant*: it has no `"grants"` and no `"ip": ["*"]`.
+  - *HoldNoWideGrant*: it has no `"grants"` and no `"ip": ["*"]`, and its list of forbidden destinations names `autogroup:tagged` and `autogroup:danger-all`.
   - *SettingsLineAndCheck*: the settings line of *Approach* 4 and `tailscale debug prefs`.
   - *ChecksNameEveryProbe*:
     - `tailscale exit-node list`, `tailscale status` and an IPv6 probe (`fd7a:115c:a1e0::`);
     - the accept-routes probe started with `setsid`, its one command string containing both `--accept-routes=true` and `--accept-routes=false`;
     - `tailscale debug prefs` appears after that probe.
   - *RebootCheck*: `sudo reboot`, followed by `tailscale status` and the ingest probes.
-  - *DownResidual*: the section says that while Tailscale is not up a send follows the `default route` and the `token` goes in clear, and no longer says that every send fails as `connection failed`.
+  - *DownResidual*: the section says that while Tailscale is not up a send follows the `default route`, the `token` goes in clear to a party that answers, and such an answer can make the agent drop or give up the records; it no longer says that every send fails as `connection failed`.
   - *KeyExpiry*: `--force-reauth`.
   - Each step for S2, S4, S5 and S6 contains "not yet run".
 
@@ -100,10 +100,10 @@ Rows only CI or a real host can run: none in CI. Everything on the server is the
 2. **README, step 2** (policy):
    - The fragment is replaced by a reference to the file and an explanation per entry.
    - The `"*"` grant is removed. The README says what that loses over the tailnet (web UI, SSH and file services of the backend host; the home LAN is unchanged) and points to the opt-in.
-   - The existing warnings stay. New warnings: no `autoApprovers`, `ssh` rule or subnet/`autogroup:internet` grant with a source matching the server, and no tag as a tag owner.
+   - The existing warnings stay. New warnings: no `autoApprovers`, `ssh` rule or grant with a source matching the server, and no tag as a tag owner; the forbidden destinations listed: `*`, `autogroup:internet`, `autogroup:tagged`, `autogroup:danger-all`, a subnet.
    - The optional backend-to-member grant stays as prose, marked untested, with no line in the file (DA note 2).
    - The console and GitOps are named neutrally.
-3. **README, residual** (the section's opening paragraph): the sentence "every send fails as `connection failed`" (line 10) is replaced by the residual of spec E5: while Tailscale is not up, a send to the tailnet address follows the server's default route, fails as `connection failed` or `timeout`, and whoever answers at that address on the provider's path gets the token and the batch in clear; issue #<follow-up 2> adds a control.
+3. **README, residual** (the section's opening paragraph): the sentence "every send fails as `connection failed`" (line 10) is replaced by the residual of spec E5: while Tailscale is not up, a send to the tailnet address follows the server's default route, fails as `connection failed` or `timeout`, and the records stay spooled when nothing answers; a party that answers at that address on the provider's path gets the token and the batch in clear, and its `2xx` answer makes the agent drop those records as acknowledged, a `400`/`413`/`422` refusal makes it give them up (spec E5); issue #<follow-up 2> adds a control.
 4. **README, join step** (today's 3):
    - The settings line `tailscale set --ssh=false --accept-routes=false --advertise-routes= --advertise-exit-node=false --exit-node= --advertise-connector=false --webclient=false --accept-dns=false`. If it fails with an unknown flag, Tailscale is upgraded from the package repository first, rather than the flag being dropped (DA note 3, Security N4).
    - Then `tailscale debug prefs`, expecting `RunSSH` false, `RouteAll` false, `AdvertiseRoutes` empty or null, `ExitNodeID` empty, `CorpDNS` false, `RunWebClient` false, `AppConnector` `Advertise` false and `AdvertiseTags` `["tag:vandox-agent"]`. The output format is marked as not checked.
@@ -112,7 +112,7 @@ Rows only CI or a real host can run: none in CI. Everything on the server is the
    - Today's lines, plus the web port and SSH on the backend's IPv6 tailnet address, another tailnet device, `tailscale status` and `tailscale exit-node list`.
    - The optional detached accept-routes probe with its caveat, then `tailscale debug prefs` again.
    - Each with the result to expect, its Tailscale page (kb/1018, kb/1019, kb/1103) and the cause of a wrong result.
-6. **README, new reboot step**: `sudo reboot`, then `tailscale status`, `tailscale debug prefs`, the ingest probes of step 5, `systemctl is-active vandox-agent` and the journal. Sends fail until the tailnet is up (step 3's residual applies in that window), then go out from the spool.
+6. **README, new reboot step**: `sudo reboot`, then `tailscale status`, `tailscale debug prefs`, the ingest probes of step 5, `systemctl is-active vandox-agent` and the journal. Sends fail until the tailnet is up and then go out from the spool, unless a party answered in that window (step 3's residual).
 7. **README, results:** every result of these steps is marked "not yet run", and *Checks on the server* gets a row per check: "not yet run (issue #<follow-up>)".
 
 Layout: today's numbered steps with fenced command blocks and bullets for results; the Dev words it, approved in step 9.
