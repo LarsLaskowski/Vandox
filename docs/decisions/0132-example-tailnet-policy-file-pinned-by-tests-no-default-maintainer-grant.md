@@ -1,4 +1,4 @@
-# 0132: Example tailnet policy as a file pinned by tests, without a default grant for maintainer devices, and unreachable tailnet routes on the server
+# 0132: Example tailnet policy as a file pinned by tests, without a default grant for maintainer devices, with the token's exposure while Tailscale is down split off
 
 - **Status:** Proposed
 - **Date:** 2026-10-29
@@ -25,24 +25,25 @@ unit's `IPAddressAllow=` filters by address, not interface.
 4. **Reading the file with `github.com/tailscale/hujson`** — exact parsing, at the cost of a new dependency for one test.
 5. **Maintainer devices: every port, the web UI port only, or nothing by default** — the Product Manager chose nothing by default,
    with a commented opt-in for SSH, so record 0016 stays as it is.
-6. **Keeping sends off the default route: a oneshot unit with `unreachable` routes in the main table, netplan routes, an nftables
-   rule, or `RestrictNetworkInterfaces=`** — the unit is independent of the provider's network files and, required by the agent's
-   unit, fails closed; netplan edits provider-managed files, nftables interacts with Tailscale's chains, and the systemd option
-   needs a newer systemd than Ubuntu 22.04's and a change to the agent's unit.
+6. **Keeping sends off the default route in this change, or in a follow-up issue** — a oneshot unit with `unreachable` routes in
+   the main table looked simplest, but systemd-networkd deletes such foreign routes on every link configure, reconfigure and carrier
+   loss (Security's reading of systemd 249.11), so it would fail silently. The other candidates (`ManageForeignRoutes=no`, a
+   `[Route] Type=unreachable` drop-in for the provider's uplink, nftables, `RestrictNetworkInterfaces=` from systemd 250) all touch
+   the provider's network configuration or the agent's unit and need a measurement on a real host that this change cannot make.
 
 ## Decision
 
 Option 2, in `deploy/agent/`, read in the test by a strip helper and a strict token walk that refuses duplicate keys, instead of a
 dependency: the file's grants are the agent's `tcp:<ingest port>` and the maintainer's own devices among themselves, nothing for
-maintainer devices on the backend host except a commented SSH opt-in. On the server, a documented oneshot unit (option 6) keeps the
-tailnet ranges unreachable outside Tailscale's own routes. The rules are in the [Network and security model](../areas/network-and-security-model.md) area.
+maintainer devices on the backend host except a commented SSH opt-in. The token's exposure while Tailscale is down (option 6) is
+split into a follow-up issue after Security's second review; this change states it as a residual. The rules are in the [Network and security model](../areas/network-and-security-model.md) area.
 
 ## Consequences
 
 - The maintainer's devices lose the web UI, SSH and file services of the backend host over the tailnet unless the opt-in is enabled;
   in the home LAN nothing changes.
 - The file is not part of the install bundle; the bundle's file lists name their files explicitly.
-- Without the routes (a provider that uses the tailnet ranges), the token and the batch go in clear to whoever answers on the
-  provider's path while Tailscale is down; the area document names this residual.
-- Until the maintainer's run on the production tailnet, the console's acceptance of the file and of its `tests` entries, and the routes' interplay with tailscaled and networkd, are unverified;
+- Until the follow-up issue adds a control, the token and the batch go in clear to whoever answers at the backend's tailnet address
+  on the provider's path while Tailscale is down; the exposure predates this change, and the area document names it.
+- Until the maintainer's run on the production tailnet, the console's acceptance of the file and of its `tests` entries, are unverified;
   a wrong syntax makes the save fail visibly.

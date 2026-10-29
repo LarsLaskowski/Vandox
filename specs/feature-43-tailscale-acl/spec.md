@@ -39,13 +39,8 @@ README grant of **every** backend-host port to maintainer devices that disagrees
   Tailscale SSH off, accepts no routes, advertises no routes and no exit node), and then the settings check, then the check shows
   Tailscale SSH off, no advertised routes, not an exit node, routes not accepted, Tailscale DNS off and the tag `tag:vandox-agent`,
   each with the value to expect; the exact output format of the read command is marked as not checked in this project.
-- S5: Given the set-up server, when it reboots, then Tailscale comes up by itself without a login, the settings of S4 and the
-  routes of S7 are unchanged, `ip route get 100.64.0.1` names `tailscale0`, the checks of S2 give the same results, and the agent
-  sends again, records of the window from the spool.
-- S7: Given a server whose provider uses nothing in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` (a documented precondition check),
-  when the maintainer follows the README step that comes before the agent's installation, then the main routing table holds
-  `unreachable` routes for both ranges, set at every boot before `vandox-agent` starts, and a documented check prints
-  `unreachable 100.64.0.0/10` (and the IPv6 line); Tailscale's own routes still win while it is up. Marked as not yet run.
+- S5: Given the set-up server, when it reboots, then Tailscale comes up by itself without a login, the settings of S4 are unchanged,
+  the checks of S2 give the same results, and the agent sends again, records of the window from the spool.
 - S6: Given the server's entry in the admin console, when the maintainer looks at its key expiry, then it shows expiry disabled as
   the README says, and the README states why (a tagged node, not a person's login) and how to replace the node's key deliberately:
   remove the machine and join again with the tag, which gives the server a new tailnet address and identity, so the `tailscale whois`
@@ -64,21 +59,18 @@ README grant of **every** backend-host port to maintainer devices that disagrees
 - E4: A compromised root on the server turns on Tailscale SSH, advertises a route or an exit node, accepts routes, or selects an
   exit node: the policy still lets the server reach only the ingest port (no `ssh` rule, no `autoApprovers` entry, no grant to a
   subnet or `autogroup:internet` matches `tag:vandox-agent`); the README says so and names the rules that must never be added.
-- E5: Tailscale is not up (before its netmap after a boot, stopped, logged out, the node removed): with the routes of S7 every send
-  fails at once with no route to host, logged as `connection failed`, so the token and the batch never leave the server; the records
-  stay in the spool and are sent once the tailnet is up. Without them a `100.x` destination follows the default route, and whoever
-  answers there gets the token and the batch in clear: the README and the network area name this residual.
+- E5: Tailscale is not up (before its netmap after a boot, stopped, logged out, the node removed): a send to the backend's tailnet
+  address follows the server's default route and fails as `connection failed` or `timeout`; whoever answers at that address on the
+  provider's path gets the token and the batch in clear. The README and the network area name this residual and the follow-up issue
+  that adds a control; the records stay in the spool and are sent once the tailnet is up.
 - E6: After a reboot Tailscale does not come up: `tailscale status` shows it, the agent keeps spooling as in E5, and the README names
   the check and the fix.
-- E7: The provider's network uses an address in one of the two ranges: the precondition check shows it, and the README says not to
-  add the routes and names the residual of E5.
 
 ## Non-functional requirements
 
 - Security: the example policy is part of security area 2 (*Tailscale ACL and port binding*, "the documented ACL"); nothing in it
   may let a source matching `tag:vandox-agent` reach more than TCP to the ingest port of `tag:vandox-backend`.
-- No change to the agent, its unit file, its install scripts or the backend; no new configuration. The routes of S7 are an operator
-  step of the README.
+- No change to the agent, its unit file, its install scripts or the backend; no new configuration.
 - Compatibility: Ubuntu 22.04 on the server, Tailscale from its official package repository, the policy in the `grants` form in
   HuJSON as the admin console stores it (the older `acls` form stays undocumented as tested).
 - Documented procedure (*Operator environments and documented procedures*, `.squad/routing.md`): every statement no run has shown is
@@ -106,13 +98,10 @@ README grant of **every** backend-host port to maintainer devices that disagrees
 - [ ] AC4: the README has the settings command and the settings check of S4, each value with the value to expect, the read
   command's output format marked as not checked, and the result marked as not yet run on the production server (S4).
 - [ ] AC5: the README describes the reboot check of S5 with the results to expect, including the agent's sends after the tailnet is
-  up again, marked as not yet run (S5, E5, E6).
+  up again, marked as not yet run, and the residual of E5 with its follow-up issue; the network area names it too (S5, E5, E6).
 - [ ] AC6: the README states the key expiry of the tagged server, why, how to check it in the admin console and how to replace its
   key with the consequences of S6 (new address, repeated `whois` check, `backend.url` unaffected, the untested `--force-reauth`
   alternative); the check on the server's entry is marked as not yet run (S6).
-- [ ] AC7: the README has the step of S7 before the agent's installation: the precondition check, the persistent routes for both
-  ranges ordered before `vandox-agent`, and the check, all marked as not yet run; the reboot step repeats the check and
-  `ip route get 100.64.0.1`; the network area states the control and the residual without it (S7, S5, E5, E6, E7).
 
 ## Out of scope
 
@@ -120,6 +109,8 @@ README grant of **every** backend-host port to maintainer devices that disagrees
 - Tailscale on the backend host (TUN mode, Synology): documented under issue #40 and record 0127.
 - The older `acls` policy form, and a grant that lets the server reach the tailnet's name servers.
 - Any change to the agent, its unit (`IPAddressAllow=`) or the backend.
+- A control that keeps sends off the default route while Tailscale is down (E5): split into a follow-up issue (Lead decision after
+  Security's second review, recorded in record 0132).
 
 ## Open questions
 
@@ -139,8 +130,8 @@ README grant of **every** backend-host port to maintainer devices that disagrees
 - `docs/areas/network-and-security-model.md`, *Agent to backend* and *Web UI*: the example policy file as the source of the rules,
   what the policy does against a compromised root's Tailscale settings (E4), the behavior after a reboot (S5, E5), and the maintainer
   devices' access: none to the backend host's tailnet address by default (only the agent's `tcp:<ingest port>`), and a subnet-route
-  grant to the home LAN gives those tailnet devices the web UI at its LAN address as if in the home LAN (Q8, M2); the unreachable
-  routes of S7 and the residual without them (E5).
+  grant to the home LAN gives those tailnet devices the web UI at its LAN address as if in the home LAN (Q8, M2); the residual of E5
+  and its follow-up issue.
 - `deploy/agent/README.md`, *Tailscale on the monitored server* (the procedure): every step above, marked as not yet run.
 
 ## Challenge
@@ -157,7 +148,8 @@ README grant of **every** backend-host port to maintainer devices that disagrees
 - Minor 3 (pin the file with a test): accepted for the plan, which names a Go test reading the file as HuJSON and asserting AC1.
 - Minor 4 (path, security area list, bundle): accepted for the plan: exact path, the file added to security area 2 in
   `.squad/project.md`, and, under `deploy/agent/`, not in the install bundle (`MANIFEST_NAMES`, `check-agent-bundle.sh`).
-- Minor 5 (E5/E6 failure and the token): accepted; Security's plan review then required a control (B1): S7, E5–E7 and AC7.
+- Minor 5 (E5/E6 failure and the token): accepted. Security's plan review required a control (B1); its second review showed the
+  chosen routes do not survive systemd-networkd (B3), so the Lead split the control into a follow-up issue and E5 states the residual.
 - Minor 6 (IPv6): accepted; S2 and AC2 add a blocked probe to the backend host's IPv6 tailnet address.
 - Minor 7 (key replacement): accepted; S6 and AC6 name the new address, the repeated `whois` check, the unaffected `backend.url`
   and the untested `--force-reauth` alternative.

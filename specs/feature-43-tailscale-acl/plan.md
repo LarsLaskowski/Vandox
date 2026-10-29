@@ -1,7 +1,7 @@
 # Plan: Tailscale on the monitored server and its tailnet policy
 
 Source: Issue #43 | [spec.md](spec.md)
-Status: Revised (1)
+Status: Revised (2)
 Tier: security — the change rewrites the documented tailnet policy, the allow-list that decides what a compromised server may reach (it removes a grant and adds the example policy file that becomes its one source).
 Security areas touched: 2 *Tailscale ACL and port binding* (the documented ACL: new `deploy/agent/tailnet-policy.hujson`, `deploy/agent/README.md`); `.squad/project.md` *Security areas* (area 2's file list extended)
 
@@ -29,8 +29,8 @@ See [spec.md](spec.md), *Problem*; criteria AC1–AC6 are the spec's.
 | 14 | `IPAddressAllow=` filters by address, not interface | `deploy/agent/vandox-agent.service:50-51`; systemd's IP accounting/filtering is per address | confirmed |
 | 15 | The agent's request carries the token on the first write and no `Expect: 100-continue` | Security's reading of `internal/sender/transport.go` | confirmed |
 | 16 | A connect that fails with no route to host is logged as `connection failed` | `internal/sender/transport.go:176-193` (`classifyFailure`: not a timeout, not TLS → `reasonConnection`) | confirmed |
-| 17 | `RestrictNetworkInterfaces=` needs systemd 250; the server runs 249 | to verify: none needed, the option is not used (now: Security's recollection; 249 from README:500) | unverified |
-| 18 | systemd-networkd may remove foreign routes when it starts (`ManageForeignRoutes=` default) and so drop the unreachable routes; `After=` and `PartOf=systemd-networkd.service` re-add them | to verify: the maintainer's reboot check and one `systemctl restart systemd-networkd` followed by the route check (follow-up issue) (now: not measured) | unverified |
+| 17 | `RestrictNetworkInterfaces=` needs systemd 250; the server runs 249 | to verify: in the follow-up issue that designs the control (now: Security's recollection; 249 from README:500) | unverified |
+| 18 | systemd-networkd (default `ManageForeignRoutes=yes`) deletes foreign routes such as `unreachable 100.64.0.0/10` whenever a link is configured (boot), reconfigured (`networkctl reconfigure`, `netplan apply`) or loses its carrier, so a route set by a oneshot unit does not persist | Security's round-2 reading of systemd v249.11: `networkd-route.c:1153-1234`, `:1871-1885`, `networkd-link.c:1000-1024`, `:1162`, `:1262`, `:1573`, `man/networkd.conf.xml:75-82`; not measured | confirmed |
 
 ## Tests per criterion
 
@@ -40,13 +40,12 @@ See [spec.md](spec.md), *Problem*; criteria AC1–AC6 are the spec's.
 | AC2 | `TestAgentReadme_TailscaleChecksNameEveryProbe` | `deploy/agent/tailnet_policy_test.go` |
 | AC3 | `TestTailnetPolicy_GrantsNothingOnTheBackendButIngest`; `TestTailnetPolicy_OptInLinesAreCommentedSSHOnly`; `TestAgentReadme_TailscaleStepsHoldNoWideGrant` | `deploy/agent/tailnet_policy_test.go` |
 | AC4 | `TestAgentReadme_TailscaleSettingsLineAndCheck` | `deploy/agent/tailnet_policy_test.go` |
-| AC5 | `TestAgentReadme_TailscaleRebootCheck` | `deploy/agent/tailnet_policy_test.go` |
+| AC5 | `TestAgentReadme_TailscaleRebootCheck`; `TestAgentReadme_TailscaleDownResidual` | `deploy/agent/tailnet_policy_test.go` |
 | AC6 | `TestAgentReadme_TailscaleKeyExpiry` | `deploy/agent/tailnet_policy_test.go` |
-| AC7 | `TestAgentReadme_TailnetRoutesUnit` | `deploy/agent/tailnet_policy_test.go` |
 
 The policy file is read by two test helpers (Security B2), never by `json.Unmarshal`:
 
-- `stripHuJSON`: removes `//` and `/* */` comments and trailing commas outside strings; inside a string it honors escapes, so `\"`, `\\"`, `//`, `/*` and `*/` stay string content. It returns an error for a leading BOM, an unterminated block comment and an unterminated string. Its own test covers each of these cases, a trailing comma before `}` and before `]`, and CRLF input.
+- `stripHuJSON`: removes `//` and `/* */` comments and trailing commas outside strings; inside a string it honors escapes, so `\"`, `\\"`, `//`, `/*` and `*/` stay string content. It returns an error for a leading BOM, an unterminated block comment and an unterminated string. Its own test covers each of these cases, a trailing comma before `}` and before `]`, a trailing comma followed by a comment and then `}` or `]` (Security NB2), and CRLF input.
 - `decodeStrict`: walks the result token by token (`json.Decoder.Token`) into maps and slices. It refuses a duplicate key at any level, comparing keys case-sensitively, and refuses trailing data after the top value. Its test covers a duplicate `grants` at the top level, a duplicate `src` in a grant, and a nested duplicate.
 
 The asserts, on the decoded file and on the README section *Tailscale on the monitored server* read with `readRepositoryText`. Every key comparison is case-sensitive, so `"SRC"` or `"Src"` fails as an unknown key.
@@ -69,18 +68,17 @@ The asserts, on the decoded file and on the README section *Tailscale on the mon
     - `tailscale exit-node list`, `tailscale status` and an IPv6 probe (`fd7a:115c:a1e0::`);
     - the accept-routes probe started with `setsid`, its one command string containing both `--accept-routes=true` and `--accept-routes=false`;
     - `tailscale debug prefs` appears after that probe.
-  - *RebootCheck*: `sudo reboot`, followed by the route check and `ip route get 100.64.0.1`.
+  - *RebootCheck*: `sudo reboot`, followed by `tailscale status` and the ingest probes.
+  - *DownResidual*: the section says that while Tailscale is not up a send follows the `default route` and the `token` goes in clear, and no longer says that every send fails as `connection failed`.
   - *KeyExpiry*: `--force-reauth`.
-  - *TailnetRoutesUnit*: the unit's lines `ExecStart=/usr/sbin/ip route replace unreachable 100.64.0.0/10`, `ExecStart=/usr/sbin/ip -6 route replace unreachable fd7a:115c:a1e0::/48`, `Before=vandox-agent.service` and `RequiredBy=vandox-agent.service`, plus the checks `ip route show table main 100.64.0.0/10` and `ip -6 route show table main fd7a:115c:a1e0::/48`. The step comes before the section's join step.
-  - Each step for S2, S4, S5, S6 and S7 contains "not yet run".
+  - Each step for S2, S4, S5 and S6 contains "not yet run".
 
 **Documented shell procedure** (*Operator environments*). The lines use placeholders (`100.64.0.1`), not shell variables, so case (d), a lost variable, cannot happen.
 
-- (a) Pasted at once: every line is independent. The routes unit is one heredoc block, so pasting it whole is its intended use.
-- (b) One line at a time: the intended use for everything else. The README says the heredoc block goes in as one paste.
+- (a) Pasted at once: every line is independent.
+- (b) One line at a time: the intended use.
 - (c) One line fails:
   - A failed check prints its result and changes nothing.
-  - If `systemctl enable --now` of the routes unit fails, the route check shows no `unreachable` line, and the README says to stop before the agent's install. Because of `RequiredBy=`, the agent cannot start without the unit (fails closed).
   - The accept-routes probe runs detached (`setsid -f`) with its output in `/root/vandox-route-probe.txt`. A closed SSH session therefore does not kill it before the revert. The README says this is likely, not guaranteed (DA note 5, Security N3), and the settings check after it shows a missed revert as `RouteAll` true.
 
 Rows only CI or a real host can run: none in CI. Everything on the server is the maintainer's run (follow-up issue).
@@ -105,15 +103,7 @@ Rows only CI or a real host can run: none in CI. Everything on the server is the
    - The existing warnings stay. New warnings: no `autoApprovers`, `ssh` rule or subnet/`autogroup:internet` grant with a source matching the server, and no tag as a tag owner.
    - The optional backend-to-member grant stays as prose, marked untested, with no line in the file (DA note 2).
    - The console and GitOps are named neutrally.
-3. **README, new step before the join** (*Keep the tailnet ranges off the default route*):
-   - **Precondition:** `ip -4 addr`, `ip -6 addr`, `ip route`, `ip -6 route`. Nothing in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` may appear outside `tailscale0`. Otherwise stop, do not add the routes, and accept the residual (E7).
-   - **The unit:** written with `cat > /etc/systemd/system/vandox-tailnet-routes.service <<'EOF'`:
-     - `[Unit]`: `Description=`, `After=systemd-networkd.service`, `PartOf=systemd-networkd.service`, `Before=vandox-agent.service`;
-     - `[Service]`: `Type=oneshot`, `RemainAfterExit=yes`, and the two `ExecStart=` lines of *Tests per criterion*. There is no `ExecStop=`: the routes stay when the unit stops, so it fails closed;
-     - `[Install]`: `WantedBy=multi-user.target` and `RequiredBy=vandox-agent.service`.
-   - **Enable:** `systemctl daemon-reload` and `systemctl enable --now vandox-tailnet-routes.service`.
-   - **The check:** `ip route show table main 100.64.0.0/10` prints `unreachable 100.64.0.0/10`. `ip -6 route show table main fd7a:115c:a1e0::/48` prints a line that starts with `unreachable fd7a:115c:a1e0::/48`. With Tailscale up, `ip route get 100.64.0.1` names `dev tailscale0`.
-   - The README explains why: while Tailscale is down, the token and the batch would otherwise go in clear to whoever answers on the provider's path (fact 13). It also says the step applies to the already-joined production server too, and that the agent's restart follows a networkd restart because of `PartOf=` and `RequiredBy=`. Not yet run.
+3. **README, residual** (the section's opening paragraph): the sentence "every send fails as `connection failed`" (line 10) is replaced by the residual of spec E5: while Tailscale is not up, a send to the tailnet address follows the server's default route, fails as `connection failed` or `timeout`, and whoever answers at that address on the provider's path gets the token and the batch in clear; issue #<follow-up 2> adds a control.
 4. **README, join step** (today's 3):
    - The settings line `tailscale set --ssh=false --accept-routes=false --advertise-routes= --advertise-exit-node=false --exit-node= --advertise-connector=false --webclient=false --accept-dns=false`. If it fails with an unknown flag, Tailscale is upgraded from the package repository first, rather than the flag being dropped (DA note 3, Security N4).
    - Then `tailscale debug prefs`, expecting `RunSSH` false, `RouteAll` false, `AdvertiseRoutes` empty or null, `ExitNodeID` empty, `CorpDNS` false, `RunWebClient` false, `AppConnector` `Advertise` false and `AdvertiseTags` `["tag:vandox-agent"]`. The output format is marked as not checked.
@@ -122,8 +112,8 @@ Rows only CI or a real host can run: none in CI. Everything on the server is the
    - Today's lines, plus the web port and SSH on the backend's IPv6 tailnet address, another tailnet device, `tailscale status` and `tailscale exit-node list`.
    - The optional detached accept-routes probe with its caveat, then `tailscale debug prefs` again.
    - Each with the result to expect, its Tailscale page (kb/1018, kb/1019, kb/1103) and the cause of a wrong result.
-6. **README, new reboot step**: `sudo reboot`, then the route check, `ip route get 100.64.0.1`, `tailscale status`, `tailscale debug prefs`, the ingest probes of step 5, `systemctl is-active vandox-agent` and the journal. Sends fail at once as `connection failed` until the tailnet is up, then go out from the spool.
-7. **README, existing text:** the sentence "every send fails as `connection failed`" (line 10) is tied to step 3's routes. Every result of these steps is marked "not yet run", and *Checks on the server* gets a row per check: "not yet run (issue #<follow-up>)".
+6. **README, new reboot step**: `sudo reboot`, then `tailscale status`, `tailscale debug prefs`, the ingest probes of step 5, `systemctl is-active vandox-agent` and the journal. Sends fail until the tailnet is up (step 3's residual applies in that window), then go out from the spool.
+7. **README, results:** every result of these steps is marked "not yet run", and *Checks on the server* gets a row per check: "not yet run (issue #<follow-up>)".
 
 Layout: today's numbered steps with fenced command blocks and bullets for results; the Dev words it, approved in step 9.
 
@@ -133,11 +123,7 @@ Layout: today's numbered steps with fenced command blocks and bullets for result
 2. **Reading HuJSON in the test.** The strip helper plus a strict token walk (chosen). `github.com/tailscale/hujson` lost: it is a new dependency, and its standardization still leaves duplicate keys to `encoding/json`'s last-wins rule.
 3. **Policy `tests` section.** Included: it is meant to guard a later edit, and a wrong syntax fails the save visibly. Residual: fact 9.
 4. **Settings check.** `tailscale debug prefs` (chosen) is in long-released versions. `tailscale get all` lost: it is too new.
-5. **Keeping the token off the provider's network while Tailscale is down** (Security B1):
-   - A oneshot unit with unreachable routes in the main table (chosen): independent of the provider's network files, ordered before the agent, and fail-closed through `RequiredBy=`.
-   - netplan `type: unreachable` routes lost: they edit provider- or cloud-init-managed files, and a mistake there can cut the server off at `netplan apply`.
-   - An nftables rule refusing tailnet destinations outside `tailscale0` lost: it interacts with Tailscale's own netfilter chains and the provider's firewall.
-   - `RestrictNetworkInterfaces=` in the agent's unit lost: it needs systemd 250 (fact 17), and the spec forbids changing the unit.
+5. **Keeping the token off the provider's network while Tailscale is down** (Security B1, B3): split into follow-up issue 2 (Lead decision, mode `decide`, after Security's second `CHANGES_REQUIRED`). A oneshot unit with `unreachable` routes does not survive networkd (fact 18). Each remaining candidate is unmeasured and touches the provider's network configuration: `ManageForeignRoutes=no` changes networkd for all foreign routes; `[Route] Type=unreachable` goes in a drop-in for the provider's uplink `.network`; netplan routes and nftables are the others. `RestrictNetworkInterfaces=` needs a newer systemd (fact 17) and a unit change. Settling it needs a measurement on a systemd-249 host with networkd, which the session lacks and the Product Manager will not run now. The exposure predates this change (README line 10 already assumes Tailscale is up), so this change states it instead of claiming a control.
 
 ## Affected projects and types
 
@@ -166,7 +152,7 @@ Files no unit test can cover: none.
     - the example policy file as the source of the rules;
     - its `tests` entries, not yet verified to take effect;
     - E4;
-    - the unreachable routes as the control that keeps a send from leaving while Tailscale is down, and the residual without them (token and batch in clear to whoever answers at that address on the provider's path);
+    - the residual while Tailscale is down (token and batch in clear to whoever answers at that address on the provider's path) and follow-up issue 2;
     - the behavior after a reboot.
   - *Web UI*: the policy grants no source access to the backend host's tailnet address except the agent's `tcp:<ingest port>`. A subnet-route grant to the home LAN gives those devices the web UI at its LAN address, as if they were in the home LAN.
   - *Related decisions*: 0132.
@@ -177,24 +163,24 @@ Owner: Dev, after the tests are green.
 
 - `deploy/agent/README.md`: *Approach* 2–7.
 - `docs/areas/network-and-security-model.md`: *Areas*.
-- `docs/INSTALL.md` step 11 (lines 310-312): name the policy file, and the routes step among the steps done before the agent.
-- `.squad/project.md` area 2: add `deploy/agent/tailnet-policy.hujson` and the README's routes unit to the file list, and record 0132 to its records.
+- `docs/INSTALL.md` step 11 (lines 310-312): name the policy file.
+- `.squad/project.md` area 2: add `deploy/agent/tailnet-policy.hujson` to the file list, and record 0132 to its records.
 - `.squad/stack.md` *Layout* (line 45): the `deploy/agent` tests also read the example tailnet policy.
 - Sweep: `docs/ARCHITECTURE.md:266` and `:447` and `SECURITY.md:41-42` state the rule and stay true. `docs/ARCHITECTURE.md:499` (bundle contents) is unchanged.
 
 ## Architecture check
 
-The guarantee that the monitored server reaches only the ingest port is kept, pinned by tests and by the policy's own `tests`. It is extended on the server's side: the token does not leave the server while Tailscale is down. Record 0016 is kept. No guarantee is weakened, and `docs/ARCHITECTURE.md` needs no edit.
+The guarantee that the monitored server reaches only the ingest port is kept, pinned by tests and by the policy's own `tests`. The token's exposure while Tailscale is down predates this change; it is now stated, and follow-up issue 2 adds a control. Record 0016 is kept. No guarantee is weakened, and `docs/ARCHITECTURE.md` needs no edit.
 
 ## Security considerations
 
 - [x] No limits: only the repository's own file is parsed, in a test.
 - [x] No user-visible exception: none.
-- `IPAddressAllow=` cannot name an interface (fact 14). `RestrictNetworkInterfaces=` would, but needs systemd 250 against the server's 249 (fact 17, not measured), and the spec keeps the unit unchanged. The routes of *Approach* 3 are the control. How they interact with a real tailscaled and with networkd is the follow-up run's (facts 13, 18).
+- `IPAddressAllow=` cannot name an interface (fact 14). `RestrictNetworkInterfaces=` would, but needs systemd 250 against the server's 249 (fact 17). No control in this change: the residual of spec E5 is stated in the README and the area, and follow-up issue 2 designs the control (*Options considered* 5).
 
 ## Decision records
 
-- `docs/decisions/0132-example-tailnet-policy-file-pinned-by-tests-no-default-maintainer-grant.md` (Proposed, extended with the routes)
+- `docs/decisions/0132-example-tailnet-policy-file-pinned-by-tests-no-default-maintainer-grant.md` (Proposed; records the split of the routes control)
 
 ## Challenge
 
@@ -208,13 +194,7 @@ Answers to the five minor *Challenge notes* of the Devil's Advocate, folded in h
 
 ## Security review
 
-- B1 (token on the provider's network while Tailscale is down): resolved.
-  - *Approach* 3 adds the precondition, the routes unit (ordered before the agent and required by it) and the check.
-  - *Approach* 6 repeats the check and `ip route get` after the reboot.
-  - Spec S7, E5 to E7 and AC7 replace the "timeout via the default route" wording.
-  - The area document states the control and the residual.
-  - *TailnetRoutesUnit* pins the lines, and the follow-up issue lists the checks.
-  - The mechanism is mine to decide: a oneshot unit (*Options considered* 5).
+- B1 and B3 (token on the provider's network while Tailscale is down; the routes do not survive networkd): not fixed in this change. After the second `CHANGES_REQUIRED`, the Lead split the control into follow-up issue 2 (*Loop limits*, Plan ↔ Security). Accept-and-fix did not apply: B3 is read from source, not measured, and its fix is a choice among options, not a supplied edit. This change states the residual (*Approach* 3, *DownResidual*, the area document). Fact 18 is corrected, and `PartOf=` is gone with the unit.
 - B2 (`encoding/json` versus Tailscale's parser): resolved.
   - `stripHuJSON` handles string escapes, refuses a BOM and unterminated comments or strings, and has its own tests.
   - `decodeStrict` refuses duplicate keys at every level, compared case-sensitively.
@@ -223,12 +203,19 @@ Answers to the five minor *Challenge notes* of the Devil's Advocate, folded in h
 - N2: accepted. A second `tests` entry denies UDP to 8081; its syntax is fact 9.
 - N3: accepted, together with DA note 5.
 - N4: accepted, together with DA note 3.
+- NB1 (name servers in the tailnet range): moved to follow-up issue 2, where it belongs to the precondition of a route control.
+- NB2: accepted. The strip helper's test adds a trailing comma followed by a comment.
 
 ## Out of scope / follow-ups
 
 - The PR says `Refs #43` and does not close it.
 - Follow-up issue (opened by the orchestrator): "[Ops] Run the Tailscale checks of the monitored server on production". Its body asks the maintainer to:
   - save `deploy/agent/tailnet-policy.hujson`, then save it once with the grant widened to `tcp:*` and once to `"8081"`, expecting both saves refused (facts 8, 9);
-  - run the precondition, routes unit and route checks, plus one networkd restart (fact 18);
-  - run the settings check, the checks, the reboot check with `ip route get 100.64.0.1`, and look at key expiry (facts 10 to 12);
+  - run the settings check, the checks and the reboot check, and look at key expiry (facts 10 to 12);
   - record the results in *Checks on the server*, then close #43.
+- Follow-up issue 2 (opened by the orchestrator; its number replaces `#<follow-up 2>` in the README): "[Security] Keep the agent's token off the provider's network while Tailscale is down". Body:
+  - the problem: spec E5 here; fact 13 (Tailscale's routes only in table 52, removed when it stops) and fact 14 (`IPAddressAllow=` ignores the interface);
+  - why a oneshot unit with `unreachable` routes fails: systemd-networkd drops foreign routes on link configure, reconfigure and carrier loss (fact 18, Security's v249.11 source references);
+  - candidates to measure on a systemd-249 host with networkd: a `networkd.conf.d` drop-in `ManageForeignRoutes=no` (affects all foreign routes); `[Route] Destination=… Type=unreachable` in a drop-in for the uplink's `.network`; an nftables rule; the agent unit's `RestrictNetworkInterfaces=` (systemd 250 or later);
+  - the precondition: which network manager is active (`systemctl is-active systemd-networkd NetworkManager`), no provider address, route or name server (`resolvectl dns`) in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` (Security NB1);
+  - the checks: the route check after a boot, after `networkctl reconfigure <uplink>` or `netplan apply`, and after a carrier flap, plus `ip route get 100.64.0.1` naming `tailscale0` while Tailscale is up.
