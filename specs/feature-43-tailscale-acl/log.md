@@ -23,4 +23,5 @@ are quoted in full.
 | 2026-10-29 22:21 | 3 Plan decide (2nd Security rejection) | squad-lead | RESULT: DONE - B1/B3 token control split into follow-up issue 2; residual stated in README/area; no further Security plan round (step-8 diff review still runs); PM question offered: ship now with residual or hold (opus/medium · 25,820 tokens · 7 tool uses · 123 s · continued) |
 | 2026-10-29 22:21 | 3 Follow-up issues | Orchestrator | Opened #337 (token off provider network while Tailscale is down = follow-up 2) and #338 (production run of the checks = follow-up 1) |
 | 2026-10-29 22:21 | 4 Skeleton | Orchestrator | Skipped: plan adds no API (no production code) |
-| 2026-10-29 22:21 | 5 Tests first (G1) | squad-tester | launched, mode tests-first (sonnet/medium · usage pending) |
+| 2026-10-29 22:21 | 5 Tests first (G1) | squad-tester | launched, mode tests-first (sonnet/medium · 121,777 tokens · 15 tool uses · 239 s) |
+| 2026-10-29 22:26 | 5 Tests first (G1) | Orchestrator | Confirmed: compiles, go vet clean, 17 file-dependent tests fail on current tree, helper tests pass; deferred: none |
