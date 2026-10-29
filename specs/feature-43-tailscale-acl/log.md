@@ -41,4 +41,6 @@ are quoted in full.
 | 2026-10-29 22:36 | 8 Spec/plan E5 wording | squad-lead | correct E5 residual and dst guard in spec/plan (opus/medium · 6,903 tokens · 5 tool uses · 33 s · continued) |
 | 2026-10-29 22:37 | 8 Delta review 1 (Reviewer) | Orchestrator | APPROVE: R1-R5 resolved, new prose and test code without defects |
 | 2026-10-29 22:37 | 8 Delta review 1 (Security) | Orchestrator | APPROVED: B1 and B2 resolved; mutation fails as intended; one wording nit (README:17) non-blocking |
-| 2026-10-29 22:37 | 9 PR approval | squad-lead | launched, mode approve-pr (open: split decision, DownResidual test vs plan, README:17 nit, record status) (opus/medium · usage pending) |
+| 2026-10-29 22:37 | 9 PR approval | squad-lead | launched, mode approve-pr (open: split decision, DownResidual test vs plan, README:17 nit, record status) (opus/medium · 50,419 tokens · 9 tool uses · 52 s) |
+| 2026-10-29 22:38 | 9 PR approval | Orchestrator | Lead NOT APPROVED: split to #337 stands; fix round 2: README residual paragraph (Dev) + DownResidual needles (Tester), then Reviewer and Security delta |
+| 2026-10-29 22:38 | 8 Fix round 2 (Dev) | squad-dev | README residual paragraph rewrite (sonnet/medium · usage pending) |
