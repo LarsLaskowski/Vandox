@@ -291,10 +291,8 @@ validate_backend_url() {
             host=""
         fi
 
-        if [[ -n $host && -n $port ]]; then
-            if [[ ! $port =~ $re_port ]] || ((port > 65535)); then
-                host=""
-            fi
+        if [[ -n $host && -n $port ]] && { [[ ! $port =~ $re_port ]] || ((port > 65535)); }; then
+            host=""
         fi
 
         if [[ -n $host ]]; then
@@ -485,11 +483,9 @@ read_bundle_version() {
 
     if _within_bound "$file" 64; then
         {
-            if IFS= read -r line && ! { IFS= read -r extra || [[ -n $extra ]]; }; then
-                if validate_version "$line"; then
-                    VERSION=$line
-                    return 0
-                fi
+            if IFS= read -r line && ! { IFS= read -r extra || [[ -n $extra ]]; } && validate_version "$line"; then
+                VERSION=$line
+                return 0
             fi
         } <"$file"
     fi

@@ -50,8 +50,11 @@ jobs:
             echo "::error::the run's ref '$REF' is not the release tag refs/tags/$TAG"
             exit 1
           fi
-          prerelease=false
-          case "$TAG" in *-*) prerelease=true ;; esac
+          case "$TAG" in
+            *-*) prerelease=true ;;
+            v*.*.*) prerelease=false ;;
+            *) echo "::error::tag '$TAG' is neither a MAJOR.MINOR.PATCH nor a pre-release SemVer tag"; exit 1 ;;
+          esac
           if [ "$prerelease" != "$RELEASE_PRERELEASE" ]; then
             echo "::error::the release's pre-release flag ($RELEASE_PRERELEASE) does not match the tag '$TAG': a tag with a pre-release suffix needs 'Set as a pre-release', any other tag must not have it"
             exit 1
