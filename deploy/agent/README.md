@@ -519,7 +519,7 @@ a `ProtectProc=` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `D
 | Where | systemd | Overall exposure level |
 | ----- | ------- | ---------------------- |
 | CI job `agent-install`, Ubuntu 22.04 runner (PR #324, head `a0d92a6`, run 40480331990) | 249 (`249.11-0ubuntu3.22`) | `Overall exposure level for vandox-agent.service: 2.2 OK` |
-| the monitored server (the Product Manager's server run, the artifact described in *Checks on the server*) | 249 (Ubuntu 22.04.5 LTS) | `Overall exposure level for vandox-agent.service: 2.2 OK` |
+| the monitored server (the Product Manager's server run, the artifact described in *Checks on the server*) | 249 (Ubuntu 22.04.5 LTS) | `Overall exposure level for vandox-agent.service: 2.2 OK` in both runs |
 
 Items the CI run and the server run both still flag (the same 15 items; the exposure each adds), with the reason the unit keeps them open:
 
@@ -549,25 +549,35 @@ repeat install, restart after a removed spool directory, uninstall, reinstall an
 ## Checks on the server
 
 The install script prints these four checks (a warning never fails the installation); the rest are run by hand. The Product Manager
-ran them on a monitored server (Ubuntu 22.04.5 LTS) with the artifact `agent-install-files` of the `agent-install` run of PR #324
-(version `v0.0.0-rc.0`), installed from that artifact. The run number of the artifact was not recorded; these SHA-256 values identify
-the exact files that were installed:
+ran them on a monitored server (Ubuntu 22.04.5 LTS, version `v0.0.0-rc.0`) with the artifact `agent-install-files` of the `agent-install`
+run of PR #324, twice. The binary is rebuilt in every CI run and is not bit-identical between runs, so the SHA-256 values below
+identify the exact files of each run.
 
-- bundle `vandox-agent-install-v0.0.0-rc.0.tar.gz`: `e2a7b07e9c42f129598b8c41b81ec9c3f2a92006c8052470ff62dee7af572c4f`
-- binary `vandox-agent-linux-amd64`: `1af5983910c8a01a154ea898dc52f0e6d9726ba0762f52c4730557ee28676065`
+- **First run (reboot measured).** The run number of the artifact was not recorded.
+  - bundle `vandox-agent-install-v0.0.0-rc.0.tar.gz`: `e2a7b07e9c42f129598b8c41b81ec9c3f2a92006c8052470ff62dee7af572c4f`
+  - binary `vandox-agent-linux-amd64`: `1af5983910c8a01a154ea898dc52f0e6d9726ba0762f52c4730557ee28676065`
+- **Re-run with the bundle of `d9de44b` (`install.sh` with the three Sonar fixes; no reboot).** CI run 40929022861. The agent was
+  uninstalled without `--purge` and installed again from that artifact on the production server.
+  - bundle `vandox-agent-install-v0.0.0-rc.0.tar.gz`: `451e18ade63231e5d050ecd034c3807dfc568e48b5dab472d3c99d8062758fff`
+  - binary `vandox-agent-linux-amd64`: `4dc16fc732c24275672e621508efcfe5893981b306db64fbc1acbb4e37171a58`
 
-The results are in the last column. The user `vandox-agent` already existed: the script kept its primary group `vandox-agent`, set its supplementary groups to `adm` and
-`systemd-journal`, kept its home directory in place, and ended with `vandox-agent v0.0.0-rc.0 installed and running`.
+The results are in the last column; they are the first run's, with a note where the re-run was checked too. In the first run the user
+`vandox-agent` already existed: the script kept its primary group `vandox-agent`, set its supplementary groups to `adm` and
+`systemd-journal`, kept its home directory in place, and ended with `vandox-agent v0.0.0-rc.0 installed and running`. The re-run printed
+`install.sh: keeping existing /etc/vandox/agent.yaml`, `home directory /home/vandox-agent is kept in place`, the four checks
+`ok` and `vandox-agent v0.0.0-rc.0 installed and running`; the service was `enabled` and `active (running)` with 14.2M of
+256.0M memory, and the agent logged `socket owners partly unknown` and `backend not accepting batches` (the backend was
+`vandoxd` v0.1.0 without the ingest API, as before).
 
 | Check | Command or line | Result to expect | Result of the server run |
 | ----- | --------------- | ---------------- | ------------------------ |
-| Journal files readable by the group | `check journal-group: ok` | `ok`; the `WARNING` means a file below `/var/log/journal` is not group-readable by `systemd-journal` (or there is none: a volatile journal only under `/run/log/journal`; then the `kernel` and `logs` collectors read that one, check it by hand with `ls -l /run/log/journal/*/`) | `check journal-group: ok` |
-| Clock of the journal | `check journal-clock: ok` | `/proc/uptime` and the journal's monotonic clock differ by less than 1 s; `WARNING ... differ by <n> ms` means every live kill reads as late and gets no extra snapshots; `WARNING could not read the journal timestamp` means `logger` or `journalctl` failed | `check journal-clock: ok` |
-| `process_madvise` in `@ipc` | `check ipc-filter: ok` | systemd lists the name, so the system-call filter entry takes effect | `check ipc-filter: ok` |
-| Capabilities of the running agent | `check capabilities: ok` | `CapEff` is `0000000000080000` (`CAP_SYS_PTRACE` alone) | `check capabilities: ok` |
-| Security score | `systemd-analyze security vandox-agent` | `OK` or better (see *Unit*) | `2.2 OK`, the same items flagged as in the CI run (*Unit*) |
-| `ptrace` attach is refused | run `sleep 300 &` as root, then `sudo systemd-run --wait --pipe -p User=vandox-agent -p AmbientCapabilities=CAP_SYS_PTRACE -p CapabilityBoundingSet=CAP_SYS_PTRACE -p NoNewPrivileges=yes -p 'SystemCallFilter=@system-service adjtimex' -p 'SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise' -p SystemCallErrorNumber=EPERM -p SystemCallArchitectures=native python3 -c 'import ctypes,sys; l=ctypes.CDLL(None,use_errno=True); r=l.ptrace(16,int(sys.argv[1]),0,0); print("EPERM" if r==-1 and ctypes.get_errno()==1 else "NOT REFUSED")' <PID of the sleep>` | prints `EPERM` | `EPERM` |
-| Reboot | `sudo reboot`, then `systemctl is-active vandox-agent` | `active`, started by itself after the journal flush | `active` and enabled, started by itself after the reboot; memory 25.8M of `MemoryMax=256M` |
+| Journal files readable by the group | `check journal-group: ok` | `ok`; the `WARNING` means a file below `/var/log/journal` is not group-readable by `systemd-journal` (or there is none: a volatile journal only under `/run/log/journal`; then the `kernel` and `logs` collectors read that one, check it by hand with `ls -l /run/log/journal/*/`) | `check journal-group: ok` (re-run: `ok`) |
+| Clock of the journal | `check journal-clock: ok` | `/proc/uptime` and the journal's monotonic clock differ by less than 1 s; `WARNING ... differ by <n> ms` means every live kill reads as late and gets no extra snapshots; `WARNING could not read the journal timestamp` means `logger` or `journalctl` failed | `check journal-clock: ok` (re-run: `ok`) |
+| `process_madvise` in `@ipc` | `check ipc-filter: ok` | systemd lists the name, so the system-call filter entry takes effect | `check ipc-filter: ok` (re-run: `ok`) |
+| Capabilities of the running agent | `check capabilities: ok` | `CapEff` is `0000000000080000` (`CAP_SYS_PTRACE` alone) | `check capabilities: ok` (re-run: `ok`) |
+| Security score | `systemd-analyze security vandox-agent` | `OK` or better (see *Unit*) | `2.2 OK`, the same items flagged as in the CI run (*Unit*) (re-run: `2.2 OK`) |
+| `ptrace` attach is refused | run `sleep 300 &` as root, then `sudo systemd-run --wait --pipe -p User=vandox-agent -p AmbientCapabilities=CAP_SYS_PTRACE -p CapabilityBoundingSet=CAP_SYS_PTRACE -p NoNewPrivileges=yes -p 'SystemCallFilter=@system-service adjtimex' -p 'SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise' -p SystemCallErrorNumber=EPERM -p SystemCallArchitectures=native python3 -c 'import ctypes,sys; l=ctypes.CDLL(None,use_errno=True); r=l.ptrace(16,int(sys.argv[1]),0,0); print("EPERM" if r==-1 and ctypes.get_errno()==1 else "NOT REFUSED")' <PID of the sleep>` | prints `EPERM` | `EPERM` (re-run: `EPERM`) |
+| Reboot | `sudo reboot`, then `systemctl is-active vandox-agent` | `active`, started by itself after the journal flush | `active` and enabled, started by itself after the reboot; memory 25.8M of `MemoryMax=256M`; measured in the first run only: the unit file is unchanged since, and the re-run on the production server did not reboot |
 | Files and modes | `stat -c '%U:%G %a %n' /etc/vandox/agent-token /etc/vandox/agent.yaml /var/lib/vandox/spool` | `root:root 600`, `root:vandox-agent 640`, `vandox-agent:vandox-agent 700` | as expected |
 | Transmission to the backend | the agent's log (`journalctl -u vandox-agent`) after the start; the fourth line of *Tailscale on the monitored server*, step 4 | the line prints `401`; the agent logs no `backend not accepting batches`, and the backend stores its batches | not part of this run (part of the v0.2.0 release check): the backend was `vandoxd` v0.1.0, which has no ingest API (it came with PR #316 and will first be released in v0.2.0), so the agent logged `backend not accepting batches reason=status status=404` and kept its records in the spool. The other log lines seen in the run were `mariadb down`, then `mariadb answering again`, and `socket owners partly unknown`. |
 | rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
