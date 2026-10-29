@@ -36,3 +36,6 @@ are quoted in full.
 | 2026-10-29 22:35 | 8 Fix round 1 (Dev) | squad-dev | docs/policy fixes R1-R5, S-B1, S-N2 (sonnet/medium · 7,674 tokens · 4 tool uses · 33 s · continued) |
 | 2026-10-29 22:35 | 8 Fix round 1 (Tester) | squad-tester | launched, mode coverage: dst exact set (Security B2) (sonnet/medium · 68,344 tokens · 6 tool uses · 42 s) |
 | 2026-10-29 22:36 | 8 Code check (fix round 1) | Orchestrator | gofmt, vet, golangci-lint, go test -race deploy/agent, scope-check, decision-check all PASS |
+| 2026-10-29 22:36 | 8 Delta review 1 (Reviewer) | squad-reviewer | delta round at c897bbb (opus/medium · usage pending) |
+| 2026-10-29 22:36 | 8 Delta review 1 (Security) | squad-security | delta round at c897bbb (opus/medium · usage pending) |
+| 2026-10-29 22:36 | 8 Spec/plan E5 wording | squad-lead | correct E5 residual and dst guard in spec/plan (opus/medium · usage pending) |
