@@ -29,6 +29,7 @@ are quoted in full.
 | 2026-10-29 22:31 | 6 Implement (G1) gates | Orchestrator | go test -race deploy/agent green; no production code, no Coverage gate (plan); decision-check PASS |
 | 2026-10-29 22:31 | 7 Code check | Orchestrator | gofmt clean, go build/vet, golangci-lint 0 issues, scope-check PASS, main not moved |
 | 2026-10-29 22:31 | 7 Sonar gate | Orchestrator | Not run: only test code, docs and a policy file changed (tests excluded from cloud analysis); PR analysis reads it in step 11 |
-| 2026-10-29 22:31 | 8 Review round 1 | squad-reviewer | launched at b7e2f6c (opus/medium · usage pending) |
+| 2026-10-29 22:31 | 8 Review round 1 | squad-reviewer | launched at b7e2f6c (opus/medium · 92,576 tokens · 19 tool uses · 162 s) |
 | 2026-10-29 22:31 | 8 Security diff review | squad-security | launched at b7e2f6c, mode diff (opus/medium · 84,669 tokens · 17 tool uses · 126 s) |
 | 2026-10-29 22:33 | 8 Security diff review | Orchestrator | Security verdict CHANGES_REQUIRED: B1 E5 residual inaccurate (answering party can make agent ack/give up records; agent.md:2005 stale), B2 AC3 guard misses dst autogroup:tagged/danger-all; N1, N2. Waiting for Reviewer round 1 |
+| 2026-10-29 22:34 | 8 Review round 1 | Orchestrator | Reviewer verdict BLOCKING 4, NON-BLOCKING 1 (agent.md stale E5 sentence; README step-4 not-yet-run wording; tailscale status check without kb page and cause; E1 warning next to the agent grant; record 0132 typo); with Security B1/B2 to Dev and Tester as fix round 1 |
