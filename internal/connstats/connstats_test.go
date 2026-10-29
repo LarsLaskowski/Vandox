@@ -1403,6 +1403,12 @@ func (f *closeHookFile) Close() error {
 	return f.File.Close()
 }
 
+// settleHeap collects twice, so that objects a first collection only queued for finalization or sweeping no longer count as live.
+func settleHeap() {
+	runtime.GC()
+	runtime.GC()
+}
+
 // measureRun runs the collector once over g and etc and measures the live data when the collector opens hookName, the last fdinfo
 // file it reads for PID 1, when the inode index and the owner map are still referenced, and when it closes the passwd, when the
 // user map is referenced as well (the run's peak), and the bytes the run allocated.
@@ -1412,17 +1418,17 @@ func measureRun(t *testing.T, g *genFS, hookName string, etc fs.FS) memRun {
 	var before, mid, end, after runtime.MemStats
 	g.hookName = hookName
 	g.hook = func() {
-		runtime.GC()
+		settleHeap()
 		runtime.ReadMemStats(&mid)
 	}
 	passwdRead := false
 	etc = &closeHookFS{FS: etc, name: "passwd", hook: func() {
 		passwdRead = true
-		runtime.GC()
+		settleHeap()
 		runtime.ReadMemStats(&end)
 	}}
 	c := newCollectorWith(g, etc)
-	runtime.GC()
+	settleHeap()
 	runtime.ReadMemStats(&before)
 	_, snap := snapshotOf(t, c, runAt(0, false))
 	runtime.ReadMemStats(&after)

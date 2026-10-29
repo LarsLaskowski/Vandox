@@ -247,10 +247,20 @@ type harness struct {
 func start(t *testing.T, jobs []scheduler.Job, sink *recordingSink) *harness {
 	t.Helper()
 
+	return startIn(t, jobs, sink, false)
+}
+
+// startIn is start with the pressure mode set before Run begins, so the first run never counts its due time with the other interval.
+func startIn(t *testing.T, jobs []scheduler.Job, sink *recordingSink, pressure bool) *harness {
+	t.Helper()
+
 	logs := &logStore{}
 	s, err := scheduler.New(jobs, sink, slog.New(&recordingHandler{store: logs}))
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
+	}
+	if pressure {
+		s.SetPressure(true)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &harness{t: t, sched: s, sink: sink, logs: logs, cancel: cancel, done: make(chan struct{}), base: time.Now()}
