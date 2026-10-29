@@ -1,7 +1,7 @@
 # Spec: Tailscale on the monitored server and its tailnet policy
 
 Source: Issue #43
-Status: Draft
+Status: Approved by Product Manager
 
 ## Problem
 
