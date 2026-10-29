@@ -433,10 +433,7 @@ func TestScheduler_TriggerWhileStuckRecordsGap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				hang := newHanging(t, "kern")
-				h := start(t, []scheduler.Job{tc.job(hang)}, &recordingSink{})
-				if tc.pressure {
-					h.sched.SetPressure(true)
-				}
+				h := startIn(t, []scheduler.Job{tc.job(hang)}, &recordingSink{}, tc.pressure)
 				h.sleepTo(5 * time.Second)
 
 				requireAccepted(t, h.sched, "kern", scheduler.Trigger{Kills: killsOf(0, 1)})
