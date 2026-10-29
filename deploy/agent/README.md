@@ -14,12 +14,11 @@ the maintainer's run is tracked in issue #338.
 
 **What stays open while Tailscale is not up.** Tailscale's routes exist only while it runs. While it is not up on this server (before it has
 its network map after a boot, stopped, logged out, or the node removed), a send to the backend's tailnet address follows the server's
-default route: it fails as `connection failed` or a timeout, and whoever answers at that address on the hosting provider's path gets the
-agent's token and the batch in clear. The unit's `IPAddressAllow=` filters by address, not by interface, so it does not stop this. If
-nothing answers, the send fails and the records stay in the spool until the tailnet is up. If someone answers, the agent also treats a
-2xx answer as delivered and drops those records, and a refusal answer (`400`, `413` or `422` with the refusal header) makes it give them
-up. This exposure predates the policy file below and is not
-closed here; issue #337 adds a control.
+default route. The unit's `IPAddressAllow=` filters by address, not by interface, so it does not stop this. If nothing answers, the send
+fails as `connection failed` or a timeout, and the records stay in the spool until the tailnet is up. If someone answers at that address
+on the hosting provider's path, it gets the agent's token and the batch in clear; the agent treats a 2xx answer as delivered and drops
+those records, and a refusal answer (`400`, `413` or `422` with the refusal header) makes it give them up. This exposure predates the
+policy file below and is not closed here; issue #337 adds a control.
 
 1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
    Use the package repository method that the guide describes. Check what a script does before you run it, as you would with any
