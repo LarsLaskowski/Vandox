@@ -29,7 +29,8 @@ replaced default rule, `tailscale up --advertise-tags`, Tailscale DNS off, the c
 - The issue lets maintainer devices reach the web UI port. The README grants them **every** port of the backend host
   (`autogroup:member` to `tag:vandox-backend`, `"ip": ["*"]`), while [record 0016](../../docs/decisions/0016-web-ui-in-home-lan-with-login.md)
   and the network area say the web UI is reachable in the home LAN only, access from outside the home needing a separate decision.
-  This is a related inconsistency of the current documentation (open question Q8).
+  This is a related inconsistency of the current documentation; the Product Manager settled it (Q8): no web UI over the tailnet,
+  and the README's "every port" grant goes.
 
 ## Scenarios
 
@@ -39,9 +40,12 @@ replaced default rule, `tailscale up --advertise-tags`, Tailscale DNS off, the c
 - S2: Given the server joined with `tag:vandox-agent`, when the maintainer runs the documented checks on the server, then the ingest
   port answers (`404` for `GET /`, `401` for a `POST /v1/batches` without a token), and every other probed target is blocked
   (`No route to host` or a timeout): another port of the backend host (SSH and the web port), another tailnet device, and a home-LAN
-  address behind a subnet router where the tailnet has one.
-- S3: Given a maintainer device in the tailnet, when the maintainer opens the web UI over the tailnet, then it reaches it as the
-  answer to Q8 decides (pending).
+  address behind a subnet router or an exit node where the tailnet has one (the tailnet has other devices, Q9; the checks name
+  how to pick a target among them and do not assume there are none).
+- S3: Given a maintainer device in the tailnet and the example policy as shipped, when the maintainer opens the web UI or any other
+  port of the backend host at its tailnet address, then the connection is blocked: the example grants maintainer devices nothing on
+  `tag:vandox-backend`, and the web UI stays reachable in the home LAN only (record 0016). The file carries commented, opt-in lines
+  (for example SSH to the backend host) that the maintainer enables on purpose, each with what it opens, and none for the web port.
 - S4: Given the set-up server, when the maintainer runs the documented settings check, then it shows Tailscale SSH off, no advertised
   routes, not an exit node, routes not accepted, Tailscale DNS off and the tag `tag:vandox-agent`, each with the value to expect.
 - S5: Given the set-up server, when it reboots, then Tailscale comes up by itself without a login, the settings of S4 are unchanged,
@@ -79,23 +83,31 @@ replaced default rule, `tailscale up --advertise-tags`, Tailscale DNS off, the c
   HuJSON as the admin console stores it (the older `acls` form stays undocumented as tested).
 - Documented procedure (*Operator environments and documented procedures*, `.squad/routing.md`): every statement no run has shown is
   marked as such; the Product Manager's run on the real server and tailnet produces the results recorded for S2, S4, S5 and S6.
-- Target host and tailnet: pending the Product Manager's answer (Q9).
+- Target host and tailnet (Q9): the production server is already in the tailnet with `tag:vandox-agent`, so the procedure serves both
+  a first join and the verification of a joined server; the tailnet has other devices, whose kinds are not known, so the example
+  policy and the README treat subnet routers, exit nodes and other tagged devices as possibly present; the policy may be edited in
+  the admin console or through GitOps, so the file is plain HuJSON usable in both and the README names neither as required.
+- Verification: the extended checks, the settings check and the reboot check are not run on the production server in this change.
+  They are documented with the result to expect and marked in the README as not yet run, an open verification for the maintainer.
 
 ## Acceptance criteria
 
 - [ ] AC1: `deploy/` contains a complete example tailnet policy file that the admin console accepts; its only rule whose source
   matches `tag:vandox-agent` allows `tcp:<ingest port>` to `tag:vandox-backend`, and it has no `ssh` rule, `autoApprovers` entry
   or grant to a subnet or `autogroup:internet` that matches the server; the README's step 2 refers to it and holds no diverging copy
-  (S1, E3, E4, E7).
-- [ ] AC2: the README's checks cover the targets of S2 with the result to expect for each and the cause of a wrong result, and the
-  Product Manager's run records their results (S2, E1, E2).
-- [ ] AC3: the maintainer devices' access to the web UI over the tailnet is as Q8 decides, in the example policy and the network
-  area (S3).
-- [ ] AC4: the README has a settings check that shows each value of S4 with the value to expect, and the run records it (S4).
-- [ ] AC5: the README describes the reboot check of S5 and its result from a run on the server, including the agent's sends after
-  the tailnet is up again (S5, E5, E6).
-- [ ] AC6: the README states the key expiry of the tagged server, why, and how to replace its key, and the run records what the
-  admin console showed (S6).
+  (S1, E3, E4, E7). Verified by review and, as an open maintainer step, by saving it in the tailnet's policy.
+- [ ] AC2: the README's checks cover the targets of S2 with the result to expect for each and the cause of a wrong result; their
+  results on the production server are marked as not yet run (S2, E1, E2).
+- [ ] AC3: neither the example policy nor the README grants maintainer devices (`autogroup:member` or any other source) access to
+  `tag:vandox-backend` other than through commented opt-in lines, none of them for the web port; the README's `"ip": ["*"]` grant is
+  removed, the README says what the maintainer loses over the tailnet by that and how to opt in, and the network area states that
+  the web UI is not offered on the tailnet (S3).
+- [ ] AC4: the README has a settings check that shows each value of S4 with the value to expect, marked as not yet run on the
+  production server (S4).
+- [ ] AC5: the README describes the reboot check of S5 with the results to expect, including the agent's sends after the tailnet is
+  up again, marked as not yet run (S5, E5, E6).
+- [ ] AC6: the README states the key expiry of the tagged server, why, how to check it in the admin console and how to replace its
+  key; the check on the server's entry is marked as not yet run (S6).
 
 ## Out of scope
 
@@ -119,16 +131,19 @@ replaced default rule, `tailscale up --advertise-tags`, Tailscale DNS off, the c
 - Q6: Has the reboot been tested? Answered: for the agent's unit only (README, row *Reboot*); never for Tailscale.
 - Q7: Is key expiry off for the tagged server? Answered: the README cites Tailscale's documentation (tagged devices have key expiry
   disabled by default); not yet checked on the server's entry, so S6 records it from the run.
-- Q8: What may maintainer devices reach on the backend host over the tailnet? Pending: escalated to the Product Manager (the README's
-  "every port" grant, the issue's "web UI port", and record 0016's "home LAN only" disagree).
-- Q9: What do the target server and the tailnet have today? Pending: escalated to the Product Manager (is the server already joined
-  with `tag:vandox-agent` from the #324 run; is there a subnet router, an exit node or another tagged device; is the policy edited
-  in the admin console or through GitOps; may the production server be rebooted for the check).
+- Q8: What may maintainer devices reach on the backend host over the tailnet? Answered: by the Product Manager, option (C): no web UI
+  over the tailnet, record 0016 stays as it is; maintainer devices get only what the maintainer adds on purpose, as commented opt-in
+  lines, and the README's `autogroup:member` to `tag:vandox-backend` `"ip": ["*"]` grant is removed.
+- Q9: What do the target server and the tailnet have today? Answered: by the Product Manager: the production server is already in
+  the tailnet with `tag:vandox-agent`; the tailnet has other devices (which kinds was not stated, so none may be assumed absent); how
+  the policy is edited was not stated (both ways are documented neutrally); the reboot test and the extended checks are not run on
+  production now and stay open maintainer verification.
 
 ## Area documents
 
 - `docs/areas/network-and-security-model.md`, *Agent to backend* and *Web UI*: the example policy file as the source of the rules,
   what the policy does against a compromised root's Tailscale settings (E4), the behavior after a reboot (S5, E5), and the maintainer
-  devices' access as Q8 decides.
-- `deploy/agent/README.md`, *Tailscale on the monitored server* (the procedure, not an area document): the policy file, the settings
-  check, the extended checks, the reboot check, key expiry, and the run's results.
+  devices' access: none to the backend host over the tailnet by default, the web UI not offered on the tailnet (Q8).
+- `deploy/agent/README.md`, *Tailscale on the monitored server* (the procedure, not an area document): the policy file, the removed
+  `"*"` grant and the opt-in lines, the settings check, the extended checks, the reboot check and key expiry, each marked as not yet
+  run on the production server.
