@@ -28,6 +28,11 @@ if ! command -v reihitsu-format >/dev/null 2>&1; then
   dotnet tool install -g Reihitsu.Cli
 fi
 
+# Local tools of the repository's manifest (dotnet-sonarscanner for the *Sonar gate*, a formatter pinned there).
+if [[ -e dotnet-tools.json || -e .config/dotnet-tools.json ]]; then
+  dotnet tool restore || echo "dotnet tool restore failed; run it before the Sonar gate" >&2
+fi
+
 # Restore every solution at the repository root (the squad's settings name the one the gates build).
 for solution in *.slnx *.sln; do
   if [[ -e "$solution" ]]; then

@@ -165,8 +165,9 @@ network access to its download hosts (`api.sonarcloud.io` and `scanner.sonarclou
 hosts cover, and the NuGet registry); without them it reports NOT CHECKED, and step 11 reads the draft pull request with `python3 .squad/tools/sonar-check.py pr <number>`
 instead. A finding of a rule no local analyzer reports is noted in this section, in the same change, instead of a
 squad lesson.
-One analysis covers both languages, as in CI: the scanner for .NET (`dotnet-sonarscanner` from the tool manifest)
-wraps the full, non-incremental C# build between `begin` and `end`, and its bundled scanner analyses the Go agent
+One analysis covers both languages, as in CI: the scanner for .NET (`dotnet-sonarscanner` from the tool manifest, which
+`dotnet tool restore` must have restored before the gate in a fresh cloud session: the SessionStart hook does it,
+run it by hand where the hook did not) wraps the full, non-incremental C# build between `begin` and `end`, and its bundled scanner analyses the Go agent
 in the same run. Its `begin` arguments mirror the `sonarqube` job of `.github/workflows/ci.yml`, plus the branch
 name and the repository root as base directory: a change to the CI step changes this row too. It reads the
 OpenCover reports coverlet writes next to the Cobertura ones (`coverlet.runsettings`) and Go's `coverage.out`, so
@@ -325,6 +326,12 @@ C# (backend): follow the surrounding code and the analyzers; in particular
   `-p:VandoxCommit` and `-p:VandoxDate`.
 
 ## Writing tests
+
+**Scripts only CI can run.** A script that needs systemd, root or a service the session lacks (an
+end-to-end install check, for example) has a local smoke substitute, which the Tester runs before handing back:
+`bash -n` and `shellcheck` on the script, and a mode of the script (or a test) that runs the documented lines
+against a scratch directory with stub commands, without systemd. The plan lists the rows that can only run in
+CI (`.squad/routing.md`, *Operator environments and documented procedures*).
 
 See `docs/UNIT_TESTS.md`. Go: the standard `testing` package, table-driven tests with `t.Run`, `t.Helper()` in
 helpers, `t.TempDir()` for files, failure messages that state got and want. .NET: MSTest, one test class per
