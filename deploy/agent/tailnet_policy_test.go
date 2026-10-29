@@ -838,7 +838,7 @@ func TestAgentReadme_TailscaleDownResidual(t *testing.T) {
 
 	text := collapse(tailscaleSection(t))
 
-	containsAll(t, text, "the Tailscale section", "default route", "token", "in clear", "#337")
+	containsAll(t, text, "the Tailscale section", "default route", "token", "in clear", "drops those records", "give them up", "#337")
 
 	if stale := "every send fails as `connection failed`"; strings.Contains(text, stale) {
 		t.Errorf("the Tailscale section still says %q, want the residual: a send follows the default route while Tailscale is down", stale)
