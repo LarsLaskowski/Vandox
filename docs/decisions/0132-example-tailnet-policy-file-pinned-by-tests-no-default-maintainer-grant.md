@@ -12,7 +12,8 @@ Record 0010 makes the tailnet policy the boundary that lets a compromised monito
 policy existed only as a fragment in `deploy/agent/README.md`, which also granted the maintainer's devices every port of the backend
 host, at odds with record 0016 (web UI in the home LAN only). Nothing pinned the fragment, and nothing stops a later edit of the live
 policy from widening what the server reaches. Besides, while Tailscale is down its routes are gone and a `100.x` destination follows
-the server's default route, so the agent's plain-`http` request would carry the token and the batch onto the provider's network; the
+the server's default route, so the agent's plain-`http` request would carry the token and the batch onto the provider's network; if
+something answers there, a `2xx` answer makes the agent drop those records as delivered and a refusal answer makes it give them up; the
 unit's `IPAddressAllow=` filters by address, not interface.
 
 ## Options considered
@@ -44,6 +45,7 @@ split into a follow-up issue after Security's second review; this change states 
   in the home LAN nothing changes.
 - The file is not part of the install bundle; the bundle's file lists name their files explicitly.
 - Until the follow-up issue adds a control, the token and the batch go in clear to whoever answers at the backend's tailnet address
-  on the provider's path while Tailscale is down; the exposure predates this change, and the area document names it.
-- Until the maintainer's run on the production tailnet, the console's acceptance of the file and of its `tests` entries, are unverified;
+  on the provider's path while Tailscale is down, and an answering party can make the agent drop or give up those records (a `2xx` or a
+  refusal answer); if nothing answers, the records stay spooled. The exposure predates this change, and the area document names it.
+- Until the maintainer's run on the production tailnet, the console's acceptance of the file and of its `tests` entries is unverified;
   a wrong syntax makes the save fail visibly.

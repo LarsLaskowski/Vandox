@@ -52,9 +52,11 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   has the check, not yet run on the production server (issue #338).
 - **Residual while Tailscale is not up.** Tailscale's routes exist only while it runs, and the unit's `IPAddressAllow=` filters by
   address, not interface. While Tailscale is down (before its network map after a boot, stopped, logged out, the node removed), a send to the
-  backend's tailnet address follows the server's default route and fails as `connection failed` or a timeout, and whoever answers at that
-  address on the provider's path gets the token and the batch in clear. The exposure predates the policy file, is stated in the README, and
-  is not closed; issue #337 adds a control (record 0132). The records stay in the spool and go out once the tailnet is up.
+  backend's tailnet address follows the server's default route. If nothing answers, the send fails as `connection failed` or a timeout and the
+  records stay in the spool until the tailnet is up. Whoever answers at that address on the provider's path gets the token and the batch in
+  clear and, with a `2xx` answer (acknowledged) or a refusal answer (`400`, `413` or `422` with the refusal header), makes the agent drop those
+  records as delivered or give them up. The exposure predates the policy file, is stated in the README, and is not closed; issue #337 adds a
+  control (record 0132).
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).

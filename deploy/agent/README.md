@@ -15,8 +15,10 @@ the maintainer's run is tracked in issue #338.
 **What stays open while Tailscale is not up.** Tailscale's routes exist only while it runs. While it is not up on this server (before it has
 its network map after a boot, stopped, logged out, or the node removed), a send to the backend's tailnet address follows the server's
 default route: it fails as `connection failed` or a timeout, and whoever answers at that address on the hosting provider's path gets the
-agent's token and the batch in clear. The unit's `IPAddressAllow=` filters by address, not by interface, so it does not stop this. The
-agent keeps its records in its spool and sends them once the tailnet is up. This exposure predates the policy file below and is not
+agent's token and the batch in clear. The unit's `IPAddressAllow=` filters by address, not by interface, so it does not stop this. If
+nothing answers, the send fails and the records stay in the spool until the tailnet is up. If someone answers, the agent also treats a
+2xx answer as delivered and drops those records, and a refusal answer (`400`, `413` or `422` with the refusal header) makes it give them
+up. This exposure predates the policy file below and is not
 closed here; issue #337 adds a control.
 
 1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
@@ -68,6 +70,7 @@ closed here; issue #337 adds a control.
      root on this server that turns on Tailscale SSH, advertises a route or an exit node, accepts routes or selects an exit node still
      reaches only the ingest port. The settings line of step 3 keeps these off anyway.
    - No tag as a tag owner.
+   - No grant of your devices (or anyone) with `autogroup:tagged` or `autogroup:danger-all` as destination: both include the backend host.
    - The agent itself never listens on a port, so it needs no rule with this server as destination. If you also manage the server over
      Tailscale (SSH or anything else over the tailnet, not over the normal network), that needs an extra rule with your devices as
      source and `tag:vandox-agent` as destination; no rule but the agent's one may have `tag:vandox-agent` as source.
@@ -138,8 +141,9 @@ closed here; issue #337 adds a control.
    is an alternative that has not been tested.
 4. **Check the connection and the policy.** On this server, with the backend host's tailnet address in place of `100.64.0.1`, its IPv6
    tailnet address in place of `fd7a:115c:a1e0::1`, another tailnet device's address in place of `100.64.0.9`, and the backend's ingest
-   port in place of `8081`. Each line stands alone and changes nothing. The results of the lines added for issue #43 (everything but the
-   first four) have **not yet run** on the production server (issue #338):
+   port in place of `8081`. Each line stands alone and changes nothing. Only the fifth line, SSH on the backend host's IPv4 tailnet
+   address, has a result from the production server (below); the results of the other lines, the two `curl` lines and the lines added
+   for issue #43 among them, have **not yet run** there (issue #338):
 
    ```
    tailscale ip -4
@@ -178,7 +182,9 @@ closed here; issue #337 adds a control.
        wide, usually because the default rule is still there, a second rule matches the server, or the server has no tag; correct
        step 2 or 3.
    - `tailscale status` must list the backend host as its only peer, because Tailscale shows a server only the peers the policy
-     relates to it. Another peer means a rule gives the server more than the ingest port; find it in the policy.
+     relates to it (Tailscale's access control page: <https://tailscale.com/kb/1018/acls>). Another peer means a rule has this server
+     as source or as destination: a rule that gives the server more than the ingest port is too wide and must go; one with your devices
+     as source and `tag:vandox-agent` as destination, added on purpose to manage the server (step 2), explains that peer.
    - `tailscale exit-node list` must show no exit node this server may use (Tailscale's exit node page:
      <https://tailscale.com/kb/1103/exit-nodes>). One in the list means a rule or an exit node's `autogroup:internet` grant matches this
      server; remove that match.
@@ -223,8 +229,9 @@ closed here; issue #337 adds a control.
    - `tailscale status` shows the server logged in and the backend host as its peer; `tailscale debug prefs` shows the values of step 3
      unchanged; the two `curl` lines print `404` and `401`.
    - `systemctl is-active vandox-agent` prints `active`. The journal shows the agent sending again, with the records of the window from
-     its spool, and no further `connection failed` after the tailnet is up. Until the tailnet is up, sends fail, and the residual at
-     the top of this section applies in that window.
+     its spool, and no further `connection failed` after the tailnet is up. Until the tailnet is up, the residual at the top of this
+     section applies in that window: if nothing answers, sends fail and the records stay spooled; an answering party on the provider's
+     path gets the token and the batch and, with a `2xx` or a refusal answer, makes the agent drop or give up those records.
    - If `tailscale status` says Tailscale is stopped or logged out, check `systemctl status tailscaled` and run
      `systemctl enable --now tailscaled`; if it asks for a login, join again with step 3. The agent keeps spooling meanwhile.
 

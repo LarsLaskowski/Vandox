@@ -24,7 +24,8 @@
   },
 
   "grants": [
-    // The agent's only rule: TCP to the ingest port of the backend host.
+    // The agent's only rule: TCP to the ingest port of the backend host. No other rule may have a source that matches the server
+    // (see the header): a second one widens what a compromised server reaches.
     {"src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend"], "ip": ["tcp:8081"]},
 
     // Your own devices reach each other (what the default rule gave them among themselves).
