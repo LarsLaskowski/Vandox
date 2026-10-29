@@ -46,6 +46,8 @@ are quoted in full.
 | 2026-10-29 22:38 | 8 Fix round 2 (Dev) | squad-dev | README residual paragraph rewrite (sonnet/medium · 1,742 tokens · 2 tool uses · 16 s · continued) |
 | 2026-10-29 22:39 | 8 Fix round 2 (Tester) | squad-tester | needles for DownResidual test (sonnet/medium · 1,510 tokens · 3 tool uses · 20 s · continued) |
 | 2026-10-29 22:40 | 8 Code check (fix round 2) | Orchestrator | gofmt, vet, golangci-lint, go test -race deploy/agent, scope-check PASS; main not moved; head 2224c66 |
-| 2026-10-29 22:40 | 8 Delta review 2 (Reviewer) | squad-reviewer | delta round at 2224c66 (opus/medium · usage pending) |
-| 2026-10-29 22:40 | 8 Delta review 2 (Security) | squad-security | delta confirmation at 2224c66 (opus/medium · usage pending) |
+| 2026-10-29 22:40 | 8 Delta review 2 (Reviewer) | squad-reviewer | delta round at 2224c66 (opus/medium · 2,902 tokens · 3 tool uses · 15 s · continued) |
+| 2026-10-29 22:40 | 8 Delta review 2 (Security) | squad-security | delta confirmation at 2224c66 (opus/medium · 2,628 tokens · 2 tool uses · 17 s · continued) |
 | 2026-10-29 22:40 | 8 Delta review 2 (Reviewer) | Orchestrator | APPROVE: README paragraph and test needles correct, no new defects |
+| 2026-10-29 22:40 | 8 Delta review 2 (Security) | Orchestrator | APPROVED: nit resolved, no findings |
+| 2026-10-29 22:40 | 9 PR approval | Orchestrator | Approved: Lead's NOT APPROVED fixes done (round 2), Reviewer and Security delta clean at 2224c66, gates pass, main not moved; record 0132 set to Accepted (record status only); split to #337 confirmed by Lead |

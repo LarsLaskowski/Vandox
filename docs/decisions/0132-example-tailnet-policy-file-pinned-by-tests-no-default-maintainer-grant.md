@@ -1,6 +1,6 @@
 # 0132: Example tailnet policy as a file pinned by tests, without a default grant for maintainer devices, with the token's exposure while Tailscale is down split off
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-29
 - **Area:** Network and security model
 - **Source:** Issue #43
