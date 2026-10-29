@@ -18,4 +18,5 @@ are quoted in full.
 | 2026-10-29 22:09 | 2b Plan challenge | Orchestrator | Verdict OBJECTIONS 0 major, 5 minor; appended verbatim to plan.md Challenge notes |
 | 2026-10-29 22:12 | 3 Plan security review | Orchestrator | Security verdict CHANGES_REQUIRED: B1 (E5: unreachable routes for 100.64.0.0/10 and fd7a:115c:a1e0::/48 needed), B2 (Go test parser guard: duplicate/case keys, strip helper, BOM), N1-N4; to Lead in revise round with the 5 challenge notes |
 | 2026-10-29 22:16 | 3 Plan revise round | squad-lead | RESULT: DONE - B1 (oneshot unit with unreachable routes), B2 (strict token walk), N1-N4 and 5 challenge notes answered (opus/medium · 43,388 tokens · 12 tool uses · 224 s · continued) |
-| 2026-10-29 22:16 | 3 Plan security review (round 2) | squad-security | launched, mode plan, re-review of revision (opus/medium · usage pending) |
+| 2026-10-29 22:16 | 3 Plan security review (round 2) | squad-security | launched, mode plan, re-review of revision (opus/medium · 55,111 tokens · 13 tool uses · 146 s) |
+| 2026-10-29 22:18 | 3 Plan security review (round 2) | Orchestrator | Security verdict CHANGES_REQUIRED (2nd rejection): B1 only partly resolved - B3 networkd deletes foreign unreachable routes on link reconfigure/carrier loss/boot without restarting; NB1, NB2. Next: squad-lead mode decide |
