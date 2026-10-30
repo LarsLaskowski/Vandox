@@ -17,3 +17,5 @@ are quoted in full.
 | 2026-10-30 19:01 | 2 Plan | squad-lead | revise (2): PM acceptance recorded, spool fact 8 confirmed, follow-ups #341 #342; plan final (opus/medium · 9,448 tokens · 6 tool uses · 87 s · continued) |
 | 2026-10-30 19:02 | 6 Implement | squad-dev | docs done: BENCHMARKS Agent footprint, agent.md, deploy/agent README; #44 grep clean (sonnet/medium · 85,049 tokens · 22 tool uses · 68 s) |
 | 2026-10-30 19:12 | 7 Code check | Orchestrator | Format check, scope-check, decision-check, go build/vet/test -race, analyzer-check PASS on docs-only diff; dotnet test and Sonar gate not run (no code in diff), CI at step 11 |
+| 2026-10-30 19:14 | 8 Review | squad-reviewer | round 1 full on b924e53: APPROVE, 1 non-blocking (README Peak memory source cell) (opus/medium · 50,815 tokens · 11 tool uses · 82 s) |
+| 2026-10-30 19:14 | 8 Review | Orchestrator | verbatim fix of the non-blocking finding in deploy/agent/README.md (Peak memory row), commit 36ac6f4; Format check, scope-check, decision-check pass |
