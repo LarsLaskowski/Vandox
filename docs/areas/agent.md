@@ -366,9 +366,9 @@ started again while it hangs. A local user who holds the memory map lock of a pr
 is deliberate: a goroutine and deadline per process would cost more than the collector itself (record 0113, option 10).
 
 **Speed and cost.** A snapshot of 250 processes takes under 100 ms; the figure and the host it was measured on are in
-[Benchmarks](../BENCHMARKS.md) (*Process snapshot*), not measured on the server (kernel 5.15, 2 GB), which #44 does. Reading
-`smaps_rollup` of every process every 15 seconds under pressure is a cost nobody has measured on the server; it is an **open point for #44
-and #45**.
+[Benchmarks](../BENCHMARKS.md) (*Process snapshot*), not measured on the server (kernel 5.15, 2 GB); the agent's total CPU there is 0.42 % of one core over 24 hours
+([Benchmarks](../BENCHMARKS.md), *Agent footprint*). Reading `smaps_rollup` of every process every 15 seconds under pressure is a cost nobody
+has measured on the server; it is an **open point for #45 and #342**.
 
 ## Connections
 
@@ -547,7 +547,8 @@ per table line, all reclaimed by the garbage collector. The garbage is accepted;
 **Speed.** `BenchmarkConnections_Collect` over the captured server tables with 300 processes of 30 descriptors, the fixture `passwd`
 included, takes 57.8 ms per run and allocates 2.02 MB in 26,484 allocations; the tree before the socket UIDs, on the same host and day,
 took 57.3 ms with 1.99 MB in 26,310 allocations, so the `passwd` read and the UIDs cost no measurable time ([Benchmarks](../BENCHMARKS.md),
-*Connection snapshot*); not measured on the server (#44).
+*Connection snapshot*); not measured on the server, where the agent's total CPU is 0.42 % of one core ([Benchmarks](../BENCHMARKS.md),
+*Agent footprint*).
 
 **Residuals.**
 
@@ -1712,7 +1713,7 @@ positions are in, and one frame buffer; it does not grow with the number of reco
 sender stream; the age read of the self-metrics (once a minute) takes a position as well, so it can replace one, and the stream whose
 position was replaced then finds its place again through the sparse index, which costs reading time and never correctness. Opening a spool filled
 to the default cap takes 26.2 ms and one of 1,024 files 15.9 ms on the development host, against a bound of 5 seconds
-([BENCHMARKS](../BENCHMARKS.md), *Spool open*); the server is not measured (#44).
+([BENCHMARKS](../BENCHMARKS.md), *Spool open*); not measured on the server (#342).
 
 **Capacity.** The default `spool.max_size` holds 7 days of the **reference stream**, an estimate of the server that the tests generate
 from a fixed seed, every record with varying content: per day 2,880 `system` samples of 110 metrics; 1,440 `filesystem` samples of 7
@@ -1724,9 +1725,11 @@ status counters, 15 variables and 8 threads; 400 service states; 200,000 log lin
 full-scale 7-day run (`TestSpool_SevenDayOutageFullScale` with `VANDOX_LONG_TESTS=1`, without the race detector; 109.6 s on the
 development host, 2026-10-23) kept all 3,811,920 records, held 1,576,818,758 of 2,147,483,648 bytes after the 7 days (73 %, the final
 16-digit sequence numbers, headers and summaries included), dropped nothing, wrote no `spool_dropped` gap and read every record back
-once in order. Every test run checks the same at one eightieth of every daily count (`TestSpool_SevenDayOutage`). The real volume is
-measured on the server in #44; under sustained memory pressure the agent records much more, so less than 7 days may fit and the cap
-drops the oldest with gaps (*Memory pressure mode*).
+once in order. Every test run checks the same at one eightieth of every daily count (`TestSpool_SevenDayOutage`). On the production
+server, without sending (nothing acknowledged), the spool grew by about 157 MB a day, derived from the spacing of the sealed files (one of about
+16.76 MB every 2 h 33 min, 2026-10-28 to 2026-10-30; the total gives 158 MB), which is about 70 % of the reference stream's 225 MB, so the
+default 2 GiB holds about 13.7 days ([BENCHMARKS](../BENCHMARKS.md), *Agent footprint*). Under sustained memory pressure the agent records
+much more, so less than 7 days may fit and the cap drops the oldest with gaps (*Memory pressure mode*).
 
 **Logging.** Through the agent's logger with `component=spool`, one line per change and never a path, a record's content or a system
 error text other than an `errno` text: info `spool created`; warning `spool data dropped` and info `spool data no longer dropped`;
@@ -1797,7 +1800,7 @@ acknowledgement, since the start), never negative.
 8.6 MB under the race detector (7.5 to 7.8 MB without), the same at 600 and at 2,400 records of backlog, against the limit of 16 MiB.
 `TestReferenceStream_BackfillRate` took 6,807 records of the reference stream (*Capacity*), 2,630,490 bytes of lines, to 556,335 bytes
 compressed (gzip ratio 4.73), which at the default `256KiB` a second is 3,207 records a second, inside the band of 1,000 to 8,500
-the test pins (on the development host; the real rate is measured in #44). At that rate the backlog of a day (544,560 records) takes about 3 minutes
+the test pins (on the development host; the real rate is not measured yet, #342). At that rate the backlog of a day (544,560 records) takes about 3 minutes
 of sending beside the live stream.
 
 **Logging.** Through the agent's logger with `component=sender`, never the URL, the token, a host or an answer's text, only the fixed
