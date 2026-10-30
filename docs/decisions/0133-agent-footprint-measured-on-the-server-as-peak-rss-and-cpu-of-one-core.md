@@ -17,7 +17,7 @@ and their sources are in [Benchmarks](../BENCHMARKS.md) (*Agent footprint*).
 
 ## Options considered
 
-1. **Measure on the production server and state the remaining deviations for the Product Manager to accept** (chosen) —
+1. **Measure on the production server and have the Product Manager accept the remaining deviations** (chosen) —
    the server's own load is the load the criterion protects, and the margins (peak RSS about 20.4 MB of 30 MB, CPU 0.42 %
    of 1 %) are wide. The sending path and a memory pressure episode stay unmeasured.
 2. **Measure again while the agent sends** — covers the sender and the backfill, but needs #43 and a backend with the
@@ -28,19 +28,19 @@ and their sources are in [Benchmarks](../BENCHMARKS.md) (*Agent footprint*).
 ## Decision
 
 The memory criterion is the agent's peak RSS (`VmHWM`) under 30 MB. The CPU criterion is its cgroup CPU time over the run's
-elapsed time under 1 % of one core. The 24 h 16 min run on the production server meets both.
+elapsed time under 1 % of one core. The 24 h 16 min run on the production server meets both, and the Product Manager
+accepted its remaining deviations from the issue on 2026-10-30.
 
 ## Consequences
 
-- **Deviations awaiting the Product Manager.** Three deviations from the issue remain:
+- **Deviations accepted.** Three deviations from the issue remain, and the Product Manager accepted them on 2026-10-30:
   - the server had 161 processes, not several hundred;
   - the agent never sent anything;
   - the stats of the previous agent instance are lost.
 
-  The Product Manager has **not** accepted them yet. #44 closes only once the Product Manager confirms them; until then
-  the issue stays open, and this record says so.
+  With that acceptance the issue's second criterion is met.
 - The cgroup's `MemoryCurrent` (about 47.3 MiB) is not the criterion: it includes the page cache of the spool files.
-- The footprint while sending and backfilling, and under memory pressure, is not measured. It belongs to the follow-up
-  issue on the sending path and to the parallel run of #45.
+- The footprint while sending and backfilling, under memory pressure, and the spool's open time on the server are not
+  measured. They belong to #342 (and the pressure cost also to the parallel run of #45).
 - Revisit when a later version adds a collector or changes the sender: a new run on the server under the same
   definitions replaces the results.
