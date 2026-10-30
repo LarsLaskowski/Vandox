@@ -2002,8 +2002,12 @@ the only one that joins the check and `tar` with `&&` (`deploy/agent/README.md`,
 [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md).
 The monitored server must be a node of the backend host's tailnet (Tailscale installed and logged in; the steps are in
 `deploy/agent/README.md`, *Tailscale on the monitored server*). The unit's allow-list admits only localhost, `100.64.0.0/10` and
-`fd7a:115c:a1e0::/48`, so without Tailscale every send fails as `connection failed` and the agent keeps spooling and retrying
-(*Sending*); the unit has no ordering on `tailscaled`, because the sender retries until the tailnet is up.
+`fd7a:115c:a1e0::/48`, by address, not by interface: while Tailscale is not up, a send to the backend's tailnet address follows the
+server's default route. If nothing answers, it fails as `connection failed` or a timeout and the agent keeps spooling and retrying
+(*Sending*). Whoever answers at that address on the hosting provider's path gets the token and the batch in clear and, with a `2xx` or a
+refusal answer, makes the agent drop or give up those records (the residual in
+[Network and security model](network-and-security-model.md), issue #337). The unit has no ordering on `tailscaled`, because the sender
+retries until the tailnet is up.
 
 **Command.** `install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`; the version is the one in `VERSION`, there is no
 `--version`. `--agent-id` and `--backend-url` are required while no `/etc/vandox/agent.yaml` exists and are ignored when it does.

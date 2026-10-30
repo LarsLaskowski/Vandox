@@ -42,7 +42,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
   `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).
   `tools/Vandox.StorageBenchmark` (console program for the storage write measurement, `docs/BENCHMARKS.md`). Tests in `tests/<Project>.Tests`, mirroring the namespace and file of the class under test
   (`Foo.cs` → `FooTests.cs`).
-- `deploy/agent` is a test-only Go package (`*_test.go` only, package `agent`): its tests source `common.sh`, `install.sh` and `uninstall.sh` into bash with stub commands on `PATH` and read the unit file and the documents; `go build`, `go vet` and `go test ./...` handle it like any package, and it holds no production Go code.
+- `deploy/agent` is a test-only Go package (`*_test.go` only, package `agent`): its tests source `common.sh`, `install.sh` and `uninstall.sh` into bash with stub commands on `PATH` and read the unit file, the documents and the example tailnet policy `tailnet-policy.hujson`; `go build`, `go vet` and `go test ./...` handle it like any package, and it holds no production Go code.
 - Shared by both: `testdata/` (including the golden wire batch `testdata/wire/all-kinds.jsonl`, record 0075).
 
 ## Commands

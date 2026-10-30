@@ -7,9 +7,18 @@ the agent holds, each with the collector that needs it, follow under *Rights per
 ## Tailscale on the monitored server
 
 The agent sends its data only over Tailscale: its unit lets it reach nothing but localhost and the tailnet ranges `100.64.0.0/10` and
-`fd7a:115c:a1e0::/48`. Without Tailscale on this server, every send fails as `connection failed`; the agent keeps its data in its spool
-and tries again. Do these steps once, before you install the agent. They follow Tailscale's documentation and a run on a real tailnet;
-where Tailscale's pages differ from this summary, follow Tailscale.
+`fd7a:115c:a1e0::/48`. Do these steps once, before you install the agent. They follow Tailscale's documentation and a run on a real
+tailnet; where Tailscale's pages differ from this summary, follow Tailscale. The steps and checks added for issue #43 (the settings line
+and its check, the extended checks, the reboot check and the key expiry) have **not yet run** on the production server; each says so, and
+the maintainer's run is tracked in issue #338.
+
+**What stays open while Tailscale is not up.** Tailscale's routes exist only while it runs. While it is not up on this server (before it has
+its network map after a boot, stopped, logged out, or the node removed), a send to the backend's tailnet address follows the server's
+default route. The unit's `IPAddressAllow=` filters by address, not by interface, so it does not stop this. If nothing answers, the send
+fails as `connection failed` or a timeout, and the records stay in the spool until the tailnet is up. If someone answers at that address
+on the hosting provider's path, it gets the agent's token and the batch in clear; the agent treats a 2xx answer as delivered and drops
+those records, and a refusal answer (`400`, `413` or `422` with the refusal header) makes it give them up. This exposure predates the
+policy file below and is not closed here; issue #337 adds a control.
 
 1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
    Use the package repository method that the guide describes. Check what a script does before you run it, as you would with any
@@ -18,37 +27,54 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    `tag:vandox-backend`. The policy must allow this server only the ingest port on the backend
    host ([SECURITY.md](../../SECURITY.md)). That is possible only when the server joins with a tag: a device without a tag acts as
    the user who logged it in, so every rule for that user would apply to the server too. Rules only add permissions, and `*`
-   includes tagged devices, so **the tailnet's default rule must be replaced first**: in the policy file it reads
-   `{"src": ["*"], "dst": ["*"], "ip": ["*"]}` (in the older form `{"action": "accept", "src": ["*"], "dst": ["*:*"]}`). Tag the
-   backend host as Tailscale's guide to tags describes (<https://tailscale.com/kb/1068/acl-tags>). Then write
-   the policy (<https://tailscale.com/kb/1018/acls>) with these entries, with the backend's ingest port in place of `8081`:
+   includes tagged devices, so **the tailnet's default rule must be replaced first**: in the policy file it is a grant with `*` as
+   source, destination and IP (in the older form an `accept` rule with `*` as source and `*:*` as destination). Tag the
+   backend host as Tailscale's guide to tags describes (<https://tailscale.com/kb/1068/acl-tags>).
 
-   ```
-   "tagOwners": {
-     "tag:vandox-agent":   ["autogroup:admin"],
-     "tag:vandox-backend": ["autogroup:admin"],
-   },
-   "grants": [
-     {"src": ["tag:vandox-agent"],   "dst": ["tag:vandox-backend"], "ip": ["tcp:8081"]},
-     {"src": ["autogroup:member"],   "dst": ["autogroup:self"],     "ip": ["*"]},
-     {"src": ["autogroup:member"],   "dst": ["tag:vandox-backend"], "ip": ["*"]},
-   ],
-   ```
+   Then replace the whole policy (<https://tailscale.com/kb/1018/acls>) with the example file
+   [`tailnet-policy.hujson`](tailnet-policy.hujson) of this folder. It is plain HuJSON, so the admin console accepts it as the policy
+   file and GitOps can use it as it is; it is not part of the install bundle, so take it from the repository at the release's tag.
+   Whether the console accepts the file has **not yet run**; the maintainer saves it in the tailnet (issue #338). The file holds:
 
+   - `tagOwners`: both tags are owned by `autogroup:admin`. No tag may own a tag.
+   - The agent's only rule: TCP to the ingest port of the backend host. Write it exactly as `tcp:<port>`. A port without a protocol
+     (`"8081"`) allows every protocol on that port, and `tcp:*` allows every TCP port. The port appears twice in the file, in this rule
+     and in the `tests` entries; if your backend uses another port, change both.
+   - A rule for your own devices (`autogroup:member` to `autogroup:self`), which keeps them reaching each other. A tagged host is no
+     longer part of its user's `autogroup:self`.
+   - Two `tests` entries: the agent reaches the ingest port and not ports 22, 8080 and 443 of the backend host, and not the ingest port
+     over UDP. They are meant to make the console refuse a later edit that lets the server reach more. Whether the console checks them
+     against the rules on save has **not yet run** (issue #338).
+   - One commented line, off by default: SSH from the tailnet admins to the backend host.
+
+   What the file changes against the default rule:
+
+   - The rule that gave your devices every port of the backend host over the tailnet, which earlier versions of this README had, is gone.
+     Your devices no longer reach
+     the backend host's web UI, SSH or file services at its tailnet address. In the home LAN nothing changes: the web UI is reachable
+     there only, with its login (record 0016). To open SSH over the tailnet on purpose, remove the comment marks from the one
+     commented line, which opens `tcp:22` of the backend host and nothing else. There is no line for the web port.
    - Whoever replaces the default rule must also think of exit nodes, DNS servers, subnet routers and other tagged devices that
-     it had covered: each needs its own rule.
-   - The first grant is the agent's only rule: TCP to the ingest port of the backend host. Write it exactly as `tcp:<port>`. A
-     port without a protocol (`"8081"`) allows every protocol on that port, and `tcp:*` allows every TCP port.
-   - The second and third replace the default rule for your own devices. Your devices reach each other, and they reach the backend
-     host, whose web UI, SSH and file services stay usable; a tagged host is no longer part of its user's `autogroup:self`.
-   - Optional, and not tested in a run: if the backend host itself opens connections to your devices (for example backups), it
-     needs a fourth grant with `tag:vandox-backend` as source and `autogroup:member` as destination.
-   - No other rule may have a source that matches this server: not `*`, not `autogroup:tagged`, and not `tag:vandox-agent` with
-     another destination. The agent itself never listens on a port, so it needs no rule with this server as destination. If you also manage the
-     server over Tailscale (SSH or anything else over the tailnet, not over the normal network), that needs an extra rule with your
-     devices as source and `tag:vandox-agent` as destination; no rule but the first grant may have `tag:vandox-agent` as source.
+     it had covered, and of your own devices that need more than each other: each needs its own rule, written with a source that cannot
+     match this server. A grant to a subnet route of the home LAN gives those devices the web UI at its LAN address, as if they were in
+     the home LAN.
+   - Optional, and not tested in a run: if the backend host itself opens connections to your devices (for example backups), it needs a
+     rule with `tag:vandox-backend` as source and `autogroup:member` as destination. The file has no line for it.
 
-   Tailscale now recommends the `grants` form. Our understanding is that the older `acls` form still works, with
+   Rules that must never be added:
+
+   - No other rule may have a source that matches this server: not `*`, not `autogroup:tagged`, not `tag:vandox-agent` with another
+     destination, and not an address, a CIDR, a host alias or an ipset that covers it.
+   - No `autoApprovers` entry, no `ssh` rule and no grant to a subnet or to `autogroup:internet` with such a source. Then a compromised
+     root on this server that turns on Tailscale SSH, advertises a route or an exit node, accepts routes or selects an exit node still
+     reaches only the ingest port. The settings line of step 3 keeps these off anyway.
+   - No tag as a tag owner.
+   - No grant of your devices (or anyone) with `autogroup:tagged` or `autogroup:danger-all` as destination: both include the backend host.
+   - The agent itself never listens on a port, so it needs no rule with this server as destination. If you also manage the server over
+     Tailscale (SSH or anything else over the tailnet, not over the normal network), that needs an extra rule with your devices as
+     source and `tag:vandox-agent` as destination; no rule but the agent's one may have `tag:vandox-agent` as source.
+
+   Tailscale now recommends the `grants` form, which the file uses. Our understanding is that the older `acls` form still works, with
    `{"action": "accept", "src": ["tag:vandox-agent"], "dst": ["tag:vandox-backend:8081"]}` as the agent's rule, but this project
    has not tested it.
 3. **Join the tailnet with the tag.** Run as root:
@@ -60,19 +86,36 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    It prints a URL; open it in a browser and sign in, as an admin of the tailnet, to the tailnet of the backend host. The request
    fails if the policy of step 2 does not name the tag. If it also prints that some peers are advertising routes but
    `--accept-routes` is false, leave it so: do not add `--accept-routes`. The unit lets the agent reach only localhost and the
-   tailnet ranges, so routes into other networks would only carry traffic the unit blocks. Tailscale documents that tagged devices
-   have key expiry turned off by default (<https://tailscale.com/kb/1068/acl-tags>), so the server stays in the tailnet. The agent
-   needs neither Tailscale SSH (`--ssh`) nor any other option.
+   tailnet ranges, so routes into other networks would only carry traffic the unit blocks. The agent needs neither Tailscale SSH
+   (`--ssh`) nor any other option.
 
-   **Turn off Tailscale's DNS on this server.** On Linux, Tailscale takes over the server's name resolution by default and resolves names through the tailnet's DNS settings. With the narrow policy of step 2, lookups can then fail: the install lines cannot reach `github.com` (`curl: (6) Could not resolve host`), and nothing else on the server can resolve a name either. Keep the server's own name server:
+   **Turn off what the agent does not need, and check it.** One line sets every option that could give this server more reach than the
+   ingest port: Tailscale SSH, accepted and advertised routes, an exit node (offered or selected), the app connector, the web client and
+   Tailscale's DNS. Run as root:
 
    ```
-   tailscale set --accept-dns=false
+   tailscale set --ssh=false --accept-routes=false --advertise-routes= --advertise-exit-node=false --exit-node= --advertise-connector=false --webclient=false --accept-dns=false
+   ```
+
+   If it fails with an unknown flag, the installed Tailscale is too old: upgrade it from the package repository (step 1) and run the
+   line again. Do not drop the flag, because an old client applies nothing when it rejects one. Then show the settings:
+
+   ```
+   tailscale debug prefs
+   ```
+
+   Expect `RunSSH` false, `RouteAll` false, `AdvertiseRoutes` empty or null, `ExitNodeID` empty, `CorpDNS` false, `RunWebClient` false,
+   `AppConnector` with `Advertise` false, and `AdvertiseTags` holding `tag:vandox-agent` only. The exact output format of this command
+   has not been checked in this project. The settings line and this check have **not yet run** on the production server (issue #338).
+
+   **Tailscale's DNS is off after that line.** On Linux, Tailscale takes over the server's name resolution by default and resolves names through the tailnet's DNS settings. With the narrow policy of step 2, lookups can then fail: the install lines cannot reach `github.com` (`curl: (6) Could not resolve host`), and nothing else on the server can resolve a name either. The line above keeps the server's own name server; check it:
+
+   ```
    tailscale dns status
    getent hosts github.com
    ```
 
-   The second line must no longer show Tailscale's DNS as enabled. The third must print an address. MagicDNS names then no longer
+   The first line must no longer show Tailscale's DNS as enabled. The second must print an address. MagicDNS names then no longer
    resolve on this server, so give the agent the backend's tailnet address (`http://100.x.y.z:8081`), never a MagicDNS name.
    In a run on a real tailnet, `getent hosts github.com` printed nothing while Tailscale's DNS was on, and the server's own name
    server answered once it was off. The other way, a grant that lets this server reach the tailnet's name servers on port 53,
@@ -87,16 +130,32 @@ where Tailscale's pages differ from this summary, follow Tailscale.
 
    It should name `tag:vandox-agent`, not a user (the exact wording of the output has not been checked in this project). A server
    without the tag acts as the user who logged it in: remove it from the tailnet and join again with the tag.
-4. **Check the connection.** On this server, with the backend host's tailnet address in place of `100.64.0.1` and its ingest port
-   in place of `8081`:
+
+   **Key expiry.** Tailscale documents that tagged devices have key expiry turned off by default (<https://tailscale.com/kb/1068/acl-tags>),
+   because the node belongs to a tag and not to a person's login, so the server stays in the tailnet. To check, look at the server's
+   entry in the admin console: it should show no expiry (the console's wording has not been checked). That check has **not yet run**
+   (issue #338). To replace the node's key on purpose, remove the machine in the admin console and run the join line above again with
+   the tag. The server then has a new tailnet address and identity, so repeat the `tailscale whois` check with the new address; the
+   agent's `backend.url` is the backend's address and stays valid. `tailscale up --force-reauth --advertise-tags=tag:vandox-agent`
+   is an alternative that has not been tested.
+4. **Check the connection and the policy.** On this server, with the backend host's tailnet address in place of `100.64.0.1`, its IPv6
+   tailnet address in place of `fd7a:115c:a1e0::1`, another tailnet device's address in place of `100.64.0.9`, and the backend's ingest
+   port in place of `8081`. Each line stands alone and changes nothing. Only the fifth line, SSH on the backend host's IPv4 tailnet
+   address, has a result from the production server (below); the results of the other lines, the two `curl` lines and the lines added
+   for issue #43 among them, have **not yet run** there (issue #338):
 
    ```
    tailscale ip -4
    tailscale ping 100.64.0.1
    curl -s -o /dev/null -w '%{http_code}\n' http://100.64.0.1:8081/
    curl -s -o /dev/null -w '%{http_code}\n' -X POST http://100.64.0.1:8081/v1/batches
-   timeout 5 bash -c '</dev/tcp/100.64.0.1/22'
-   echo $?
+   timeout 5 bash -c '</dev/tcp/100.64.0.1/22'; echo $?
+   timeout 5 bash -c '</dev/tcp/100.64.0.1/8080'; echo $?
+   timeout 5 bash -c '</dev/tcp/fd7a:115c:a1e0::1/8080'; echo $?
+   timeout 5 bash -c '</dev/tcp/fd7a:115c:a1e0::1/22'; echo $?
+   timeout 5 bash -c '</dev/tcp/100.64.0.9/22'; echo $?
+   tailscale status
+   tailscale exit-node list
    ```
 
    - The first line prints this server's tailnet address (a `100.x.y.z` address).
@@ -104,8 +163,8 @@ where Tailscale's pages differ from this summary, follow Tailscale.
    - The third must print `404`. Only the ingest port answers like that: it answers every request except the agent's own batches
      with `404`, so a `404` shows that the policy lets this server reach the ingest port. This `404` proves only that the ingest port is reachable, not that the backend has the ingest API: that is the fourth line. The other answers:
      - `302` (a redirect to `/login`) means the web listener answered, not the ingest port. The address or port is wrong.
-     - `000` means no connection: check the grant of step 2, and that the backend host carries `tag:vandox-backend` (without it
-       the grant matches nothing).
+     - `000` means no connection: check the rule of step 2, and that the backend host carries `tag:vandox-backend` (without it
+       the rule matches nothing).
      - In both cases, check on the backend host that `.env` sets `INGEST_BIND_ADDRESS` to its tailnet address, and run
        `docker port vandoxd 8081`. The ingest port is container port 8081 and the web port 8080 (step 10 of
        [`docs/INSTALL.md`](../../docs/INSTALL.md)).
@@ -113,14 +172,67 @@ where Tailscale's pages differ from this summary, follow Tailscale.
      is enabled. The backend logs an `ingest token refused` warning for it (at most one a minute).
      - `503` means ingest is disabled: set `ingest.agent_id` and the token on the backend.
      - `404` means the backend has no ingest API (v0.1.0 or older), a proxy is in front of the port, or the port is the wrong one.
-   - The last two try another port of the backend host, SSH (22), and mean something only after the third line printed `404` and the fourth `401`.
+   - The next five lines try other targets: SSH (22) and the web port (8080) of the backend host on its IPv4 tailnet address, the web
+     port and SSH on its IPv6 tailnet address, and SSH on another tailnet device. They mean something only after the third line printed
+     `404` and the fourth `401`. Each must be blocked (Tailscale's access control page: <https://tailscale.com/kb/1018/acls>).
      - Blocked by the policy, as it should be: `No route to host`, or `124` (a timeout). In the Product Manager's server run the blocked attempt printed `No route to host` in one policy state and timed out (`124`) in
        another, and the allowed one, before the default rule was replaced, printed `Connection refused`.
-     - The policy lets this server reach port 22: `Connection refused` with `1`, or `0` (connected). The policy is too wide,
-       usually because the default rule is still there or the server has no tag; correct step 2 or 3.
+     - The policy lets this server reach that port or device: `Connection refused` with `1`, or `0` (connected). The policy is too
+       wide, usually because the default rule is still there, a second rule matches the server, or the server has no tag; correct
+       step 2 or 3.
+   - `tailscale status` must list the backend host as its only peer, because Tailscale shows a server only the peers the policy
+     relates to it (Tailscale's access control page: <https://tailscale.com/kb/1018/acls>). Another peer means a rule has this server
+     as source or as destination: a rule that gives the server more than the ingest port is too wide and must go; one with your devices
+     as source and `tag:vandox-agent` as destination, added on purpose to manage the server (step 2), explains that peer.
+   - `tailscale exit-node list` must show no exit node this server may use (Tailscale's exit node page:
+     <https://tailscale.com/kb/1103/exit-nodes>). One in the list means a rule or an exit node's `autogroup:internet` grant matches this
+     server; remove that match.
+   - Optional, and an extra check of the policy: a deliberate `--accept-routes=true` with a probe of a home-LAN address behind a subnet
+     router shows that the policy refuses the route (Tailscale's subnet router page: <https://tailscale.com/kb/1019/subnets>). **Caveat:**
+     a route that overlaps the hosting provider's network would redirect the server's own traffic while the setting is on, so the
+     probe runs detached, as root, and reverts the setting itself. Replace `192.168.1.10` by a home-LAN address behind a subnet router:
+
+     ```
+     setsid -f bash -c "tailscale set --accept-routes=true; sleep 10; timeout 5 bash -c '</dev/tcp/192.168.1.10/22'; echo \$?; tailscale set --accept-routes=false" > /root/vandox-route-probe.txt 2>&1
+     ```
+
+     After about 20 seconds, `cat /root/vandox-route-probe.txt` must show `No route to host` or `124`, not `0` or `1`. The detached start
+     makes it likely, not certain, that the revert runs even if your SSH session closes. Run the settings check right after it:
+
+     ```
+     tailscale debug prefs
+     ```
+
+     `RouteAll` must be false again. If it is true, run `tailscale set --accept-routes=false` yourself.
 
    Use the backend's tailnet address, not its MagicDNS name: with Tailscale's DNS turned off (step 3), MagicDNS names do not
    resolve on this server.
+5. **Check the reboot, after the agent is installed.** Tailscale should come up by itself, without a login, with its tag and its
+   settings. The check has **not yet run** on the production server (issue #338). Run as root:
+
+   ```
+   sudo reboot
+   ```
+
+   When the server answers again, run:
+
+   ```
+   tailscale status
+   tailscale debug prefs
+   curl -s -o /dev/null -w '%{http_code}\n' http://100.64.0.1:8081/
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST http://100.64.0.1:8081/v1/batches
+   systemctl is-active vandox-agent
+   journalctl -u vandox-agent --since '10 min ago' --no-pager
+   ```
+
+   - `tailscale status` shows the server logged in and the backend host as its peer; `tailscale debug prefs` shows the values of step 3
+     unchanged; the two `curl` lines print `404` and `401`.
+   - `systemctl is-active vandox-agent` prints `active`. The journal shows the agent sending again, with the records of the window from
+     its spool, and no further `connection failed` after the tailnet is up. Until the tailnet is up, the residual at the top of this
+     section applies in that window: if nothing answers, sends fail and the records stay spooled; an answering party on the provider's
+     path gets the token and the batch and, with a `2xx` or a refusal answer, makes the agent drop or give up those records.
+   - If `tailscale status` says Tailscale is stopped or logged out, check `systemctl status tailscaled` and run
+     `systemctl enable --now tailscaled`; if it asks for a login, join again with step 3. The agent keeps spooling meanwhile.
 
 ## Install the agent
 
@@ -582,6 +694,11 @@ The results are in the last column; they are the first run's, with a note where 
 | Transmission to the backend | the agent's log (`journalctl -u vandox-agent`) after the start; the fourth line of *Tailscale on the monitored server*, step 4 | the line prints `401`; the agent logs no `backend not accepting batches`, and the backend stores its batches | not part of this run (part of the v0.2.0 release check): the backend was `vandoxd` v0.1.0, which has no ingest API (it came with PR #316 and will first be released in v0.2.0), so the agent logged `backend not accepting batches reason=status status=404` and kept its records in the spool. The other log lines seen in the run were `mariadb down`, then `mariadb answering again`, and `socket owners partly unknown`. |
 | rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
 | Peak memory | the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | to be measured |
+| Tailscale policy file | save `deploy/agent/tailnet-policy.hujson` as the tailnet's policy (step 2 of *Tailscale on the monitored server*); then save it once with the agent's rule widened to `tcp:*` and once to `"8081"` | the console accepts the file; both widened saves are refused by the `tests` entries | not yet run (issue #338) |
+| Tailscale checks | the probes of step 4 of *Tailscale on the monitored server*, with `tailscale status` and `tailscale exit-node list` | `404` and `401` from the ingest port; every other probe blocked; the backend host the only peer; no exit node | not yet run (issue #338) |
+| Tailscale settings | the `tailscale set` line and `tailscale debug prefs` (step 3) | SSH, accepted routes, advertised routes, exit node, app connector, web client and Tailscale's DNS off; tag `tag:vandox-agent` | not yet run (issue #338) |
+| Tailscale after a reboot | `sudo reboot`, then step 5 | Tailscale up by itself with the same settings; the ingest probes as before; `active`; the agent sends again from its spool | not yet run (issue #338) |
+| Key expiry of the tagged server | the server's entry in the admin console (step 3) | expiry disabled | not yet run (issue #338) |
 
 The same cases, on a throw-away runner with systemd 249, run in the CI job `agent-install` (`.github/scripts/check-agent-install.sh`); its results
 are in *Unit*. They are the runner's, not the server's; the server's results are in the table above.
