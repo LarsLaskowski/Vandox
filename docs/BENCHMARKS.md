@@ -5,6 +5,8 @@ Benchmarks live next to the tests of the code they measure (Go: a benchmark in t
 ([`UNIT_TESTS.md`](UNIT_TESTS.md)). Only results from the reference host count against a criterion; results
 from the development host show the order of magnitude.
 
+The reference host of the agent is the monitored server (*Agent footprint*), not the host below.
+
 Reference host: a Synology DS918+ (Intel Celeron J3455, DSM, running `vandoxd` in Docker). It has an SSD volume and a slower HDD volume; the
 tables say which one a run used. The data directory of the container can be on either volume; the SSD is recommended.
 
@@ -100,7 +102,7 @@ capture times that repeat every hour, so the first batch inserts about 3,600 sam
 
 The median of five batches rose from 279-304 ms to 319-335 ms (about 12 to 15 per cent), the first batches by about 120 ms: they pay a
 sample-time row and its lookups for each new capture time of a metric, the later ones mostly the stream row and the classification. The criterion
-stays met on the development host with a wide margin; the reference host is not measured (it stays with #44), and a rise of the same proportion
+stays met on the development host with a wide margin; the reference host is not measured (#342), and a rise of the same proportion
 would put its 783 ms median at about 900 ms, still under one second.
 
 The scenario of the backfill (`--backfill`, option of the same tool: `dotnet run -c Release --project tools/Vandox.StorageBenchmark -- <folder> --backfill [--size N]`)
@@ -361,8 +363,9 @@ kill $(jobs -p)
 
 The ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273 processes the 190 sleepers started for the run
 allowed reading `smaps_rollup`, while most of the sandbox's own processes (another user namespace) refused it, so the figure is for a
-mix of processes with and without PSS; a host where all of them are readable costs somewhat more. The value on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**: #44 measures it. The cost of reading `smaps_rollup`
-of every process every 15 seconds under memory pressure is an open point of #44 and #45 (Agent area, *Processes*).
+mix of processes with and without PSS; a host where all of them are readable costs somewhat more. The time of one snapshot on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**; the agent's total CPU there is 0.42 % of one
+core over 24 hours (*Agent footprint*). The cost of reading `smaps_rollup` of every process every 15 seconds under memory pressure is an
+open point of #45 and #342 (Agent area, *Processes*).
 
 ## Connection snapshot
 
@@ -387,7 +390,8 @@ Median of six runs of the benchmark's own report (56.4 to 62.4 ms) since a run a
 issue #279). The tree before that change, measured the same day on the same host: median 57.3 ms (55.3 to 59.2 ms), 1.99 MB and 26,310 allocations per run, so the read
 adds about 0.03 MB and 174 allocations and its time is within the noise. A passwd of the largest size the agent reads (1 MiB, 115,968 users) costs one run about
 20 MB of garbage and 4.6 MB of live data more (Agent area, *Connections*, **Bounded memory**). The file system is in memory, so the figure leaves out the kernel's cost to
-produce `fdinfo` files and to resolve a path in `/proc`; the value on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**: #44 measures it.
+produce `fdinfo` files and to resolve a path in `/proc`; the time of one snapshot on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**; the agent's total CPU there is 0.42 % of one
+core over 24 hours (*Agent footprint*).
 The memory figures of a run (live data, garbage per line and per descriptor) are in the Agent area (*Connections*, **Bounded memory**).
 
 ## Listener reads
@@ -433,4 +437,52 @@ go test ./internal/spool -run '^$' -bench 'BenchmarkOpen_(Full|ManyFiles)' -benc
 | development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.10 GHz | 2026-10-23 | `BenchmarkOpen_ManyFiles` (1,024 files) | **15.9 ms** |
 
 Both are far below the 5 seconds. Each figure is the mean of three opens in one run (`-benchtime 3x`), not a median of several runs. The file system
-of the sandbox is not the data volume of a monitored server; the reference host of the agent is not measured.
+of the sandbox is not the data volume of a monitored server; the open time on the server is not measured (#342).
+
+## Agent footprint
+
+Criterion (issue #44, as defined by [0133](decisions/0133-agent-footprint-measured-on-the-server-as-peak-rss-and-cpu-of-one-core.md)): the agent's
+peak RSS (`VmHWM`) stays **under 30 MB**, and its cgroup CPU time over the elapsed time of the run stays **under 1 % of one core**, over 24 hours
+on the monitored server. One agent instance was measured by the Product Manager on the production server.
+
+### Procedure
+
+The values were read from the running unit on the server, 2026-10-30 at 19:48:34 CET, after the instance had run 87,367 s (24 h 16 min 7 s;
+`MainPID` 118256, `NRestarts=0`, restarted by hand 2026-10-29 at 19:32:27 CET):
+
+- the host: Ubuntu 22.04, kernel 5.15.0-191, 1 core, 1,963 MB of RAM, 161 processes, load average 0.00 / 0.08 / 0.06;
+- CPU: `CPUUsageNSec` of the unit (368,052,315,000 ns) divided by the elapsed 87,367 s;
+- memory: `VmHWM`, `VmRSS` and the thread count from `/proc/<pid>/status`, and `Rss` and `Pss` from `/proc/<pid>/smaps_rollup`;
+- the cgroup's `MemoryCurrent`; systemd's `MemoryPeak` and `IO*Bytes` were unavailable;
+- `/proc/<pid>/io`, read earlier at 18:14 CET (22 h 42 min, 81,721 s into the run);
+- the spool directory (`ls -l`, `du -sb`), read 2026-10-30 at about 19:58 CET.
+
+No script is kept in the repository. The agent did not send during the run (see the deviations below).
+
+### Results
+
+| Host | Kernel | CPU | RAM | Date | Run | Processes | CPU (% of one core) | Peak RSS | RSS / PSS |
+| ---- | ------ | --- | --- | ---- | --- | --------: | ------------------: | -------: | --------- |
+| production server (monitored) | 5.15.0-191 | 1 core | 1,963 MB | 2026-10-30 | 24 h 16 min | 161 | **0.42** (368.05 s of 87,367 s) | **20.4 MB** (`VmHWM` 19,896 kB, unchanged since 22 h 42 min) | `VmRSS` 13.7 MB; `smaps_rollup` Rss and Pss 15.8 MB (Pss anonymous 10,220 kB, file 5,216 kB); 12 threads |
+
+The cgroup's `MemoryCurrent` was 47.3 MiB (49,582,080 B). It includes the page cache of the spool files and is not the criterion. Systemd's
+`MemoryPeak` and `IO*Bytes` are unavailable on kernel 5.15, so the peak is the process's own `VmHWM`.
+
+The I/O counters are from the earlier reading at 18:14 CET (22 h 42 min, 81,721 s): `rchar` 2,725,637,213, `wchar` 186,489,754, `syscr` 19,125,487,
+`syscw` 131,966, `read_bytes` 11,759,616, `write_bytes` 268,169,216 (11.8 MB an hour), `cancelled_write_bytes` 0.
+
+The spool figures are from the reading at about 19:58 CET: the directory holds 331,265,645 B (`du -sb`), among them `spool-meta.json` (128 B), `agent-state.json`
+(496 B) and the data files, which include those from before the restart. While the agent does not send, nothing is acknowledged and the spool only grows. The 19 sealed
+data files of 16.75 to 16.78 MB span 2026-10-28 20:03 to 2026-10-30 18:07 CET, which is 46 h 4 min over 18 intervals, or 2 h 33 min 33 s a file: **about 157 MB a day**. The total
+of the data files over the 50 h 20 min from the first file to the active one gives 158.0 MB a day. That is about 70 % of the 225 MB a day of the reference stream
+(1,576,818,758 B over 7 days, `TestSpool_SevenDayOutageFullScale`), so the default cap of 2 GiB holds about 13.7 days of it.
+
+**Verdict: both targets met.** Peak RSS 20.4 MB against 30 MB, CPU 0.42 % against 1 % of one core, over 24 h 16 min. Three deviations from the issue remain, and the
+Product Manager accepted them on 2026-10-30 (0133):
+
+- the server had 161 processes, not several hundred;
+- the agent did not send: the backend of the server, `vandoxd` v0.1.0, has no ingest API and answers `404`, and the agent behaved as specified (shared backoff, records kept);
+- the stats of the previous agent instance (before the restart on 2026-10-29) are lost.
+
+Not measured, and open for #342: the footprint while the agent sends and backfills, the cost of `smaps_rollup` of every process under memory pressure (with
+#45), and the spool's open time on the server.
