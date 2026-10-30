@@ -10,3 +10,5 @@ are quoted in full.
 | 2026-10-30 17:10 | 2 Plan | Product Manager | Agent already runs 24 h+ on the production server; user supplies measurements, no sampler/load generator wanted |
 | 2026-10-30 17:21 | 2 Plan | squad-lead | RESULT: DONE tier trivial; plan.md + record 0133 (Proposed); PM acceptance of deviations NOT yet given, asked (opus/medium · usage pending) |
 | 2026-10-30 18:54 | 2 Plan | Product Manager | Supplied full 24 h measurement (24 h 16 min); did not yet accept remaining deviations (161 processes, nothing sent, previous-instance stats lost) |
+| 2026-10-30 18:59 | 2 Plan | Product Manager | Accepted the remaining deviations (161 processes, nothing sent, previous-instance stats lost); PR may close #44; spool listing still to follow |
+| 2026-10-30 18:59 | 2 Plan | squad-lead | revise: 24 h figures, record 0133 renamed, no PM acceptance claimed; fact 8 (spool listing, likely truncated by head -20) to re-read (opus/medium · 60,826 tokens · 14 tool uses · 135 s · continued) |
