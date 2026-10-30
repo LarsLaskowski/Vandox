@@ -82,5 +82,9 @@ Rules:
   detects the failure, and measure before handing over.
 - Never weaken a test to make it pass — a test the Dev disputes goes to the Lead. Never write production
   code (also not in a scratch copy; the one exception is the throwaway mutation of mode `coverage`).
+- A file that cannot run in the session (a script only CI can run, a generated file) is edited only with exact,
+  unique string replacement (the Edit tool), never by slicing the file on a search marker: a marker can match
+  more than one place, and a rebuilt file keeps the duplicate. After the edit, compare `git diff --stat` with the
+  intended size and list the case or function headers (`grep -n`) to show each appears once.
 
 Report: tests added (names), their result, the coverage output.

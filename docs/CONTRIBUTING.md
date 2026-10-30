@@ -68,6 +68,9 @@ Areas: `Agent`, `Backend`, `Web`, `Logs`, `Alerts`, `Security`, `Ops`, `Repo`, `
 When a PR is related to an issue, use the `Closes #issuenumber` syntax so the issue links to the
 PR automatically and closes when the PR is merged.
 
+The PR's label decides its section in the generated release notes (`.github/release.yml`): `breaking-change`,
+`enhancement`, `security`, `bug`; any other PR is listed under *Other changes*, and `ignore-for-release` leaves it out.
+
 Follow the PR template in [`.github/pull_request_template.md`](../.github/pull_request_template.md).
 
 ## Contributions from outside
