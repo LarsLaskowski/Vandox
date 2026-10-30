@@ -19,3 +19,4 @@ are quoted in full.
 | 2026-10-30 19:12 | 7 Code check | Orchestrator | Format check, scope-check, decision-check, go build/vet/test -race, analyzer-check PASS on docs-only diff; dotnet test and Sonar gate not run (no code in diff), CI at step 11 |
 | 2026-10-30 19:14 | 8 Review | squad-reviewer | round 1 full on b924e53: APPROVE, 1 non-blocking (README Peak memory source cell) (opus/medium · 50,815 tokens · 11 tool uses · 82 s) |
 | 2026-10-30 19:14 | 8 Review | Orchestrator | verbatim fix of the non-blocking finding in deploy/agent/README.md (Peak memory row), commit 36ac6f4; Format check, scope-check, decision-check pass |
+| 2026-10-30 19:14 | 9 PR approval | Orchestrator | approved by checklist: review clean, gates pass on head, main not moved, record 0133 set to Accepted, no open decisions |

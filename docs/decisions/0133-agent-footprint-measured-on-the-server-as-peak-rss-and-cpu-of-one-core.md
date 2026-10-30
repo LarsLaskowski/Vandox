@@ -1,6 +1,6 @@
 # 0133: Agent footprint measured on the server as peak RSS and CPU time of one core
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-30
 - **Area:** Agent
 - **Source:** Issue #44
