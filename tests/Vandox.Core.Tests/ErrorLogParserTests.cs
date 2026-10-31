@@ -203,6 +203,95 @@ public class ErrorLogParserTests
     }
 
     /// <summary>
+    /// The three samples become the records of their golden files, the records the Go collector is compared with as well.
+    /// </summary>
+    /// <param name="name">The name of the sample and its golden file</param>
+    /// <param name="type">The source type of the parser</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("plesk-panel", ErrorLogParser.PleskPanelType)]
+    [DataRow("nginx-error", ErrorLogParser.NginxType)]
+    [DataRow("apache-error", ErrorLogParser.ApacheType)]
+    public async Task ErrorLogParserParseAsyncParsesTheSamplesAsTheGoldenRecords(string name, string type)
+    {
+        // Arrange
+        var parser = Create(type, DateTimeZone.ForOffset(Offset.FromHours(2)));
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path($"testdata/logs/{name}.log"), TestContext.CancellationToken);
+        var golden = await ErrorLogGolden.ReadLinesAsync($"testdata/logs/{name}.records.jsonl", TestContext.CancellationToken);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, new LogFile("logs/sample", null), content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(6, golden, "one golden record per line of the sample");
+        Assert.HasCount(golden.Count, emitter.Records, "one record per golden record");
+
+        for (var index = 0; index < golden.Count; index++)
+        {
+            Assert.AreEqual(ErrorLogGolden.DescribeLine(golden[index]), ErrorLogGolden.Describe(emitter.Records[index]), $"record {index}");
+        }
+    }
+
+    /// <summary>
+    /// The web signature fixtures become the records of their golden files in UTC.
+    /// </summary>
+    /// <param name="name">The name of the fixture and its golden file</param>
+    /// <param name="type">The source type of the parser</param>
+    /// <param name="count">The number of golden records</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("web-signatures-nginx", ErrorLogParser.NginxType, 7)]
+    [DataRow("web-signatures-apache", ErrorLogParser.ApacheType, 1)]
+    public async Task ErrorLogParserParseAsyncParsesTheWebSignatureFixturesAsTheGoldenRecords(string name, string type, int count)
+    {
+        // Arrange
+        var parser = Create(type, DateTimeZone.Utc);
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path($"testdata/logs/{name}.log"), TestContext.CancellationToken);
+        var golden = await ErrorLogGolden.ReadLinesAsync($"testdata/logs/{name}.records.jsonl", TestContext.CancellationToken);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, new LogFile("logs/sample", null), content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(count, golden, "the golden records of the fixture");
+        Assert.HasCount(golden.Count, emitter.Records, "one record per golden record");
+
+        for (var index = 0; index < golden.Count; index++)
+        {
+            Assert.AreEqual(ErrorLogGolden.DescribeLine(golden[index]), ErrorLogGolden.Describe(emitter.Records[index]), $"record {index}");
+        }
+    }
+
+    /// <summary>
+    /// The daylight saving fixture, a time in the skipped hour and two passes through the repeated hour, becomes the records of its golden file in Europe/Berlin.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ErrorLogParserParseAsyncParsesTheDaylightSavingFixtureAsTheGoldenRecords()
+    {
+        // Arrange
+        var parser = Create(ErrorLogParser.NginxType, BerlinZone());
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/logs/nginx-error-dst.log"), TestContext.CancellationToken);
+        var golden = await ErrorLogGolden.ReadLinesAsync("testdata/logs/nginx-error-dst.records.jsonl", TestContext.CancellationToken);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, new LogFile("logs/sample", null), content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.IsEmpty(emitter.Warnings, "nothing is warned about");
+        Assert.HasCount(5, golden, "five golden records");
+        Assert.HasCount(golden.Count, emitter.Records, "one record per golden record");
+
+        for (var index = 0; index < golden.Count; index++)
+        {
+            Assert.AreEqual(ErrorLogGolden.DescribeLine(golden[index]), ErrorLogGolden.Describe(emitter.Records[index]), $"record {index}");
+        }
+    }
+
+    /// <summary>
     /// A time in the repeated hour at the end of daylight saving time takes the earlier offset unless that lies more than ten minutes before the previous recognized line, in which case it takes the later offset.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

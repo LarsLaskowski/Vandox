@@ -1,0 +1,7 @@
+2026/10/12 10:00:00 [crit] 2101#2101: *16 pwrite() "/var/lib/nginx/body/0000000001" failed (28: No space left on device), client: 198.51.100.7, server: example.org, request: "POST /upload.php HTTP/1.1", host: "example.org"
+2026/10/12 10:00:01 [crit] 2101#2101: *17 pwrite() "/var/lib/nginx/body/0000000002" failed (28: No space left on device), client: 198.51.100.8, server: example.org, request: "POST /upload.php HTTP/1.1", host: "example.org"
+2026/10/12 10:00:02 [error] 2101#2101: *18 FastCGI sent in stderr: "PHP message: PHP Fatal error:  Uncaught mysqli_sql_exception: Too many connections in /var/www/vhosts/example.org/httpdocs/db.php:3
+Stack trace:
+#0 /var/www/vhosts/example.org/httpdocs/db.php(3): mysqli->__construct()
+#1 {main}
+  thrown in /var/www/vhosts/example.org/httpdocs/db.php on line 3" while reading response header from upstream, client: 198.51.100.7, server: example.org, request: "GET / HTTP/1.1", host: "example.org"

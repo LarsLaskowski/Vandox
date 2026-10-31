@@ -835,23 +835,41 @@ public class BuiltInSignaturesTests
     public async Task BuiltInSignaturesWebServerErrorLogsYieldPhpAndNginxEvents()
     {
         // Arrange
-        const string nginxContent = "2026/10/12 10:00:00 [crit] 2101#2101: *16 pwrite() \"/var/lib/nginx/body/0000000001\" failed (28: No space left on device), client: 198.51.100.7, server: example.org, request: \"POST /upload.php HTTP/1.1\", host: \"example.org\"\n"
-                                    + "2026/10/12 10:00:01 [crit] 2101#2101: *17 pwrite() \"/var/lib/nginx/body/0000000002\" failed (28: No space left on device), client: 198.51.100.8, server: example.org, request: \"POST /upload.php HTTP/1.1\", host: \"example.org\"\n"
-                                    + "2026/10/12 10:00:02 [error] 2101#2101: *18 FastCGI sent in stderr: \"PHP message: PHP Fatal error:  Uncaught mysqli_sql_exception: Too many connections in /var/www/vhosts/example.org/httpdocs/db.php:3\n"
-                                    + "Stack trace:\n"
-                                    + "#0 /var/www/vhosts/example.org/httpdocs/db.php(3): mysqli->__construct()\n"
-                                    + "#1 {main}\n"
-                                    + "  thrown in /var/www/vhosts/example.org/httpdocs/db.php on line 3\" while reading response header from upstream, client: 198.51.100.7, server: example.org, request: \"GET / HTTP/1.1\", host: \"example.org\"\n";
-        const string apacheContent = "[Mon Oct 12 10:00:03.123456 2026] [proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 7', referer: https://example.org/\n";
         var zone = DateTimeZone.Utc;
-        var nginx = await ParseContentAsync(new ErrorLogParser(ErrorLogParser.NginxType, ErrorLogFormat.Nginx, ErrorLogPaths.DefaultNginx, true, zone), new LogFile("logs/sample", null), nginxContent, 0, TestContext.CancellationToken);
-        var apache = await ParseContentAsync(new ErrorLogParser(ErrorLogParser.ApacheType, ErrorLogFormat.Apache, ErrorLogPaths.DefaultApache, true, zone), new LogFile("logs/sample", null), apacheContent, nginx.Count, TestContext.CancellationToken);
+        var nginx = await ParseAsync(new ErrorLogParser(ErrorLogParser.NginxType, ErrorLogFormat.Nginx, ErrorLogPaths.DefaultNginx, true, zone), new LogFile("logs/sample", null), "testdata/logs/web-signatures-nginx.log", TestContext.CancellationToken);
+        var apache = await ParseBytesAsync(new ErrorLogParser(ErrorLogParser.ApacheType, ErrorLogFormat.Apache, ErrorLogPaths.DefaultApache, true, zone), new LogFile("logs/sample", null), await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/logs/web-signatures-apache.log"), TestContext.CancellationToken), nginx.Count, "testdata/logs/web-signatures-apache.log", TestContext.CancellationToken);
         var records = nginx.Concat(apache).OrderBy(pair => pair.Record.CapturedAt).ThenBy(pair => pair.Id).ToList();
 
         // Act
         var events = SignatureSamples.Run(BuiltInSignatures.Catalog, records);
 
         // Assert
+        Assert.AreSequenceEqual(["nginx_disk_full", "php_too_many_connections", "php_disk_full"], events.Select(detected => detected.SignatureId).ToList(), "events in time order");
+        Assert.AreSequenceEqual([IdOf(records, "body/0000000001"), IdOf(records, "body/0000000002")], events[0].RecordIds.ToList(), "the two pwrite lines");
+        Assert.AreEqual(2L, events[0].LineCount, "two nginx lines");
+        Assert.AreSequenceEqual([IdOf(records, "Uncaught mysqli_sql_exception")], events[1].RecordIds.ToList(), "the Uncaught line");
+        Assert.AreEqual(1L, events[1].LineCount, "one connection line");
+        Assert.AreSequenceEqual([IdOf(records, "Write of 8192 bytes")], events[2].RecordIds.ToList(), "the Apache line");
+        Assert.AreEqual(1L, events[2].LineCount, "one write line");
+    }
+
+    /// <summary>
+    /// The golden records of the web signature fixtures, sent as agent records, give the same three events with the same lines as the import.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task BuiltInSignaturesGoldenWebSignatureRecordsYieldPhpAndNginxEvents()
+    {
+        // Arrange
+        var nginx = ErrorLogGolden.AgentRecords(await ErrorLogGolden.ReadLinesAsync("testdata/logs/web-signatures-nginx.records.jsonl", TestContext.CancellationToken), 0);
+        var apache = ErrorLogGolden.AgentRecords(await ErrorLogGolden.ReadLinesAsync("testdata/logs/web-signatures-apache.records.jsonl", TestContext.CancellationToken), nginx.Count);
+        var records = nginx.Concat(apache).OrderBy(pair => pair.Record.CapturedAt).ThenBy(pair => pair.Id).ToList();
+
+        // Act
+        var events = SignatureSamples.Run(BuiltInSignatures.Catalog, records);
+
+        // Assert
+        Assert.HasCount(8, records, "eight golden records, the continuation lines of the stack trace included");
         Assert.AreSequenceEqual(["nginx_disk_full", "php_too_many_connections", "php_disk_full"], events.Select(detected => detected.SignatureId).ToList(), "events in time order");
         Assert.AreSequenceEqual([IdOf(records, "body/0000000001"), IdOf(records, "body/0000000002")], events[0].RecordIds.ToList(), "the two pwrite lines");
         Assert.AreEqual(2L, events[0].LineCount, "two nginx lines");
@@ -874,20 +892,6 @@ public class BuiltInSignaturesTests
         var content = await File.ReadAllBytesAsync(RepositoryFiles.Path(path), cancellationToken);
 
         return await ParseBytesAsync(parser, file, content, 0, path, cancellationToken);
-    }
-
-    /// <summary>
-    /// Parses inline content and numbers the records after a given count.
-    /// </summary>
-    /// <param name="parser">The parser</param>
-    /// <param name="file">The file the content stands for</param>
-    /// <param name="text">The content</param>
-    /// <param name="idOffset">The number of IDs already used; the first record gets the next one</param>
-    /// <param name="cancellationToken">The token the parser honors</param>
-    /// <returns>A task that returns the records with their IDs</returns>
-    private static Task<List<(long Id, DataRecord Record)>> ParseContentAsync(ILogParser parser, LogFile file, string text, int idOffset, CancellationToken cancellationToken)
-    {
-        return ParseBytesAsync(parser, file, Encoding.UTF8.GetBytes(text), idOffset, file.Name, cancellationToken);
     }
 
     /// <summary>
