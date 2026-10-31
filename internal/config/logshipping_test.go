@@ -11,6 +11,7 @@ import (
 const (
 	patternReason  = "must be an RE2 pattern of at most 1024 bytes and 400 compiled instructions"
 	togetherReason = "patterns must compile to at most 400 instructions together"
+	formatReason   = "must be one of syslog, plesk-panel, sw-cp-server-error, nginx-error, apache-error"
 )
 
 // shippingDoc returns a valid agent file with the given lines below log_shipping.
@@ -120,6 +121,10 @@ func acceptedCases() []acceptedCase {
 		{"a minimum of err", []string{"  min_priority: err"}, shipping(true, "err", nil, nil)},
 		{"a file", []string{"  files:", "    - {path: /var/log/mail.log, format: syslog}"}, shipping(true, "info", []LogFile{mail}, nil)},
 		{"16 files", files16Lines, shipping(true, "info", files16, nil)},
+		{"a plesk-panel file", []string{"  files:", "    - {path: /var/log/plesk/panel.log, format: plesk-panel}"}, shipping(true, "info", []LogFile{{Path: "/var/log/plesk/panel.log", Format: "plesk-panel"}}, nil)},
+		{"a sw-cp-server-error file", []string{"  files:", "    - {path: /var/log/sw-cp-server/error_log, format: sw-cp-server-error}"}, shipping(true, "info", []LogFile{{Path: "/var/log/sw-cp-server/error_log", Format: "sw-cp-server-error"}}, nil)},
+		{"an nginx-error file", []string{"  files:", "    - {path: /var/log/nginx/error.log, format: nginx-error}"}, shipping(true, "info", []LogFile{{Path: "/var/log/nginx/error.log", Format: "nginx-error"}}, nil)},
+		{"an apache-error file", []string{"  files:", "    - {path: /var/log/apache2/error.log, format: apache-error}"}, shipping(true, "info", []LogFile{{Path: "/var/log/apache2/error.log", Format: "apache-error"}}, nil)},
 		{"a rule with every condition", []string{"  drop:", "    - {log: journal, program: dovecot, priority: info, message: '^imap-login: Login: '}"}, shipping(true, "info", nil, one(full))},
 		{"a rule for a configured file", []string{"  files:", "    - {path: /var/log/mail.log, format: syslog}", "  drop:", "    - {log: /var/log/mail.log, priority: debug}"},
 			shipping(true, "info", []LogFile{mail}, one(DropRule{Log: "/var/log/mail.log", Priority: "debug"}))},
@@ -184,8 +189,11 @@ func shippingErrors() []shippingError {
 		{"a path with U+0000", []string{"  files:", file(`"/var/log/S3NT1NEL\0x"`, "syslog")}, "log_shipping.files[0].path", ""},
 		{"a path listed twice", []string{"  files:", "    - {path: /var/log/mail.log, format: syslog}", file("/var/log/mail.log", "syslog")}, "log_shipping.files[1].path", ""},
 		{"more than 16 files", files17, "log_shipping.files", ""},
-		{"a format other than syslog", []string{"  files:", file("/var/log/mail.log", "json")}, "log_shipping.files[0].format", ""},
-		{"a format in upper case", []string{"  files:", file("/var/log/mail.log", "SYSLOG")}, "log_shipping.files[0].format", ""},
+		{"a format of json", []string{"  files:", file("/var/log/mail.log", "json")}, "log_shipping.files[0].format", formatReason},
+		{"a format in upper case", []string{"  files:", file("/var/log/mail.log", "SYSLOG")}, "log_shipping.files[0].format", formatReason},
+		{"a format of nginx without -error", []string{"  files:", file("/var/log/mail.log", "nginx")}, "log_shipping.files[0].format", formatReason},
+		{"a format of nginx-error in upper case", []string{"  files:", file("/var/log/mail.log", "NGINX-ERROR")}, "log_shipping.files[0].format", formatReason},
+		{"an empty format", []string{"  files:", file("/var/log/mail.log", "''")}, "log_shipping.files[0].format", formatReason},
 		{"a rule without a condition", []string{"  drop:", "    - {program: x}", "    - {program: ''} # bad"}, "log_shipping.drop[1]", ""},
 		{"an unknown priority in a rule", []string{"  drop:", "    - {program: x, priority: S3NT1NEL} # bad"}, "log_shipping.drop[0].priority", ""},
 		{"a log that is neither the journal nor a configured file", []string{"  drop:", "    - {log: /var/log/other.log} # bad"}, "log_shipping.drop[0].log", ""},
