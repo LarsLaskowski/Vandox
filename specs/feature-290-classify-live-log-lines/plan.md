@@ -30,7 +30,7 @@ the logic of `SystemLogGrouper` (`src/Vandox.Core/LogParsing/SystemLogGrouper.cs
 | 13 | `log_line.event` is in both decoders, and the golden batch carries one; an older backend accepts a batch with events. | `testdata/wire/all-kinds.jsonl` (1 `event`); `WireContractTests.DecodeGoldenBatchReadsEveryLogLineField` | confirmed |
 | 14 | The backend acknowledges a batch only after its commit. | `IngestEndpointTests.IngestEndpointValidBatchAnswers204AfterCommit`; project.md area 1 | confirmed |
 | 16 | No existing logship test has a mail marker, a MariaDB line or a kernel start line. | grep of `internal/logship/*_test.go` for `mariadbd`, `oom-killer`, `cut here`, `postfix/`, `dovecot` | confirmed |
-| 17 | The collector's live memory stays within 24 MiB when it holds 256 user IDs and 8 system IDs, at most two journal IDs and 16 files hold an open MariaDB entry and kernel report each at maximum size, in the committed state, a fork and the last dropped fork. | to verify: `TestLogs_HeapStaysBounded` extended to exactly that, run by the Dev in step 6; a failure goes back to the Lead. Estimate: about 50 KiB per holding source, 18 sources, 3 copies, about 2.7 MiB; an ID without open groups holds no stages | unverified |
+| 17 | The collector's live memory stays within 24 MiB with 256 user IDs and 8 system IDs, at most two journal IDs and 16 files holding a MariaDB entry and a kernel report each near maximum size, in three copies. | Dev's measurement in a copy with the test fixed (mode `decide`, item 1): peak 1.63 MiB; `TestLogs_HeapStaysBounded` asserts it once the Tester's fix is in | confirmed |
 | 18 | The spool accepts records after the scheduler has stopped and before `store.Flush`: it is closed only after the last save. | `internal/agent/agent.go:176-186` (`wg.Wait()`, `store.Flush`, then `closeSpool`) | confirmed |
 | 19 | A syslog-file line's capture time is the time written in the line (by rsyslog, or the sender where rsyslog keeps the sender's time); a line dated after its run's start already does not move the file's bookkeeping time. | `internal/logship/files.go:356-386`; `docs/areas/agent.md` *Configured files* (record 0121 option 14) | confirmed |
 | 20 | systemd 249 on the server gives `user-10000.journal` a seqnum ID of its own. | record 0121 *Context*; later versions not checked, and the design does not depend on it (*Approach* 2) | confirmed |
@@ -44,7 +44,7 @@ Go tests sit next to the code. C# tests mirror the class under test.
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `TestLogs_ClassifiedJournalEqualsTheImport` (system-ID journal written from `classify.export`, against `classify-records.jsonl`; records compared in order of capture time, then program, then message; every field except `log`, origin and sequence); `TestLogs_ClassifiedSyslogFileEqualsTheImport` (against `classify-syslog.records.jsonl`; raw and error-log lines against today's live mapping); `JournalExportParserParsesClassifyFixtureAsTheGoldenRecords`; `SyslogParserParsesClassifyFixtureAsTheGoldenRecords`; package tests `TestClassifyMail` (table of the C# `MailLineClassifierTests` cases), `TestParseHeader` (the four header forms), `TestMariaDB` (join, end, bounds, events, recovery), `TestKernel` (start, ends, 2,000 lines, head and tail) | `internal/logship/stages_test.go`; `tests/Vandox.Core.Tests/JournalExportParserTests.cs`; `tests/Vandox.Core.Tests/SyslogParserTests.cs`; `internal/logstages/mail_test.go`, `header_test.go`, `mariadb_test.go`, `kernel_test.go` |
+| AC1 | `TestLogs_RecoveryEndAfterTheStartEntryExpiredGetsItsEvent`; `TestLogs_ClassifiedJournalEqualsTheImport` (system-ID journal written from `classify.export`, against `classify-records.jsonl`; records compared in order of capture time, then program, then message; every field except `log`, origin and sequence); `TestLogs_ClassifiedSyslogFileEqualsTheImport` (against `classify-syslog.records.jsonl`; raw and error-log lines against today's live mapping); `JournalExportParserParsesClassifyFixtureAsTheGoldenRecords`; `SyslogParserParsesClassifyFixtureAsTheGoldenRecords`; package tests `TestClassifyMail` (table of the C# `MailLineClassifierTests` cases), `TestParseHeader` (the four header forms), `TestMariaDB` (join, end, bounds, events, recovery), `TestKernel` (start, ends, 2,000 lines, head and tail) | `internal/logship/stages_test.go`; `tests/Vandox.Core.Tests/JournalExportParserTests.cs`; `tests/Vandox.Core.Tests/SyslogParserTests.cs`; `internal/logstages/mail_test.go`, `header_test.go`, `mariadb_test.go`, `kernel_test.go` |
 | AC2 | `BuiltInSignaturesFindEventSignaturesInClassifyGoldenRecords` (the detector on both golden files: `postfix_fatal`, `dovecot_fatal`, `mariadb_crash` with `signal`, `mariadb_recovery_start`, `mariadb_recovery_end`) | `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` |
 | AC3 | `TestLogs_GroupSpansRunsAndBatches` (lines of one entry and one report in three runs, each kept); `TestLogs_DroppedRunJoinsEachLineOnce` | `internal/logship/stages_test.go` |
 | AC4 | `TestLogs_CaughtUpEntryClosesAfterSixtySeconds` (closed at clock = first + 60 s + 1 µs, not at + 60 s); `TestLogs_BacklogLineJoinsByCaptureTime` (captured + 50 s, read 90 s later); `TestLogs_LineSixtyOneSecondsLaterClosesTheEntry`; `TestLogs_FutureDatedGroupClosesSixtySecondsAfterItsRun` (a forged kernel start line in a `syslog` file dated a year ahead closes by the clock 60 s after the start of the run that read it); `TestStages_Expire` | `internal/logship/stages_test.go`; `internal/logstages/stages_test.go` |
@@ -82,15 +82,19 @@ source, not from the area document; where the two disagree, the C# code wins and
    state. The rule decides by the file, not by the ID, so it holds however journald assigns IDs (fact 20). Error-log formats get
    no stages (E7). `state.stages` holds a `Stages` only for a source with an open group, created on demand and dropped when its
    last group closes. A `Stages` allocates a grouper's buffers only while its group is open, so 256 user IDs cost nothing.
-3. Expiry. A group expires when a shipped line of its source is captured more than 60 s after the group's **anchor**, and, when
-   the source has been read to its end in a run, when the clock is more than 60 s past the anchor. The anchor is the earlier of
-   the group's first capture time and the start of the run that read its first line, the rule of record 0121 option 14. So a
-   first line dated in the future (a forged `syslog` line) still closes 60 s after its run by the clock (DA 2). A clock that is
-   never reached because a flood keeps the source busy is bounded by the import's 2,000 lines and 16,384 bytes, and named as a
-   residual (N1).
+3. Expiry.
+   - Every time is capped at the start of the run that read it: the earlier of the capture time and that run's start (record
+     0121 option 14).
+   - The **anchor** of a group is its first line's capped time.
+   - A group expires when a shipped line of its source has a capped time more than 60 s after the anchor (`Expire` with that
+     capped time).
+   - It also expires when the source has been read to its end in a run and the clock is more than 60 s past the anchor.
+
+   A future-dated line can neither hold a group nor close one early (DA 2, `decide` a); a flood is residual N1.
 4. Closing (`Close`):
    - at the end of reading any journal ID in a run, except the ID whose online file is `system.journal`;
-   - at the end of a renamed file, because the import groups per file;
+   - at a rotation, when the kept file becomes the renamed part, because the held-back position names a part, and the import
+     groups per file. A group open across the moment the rotation is found is sent as two records (mode `decide`, item b);
    - before every gap the collector records for that source (truncation, lost rotation, vacuum, unreadable entry, refused
      file, an ID forgotten with a gap);
    - at a give-up, the run that starts from the dropped fork closes every source before the give-up gap (E10).
@@ -116,6 +120,9 @@ source, not from the area document; where the two disagree, the C# code wins and
      committed state. It closes every group in the fork and returns the records, with the fork as its pending run. It commits
      nothing itself. Only `Kept(true)`, called by `Scheduler.Flush` after the records were put, adopts the fork and saves the
      shipped positions. An abandoned or unkept flush leaves the held-back positions.
+
+The MariaDB recovery state of a source outlives its `Stages`: one flag per system ID or file, kept while it is set, and cloned
+with the state. A recovery end long after its start therefore still gets its event, as S5 requires (mode `decide`, item c).
 
 So a clean stop repeats nothing. A crash, or a flush that was not kept, reads a holding source again from its oldest held line,
 as E2 allows. Nothing read again is discarded, so a changed filter, zone or version cannot lose a held line. The recovery state
@@ -226,7 +233,7 @@ package list.
     filter order.
   - *Memory*: the groups in the 24 MiB, as measured (fact 17).
   - *Residuals*: replace "no classification until #290" with the differences from the import (out-of-order line after the close,
-    ID and renamed end, user files, recovery state at a restart, records ordered at their close).
+    ID end and rotation (two records), the capped times, user files, recovery state at a restart, records ordered at their close).
   - *Residuals*, two more: E1's clock close of a `syslog` file needs the source read to its end, and the times come from the line
     as rsyslog writes them (reception time by default, not checked on the server). A flood of lines dated within the window,
     joining or not, holds a group and the held-back position as long as such a flood lasts, and a crash then reads the whole
@@ -276,22 +283,21 @@ package list.
 
 ## Challenge
 
-Devil's Advocate, plan challenge; the reasoning is in record 0121, options 19-23. All four accepted:
-- Major 1, replay loses lines: held-back positions and a stop flush (*Approach* 6-7).
-- Major 2, a group dated in the future: expiry anchored at the run start (*Approach* 3, AC4).
-- Minor 3, user files: decided by the file (*Approach* 2, spec E8).
-- Minor 4, a group's `from`: `Output.From`.
+Devil's Advocate, plan challenge: all four objections were accepted (record 0121, options 19-23).
+- Major 1: held-back positions and a stop flush (*Approach* 6-7).
+- Major 2: expiry on capped times (*Approach* 3).
+- Minor 3: user files are decided by the file (*Approach* 2).
+- Minor 4: `Output.From`.
 
 ## Security review
 
 - Round 1:
-  - B1 and B3 resolved: the marks and the replay are gone.
-  - B2 accepted: stages and buffers exist only while a group is open, and the heap test checks it (fact 17).
+  - B1 and B3 resolved by removing the marks and the replay.
+  - B2 accepted (fact 17).
   - N1 and N2 taken (*Documentation updates*).
 - Round 2:
-  - B4 accepted as required, decided in mode `decide` (*Approach* 7, tests in AC5).
-  - N3 taken: spec E1 is now conditional, E2 names the longer re-read, and the Agent area residual says "as long as such a
-    flood lasts".
+  - B4 accepted as required (*Approach* 7, AC5).
+  - N3 taken: spec E1 and E2 changed, and the Agent area residual updated.
 
 ## Out of scope / follow-ups
 

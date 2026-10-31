@@ -186,9 +186,10 @@ A source with an open group is saved at its oldest held line. The agent's stop s
 - Live lines get the import's classification (#290). The C# and Go stages must change together: the golden records of
   `testdata/journal/classify.export` and of `testdata/logs/classify-syslog.log` fail when one changes alone.
 - A live record differs from the import's at the edges named in the Agent area:
-  - an entry is closed by a line more than 60 seconds later, by the clock, or by the end of an ID or renamed file;
+  - an entry is closed by a line more than 60 seconds later, by the clock, by the end of an ID, or at a rotation of its file;
+  - every time is capped at its run's start, so a future-dated line can neither hold a group nor close one early;
   - user journal files are not grouped;
-  - the recovery state is lost at a restart.
+  - the recovery state is lost at a restart (it outlives a source's stages otherwise).
 
   Its record identity orders it at its close, not at its header.
 - A crash repeats the lines of a holding source from its oldest held line; a clean stop repeats nothing. The scheduler gains a

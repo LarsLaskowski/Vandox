@@ -47,8 +47,8 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
   (after a restart, or runs cut by their 1,000-record budget), a continuation line captured within 60 seconds but read later still
   joins, as on import. Two closes differ from the import, which keeps such an entry open until a later line ends it, and both are
   named in the Agent area. First, a line captured within 60 seconds of the header that arrives after a line already more than 60
-  seconds later no longer joins; that happens only when the clock steps back. Second, an entry still open when its journal ID or
-  renamed file has been read to its end is closed there.
+  seconds later no longer joins; that happens only when the clock steps back. Second, an entry still open when its journal ID has
+  been read to its end, or when a rotation of its file is found, is closed there.
 - E2: The agent or the backend ends while an entry or report is open, cleanly (SIGTERM, an update) or uncleanly (SIGKILL, a crash,
   a power loss). **No line is lost silently.** A line the backend acknowledged survives a backend crash, and a line whose
   position the agent saved has reached the backend or the durable spool. After an unclean end of the agent, the lines repeated
