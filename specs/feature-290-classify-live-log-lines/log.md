@@ -21,3 +21,4 @@ are quoted in full.
 | 2026-10-31 17:02 | 6 Implement G1 | squad-dev | launched: port logstages until package tests pass (sonnet/medium · usage pending) |
 | 2026-10-31 17:09 | 6 Implement G1 | squad-dev | Port done; package tests pass with -race (confirmed), 98.7% coverage; no dispute (sonnet/medium · 164,360 tokens · 23 tool uses · 371 s) |
 | 2026-10-31 17:10 | 4 Skeleton G2 | squad-dev | Flusher interface and Scheduler.Flush stubs in scheduler.go; Logs.Flush stub left to row 8 (sonnet/medium · 4,634 tokens · 4 tool uses · 33 s · continued from 4 Skeleton G1) |
+| 2026-10-31 17:15 | 5 Tests first G2 | squad-tester | 4 tests written, fail on the stub; deferred: TestRun_StopFlushesTheCollectorsBeforeTheLastSave passes only after G3 (rows 8, 10) (sonnet/medium · 122,503 tokens · 18 tool uses · 288 s) |
