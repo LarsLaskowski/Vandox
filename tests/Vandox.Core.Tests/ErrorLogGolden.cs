@@ -55,6 +55,96 @@ internal static class ErrorLogGolden
     }
 
     /// <summary>
+    /// Describes a golden line of the classification fixtures with every field the stages can change, except the log.
+    /// </summary>
+    /// <param name="json">The line</param>
+    /// <returns>The description, equal to <see cref="DescribeClassified(DataRecord)"/> of the imported record</returns>
+    internal static string DescribeClassified(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+
+        var root = document.RootElement;
+        var eventName = root.TryGetProperty("event", out var property) ? property.GetString() : string.Empty;
+
+        return $"{DescribeLine(json)}|{eventName}";
+    }
+
+    /// <summary>
+    /// Describes an imported record with the fields of the golden record of the classification fixtures, the event included.
+    /// </summary>
+    /// <param name="record">The record</param>
+    /// <returns>The description</returns>
+    internal static string DescribeClassified(DataRecord record)
+    {
+        return $"{Describe(record)}|{RecordingEmitter.Line(record).Event}";
+    }
+
+    /// <summary>
+    /// Sorts records by capture time, then program, then message, the order of the classification golden files.
+    /// </summary>
+    /// <param name="records">The records</param>
+    /// <returns>The sorted records</returns>
+    internal static List<DataRecord> SortedByCaptureTime(IEnumerable<DataRecord> records)
+    {
+        return records.OrderBy(record => record.CapturedAt)
+                      .ThenBy(record => RecordingEmitter.Line(record).Program, StringComparer.Ordinal)
+                      .ThenBy(record => RecordingEmitter.Line(record).Message, StringComparer.Ordinal)
+                      .ToList();
+    }
+
+    /// <summary>
+    /// Asserts that imported records equal the golden lines of a classification fixture: the same number, and in capture order every field except the log.
+    /// </summary>
+    /// <param name="imported">The imported records</param>
+    /// <param name="golden">The golden lines</param>
+    internal static void AssertClassifiedEqual(IEnumerable<DataRecord> imported, List<string> golden)
+    {
+        var sorted = SortedByCaptureTime(imported);
+
+        Assert.HasCount(golden.Count, sorted, "one imported record per golden record");
+
+        for (var index = 0; index < golden.Count; index++)
+        {
+            Assert.AreEqual(DescribeClassified(golden[index]), DescribeClassified(sorted[index]), $"record {index}");
+        }
+    }
+
+    /// <summary>
+    /// Asserts that the golden lines of a classification fixture carry every event of the stages and the plain priorities of the lines the stages leave alone.
+    /// </summary>
+    /// <param name="golden">The golden lines</param>
+    internal static void AssertClassifiedCoverage(List<string> golden)
+    {
+        string[] expected = [
+                                "dovecot.database_unavailable",
+                                "dovecot.fatal",
+                                "dovecot.panic",
+                                "mariadb.abort",
+                                "mariadb.ready",
+                                "mariadb.recovery_end",
+                                "mariadb.recovery_start",
+                                "mariadb.shutdown",
+                                "mariadb.start",
+                                "postfix.database_unavailable",
+                                "postfix.fatal",
+                                "postfix.panic"
+                            ];
+
+        var events = golden.Select(line =>
+                                   {
+                                       using var document = JsonDocument.Parse(line);
+
+                                       return document.RootElement.TryGetProperty("event", out var property) ? property.GetString()! : string.Empty;
+                                   })
+                           .Where(name => name.Length > 0)
+                           .Distinct()
+                           .Order(StringComparer.Ordinal)
+                           .ToList();
+
+        Assert.AreSequenceEqual(expected, events, "every event of the stages is in the golden records");
+    }
+
+    /// <summary>
     /// Makes the records of the golden lines as the agent sends them, numbered from a given count.
     /// </summary>
     /// <param name="lines">The golden lines</param>
@@ -83,7 +173,8 @@ internal static class ErrorLogGolden
                                         Pid = root.GetProperty("pid").GetInt32(),
                                         Priority = priority.ValueKind == JsonValueKind.Null ? null : (byte)priority.GetInt32(),
                                         Message = root.GetProperty("message").GetString()!,
-                                        Truncated = root.GetProperty("truncated").GetBoolean()
+                                        Truncated = root.GetProperty("truncated").GetBoolean(),
+                                        Event = root.TryGetProperty("event", out var eventName) ? eventName.GetString()! : string.Empty
                                     }
                          };
 
