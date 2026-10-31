@@ -4,7 +4,7 @@ Plan: [plan.md](plan.md) — Status: Draft
 
 | # | Group | Task | Files | Criteria | Depends on | Owner | Done |
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
-| 1 | G1 | Skeleton: `ResolveLocal`, `Format`, `PleskPanel`, `Nginx`, `Apache`, `Parse` | `internal/syslogline/clock.go`, `internal/errorlogline/errorlogline.go` | AC1, AC3, AC9 | — | Dev | [ ] |
+| 1 | G1 | Skeleton: `ResolveLocal`, `Format`, `PleskPanel`, `Nginx`, `Apache`, `Parse` | `internal/syslogline/clock.go`, `internal/errorlogline/errorlogline.go` | AC1, AC3, AC9 | — | Dev | [x] |
 | 2 | G1 | Tests first: grammar and clock tests | `internal/errorlogline/errorlogline_test.go`, `internal/syslogline/clock_test.go` | AC1, AC3, AC9 | 1 | Tester | [ ] |
 | 3 | G1 | Port `ErrorLogLine.TryParse` and `SyslogClock.ResolveLocal` with the fraction step | `internal/errorlogline/errorlogline.go`, `internal/syslogline/clock.go` | AC1, AC3, AC9 | 2 | Dev | [ ] |
 | 4 | G2 | Skeleton: `logFormats`, `logFormatReason` | `internal/config/logshipping.go` | AC4 | — | Dev | [ ] |

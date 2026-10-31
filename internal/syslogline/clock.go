@@ -117,3 +117,9 @@ func resolveAbsolute(ts stamp) (time.Time, bool) {
 	}
 	return instant, true
 }
+
+// ResolveLocal turns a local time with its year, in the zone of the clock, into a UTC instant with the fraction nanos. False means the
+// date does not exist or the instant is not storable. On success the instant becomes the previous instant of the clock.
+func (c *Clock) ResolveLocal(year, month, day, hour, minute, second, nanos int) (time.Time, bool) {
+	return time.Time{}, false
+}
