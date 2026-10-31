@@ -69,8 +69,13 @@ For the error logs (#289):
 14. **A line's time as the file's bookkeeping time** — as #37 did; but these formats, and RFC 3339 syslog lines, carry a year the
     writer controls, and a forged year in 2262 would move the start of a truncation's or a given-up span's gap past the lost lines.
     **The run's start plus the 24-hour tolerance of year-less times** still lets a gap start a day ahead. **The earlier of the line's
-    time and the run's start** (chosen): a line cannot be written after the run that reads it began, except after a clock step or a
-    forgery, so the bound can only widen a gap; the record keeps its own time.
+    time and the run's start** moves a gap start to that run's start, past honest lines written before it that a run stopped on its
+    budget right after the forged line left unread. **A line dated after the start of the run that reads it does not move the file's
+    last time or the run's latest time** (chosen): they keep their previous value, an earlier line's time or the start of the run that
+    took the position, which lies at or before the forged line's real write time, so the start of a truncation's, a lost rotation's or
+    a given-up span's gap never passes a lost line; the end of a pending lost-rotation gap is the earlier of the line's time and the
+    run's start. The record keeps its own time. Positions saved before this change with a future time (RFC 3339 syslog lines only)
+    stay unbounded until the next line dated before its run is read: accepted.
 
 ## Decision
 
@@ -82,8 +87,8 @@ in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
 [Configuration and secrets](../areas/configuration-and-secrets.md) area (`log_shipping`).
 
 For #289 the configured files also take the formats `plesk-panel`, `sw-cp-server-error`, `nginx-error` and `apache-error`, parsed by
-`internal/errorlogline` with the import's mapping and raw lines, the agent gains no right, and every file's bookkeeping times are
-bounded by the run's start (options 9 to 14). The rules are in the
+`internal/errorlogline` with the import's mapping and raw lines, the agent gains no right, and a file line dated after its run's start
+never moves the bookkeeping times (options 9 to 14). The rules are in the
 Agent area (*Log shipping*).
 
 ## Consequences

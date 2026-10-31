@@ -50,7 +50,7 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 - E3: A file in another format (an Apache log configured as `nginx-error`) has every line shipped raw, without a warning per line.
 - E4: A raw line whose predecessor the agent did not read — the first line after a first start at the end of the file, of a file that
   appeared later, after a truncation or a lost rotation — gets the file's last time (the run's start when the position was taken
-  without a line), where the import takes the file's modification time. After a rotation whose renamed file was found, the first raw
+  without a line; E14 when a line dated after its run came before), where the import takes the file's modification time. After a rotation whose renamed file was found, the first raw
   line of the new file gets the time of the renamed file's last line. Either record differs from the import's in `captured_at` only.
 - E5: Long lines, a byte order mark, `\r\n` and empty lines are handled as for `syslog` files (cut at 16,384 bytes as the import).
 - E6: A time in the skipped hour at the start of daylight saving time is shifted forward; one in the repeated hour takes the earlier
@@ -59,10 +59,9 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   a new file in the repeated hour can get another offset than on import.
 - E7: While `/etc/localtime` cannot be read, no configured file is read (positions stay, no gap) — the existing rule.
 - E8: Client text with a line feed can forge a line of the format, shipped as such and matched by signatures, as on import.
-- E9: The agent reads local times in the zone of `/etc/localtime`, the import in `import.time_zone`; when they differ, the capture
-  times differ. Should Plesk write the panel log in another zone than `/etc/localtime` (unverified, record 0092), its lines are off by
-  that difference.
-- E10: A flood of raw lines stays within the run budgets and memory bound of `syslog` files.
+- E9: The agent reads local times in the zone of `/etc/localtime`, the import in `import.time_zone`; capture times differ by any
+  difference, and by the panel log's own zone should it differ (unverified, record 0092).
+- E10: A flood of raw lines stays within the run budgets and memory bound.
 - E11: A record whose capture time lies more than 10 minutes from its receive time is stored **backfilled** and never alerts
   (*Live data and backfill*, record 0130): a raw line that takes an hours-old predecessor's time (an Apache start-up message after a
   quiet night) and every panel line under E9's zone difference. Accepted; named in the Agent area.
@@ -70,9 +69,10 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   near the 16,384-byte cut `truncated`, can differ for such a line — an existing difference of every agent file format, named in the
   Agent area.
 - E14: A line dated after the start of the run that reads it (a forged year such as `2262/04/11`, a clock stepped back) keeps its
-  own time as `captured_at`, but the file's last time and the run's latest time take the run's start instead, so the gaps of a
-  truncation, a lost rotation and a given-up span still cover the lost lines, and a raw line after it gets the run's start. This holds
-  for `syslog` files too, whose RFC 3339 lines carry a year (a defect of #37 fixed here).
+  own `captured_at`, but leaves the file's last time and the run's latest time at their previous value (an earlier line's time or the
+  start of the run that took the position); a raw line after it takes that time. So the gaps of a truncation, a lost rotation and a
+  given-up span start at or before every lost line, also after a run stopped on its budget, and end at or before the run's start.
+  This fixes `syslog` files too (RFC 3339 years, #37); a future time saved earlier stays until a line dated before its run.
 - E13: When a rotation leaves a new file the agent cannot read, the rest of the renamed file waits with it under the standing
   `log file not readable` warning and is read once the path opens again; a restart in between loses the renamed file's descriptor, and
   a renamed file no longer found then becomes a gap — the existing rule of #37.
@@ -81,7 +81,7 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 
 - Configuration: no new key. `log_shipping.files[].format` accepts `plesk-panel`, `sw-cp-server-error`, `nginx-error` and
   `apache-error` besides `syslog`; the default stays `[]`. Existing configurations and saved positions stay valid (matched by path).
-- Wire format unchanged; the new sources fit the `source` name pattern.
+- Wire format unchanged.
 - Rights and dependencies: no new capability, group, ACL, installer step, dependency or program (Product Manager); files are opened
   through the existing link-free walk.
 - Formats: built and tested from the samples in `testdata/logs/`; the Plesk panel format, its zone and `sw-cp-server`'s use of
@@ -89,7 +89,7 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 - Target host (Product Manager: no access to the server, no real lines): the owner, group and mode of the four files and their
   directories, how each is rotated (logrotate `create` with which mode, `copytruncate`, Plesk's own rotation), whether `setfacl`
   (package `acl`) is installed and whether `plesk repair fs` resets permissions are unknown; the README marks each as unverified.
-- Hand-written line grammars, linear in the line length; memory bound, run budgets and agent log lines unchanged.
+- Hand-written grammars, linear in the line length; memory bound, run budgets and agent log lines unchanged.
 - Parity: for a line of valid UTF-8 read after its predecessor in the same file, the agent's record equals the import's in every
   field but `log` (the configured absolute path) given the same zone; E4, E6, E9, E12 and E14 name the exceptions.
 
@@ -123,8 +123,10 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 - [ ] AC11: `deploy/agent/README.md` holds the checks and grant commands of S8 as the plan fixes them after the dry run, the default
   ACL's reach, the returning warning, the data sent, and the unverified marks of *Target host*; the Agent area names E11 and E12 (S8,
   E11, E12).
-- [ ] AC12: After a line dated in 2262, a truncation's gap and a given-up span's gap still start at or before the run that read it and
-  end at or before the run's start, for an error log and for an RFC 3339 `syslog` line, and the line keeps its own `captured_at` (E14).
+- [ ] AC12: After a line dated in 2262, the gaps of a truncation, a lost rotation and a given-up span start at or before the time of
+  the first line they lose, also when the run that read it stopped on its budget right after it, and end at or before the run's
+  start, for an error log and for an RFC 3339 `syslog` line; the line keeps its own `captured_at` and a raw line after it gets the
+  file's time from before it (E14).
 
 ## Out of scope
 
@@ -160,10 +162,7 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 
 ## Challenge
 
-1. Major, target-host facts. Accepted in part: they are unknown to the Product Manager and listed under *Target host*; S8 and AC11
-   make the README mark them unverified. A stand-in dry run replaces the server run (plan, *Approach*); E13 stays the rule of #37.
-2. Minor, golden records. Accepted: AC1, AC2 and AC9 compare with golden records of the C# import; the signature lines move to
-   `testdata/logs/`.
-3. Minor, invalid UTF-8. Accepted: parity for valid UTF-8 only (E12).
-4. Minor, old raw-line times backfilled. Accepted as E11.
-5. Minor, rotation differences. Accepted in E4 and E6.
+1. Major, target-host facts: accepted in part — unknown to the Product Manager, listed under *Target host*, marked unverified in the
+   README (S8, AC11); a stand-in dry run replaces the server run; E13 stays the rule of #37.
+2. Minor, golden records: accepted (AC1, AC2, AC9; the signature lines move to `testdata/logs/`).
+3. Minor, invalid UTF-8: accepted (E12). 4. Minor, old raw-line times: accepted (E11). 5. Minor, rotation differences: accepted (E4, E6).
