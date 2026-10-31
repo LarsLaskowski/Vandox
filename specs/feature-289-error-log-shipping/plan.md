@@ -263,3 +263,9 @@ As in [spec.md](spec.md), *Out of scope*. No follow-up issue.
 - B2, B3, N1-N4: resolved as recorded in record 0121, option 13, and *Approach*. 2nd review, non-blocking, taken: the subdirectory
   effect of `u::rw` (README, dry-run `mkdir`), `-P` on the last element only (README: grant only below root-owned elements), saved
   future times (accepted residual, *Approach*).
+
+## Security notes
+
+Security, mode `plan`, final confirmation on commit ec83e77: APPROVED. Non-blocking, appended verbatim:
+
+- **AC12 lacks the give-up end's lower bound.** The criterion text (`spec.md:124-127`) does not say that a given-up span's gap ends no earlier than the start of the dropped run that read the line. E14 and the plan's test row both state it, so it is tested. Adding it to AC12 would let the Reviewer check it against the criterion as well.
