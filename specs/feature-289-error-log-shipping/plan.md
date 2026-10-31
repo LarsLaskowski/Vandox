@@ -240,3 +240,24 @@ only its enumerations (Dev, above); record 0121 is already linked there.
 ## Out of scope / follow-ups
 
 As in [spec.md](spec.md), *Out of scope*. No follow-up issue.
+
+## Challenge notes
+
+Devil's Advocate, mode `plan`, commit 97f19ea: 0 major, 2 minor objections, appended verbatim.
+
+1. **minor** — The README text and its test (`TestReadme_ErrorLogGrantIsDocumentedAndMarkedUnverified`) fix the three grant commands and the `create 0600` statement before the dry run has measured anything. Why it matters: logrotate built with ACL support may copy the old file's ACL onto the file it creates, so neither the need for the default ACL nor the `create 0600` claim is known yet.
+   - Plan, *Approach*, README procedure: "a rotation that creates the file with a mode whose group bits are empty (`create 0600`) leaves the default ACL without effect". The test checks for "the three grant commands of *Approach*".
+   - That logrotate copies the ACL is from memory of its source, not run here; the dry run settles it.
+   - The default ACL also grants the agent read on every file later created in that directory, not just the configured log.
+   - Instruction for the Dev: in the step-12 dry run, rotate once with only the file ACL (`setfacl -m u:vandox-agent:r <dir>/<file>`) and once with the file ACL plus the default ACL, for each of `create 0640`, `create 0600` and `copytruncate`.
+   - Write the README's rotation statements from those results.
+   - Recommend the default ACL only where the file ACL alone was lost, and say that it covers every new file in the directory.
+   - The Tester's README test checks the commands the README finally holds, not a pre-fixed set of three.
+
+2. **minor** — The procedure grants search (`x`) only on the immediate directory `<dir>`. The agent's walk opens every path element from `/` with `O_PATH|O_NOFOLLOW` (`internal/logship/safeopen.go:95-118`), so it needs search right on every ancestor.
+   - The plan adds commented per-domain examples under `/var/www/vhosts/system/<domain>/logs/` to `deploy/agent/agent.yaml` with a pointer to this grant.
+   - For those, a parent above `logs/` may deny search too. Its owner and mode on Plesk are unverified.
+   - The check (`head`) also follows symbolic links, while the agent reports `link refused`.
+   - Instruction for the Dev: tell the operator to find the denying elements with `namei -l <path>` run as root, and to grant `x` on each ancestor that denies search, not only on `<dir>`.
+   - State that the check reproduces only the reason `permission denied`; a `link refused` warning means a link in the path, which no grant fixes.
+   - Mark the per-domain directory modes "(not verified on a Plesk server)".
