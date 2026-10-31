@@ -23,3 +23,4 @@ are quoted in full.
 | 2026-10-31 14:18 | 3 Plan security review (final) | squad-security | APPROVED (commit ec83e77); non-blocking: AC12 lacks the give-up end's lower bound in its text (E14 and the test row state it) (opus/medium · 5,721 tokens · 3 tool uses · 18 s · continued) |
 | 2026-10-31 14:19 | 3 Plan trim (revise) | squad-lead | plan.md trimmed under 4000 words; AC12 gains the give-up end lower bound; Security note kept in Security notes; RESULT: DONE (opus/medium · 5,862 tokens · 7 tool uses · 37 s · continued) |
 | 2026-10-31 14:20 | 4 Skeleton G1 | squad-dev | ResolveLocal and package errorlogline (Format, PleskPanel/Nginx/Apache, Parse) as zero-value stubs; go build passes (sonnet/medium · 63,750 tokens · 5 tool uses · 23 s) |
+| 2026-10-31 14:22 | 5 Tests first G1 | squad-tester | 7 tests in errorlogline_test.go and clock_test.go compile and fail on the skeleton (confirmed); none deferred (sonnet/medium · 111,993 tokens · 10 tool uses · 131 s) |
