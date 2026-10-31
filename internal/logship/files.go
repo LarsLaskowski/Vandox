@@ -58,6 +58,22 @@ func statOf(f *os.File) (int64, identity, bool) {
 	return info.Size(), identityOf(sys), true
 }
 
+// fileFormat is the format of a configured file: the source of its records and the function that parses one of its lines.
+type fileFormat struct {
+	source string
+	parse  func(line []byte, clock *syslogline.Clock, now time.Time) syslogline.Line
+}
+
+// formatOf returns the format of the configured name and whether the name is known.
+func formatOf(name string) (fileFormat, bool) {
+	return fileFormat{}, false
+}
+
+// minTime returns the earlier of two times.
+func minTime(a, b time.Time) time.Time {
+	return a
+}
+
 // filesRun is the reading of one configured file in one run.
 type filesRun struct {
 	r     *run
@@ -66,6 +82,8 @@ type filesRun struct {
 	spec  FileSpec
 	clock *syslogline.Clock
 	size  int64
+	// format is the format of the file.
+	format fileFormat
 	// lost is a gap over lines lost to a rotation; the first line read from the new file closes it.
 	lostPending bool
 	lostFrom    time.Time
@@ -336,7 +354,7 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	if at.After(r.st.last) {
 		r.st.last = at
 	}
-	rec, text := fileRecord(fr.spec.Path, parsed, at, cut)
+	rec, text := fileRecord(sourceSyslog, fr.spec.Path, parsed, at, cut)
 	if r.l.filter.drops(text) {
 		return r.tick(ctx, false)
 	}
@@ -344,15 +362,15 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	return r.tick(ctx, true)
 }
 
-// fileRecord maps a parsed syslog line to a log line record.
-func fileRecord(path string, p syslogline.Line, at time.Time, cut bool) (model.Record, *model.LogLine) {
+// fileRecord maps a parsed line of the given source to a log line record.
+func fileRecord(source, path string, p syslogline.Line, at time.Time, cut bool) (model.Record, *model.LogLine) {
 	l := &model.LogLine{Log: path, PID: p.PID, Priority: p.Priority}
 	var hostCut, programCut, messageCut bool
 	l.Host, hostCut = cleaned([]byte(p.Host), maxShortBytes)
 	l.Program, programCut = cleaned([]byte(p.Program), maxShortBytes)
 	l.Message, messageCut = cleaned([]byte(p.Message), maxMessageBytes)
 	l.Truncated = cut || hostCut || programCut || messageCut
-	return model.Record{Meta: model.Meta{Source: sourceSyslog, CapturedAt: at.UTC()}, Data: l}, l
+	return model.Record{Meta: model.Meta{Source: source, CapturedAt: at.UTC()}, Data: l}, l
 }
 
 // cutLine cuts a line longer than maxMessageBytes as the import's line reader does: to at most maxMessageBytes bytes, moved back over at

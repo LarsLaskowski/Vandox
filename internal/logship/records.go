@@ -33,6 +33,12 @@ const (
 	sourceJournal = "journal"
 	sourceSyslog  = "syslog"
 	logJournal    = "journal"
+
+	// sourcePleskPanel, sourceSwCpServerError, sourceNginxError and sourceApacheError are the source of the records of the error logs.
+	sourcePleskPanel      = "plesk-panel"
+	sourceSwCpServerError = "sw-cp-server-error"
+	sourceNginxError      = "nginx-error"
+	sourceApacheError     = "apache-error"
 )
 
 // wantFields are the journal items that are read in full.

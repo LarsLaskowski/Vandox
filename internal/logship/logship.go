@@ -112,6 +112,8 @@ type Logs struct {
 	dec    *countingDecoder
 	entry  journal.Entry
 	buf    []byte
+	// formats are the formats of the configured files, by index.
+	formats []fileFormat
 
 	inited    bool
 	committed *state
