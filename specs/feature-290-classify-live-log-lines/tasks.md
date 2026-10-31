@@ -14,7 +14,7 @@ G4 is the documentation.
 | 5 | G2 | Skeleton: `Flusher`, `Flush` (scheduler) | `internal/scheduler/scheduler.go` | AC5 | — | Dev | [x] |
 | 6 | G2 | Tests: `TestScheduler_FlushPutsTheRecordsAndReportsKept`, `TestRun_StopFlushesTheCollectorsBeforeTheLastSave` | `internal/scheduler/scheduler_test.go`, `internal/agent/agent_test.go` | AC5 | 5 | Tester | [x] |
 | 7 | G2 | Implement `Scheduler.Flush` and call it in `agent.Run` between `wg.Wait()` and `store.Flush` | `internal/scheduler/scheduler.go`, `internal/agent/agent.go` | AC5 | 6 | Dev | [x] |
-| 8 | G3 | Skeleton: `Logs.Flush`; stages per source in the state and the run method that hands a line to them (unexported) | `internal/logship/stages.go`, `state.go`, `positions.go` | AC1, AC3, AC5, AC8, AC10 | 4, 7 | Dev | [ ] |
+| 8 | G3 | Skeleton: `Logs.Flush`; stages per source in the state and the run method that hands a line to them (unexported) | `internal/logship/stages.go`, `state.go`, `positions.go` | AC1, AC3, AC5, AC8, AC10 | 4, 7 | Dev | [x] |
 | 9 | G3 | Collector tests of *Tests per criterion*; heap test adapted | `internal/logship/stages_test.go`, `internal/logship/logship_test.go` | AC1, AC3, AC4, AC5, AC6, AC7, AC8, AC10 | 2, 8 | Tester | [ ] |
 | 10 | G3 | Integrate: feed after the filter, expiry and `Close` rules, user files by file, gaps, give-up, clone, held-back positions, `Flush` | `internal/logship/stages.go`, `journal.go`, `files.go`, `state.go`, `positions.go`, `logship.go`, `run.go` | AC1, AC3, AC4, AC5, AC6, AC7, AC8, AC10 | 9 | Dev | [ ] |
 | 11 | G3 | Confirm the existing compatibility tests stay green, unchanged | `tests/Vandox.Core.Tests/WireContractTests.cs`, `internal/wire/golden_test.go`, `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` | AC9 | 10 | Tester | [ ] |
