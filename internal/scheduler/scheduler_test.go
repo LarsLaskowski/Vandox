@@ -780,6 +780,7 @@ type flushingCollector struct {
 	sink         *recordingSink
 	collectGate  chan struct{} // when set, the first Collect blocks until it is closed, ignoring its context
 	flushGate    chan struct{} // when set, Flush blocks until it is closed, ignoring its context
+	flushPanics  bool          // Flush panics
 	flushRecords []model.Record
 	collects     atomic.Int32
 	collecting   atomic.Int32
@@ -813,6 +814,9 @@ func (c *flushingCollector) Flush(_ context.Context, run scheduler.Run) []model.
 	c.mu.Lock()
 	c.flushRuns = append(c.flushRuns, run)
 	c.mu.Unlock()
+	if c.flushPanics {
+		panic("flush boom")
+	}
 	if c.flushGate != nil {
 		<-c.flushGate
 	}
@@ -1072,4 +1076,36 @@ func requireKeptOnce(t *testing.T, calls []keptCall, who string) {
 	if len(calls) != 1 || calls[0].kept == false {
 		t.Errorf("Kept calls of the %s collector = %+v, want one with kept = true", who, calls)
 	}
+}
+
+func TestScheduler_FlushPanicIsRecoveredAndNotKept(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &recordingSink{}
+		boom := newFlushing("boom", sink)
+		boom.flushPanics = true
+		healthy := newFlushing("healthy", sink)
+		h := start(t, []scheduler.Job{job(boom, 10*time.Second, 2*time.Second), job(healthy, 10*time.Second, 2*time.Second)}, sink)
+		h.sleepTo(time.Second)
+		h.stop()
+		boomKeptAtStop, healthyKeptAtStop := len(boom.keptCalls()), len(healthy.keptCalls())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		h.sched.Flush(ctx)
+
+		if n := len(boom.flushed()); n != 1 {
+			t.Fatalf("Flush calls of the panicking collector = %d, want 1", n)
+		}
+		calls := boom.keptCalls()[boomKeptAtStop:]
+		if len(calls) != 1 || calls[0].kept {
+			t.Errorf("Kept calls of the panicking collector = %+v, want exactly one with kept = false", calls)
+		}
+		for _, r := range flushRecordsIn(sink) {
+			if r.Source == "boom" {
+				t.Errorf("record of the panicking Flush reached the sink: %+v, want none", r)
+			}
+		}
+		h.requireLog(slog.LevelError, "collector panicked", anyTime, map[string]string{"collector": "boom"})
+		requireKeptOnce(t, healthy.keptCalls()[healthyKeptAtStop:], "healthy")
+	})
 }
