@@ -1543,6 +1543,64 @@ func TestRun_SavesTheStateWhenItStops(t *testing.T) {
 	})
 }
 
+// journalMessages returns the messages of the journal log lines the sink received.
+func journalMessages(sink *recordSink) []string {
+	var out []string
+	for _, r := range sink.all() {
+		if l, ok := r.Data.(*model.LogLine); ok && l.Log == "journal" {
+			out = append(out, l.Message)
+		}
+	}
+	return out
+}
+
+func TestRun_StopFlushesTheCollectorsBeforeTheLastSave(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		world := newKernelWorld()
+		origin := time.Now().Add(-time.Hour)
+		world.addJournalFile(t, []map[string][]byte{kernelLine(1, origin, 10, 0, "first"), kernelLine(2, origin, 20, 0, "second")})
+		opts := lowMemoryOptions(t, 0)
+		opts.ConfigPath = writeConfig(t, validConfig)
+		opts.Environ = []string{"VANDOX_AGENT_TOKEN=" + testToken}
+		opts.Kernel = world.sources()
+		opts.Logs = world.logSources()
+		sink := &recordSink{}
+		opts.Sink = sink
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() { done <- Run(ctx, opts) }()
+
+		// the first run starts at the end of the journal; an OOM report arrives that has no end line, so the log shipping holds it open
+		time.Sleep(time.Second)
+		synctest.Wait()
+		world.addJournalFile(t, []map[string][]byte{
+			kernelLine(3, origin, 30, 0, "[1.0] example invoked oom-killer: gfp_mask=0x100cca(GFP_HIGHUSER_MOVABLE), order=0"),
+			kernelLine(4, origin, 31, 0, "Call Trace:"),
+		})
+		time.Sleep(4 * time.Second)
+		synctest.Wait()
+		cancel()
+		code := <-done
+
+		if code != 0 {
+			t.Fatalf("Run() = %d after the cancel, want 0", code)
+		}
+		shipped := journalMessages(sink)
+		if len(shipped) != 1 || !strings.Contains(shipped[0], "invoked oom-killer") || !strings.Contains(shipped[0], "Call Trace:") {
+			t.Fatalf("log lines shipped = %q, want one record holding the open report (closed by the flush at the stop, before the sink is done)", shipped)
+		}
+		// the flush was kept before the last save, so the saved position covers the report's last line and not the position before it
+		store, status := agentstate.Open(opts.StateDir, slog.New(slog.DiscardHandler))
+		if status != agentstate.StatusLoaded {
+			t.Fatalf("state file status = %v, want StatusLoaded after the stop", status)
+		}
+		logs := store.State().Logs
+		if logs == nil || len(logs.Journal) != 1 || logs.Journal[0].Seqnum != 4 {
+			t.Errorf("saved log positions = %+v, want the one journal position at the sequence number 4 (the flush runs before the last save)", logs)
+		}
+	})
+}
+
 func TestLogshipConfig_MapsEveryOption(t *testing.T) {
 	t.Run("the default options", func(t *testing.T) {
 		opts := config.DefaultAgent().LogShipping

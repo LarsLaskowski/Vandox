@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -768,4 +769,307 @@ func TestScheduler_CancelWhileCollectorBlocked(t *testing.T) {
 			t.Errorf("gaps after a stop = %s, want none", h.describe(got))
 		}
 	})
+}
+
+// flushValue is the value of the metric record a flushingCollector returns from Flush; its Collect returns smaller values.
+const flushValue = 99.0
+
+// flushingCollector is a scheduler.Collector that also implements scheduler.Flusher and scheduler.Observer.
+type flushingCollector struct {
+	name         string
+	sink         *recordingSink
+	collectGate  chan struct{} // when set, the first Collect blocks until it is closed, ignoring its context
+	flushGate    chan struct{} // when set, Flush blocks until it is closed, ignoring its context
+	flushRecords []model.Record
+	collects     atomic.Int32
+	collecting   atomic.Int32
+	overlapped   atomic.Bool // Flush was called while a Collect was still running
+	mu           sync.Mutex
+	flushRuns    []scheduler.Run
+	kept         []keptCall
+}
+
+func newFlushing(name string, sink *recordingSink) *flushingCollector {
+	return &flushingCollector{name: name, sink: sink, flushRecords: []model.Record{metricRecord(name, flushValue)}}
+}
+
+func (c *flushingCollector) Name() string { return c.name }
+
+func (c *flushingCollector) Collect(context.Context, scheduler.Run) ([]model.Record, error) {
+	n := c.collects.Add(1)
+	if c.collectGate != nil && n == 1 {
+		c.collecting.Add(1)
+		defer c.collecting.Add(-1)
+		<-c.collectGate
+		return nil, nil
+	}
+	return []model.Record{metricRecord(c.name, float64(n))}, nil
+}
+
+func (c *flushingCollector) Flush(_ context.Context, run scheduler.Run) []model.Record {
+	if c.collecting.Load() > 0 {
+		c.overlapped.Store(true)
+	}
+	c.mu.Lock()
+	c.flushRuns = append(c.flushRuns, run)
+	c.mu.Unlock()
+	if c.flushGate != nil {
+		<-c.flushGate
+	}
+	return slices.Clone(c.flushRecords)
+}
+
+func (c *flushingCollector) Kept(run scheduler.Run, kept bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.kept = append(c.kept, keptCall{start: run.Start, kept: kept, puts: c.sink.calls.Load()})
+}
+
+func (c *flushingCollector) flushed() []scheduler.Run {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.flushRuns)
+}
+
+func (c *flushingCollector) keptCalls() []keptCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.kept)
+}
+
+// flushRecordsIn returns the records of the sink that came from a Flush.
+func flushRecordsIn(sink *recordingSink) []model.Record {
+	var out []model.Record
+	for _, r := range sink.records() {
+		if p, ok := r.Data.(*model.MetricPoint); ok && p.Value == flushValue {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// flushCase is one case of TestScheduler_FlushPutsTheRecordsAndReportsKept.
+type flushCase struct {
+	name     string
+	sinkFail bool
+	records  []model.Record
+	wantKept bool
+}
+
+func TestScheduler_FlushPutsTheRecordsAndReportsKept(t *testing.T) {
+	nan := model.Record{Meta: model.Meta{Source: "flushing"}, Data: &model.MetricPoint{Name: "sample", Value: math.NaN()}}
+	tests := []flushCase{
+		{name: "the sink keeps the records", wantKept: true},
+		{name: "the sink fails", sinkFail: true},
+		{name: "a record is refused", records: []model.Record{metricRecord("flushing", flushValue), nan}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) { runFlushCase(t, tc) })
+		})
+	}
+}
+
+func runFlushCase(t *testing.T, tc flushCase) {
+	t.Helper()
+
+	var failPuts atomic.Bool
+	sink := &recordingSink{hook: func(context.Context, int) error {
+		if failPuts.Load() {
+			return errors.New("disk full")
+		}
+		return nil
+	}}
+	fc := newFlushing("flushing", sink)
+	if tc.records != nil {
+		fc.flushRecords = tc.records
+	}
+	plain := newScripted("plain", nil)
+	h := start(t, []scheduler.Job{job(fc, 10*time.Second, 2*time.Second), job(plain, 10*time.Second, 2*time.Second)}, sink)
+	h.sleepTo(5 * time.Second)
+	h.stop()
+	putsAtStop := sink.calls.Load()
+	keptAtStop := len(fc.keptCalls())
+	plainPutsAtStop := len(sink.fromSource("plain"))
+	failPuts.Store(tc.sinkFail)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	h.sched.Flush(ctx)
+
+	runs := fc.flushed()
+	if len(runs) != 1 {
+		t.Fatalf("Flush calls of the collector = %d, want 1 (case %q)", len(runs), tc.name)
+	}
+	if runs[0].Start.IsZero() || runs[0].Start.Location() != time.UTC {
+		t.Errorf("Run.Start of the flush = %v, want the time of the flush in UTC", runs[0].Start)
+	}
+	got := flushRecordsIn(sink)
+	if len(got) != 1 {
+		t.Fatalf("flush records put = %d, want 1 (the valid record, put once; case %q); all records: %v", len(got), tc.name, sink.records())
+	}
+	requireStamped(t, got, "flushing")
+	if !got[0].CapturedAt.Equal(runs[0].Start) {
+		t.Errorf("captured_at of the flush record = %v, want the start of the flush run %v", got[0].CapturedAt, runs[0].Start)
+	}
+	calls := fc.keptCalls()[keptAtStop:]
+	if len(calls) != 1 || calls[0].kept != tc.wantKept || !calls[0].start.Equal(runs[0].Start) {
+		t.Fatalf("Kept calls = %+v, want exactly one for the flush run %v with kept = %v (case %q)", calls, runs[0].Start, tc.wantKept, tc.name)
+	}
+	if calls[0].puts <= putsAtStop {
+		t.Errorf("Put calls when Kept was called = %d, want more than the %d before the flush (the records are put before Kept)", calls[0].puts, putsAtStop)
+	}
+	if n := len(sink.fromSource("plain")); n != plainPutsAtStop {
+		t.Errorf("puts of the collector without Flush = %d after the flush, want %d (it has nothing to flush)", n, plainPutsAtStop)
+	}
+	if plain.started()[0].Start.IsZero() {
+		t.Errorf("run of the collector without Flush has no start")
+	}
+}
+
+func TestScheduler_FlushWaitsForAStoppedWorkerOrSkips(t *testing.T) {
+	t.Run("the worker returns before the context ends", func(t *testing.T) {
+		synctest.Test(t, runFlushWaits)
+	})
+	t.Run("the worker outlasts the context", func(t *testing.T) {
+		synctest.Test(t, runFlushSkips)
+	})
+}
+
+// stopWithBlockedCollect runs a scheduler whose first Collect blocks, stops it at 1 s and returns the harness with the collector.
+func stopWithBlockedCollect(t *testing.T) (*harness, *flushingCollector, *recordingSink) {
+	t.Helper()
+
+	sink := &recordingSink{}
+	fc := newFlushing("flushing", sink)
+	fc.collectGate = make(chan struct{})
+	t.Cleanup(func() { closeOnce(fc.collectGate) })
+	h := start(t, []scheduler.Job{job(fc, 10*time.Second, 2*time.Second)}, sink)
+	h.sleepTo(time.Second)
+	h.stop() // the stop leaves the blocked Collect running
+	return h, fc, sink
+}
+
+func runFlushWaits(t *testing.T) {
+	t.Helper()
+
+	h, fc, sink := stopWithBlockedCollect(t)
+	keptAtStop := len(fc.keptCalls())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	flushed := make(chan struct{})
+	go func() {
+		defer close(flushed)
+		h.sched.Flush(ctx)
+	}()
+
+	time.Sleep(2 * time.Second)
+	synctest.Wait()
+
+	if n := len(fc.flushed()); n != 0 {
+		t.Fatalf("Flush calls while Collect still runs = %d, want 0 (Flush waits for the worker)", n)
+	}
+	closeOnce(fc.collectGate)
+	<-flushed
+
+	if n := len(fc.flushed()); n != 1 {
+		t.Fatalf("Flush calls after Collect returned = %d, want 1", n)
+	}
+	if fc.overlapped.Load() {
+		t.Errorf("Flush ran while Collect was still running, want never concurrent")
+	}
+	if n := len(flushRecordsIn(sink)); n != 1 {
+		t.Errorf("flush records put = %d, want 1", n)
+	}
+	if calls := fc.keptCalls()[keptAtStop:]; len(calls) != 1 || calls[0].kept == false {
+		t.Errorf("Kept calls of the flush = %+v, want one with kept = true", calls)
+	}
+}
+
+func runFlushSkips(t *testing.T) {
+	t.Helper()
+
+	h, fc, sink := stopWithBlockedCollect(t)
+	begin := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	h.sched.Flush(ctx)
+
+	if took := time.Since(begin); took != 3*time.Second {
+		t.Errorf("Flush returned after %v, want 3s (it gives up when its context ends)", took)
+	}
+	if n := len(fc.flushed()); n != 0 {
+		t.Errorf("Flush calls = %d, want 0 (skipped while the worker is out)", n)
+	}
+	if n := len(flushRecordsIn(sink)); n != 0 {
+		t.Errorf("flush records put = %d, want 0", n)
+	}
+	closeOnce(fc.collectGate)
+	synctest.Wait()
+	if n := len(fc.flushed()); n != 0 {
+		t.Errorf("Flush calls after the late return of Collect = %d, want 0 (a skipped flush is not made up later)", n)
+	}
+	if fc.overlapped.Load() {
+		t.Errorf("Flush ran while Collect was still running, want never concurrent")
+	}
+}
+
+func TestScheduler_FlushHonoursItsContextWhenFlushBlocks(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &recordingSink{}
+		healthy := newFlushing("healthy", sink)
+		blocked := newFlushing("blocked", sink)
+		blocked.flushGate = make(chan struct{})
+		t.Cleanup(func() { closeOnce(blocked.flushGate) })
+		h := start(t, []scheduler.Job{job(healthy, 10*time.Second, 2*time.Second), job(blocked, 10*time.Second, 2*time.Second)}, sink)
+		h.sleepTo(time.Second)
+		h.stop()
+		healthyKeptAtStop, blockedKeptAtStop := len(healthy.keptCalls()), len(blocked.keptCalls())
+		begin := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		h.sched.Flush(ctx)
+
+		if took := time.Since(begin); took != 3*time.Second {
+			t.Errorf("Flush returned after %v, want 3s (the blocked Flush is abandoned when the context ends)", took)
+		}
+		if n := len(blocked.flushed()); n != 1 {
+			t.Errorf("Flush calls of the blocked collector = %d, want 1", n)
+		}
+		if len(flushRecordsIn(sink)) != 1 {
+			t.Errorf("flush records put = %d, want 1 (the healthy collector's, flushed before the blocked one is abandoned)", len(flushRecordsIn(sink)))
+		}
+		requireKeptOnce(t, healthy.keptCalls()[healthyKeptAtStop:], "healthy")
+		closeOnce(blocked.flushGate)
+		synctest.Wait()
+		if calls := blocked.keptCalls()[blockedKeptAtStop:]; len(calls) != 0 {
+			t.Errorf("Kept calls of the abandoned collector = %+v, want none (no observer is told)", calls)
+		}
+		for _, r := range flushRecordsIn(sink) {
+			if r.Source == "blocked" {
+				t.Errorf("record of the abandoned Flush reached the sink after its late return: %+v, want none", r)
+			}
+		}
+	})
+}
+
+// closeOnce closes ch unless it is closed already; it is called from one goroutine at a time.
+func closeOnce(ch chan struct{}) {
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
+}
+
+// requireKeptOnce fails unless calls is exactly one call of Kept with kept = true.
+func requireKeptOnce(t *testing.T, calls []keptCall, who string) {
+	t.Helper()
+
+	if len(calls) != 1 || calls[0].kept == false {
+		t.Errorf("Kept calls of the %s collector = %+v, want one with kept = true", who, calls)
+	}
 }
