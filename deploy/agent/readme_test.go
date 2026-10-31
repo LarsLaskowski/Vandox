@@ -12,6 +12,9 @@ const errorLogSectionHeading = "### Error logs of Plesk and the web servers"
 // unverifiedMarker marks a statement about the Plesk server that nobody has checked on one.
 const unverifiedMarker = "(not verified on a Plesk server)"
 
+// nextHeadingPattern finds the next heading of level 1 to 3.
+var nextHeadingPattern = regexp.MustCompile(`(?m)^#{1,3} `)
+
 // errorLogSectionOf returns the text from the heading to the next heading of the same or a higher level.
 func errorLogSectionOf(text, heading string) (string, bool) {
 	_, rest, found := strings.Cut(text, heading+"\n")
@@ -19,11 +22,57 @@ func errorLogSectionOf(text, heading string) (string, bool) {
 		return "", false
 	}
 
-	if next := regexp.MustCompile(`(?m)^#{1,3} `).FindStringIndex(rest); next != nil {
+	if next := nextHeadingPattern.FindStringIndex(rest); next != nil {
 		rest = rest[:next[0]]
 	}
 
 	return rest, true
+}
+
+// requireSubstrings reports every want the text lacks.
+func requireSubstrings(t *testing.T, what, text string, wants []string) {
+	t.Helper()
+
+	for _, want := range wants {
+		if strings.Contains(text, want) == false {
+			t.Errorf("%s: section lacks %q, want it", what, want)
+		}
+	}
+}
+
+// requireMarkedTopic reports a paragraph of the topic without the unverified marker, or a topic no paragraph states.
+func requireMarkedTopic(t *testing.T, name string, topic *regexp.Regexp, paragraphs []string) {
+	t.Helper()
+
+	matched := 0
+
+	for _, paragraph := range paragraphs {
+		p := strings.Join(strings.Fields(paragraph), " ")
+		if topic.MatchString(p) == false {
+			continue
+		}
+
+		matched++
+
+		if strings.Contains(p, unverifiedMarker) == false {
+			t.Errorf("%s: paragraph %q lacks %q, want the marker on each statement of fact 14", name, p, unverifiedMarker)
+		}
+	}
+
+	if matched == 0 {
+		t.Errorf("%s: no paragraph states it, want it with %q", name, unverifiedMarker)
+	}
+}
+
+// requireSetfaclWithP reports every setfacl line without -P.
+func requireSetfaclWithP(t *testing.T, section string) {
+	t.Helper()
+
+	for _, line := range strings.Split(section, "\n") {
+		if strings.Contains(line, "setfacl") && strings.Contains(line, "setfacl -P") == false {
+			t.Errorf("line %q uses setfacl without -P, want -P on every setfacl", line)
+		}
+	}
 }
 
 func TestReadme_ErrorLogGrantIsDocumentedAndMarkedUnverified(t *testing.T) {
@@ -34,67 +83,31 @@ func TestReadme_ErrorLogGrantIsDocumentedAndMarkedUnverified(t *testing.T) {
 
 	flat := strings.Join(strings.Fields(section), " ")
 
-	requireAll := func(what string, wants ...string) {
-		t.Helper()
-
-		for _, want := range wants {
-			if strings.Contains(flat, want) == false {
-				t.Errorf("%s: section lacks %q, want it", what, want)
-			}
-		}
-	}
-
-	requireAll("the four log paths",
-		"/var/log/nginx/error.log", "/var/log/apache2/error.log", "/var/log/plesk/panel.log", "/var/log/sw-cp-server/error_log")
-	requireAll("the commands of the procedure",
+	requireSubstrings(t, "the four log paths", flat, []string{
+		"/var/log/nginx/error.log", "/var/log/apache2/error.log", "/var/log/plesk/panel.log", "/var/log/sw-cp-server/error_log",
+	})
+	requireSubstrings(t, "the commands of the procedure", flat, []string{
 		"namei -l <dir>/<file>",
 		"setfacl -P -m u:vandox-agent:x <element>",
 		"setfacl -P -m u:vandox-agent:r <dir>/<file>",
 		"setfacl -P -d -m u::rw,u:vandox-agent:r,g::r,o::- <dir>",
-		"sudo -u vandox-agent head -c 0 <dir>/<file>")
-	requireAll("the signs and the data sent", "log file not readable", "link refused", "client IP addresses", "query strings", "shipped to the backend")
-
-	for _, line := range strings.Split(section, "\n") {
-		if strings.Contains(line, "setfacl") && strings.Contains(line, "setfacl -P") == false {
-			t.Errorf("line %q uses setfacl without -P, want -P on every setfacl", line)
-		}
-	}
+		"sudo -u vandox-agent head -c 0 <dir>/<file>",
+	})
+	requireSubstrings(t, "the signs and the data sent", flat, []string{
+		"log file not readable", "link refused", "client IP addresses", "query strings", "shipped to the backend",
+	})
+	requireSubstrings(t, "the default ACL's reach", strings.ToLower(flat), []string{
+		"every", "future", "subdirector", "umask", "u::rw", "create <mode>",
+	})
+	requireSetfaclWithP(t, section)
 
 	if strings.Index(flat, "namei -l") > strings.Index(flat, "setfacl") {
 		t.Errorf("section names setfacl before namei -l, want namei -l first")
 	}
 
-	lower := strings.ToLower(flat)
-	requireAll("the default ACL's reach", "every")
-	for _, want := range []string{"future", "subdirector", "umask", "u::rw", "create <mode>"} {
-		if strings.Contains(lower, want) == false {
-			t.Errorf("default ACL's reach: section lacks %q, want it", want)
-		}
-	}
-
 	paragraphs := strings.Split(section, "\n\n")
-	for name, topic := range map[string]*regexp.Regexp{
-		"the owner and mode of the files": regexp.MustCompile(`(?i)\bowner|\bmode\b.*(panel\.log|error_log)|(panel\.log|error_log).*\bmode\b`),
-		"the rotation by Plesk":           regexp.MustCompile(`(?i)plesk rotat|rotated by plesk|rotates`),
-		"plesk repair fs":                 regexp.MustCompile(`(?i)plesk repair fs`),
-	} {
-		matched := 0
-
-		for _, paragraph := range paragraphs {
-			p := strings.Join(strings.Fields(paragraph), " ")
-			if topic.MatchString(p) == false {
-				continue
-			}
-
-			matched++
-
-			if strings.Contains(p, unverifiedMarker) == false {
-				t.Errorf("%s: paragraph %q lacks %q, want the marker on each statement of fact 14", name, p, unverifiedMarker)
-			}
-		}
-
-		if matched == 0 {
-			t.Errorf("%s: no paragraph states it, want it with %q", name, unverifiedMarker)
-		}
-	}
+	requireMarkedTopic(t, "the owner and mode of the files",
+		regexp.MustCompile(`(?i)\bowner|\bmode\b.*(panel\.log|error_log)|(panel\.log|error_log).*\bmode\b`), paragraphs)
+	requireMarkedTopic(t, "the rotation by Plesk", regexp.MustCompile(`(?i)plesk rotat|rotated by plesk|rotates`), paragraphs)
+	requireMarkedTopic(t, "plesk repair fs", regexp.MustCompile(`(?i)plesk repair fs`), paragraphs)
 }
