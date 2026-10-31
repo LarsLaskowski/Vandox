@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
+	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -289,6 +290,37 @@ func TestBackups_RulesAreLiteral(t *testing.T) {
 		{"prefix of a command line that starts with another word", []Rule{{CmdlinePrefix: "pzstd"}}, "nice", nice, "", false},
 		{"second rule matches", []Rule{{Command: "borg"}, {CmdlinePrefix: "/opt/b/"}}, "run", "/opt/b/run\x00", "run", true},
 		{"no rule at all matches nothing", nil, "pzstd", "pzstd\x00", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { requireLiteral(t, tt) })
+	}
+}
+
+// TestBackups_DefaultRulesOnPleskProcesses runs the default rules of the configuration over command lines captured during a
+// Plesk backup on a real server (#287): the processes that create the backup files match, the ones that read the dump list,
+// restore or only run beside the backup do not.
+func TestBackups_DefaultRulesOnPleskProcesses(t *testing.T) {
+	var rules []Rule
+	for _, r := range config.DefaultBackupRules() {
+		rules = append(rules, Rule{Command: r.Command, CmdlinePrefix: r.CmdlinePrefix})
+	}
+	tests := []literalCase{
+		{"archiver packs a directory", rules, "backup-archiver",
+			"/opt/psa/admin/sbin/backup-archiver\x00--pack\x00--source=/opt/psa/var/modules/letsencrypt/\x00--destination=backup_ext_letsencrypt_2610311133.tzst\x00--compression-method=zstd\x00", "backup-archiver", true},
+		{"archiver packs the database dump", rules, "backup-archiver",
+			"/opt/psa/admin/sbin/backup-archiver\x00--pack\x00--source=/tmp/bddollbm3fik7406oWdsW3\x00--destination=domains/e-networld.de/databases/updateip_1/backup_sqldump_2610311133.tzst\x00", "backup-archiver", true},
+		{"tar creates the stream for pzstd", rules, "sw-tar",
+			"/usr/lib/plesk-9.0/sw-tar\x00--create\x00--file\x00-\x00--use-compress-program\x00pzstd -19\x00--files-from\x00/tmp/pmm-ru-cd-includes-zptOYC\x00", "sw-tar", true},
+		{"compressor", rules, "pzstd", "pzstd\x00-19\x00", "pzstd", true},
+		{"archiver unpacks a restore", rules, "backup-archiver",
+			"/opt/psa/admin/sbin/backup-archiver\x00--unpack\x00--source=backup.tzst\x00", "", false},
+		{"tar extracts a restore", rules, "sw-tar", "/usr/lib/plesk-9.0/sw-tar\x00--extract\x00--file\x00-\x00", "", false},
+		{"shell wrapper of the archiver", rules, "sh", "sh\x00-c\x00exec /opt/psa/admin/sbin/backup-archiver '--pack'\x00", "", false},
+		{"dump list of the ftp storage", rules, "pmm-ras",
+			"/opt/psa/admin/bin/pmm-ras\x00--get-ftp-dump-list\x00--use-ftp-passive-mode\x00", "", false},
+		{"task poll of the panel", rules, "pmmcli", "/opt/psa/bin/py3-python\x00/opt/psa/admin/sbin/pmmcli\x00--get-task\x001199\x00", "", false},
+		{"restore helper of the panel", rules, "sw-engine",
+			"/usr/bin/sw-engine\x00-c\x00/opt/psa/admin/conf/php.ini\x00/opt/psa/admin/sbin/backup_restore_helper\x00--post-backup-extension\x0016\x00", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) { requireLiteral(t, tt) })

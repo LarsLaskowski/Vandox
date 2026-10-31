@@ -106,9 +106,14 @@ backups:
   # equals `command` (compared as a whole) or its command line starts with `cmdline_prefix` (compared
   # literally, no pattern). At most 64 rules, each with exactly one of the two, 1 to 256 bytes. The
   # collector `backups` checks the processes every 10 seconds and records when a backup run starts and
-  # ends. An empty list [] turns the check off. Default: [{command: pzstd}]
+  # ends. An empty list [] turns the check off. Default: the three rules below, which come from the
+  # processes captured during a Plesk backup: `pzstd` compresses, `backup-archiver --pack` packs every
+  # part (including the database dumps) and `sw-tar --create` writes the tar stream. The modes --pack
+  # and --create keep a restore from counting as a backup. A list given here replaces the default.
   processes:
     - command: pzstd
+    - cmdline_prefix: "/opt/psa/admin/sbin/backup-archiver --pack "
+    - cmdline_prefix: "/usr/lib/plesk-9.0/sw-tar --create "
 
 log_shipping:
   # Whether the collector `logs` ships the systemd journal: the system files and the user files

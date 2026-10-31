@@ -11,7 +11,7 @@
 #36 wants an OOM kill to be recorded within seconds together with a process and connection snapshot linked to it, reboots with the
 previous uptime, and backup runs from configurable process patterns, so that a chain such as 2 Oct 2026 (a backup with `pzstd`,
 the kill of `pzstd`, then of `mariadbd`) reads as one sequence. The scheduler (0110) runs every collector at a fixed rate and never
-starts one twice; the agent had no state that outlives a restart. The Product Manager set the default backup rule to `pzstd` only.
+starts one twice; the agent had no state that outlives a restart. The Product Manager set the default backup rule to `pzstd` only until Plesk's own processes were captured (#287).
 
 ## Options considered
 
@@ -40,8 +40,9 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
    time and the online file set the position, so a file of another seqnum ID can neither move it back in time nor hide the online
    file, and a file that keeps failing is given up with a gap after three runs instead of holding the position. **A scheduler signal telling a refused record from a dropped
    result** (a new `Run` field) — the same effect, but a change to the contract `processes` and `connections` also rely on.
-9. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data; **Plesk's
-   documented tool names** — never captured, a wrong rule fails silently; **a capture first** — not available.
+9. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data when the record was written; **Plesk's
+   documented tool names** — never captured, a wrong rule fails silently; **a capture first** — not available then. #287 added the
+   rules taken from a capture: `command` matches would also count a restore, so the two prefixes name the modes `--pack` and `--create`.
 10. **A backup run whose records were dropped is decided again: the collector restores its copy of the open run on
     `Run.PreviousLost`** (chosen) — a lost start or end is written again by the next check, and the state stays current for a
     restart; **commit the open run only at the next kept run**, as for the journal position — the stored run then lags one more
@@ -53,13 +54,13 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
 A live OOM kill makes the kernel collector request one extra run of `processes` and `connections` through the scheduler, at most one
 per collector per 15 seconds, and the snapshots name the kills by their identity. A boot is recognized by comparing the boot ID with
 the one in the agent's state file, and a backup run is the span in which a process matches a `backups.processes` rule, recorded as a
-`backup_run` start and end; the default rule is `command: pzstd` only. The rules are in the [Agent](../areas/agent.md) area (*Kernel
+`backup_run` start and end; the default rules are `command: pzstd` and the prefixes of `backup-archiver --pack` and `sw-tar --create`. The rules are in the [Agent](../areas/agent.md) area (*Kernel
 events*, *Boots*, *Backup runs*) and the [wire format](../areas/wire-format.md).
 
 ## Consequences
 
-- Until #45 captures Plesk's own backup processes, a backup is recognized only while `pzstd` runs: the database dump before the
-  compression is not part of a run unless the operator adds a rule.
+- The default rules are `pzstd` plus `backup-archiver --pack` and `sw-tar --create`, chosen from the processes captured during a
+  Plesk backup (#287); the database dumps run in `backup-archiver`, so they are part of the run. The creating modes keep a restore out.
 - An extra snapshot is a sample like any other (predecessor, `Run.PreviousLost`, gaps); without pressure mode it costs at most one more
   snapshot per collector per 15 seconds.
 - A span whose result is dropped more than three times in a row is given up with a gap; its kills are then lost although the journal
