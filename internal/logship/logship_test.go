@@ -621,7 +621,7 @@ func heldEntries(first uint64) []map[string][]byte {
 		return fmt.Sprint(journalBase.Add(time.Duration(seq) * time.Microsecond).UnixMicro()) // #nosec G115 -- small test values
 	}
 	entries := []map[string][]byte{mariaEntry(first, header("Note", line), "__REALTIME_TIMESTAMP", at(first))}
-	for i := uint64(1); i <= 6; i++ {
+	for i := uint64(1); i <= 3; i++ {
 		entries = append(entries, mariaEntry(first+i, line, "__REALTIME_TIMESTAMP", at(first+i)))
 	}
 	entries = append(entries, kernelEntry(first+7, oomStart+line, "__REALTIME_TIMESTAMP", at(first+7)))
@@ -652,7 +652,7 @@ func appendHeldLines(w *world, names []string) {
 	line := strings.Repeat("y", 4000)
 	var b strings.Builder
 	b.WriteString(fileLineAs(1, "mariadbd", 2345, header("Note", line)))
-	for n := 2; n <= 7; n++ {
+	for n := 2; n <= 4; n++ {
 		b.WriteString(fileLineAs(n, "mariadbd", 2345, line))
 	}
 	b.WriteString(fileLineAs(8, "kernel", 0, oomStart+line))

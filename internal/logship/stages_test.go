@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -247,6 +248,7 @@ func heldEntryWorld(t *testing.T) (*world, *journalFeed) {
 	w.at(4, time.Second)
 	first := w.step()
 	requireMessages(t, "lines of the first run (the held entry waits, the later line does not)", messages(first), []string{"before", "later"})
+	w.stop()
 	return w, feed
 }
 
@@ -344,7 +346,7 @@ func TestLogs_FilterDecidesBeforeClassification(t *testing.T) {
 		w.start()
 		w.at(3, time.Second)
 		opened := w.step()
-		w.at(1, 61*time.Second)
+		w.at(2, 61*time.Second)
 
 		closed := w.step()
 
@@ -415,10 +417,11 @@ func TestLogs_JournalAndFileNeverJoin(t *testing.T) {
 		w := newWorld(t)
 		w.useFiles("mail.log")
 		w.writeLog("mail.log", "")
+		w.online(seqID(1), []map[string][]byte{jentry(9, "before")})
 		w.position(seqID(1), 9)
 		w.start()
 		w.step()
-		w.online(seqID(1), []map[string][]byte{mariaEntry(10, header("Note", "journal header"))})
+		w.online(seqID(1), []map[string][]byte{jentry(9, "before"), mariaEntry(10, header("Note", "journal header"))})
 		w.appendLog("mail.log", fileLineAs(11, "mariadbd", 2345, "file line"))
 		w.at(11, time.Second)
 
@@ -432,10 +435,11 @@ func TestLogs_JournalAndFileNeverJoin(t *testing.T) {
 		w := newWorld(t)
 		w.useFiles("mail.log")
 		w.writeLog("mail.log", "")
+		w.online(seqID(1), []map[string][]byte{jentry(9, "before")})
 		w.position(seqID(1), 9)
 		w.start()
 		w.step()
-		w.online(seqID(1), []map[string][]byte{mariaEntry(10, "journal line")})
+		w.online(seqID(1), []map[string][]byte{jentry(9, "before"), mariaEntry(10, "journal line")})
 		w.appendLog("mail.log", fileLineAs(11, "mariadbd", 2345, header("Note", "file header")))
 		w.at(11, time.Second)
 
@@ -691,5 +695,123 @@ func TestLogs_ClassifiedSyslogFileEqualsTheImport(t *testing.T) {
 	recs := w.drain(10)
 	recs = append(recs, w.flush()...)
 
-	requireClassifiedGolden(t, recs, golden)
+	raw := classified{CapturedAtUS: time.Date(2026, time.October, 31, 10, 3, 10, 250000000, time.UTC).UnixMicro(), Source: "syslog", Message: "this line is no syslog line at all"}
+	requireClassifiedGolden(t, recs, append(golden, raw))
+}
+
+func TestLogs_RecoveryEndAfterTheStartEntryExpiredGetsItsEvent(t *testing.T) {
+	w := newWorld(t)
+	id := seqID(1)
+	feed := &journalFeed{w: w, id: id}
+	feed.add(mariaEntry(10, header("Note", "InnoDB: Starting crash recovery from checkpoint LSN=8401234,8401234")))
+	w.position(id, 9)
+	w.start()
+	w.at(10, time.Second)
+	opened := w.step()
+	w.at(10, 61*time.Second)
+	started := w.step()
+	feed.add(mariaEntry(200, header("Note", "InnoDB: 10.6.12 started; log sequence number 8409876; transaction id 5678")))
+	w.at(200, time.Second)
+	opened2 := w.step()
+	w.at(200, 61*time.Second)
+
+	ended := w.step()
+
+	requireNoLines(t, "lines of the run that opened the start entry", opened)
+	if l := requireOneLine(t, "the run that closed the start entry", started, "mariadbd"); l.Event != "mariadb.recovery_start" {
+		t.Errorf("start entry event = %q, want mariadb.recovery_start", l.Event)
+	}
+	requireNoLines(t, "lines of the run that opened the end entry", opened2)
+	if l := requireOneLine(t, "the run that closed the end entry", ended, "mariadbd"); l.Event != "mariadb.recovery_end" {
+		t.Errorf("end entry event = %q, want mariadb.recovery_end: the recovery flag lives as long as the source, not the stages", l.Event)
+	}
+}
+
+func TestLogs_RefusedJournalFileClosesTheGroups(t *testing.T) {
+	w := newWorld(t)
+	id := seqID(1)
+	feed := &journalFeed{w: w, id: id}
+	feed.add(jentry(1, "before"), mariaEntry(2, header("Note", "entry")), mariaEntry(3, "cont"))
+	w.position(id, 0)
+	w.start()
+	w.at(3, time.Second)
+	opened := w.step()
+	// a second file of the machine directory that the reader refuses
+	w.writeJournal(journalSpec{name: "system@00000000000000000000000000000009-0000000000000001-0005f8d1b1a2c3d4.journal", seqnumID: seqID(9), entries: jentries(1, 2)})
+	bad := filepath.Join(w.jroot, machineID, "system@00000000000000000000000000000009-0000000000000001-0005f8d1b1a2c3d4.journal")
+	if err := os.WriteFile(bad, []byte("not a journal file"), 0o600); err != nil {
+		t.Fatalf("writing the damaged journal file: %v", err)
+	}
+
+	recs := w.step()
+
+	requireMessages(t, "lines of the run that opened the entry", messages(opened), []string{"before"})
+	if got := messages(recs); !slices.Contains(got, "entry\ncont") {
+		t.Errorf("lines of the run that met the refused file = %v, want the open entry sent (the refused file may hold lines of any ID)", head(got))
+	}
+}
+
+func TestLogs_RenamedFileClosesItsGroupsAndKeepsThePositionHeldBack(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", fileLines(1, 2))
+	w.clock.set(fileLineTime(3))
+	w.start()
+	w.step()
+	w.appendLog("mail.log", fileLineAs(5, "mariadbd", 2345, header("Note", "entry"))+fileLineAs(6, "mariadbd", 2345, "cont"))
+	opened := w.step()
+	w.rename("mail.log", "mail.log.1")
+	w.writeLog("mail.log", fileLineAs(7, "app", 7, "new file"))
+
+	recs := w.step()
+
+	requireNoLines(t, "lines of the run that opened the entry", opened)
+	got := messages(recs)
+	if len(got) == 0 || got[0] != "entry\ncont" {
+		t.Errorf("lines of the run that read the renamed file to its end = %v, want the entry first (the import groups per file)", head(got))
+	}
+}
+
+func TestLogs_FlushAfterAGiveUpClosesTheGroupsOfTheDroppedFork(t *testing.T) {
+	w := newWorld(t)
+	id := seqID(1)
+	feed := &journalFeed{w: w, id: id}
+	feed.add(jentry(1, "before"), mariaEntry(2, header("Note", "entry")), mariaEntry(3, "cont"))
+	w.position(id, 0)
+	w.start()
+	w.at(3, time.Second)
+	for range 4 {
+		w.collect()
+		w.refuse()
+	}
+
+	flushed := w.flush()
+
+	if got := messages(flushed); !slices.Contains(got, "entry\ncont") {
+		t.Errorf("lines of the flush after four dropped runs = %v, want the open entry of the state the next run starts from", head(got))
+	}
+}
+
+func TestLogs_FlushHoldsBackNothingAfterAKeptFlushOfAFile(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", fileLines(1, 2))
+	w.clock.set(fileLineTime(3))
+	w.start()
+	w.step()
+	w.appendLog("mail.log", fileLineAs(5, "mariadbd", 2345, header("Note", "entry"))+fileLineAs(6, "mariadbd", 2345, "cont")+fileLineAs(7, "app", 7, "later"))
+	first := w.step()
+	held := w.store.State().Logs
+	flushed := w.flush()
+	w.keep()
+	w.restart()
+	w.appendLog("mail.log", fileLineAs(8, "app", 7, "after"))
+	next := w.step()
+
+	requireMessages(t, "lines of the run that held the entry", messages(first), []string{"later"})
+	requireMessages(t, "lines of the flush", messages(flushed), []string{"entry\ncont"})
+	requireMessages(t, "lines of the new collector (nothing is repeated)", messages(next), []string{"after"})
+	if held == nil || len(held.Files) != 1 || held.Files[0].Offset >= w.store.State().Logs.Files[0].Offset {
+		t.Errorf("file positions held back %+v and after the kept flush %+v, want the offset to move on past the entry", held, w.store.State().Logs)
+	}
 }
