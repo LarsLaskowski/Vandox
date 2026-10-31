@@ -7,7 +7,7 @@ Plan: [plan.md](plan.md) — Status: Draft
 | 1 | G1 | Skeleton: `ResolveLocal`, `Format`, `PleskPanel`, `Nginx`, `Apache`, `Parse` | `internal/syslogline/clock.go`, `internal/errorlogline/errorlogline.go` | AC1, AC3, AC9 | — | Dev | [x] |
 | 2 | G1 | Tests first: grammar and clock tests | `internal/errorlogline/errorlogline_test.go`, `internal/syslogline/clock_test.go` | AC1, AC3, AC9 | 1 | Tester | [x] |
 | 3 | G1 | Port `ErrorLogLine.TryParse` and `SyslogClock.ResolveLocal` with the fraction step | `internal/errorlogline/errorlogline.go`, `internal/syslogline/clock.go` | AC1, AC3, AC9 | 2 | Dev | [x] |
-| 4 | G2 | Skeleton: `logFormats`, `logFormatReason` | `internal/config/logshipping.go` | AC4 | — | Dev | [ ] |
+| 4 | G2 | Skeleton: `logFormats`, `logFormatReason` | `internal/config/logshipping.go` | AC4 | — | Dev | [x] |
 | 5 | G2 | Tests first: adapt the accepted and refused format rows with the exact reason | `internal/config/logshipping_test.go` | AC4 | 4 | Tester | [ ] |
 | 6 | G2 | Accept the five formats | `internal/config/logshipping.go` | AC4 | 5 | Dev | [ ] |
 | 7 | G3 | Skeleton: `sourcePleskPanel`, `sourceSwCpServerError`, `sourceNginxError`, `sourceApacheError`, `fileFormat`, `formatOf`, `fileRecord`, `minTime`, `New`, the fields `formats` and `format` | `internal/logship/records.go`, `files.go`, `logship.go` | AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, AC12 | 3 | Dev | [ ] |
