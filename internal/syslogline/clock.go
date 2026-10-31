@@ -17,6 +17,12 @@ var (
 	storableMax = time.Unix(0, 9223372036854775800).UTC()
 )
 
+// The first and the last year the storage can hold.
+const (
+	firstStorableYear = 1677
+	lastStorableYear  = 2262
+)
+
 // Clock turns the time of a traditional syslog header (no year, no zone) into an instant. One Clock serves one file and keeps the
 // previous line's instant.
 type Clock struct {
@@ -115,5 +121,26 @@ func resolveAbsolute(ts stamp) (time.Time, bool) {
 	if instant.Before(storableMin) || instant.After(storableMax) {
 		return time.Time{}, false
 	}
+	return instant, true
+}
+
+// ResolveLocal turns a local time with its year, in the zone of the clock, into a UTC instant with the fraction nanos. False means the
+// date does not exist or the instant, with or without the fraction, is not storable. On success the instant becomes the previous instant of the clock.
+func (c *Clock) ResolveLocal(year, month, day, hour, minute, second, nanos int) (time.Time, bool) {
+	if month < 1 || month > 12 || day < 1 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 {
+		return time.Time{}, false
+	}
+	if year < firstStorableYear || year > lastStorableYear || day > daysIn(year, month) {
+		return time.Time{}, false
+	}
+	whole := c.instant(year, stamp{month: month, day: day, hour: hour, minute: minute, second: second}, true)
+	if whole.Before(storableMin) || whole.After(storableMax) { // the import checks the whole second first, then again with the fraction
+		return time.Time{}, false
+	}
+	instant := whole.Add(time.Duration(nanos))
+	if instant.Before(storableMin) || instant.After(storableMax) {
+		return time.Time{}, false
+	}
+	c.prev = instant
 	return instant, true
 }

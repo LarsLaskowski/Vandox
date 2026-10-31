@@ -50,7 +50,6 @@ const (
 	keyShippingFiles  = "log_shipping.files"
 	keyShippingDrop   = "log_shipping.drop"
 	journalLog        = "journal"
-	syslogFormat      = "syslog"
 	priorityLevelsMax = 8
 )
 
@@ -60,13 +59,16 @@ const (
 	logFilesReason     = "must be a list of at most 16 files"
 	logPathReason      = "must be an absolute, clean path of at most 1024 bytes (no trailing slash, no . or .. elements)"
 	logPathTwiceReason = "listed twice"
-	logFormatReason    = "must be syslog"
+	logFormatReason    = "must be one of syslog, plesk-panel, sw-cp-server-error, nginx-error, apache-error"
 	dropRulesReason    = "must be a list of at most 64 rules"
 	dropEmptyReason    = "must set at least one of log, program, priority and message"
 	dropLogReason      = "must be journal or a path listed in log_shipping.files"
 	dropPatternReason  = "must be an RE2 pattern of at most 1024 bytes and 400 compiled instructions"
 	dropTogetherReason = "patterns must compile to at most 400 instructions together"
 )
+
+// logFormats are the formats a log file of log_shipping.files can have.
+var logFormats = []string{"syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error"}
 
 var priorityNames = [priorityLevelsMax]string{"emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"}
 
@@ -111,7 +113,7 @@ func (s *LogShipping) checkFiles(file string, lines map[string]int) error {
 			return elementError(file, lines, element, element+".path", logPathReason)
 		case slices.ContainsFunc(s.Files[:i], func(o LogFile) bool { return o.Path == f.Path }):
 			return elementError(file, lines, element, element+".path", logPathTwiceReason)
-		case f.Format != syslogFormat:
+		case !slices.Contains(logFormats, f.Format):
 			return elementError(file, lines, element, element+".format", logFormatReason)
 		}
 	}

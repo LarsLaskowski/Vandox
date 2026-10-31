@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/LarsLaskowski/Vandox/internal/errorlogline"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/syslogline"
 )
@@ -58,6 +59,44 @@ func statOf(f *os.File) (int64, identity, bool) {
 	return info.Size(), identityOf(sys), true
 }
 
+// fileFormat is the format of a configured file: the source of its records and the function that parses one of its lines.
+type fileFormat struct {
+	source string
+	parse  func(line []byte, clock *syslogline.Clock, now time.Time) syslogline.Line
+}
+
+// formatOf returns the format of the configured name and whether the name is known.
+func formatOf(name string) (fileFormat, bool) {
+	switch name {
+	case "syslog":
+		return fileFormat{source: sourceSyslog, parse: syslogline.Parse}, true
+	case "plesk-panel":
+		return errorFormat(sourcePleskPanel, errorlogline.PleskPanel), true
+	case "sw-cp-server-error":
+		return errorFormat(sourceSwCpServerError, errorlogline.Nginx), true
+	case "nginx-error":
+		return errorFormat(sourceNginxError, errorlogline.Nginx), true
+	case "apache-error":
+		return errorFormat(sourceApacheError, errorlogline.Apache), true
+	}
+	return fileFormat{}, false
+}
+
+// errorFormat returns the format of an error log of the given source and layout.
+func errorFormat(source string, layout errorlogline.Format) fileFormat {
+	return fileFormat{source: source, parse: func(line []byte, clock *syslogline.Clock, _ time.Time) syslogline.Line {
+		return errorlogline.Parse(layout, line, clock)
+	}}
+}
+
+// minTime returns the earlier of two times.
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
+}
+
 // filesRun is the reading of one configured file in one run.
 type filesRun struct {
 	r     *run
@@ -66,6 +105,8 @@ type filesRun struct {
 	spec  FileSpec
 	clock *syslogline.Clock
 	size  int64
+	// format is the format of the file.
+	format fileFormat
 	// lost is a gap over lines lost to a rotation; the first line read from the new file closes it.
 	lostPending bool
 	lostFrom    time.Time
@@ -99,7 +140,7 @@ func (r *run) readFile(ctx context.Context, i int) {
 		return
 	}
 	r.fproblems[i] = "" // opened: a later failure of the reading sets its reason
-	fr := &filesRun{r: r, i: i, st: st, spec: r.l.cfg.Files[i], clock: st.clockOf(loc), size: size}
+	fr := &filesRun{r: r, i: i, st: st, spec: r.l.cfg.Files[i], clock: st.clockOf(loc), size: size, format: r.l.formats[i]}
 	if !st.have {
 		fromStart := st.waiting
 		fr.begin(f, id, fromStart)
@@ -322,7 +363,7 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	if len(line) == 0 {
 		return r.tick(ctx, false)
 	}
-	parsed := syslogline.Parse(line, fr.clock, r.start)
+	parsed := fr.format.parse(line, fr.clock, r.start)
 	at := parsed.Time
 	if !parsed.Header {
 		at = st.lastTime
@@ -330,13 +371,15 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	from := st.lastTime
 	if fr.lostPending {
 		fr.lostPending = false
-		r.emitGap(fr.lostFrom, at)
+		r.emitGap(fr.lostFrom, minTime(at, r.start))
 	}
-	st.lastTime = at
-	if at.After(r.st.last) {
-		r.st.last = at
+	if minTime(at, r.start).Equal(at) { // a line dated after the start of the run leaves lastTime, so that a gap never starts after a lost line
+		st.lastTime = at
 	}
-	rec, text := fileRecord(fr.spec.Path, parsed, at, cut)
+	if bound := minTime(at, r.start); bound.After(r.st.last) {
+		r.st.last = bound
+	}
+	rec, text := fileRecord(fr.format.source, fr.spec.Path, parsed, at, cut)
 	if r.l.filter.drops(text) {
 		return r.tick(ctx, false)
 	}
@@ -344,15 +387,15 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	return r.tick(ctx, true)
 }
 
-// fileRecord maps a parsed syslog line to a log line record.
-func fileRecord(path string, p syslogline.Line, at time.Time, cut bool) (model.Record, *model.LogLine) {
+// fileRecord maps a parsed line of the given source to a log line record.
+func fileRecord(source, path string, p syslogline.Line, at time.Time, cut bool) (model.Record, *model.LogLine) {
 	l := &model.LogLine{Log: path, PID: p.PID, Priority: p.Priority}
 	var hostCut, programCut, messageCut bool
 	l.Host, hostCut = cleaned([]byte(p.Host), maxShortBytes)
 	l.Program, programCut = cleaned([]byte(p.Program), maxShortBytes)
 	l.Message, messageCut = cleaned([]byte(p.Message), maxMessageBytes)
 	l.Truncated = cut || hostCut || programCut || messageCut
-	return model.Record{Meta: model.Meta{Source: sourceSyslog, CapturedAt: at.UTC()}, Data: l}, l
+	return model.Record{Meta: model.Meta{Source: source, CapturedAt: at.UTC()}, Data: l}, l
 }
 
 // cutLine cuts a line longer than maxMessageBytes as the import's line reader does: to at most maxMessageBytes bytes, moved back over at

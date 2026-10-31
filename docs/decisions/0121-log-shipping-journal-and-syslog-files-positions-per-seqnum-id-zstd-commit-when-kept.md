@@ -1,9 +1,9 @@
-# 0121: Log shipping reads the journal per seqnum ID with bounded zstd decoding and syslog files without links, and commits its positions when the scheduler keeps a run
+# 0121: Log shipping reads the journal per seqnum ID with bounded zstd decoding and syslog and error log files without links, and commits its positions when the scheduler keeps a run
 
 - **Status:** Accepted
 - **Date:** 2026-10-23
 - **Area:** Agent
-- **Source:** Issue #37
+- **Source:** Issue #37, Issue #289
 - **Supersedes:** —
 
 ## Context
@@ -17,6 +17,12 @@ content size, no checksum, no dictionary and one compressed block, content (and 
 bytes; and a `user-10000.journal` whose seqnum ID differs from that of both system files while its sequence numbers continue the system
 counter. The agent must stay static, start no program (0019), add no right (0030) and bound its memory (0025); a service user can
 replace its own log file with a link, and the agent can read every file.
+
+#289 adds the Plesk panel log and the `sw-cp-server`, nginx and Apache error logs, which exist on the server only as files, so that the
+web signatures (record 0094) read live lines. The import parses them (record 0092: three line grammars, raw records for unreadable
+lines); the agent does not reuse the .NET parsers (0073). The Product Manager decided that the agent keeps its rights: a file the group
+`adm` cannot read is not shipped, and the operator grants read access by hand as `deploy/agent/README.md` describes. No line of the
+server's logs is available, so the formats stay as unverified as record 0092 states.
 
 ## Options considered
 
@@ -41,6 +47,40 @@ replace its own log file with a link, and the agent can read every file.
    each element of the path with `openat` and `O_NOFOLLOW` from `/` (chosen) gives the same refusal with the standard library, without
    a window between check and open. `os.Root` was not taken: it follows links inside the root.
 
+For the error logs (#289):
+
+9. **Detect the format by content, as the import does** — no new option values, but a file's first line would choose its source, and
+   `sw-cp-server`'s log cannot be told from nginx's by content; the operator names the format per file (chosen), as `syslog` today.
+10. **Extend the syslog package with the error log grammars** — one package, but its name and its `Parse` are about syslog headers;
+    **a package with a clock of its own** would hold the skipped- and repeated-hour rules twice; a package `internal/errorlogline`
+    (chosen) holds the three grammars and resolves their times through the syslog `Clock`, which gains a resolve for a local time with
+    its year.
+11. **A raw line takes the file's modification time where it has no predecessor, as the import does** — a live file's modification time is
+    that of its newest line, not of the raw line; the file's last time (chosen) is the rule `syslog` raw lines already follow.
+12. **Prove parity with hand-written Go expectations** — they would pass a Go port that misreads the grammar as the test's author did;
+    golden records written by the C# import and read by the Go tests (chosen) bind both languages, as the journal's `live-records.jsonl`,
+    without `log`, which differs by design (the configured path against the listed name).
+13. **File access** — `CAP_DAC_READ_SEARCH` is ruled out by 0122; an ACL set by the installer would be a new right (a `security`
+    change); the Product Manager chose no new right and a documented by-hand grant, with a default ACL on the directory so that a file a
+    rotation creates inherits it, its effect on the real server unverified. Measured in the plan review: plain `setfacl` follows a link
+    planted by a directory's owner and would grant the agent its target, so the procedure uses `setfacl -P` after `namei -l`; a default
+    ACL replaces the umask for every later file and subdirectory, so it is recommended only where rotation uses `create <mode>`, with
+    `g::` and `o::` no wider than the current files. The stand-in dry run of the plan (Ubuntu 24.04, acl 2.3.2, logrotate 3.21.0; no container
+    daemon was available) showed the file's ACL alone survives `copytruncate` and `create` without a mode and is lost by `create 0640` and
+    `create 0600`; the default ACL keeps it for `create 0640`, and with `create 0600` it has no effect (the mask is empty). The README states each
+    result as measured there, not on a Plesk server.
+14. **A line's time as the file's bookkeeping time** — as #37 did; but these formats, and RFC 3339 syslog lines, carry a year the
+    writer controls, and a forged year in 2262 would move the start of a truncation's or a given-up span's gap past the lost lines.
+    **The run's start plus the 24-hour tolerance of year-less times** still lets a gap start a day ahead. **The earlier of the line's
+    time and the run's start** moves a gap start to that run's start, past honest lines written before it that a run stopped on its
+    budget right after the forged line left unread. **A line dated after the start of the run that reads it does not move the file's
+    last time** (chosen): it keeps its previous value, an earlier line's time or the start of the run that took the position, which
+    lies at or before the forged line's real write time, so the start of a truncation's, a lost rotation's or a given-up span's gap
+    never passes a lost line. The run's latest time, the end of a given-up span's gap, and the end of a pending lost-rotation gap take
+    the earlier of the line's time and the run's start, so a forged line and the raw lines after it in a dropped run still end that
+    gap at the run's start rather than at an earlier honest time. The record keeps its own time. Positions saved before this change with a future time (RFC 3339 syslog lines only)
+    stay unbounded until the next line dated before its run is read: accepted.
+
 ## Decision
 
 The `logs` collector reads every system and user journal file of the machine's journal directory with a position per seqnum ID,
@@ -49,6 +89,11 @@ through a link-free `openat` walk, and commits its positions when the scheduler 
 up a span after the fourth dropped run as the kernel collector does; the agent saves its state once more when it stops. The rules are
 in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
 [Configuration and secrets](../areas/configuration-and-secrets.md) area (`log_shipping`).
+
+For #289 the configured files also take the formats `plesk-panel`, `sw-cp-server-error`, `nginx-error` and `apache-error`, parsed by
+`internal/errorlogline` with the import's mapping and raw lines, the agent gains no right, and a file line dated after its run's start
+never moves the bookkeeping times (options 9 to 14). The rules are in the
+Agent area (*Log shipping*).
 
 ## Consequences
 
@@ -83,5 +128,11 @@ in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
   ordered per source, not across sources.
 - A crash repeats at most one state interval plus one collector interval of lines (the spec's E1); exact delivery across a crash needs
   the spool (#38) to store positions with the records.
-- Live lines carry no classification (`event`, mail markers) until #290; the error log formats follow in #289.
+- Live lines carry no classification (`event`, mail markers) until #290.
+- Error log records equal the import's except `log` for a line of valid UTF-8 read after its predecessor in the same zone. They differ
+  where the agent cannot know what the import knows (a raw line without a predecessor, the previous instant carried across a rotation,
+  an invalid byte replaced one by one) and where a raw line's borrowed old time makes the record backfilled (0130); the Agent area names
+  each.
+- A grant by hand can be lost by a rotation with a restrictive mode or a Plesk repair; the standing `log file not readable` warning is
+  the sign, and the renamed file's rest waits until the path opens again. MariaDB's and Dovecot's own files remain import-only.
 - The `COMPACT` layout of systemd 252 and later is read like the server's layout, by the same reader (0119, #286).

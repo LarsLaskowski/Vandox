@@ -1,0 +1,6 @@
+{"captured_at_us":1791508332123000,"source":"plesk-panel","host":"","program":"","pid":0,"priority":6,"message":"4821:5f3a9c1e INFO [panel] Session opened for the administrator","truncated":false}
+{"captured_at_us":1791508333456000,"source":"plesk-panel","host":"","program":"","pid":0,"priority":4,"message":"4821:5f3a9c1e WARN [extension/letsencrypt] Certificate of example.org expires in 9 days","truncated":false}
+{"captured_at_us":1791508334000000,"source":"plesk-panel","host":"","program":"","pid":0,"priority":3,"message":"ERR [panel] Cannot connect to the database: connection refused","truncated":false}
+{"captured_at_us":1791508334000000,"source":"plesk-panel","host":"","program":"","pid":0,"priority":null,"message":"  #0 /opt/psa/admin/plib/Db.php(42): Db->connect()","truncated":false}
+{"captured_at_us":1791508335000789,"source":"plesk-panel","host":"","program":"","pid":0,"priority":7,"message":"4822:a1b2c3d4 DEBUG [panel] Cache warmed","truncated":false}
+{"captured_at_us":1791508336000000,"source":"plesk-panel","host":"","program":"","pid":0,"priority":2,"message":"CRIT [panel] The disk is almost full","truncated":false}

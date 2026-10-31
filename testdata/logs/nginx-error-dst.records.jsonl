@@ -1,0 +1,5 @@
+{"captured_at_us":1774747800000000,"source":"nginx-error","host":"","program":"","pid":0,"priority":3,"message":"[error] 1#1: *1 dst 1","truncated":false}
+{"captured_at_us":1792888200000000,"source":"nginx-error","host":"","program":"","pid":0,"priority":3,"message":"[error] 1#1: *1 dst 2","truncated":false}
+{"captured_at_us":1792889400000000,"source":"nginx-error","host":"","program":"","pid":0,"priority":3,"message":"[error] 1#1: *1 dst 3","truncated":false}
+{"captured_at_us":1792890600000000,"source":"nginx-error","host":"","program":"","pid":0,"priority":3,"message":"[error] 1#1: *1 dst 4","truncated":false}
+{"captured_at_us":1792892400000000,"source":"nginx-error","host":"","program":"","pid":0,"priority":3,"message":"[error] 1#1: *1 dst 5","truncated":false}

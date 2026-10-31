@@ -7,6 +7,7 @@ package logship
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -112,6 +113,8 @@ type Logs struct {
 	dec    *countingDecoder
 	entry  journal.Entry
 	buf    []byte
+	// formats are the formats of the configured files, by index.
+	formats []fileFormat
 
 	inited    bool
 	committed *state
@@ -145,6 +148,15 @@ func New(src Sources, cfg Config, store *agentstate.Store, log *slog.Logger) (*L
 	if src.Now == nil {
 		src.Now = time.Now
 	}
+	formats := make([]fileFormat, len(cfg.Files))
+	for i, f := range cfg.Files {
+		format, known := formatOf(f.Format)
+		if known {
+			formats[i] = format
+			continue
+		}
+		return nil, fmt.Errorf("logship: log file %d has an unknown format", i)
+	}
 	dec, err := zstdfield.New()
 	if err != nil {
 		return nil, err
@@ -157,6 +169,7 @@ func New(src Sources, cfg Config, store *agentstate.Store, log *slog.Logger) (*L
 		filter:  newFilter(cfg),
 		dec:     &countingDecoder{d: dec},
 		fileBad: make([]string, len(cfg.Files)),
+		formats: formats,
 	}, nil
 }
 

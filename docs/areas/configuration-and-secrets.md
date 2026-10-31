@@ -191,8 +191,11 @@ Backend:
   - `log_shipping.min_priority`: a line with a known priority less severe than this is not shipped; a line without a priority (the
     lines of a traditional syslog file) is never dropped by it. The names are compared exactly (lower case).
   - `log_shipping.files` names the log files shipped besides the journal, in file order: each a mapping with `path`, an absolute,
-    clean path (no trailing slash, no empty, `.` or `..` element) of 2 to 1,024 bytes, listed once, and `format`, which is `syslog`
-    (the only format). A path with U+0000 or another control or format character is refused by the general string rule above. The
+    clean path (no trailing slash, no empty, `.` or `..` element) of 2 to 1,024 bytes, listed once, and `format`, which is one of `syslog`,
+    `plesk-panel`, `nginx-error`, `apache-error` and `sw-cp-server-error`, compared exactly (lower case). The last one is for Plesk's own web server
+    (`/var/log/sw-cp-server/error_log`, nginx's line format) and is chosen by configuration only: the agent finds no file by content. The error log
+    formats are the import's ([Agent](agent.md), *Log shipping*, *Error log lines*); the agent reads those files only when the operator has granted it
+    read (`deploy/agent/README.md`). A path with U+0000 or another control or format character is refused by the general string rule above. The
     path is opened at run time without following a link in any element. A file that holds what the journal ships (`/var/log/syslog` on
     a server whose rsyslog copies the journal) is shipped twice, once per source; the example file says so.
   - `log_shipping.drop` holds rules for lines that are not shipped: each a mapping with at least one of `log` (`journal` or a path
@@ -215,7 +218,7 @@ Backend:
   | `log_shipping.files` (more than 16 files) | `must be a list of at most 16 files` |
   | `log_shipping.files[<i>].path` | `must be an absolute, clean path of at most 1024 bytes (no trailing slash, no . or .. elements)` |
   | `log_shipping.files[<i>].path` (equal to an earlier path; at the later one) | `listed twice` |
-  | `log_shipping.files[<i>].format` | `must be syslog` |
+  | `log_shipping.files[<i>].format` | `must be one of syslog, plesk-panel, sw-cp-server-error, nginx-error, apache-error` |
   | `log_shipping.drop` (more than 64 rules) | `must be a list of at most 64 rules` |
   | `log_shipping.drop[<i>]` (no condition set) | `must set at least one of log, program, priority and message` |
   | `log_shipping.drop[<i>].log` | `must be journal or a path listed in log_shipping.files` |
@@ -345,7 +348,7 @@ Backend:
 - [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the units to track are a list of names and patterns, an entry without a suffix is a service, and other unit types are refused.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the MariaDB collector, which these options switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
 - [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why backup runs are named by literal process rules with `pzstd` and Plesk's two creating processes as the defaults, and why the agent's state lives in `spool.directory` without a new option.
-- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why log shipping reads the journal and `syslog` files only, why drop patterns are bounded by their compiled size, and why the state file stores a file's position by the hash of its path.
+- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why log shipping reads the journal, `syslog` files and the Plesk and web server error log files, why drop patterns are bounded by their compiled size, and why the state file stores a file's position by the hash of its path.
 - [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why `spool.max_size` is
   at most 64 GiB and the spool's files are uncompressed.
 - [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the backfill has its own,

@@ -1,0 +1,6 @@
+{"captured_at_us":1791508332123456,"source":"apache-error","host":"","program":"","pid":0,"priority":5,"message":"[mpm_prefork:notice] [pid 812] AH00163: Apache/2.4.52 (Ubuntu) configured -- resuming normal operations","truncated":false}
+{"captured_at_us":1791508333234567,"source":"apache-error","host":"","program":"","pid":0,"priority":5,"message":"[core:notice] [pid 812] AH00094: Command line: '/usr/sbin/apache2'","truncated":false}
+{"captured_at_us":1791508334345678,"source":"apache-error","host":"","program":"","pid":0,"priority":3,"message":"[php:error] [pid 901] [client 198.51.100.7:51234] PHP Fatal error:  Uncaught Error: Call to undefined function foo() in /var/www/vhosts/example.org/httpdocs/index.php:12","truncated":false}
+{"captured_at_us":1791508334345678,"source":"apache-error","host":"","program":"","pid":0,"priority":null,"message":"Stack trace:","truncated":false}
+{"captured_at_us":1791508335456789,"source":"apache-error","host":"","program":"","pid":0,"priority":4,"message":"[:warn] [pid 902] AH01630: client denied by server configuration: /var/www/vhosts/example.org/httpdocs/private","truncated":false}
+{"captured_at_us":1791508336000000,"source":"apache-error","host":"","program":"","pid":0,"priority":3,"message":"[error] [client 198.51.100.8] File does not exist: /var/www/html/favicon.ico","truncated":false}

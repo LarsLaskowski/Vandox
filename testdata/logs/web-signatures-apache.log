@@ -1,0 +1,1 @@
+[Mon Oct 12 10:00:03.123456 2026] [proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 7', referer: https://example.org/
