@@ -1,7 +1,7 @@
 # Plan: Classify live log lines
 
 Source: Issue #290 | [spec.md](spec.md)
-Status: Revised (1)
+Status: Revised (2)
 Tier: standard — the agent gets new behavior (live lines classified and grouped, a flush of the open groups at the stop, saved positions held back before held lines), but no security control is created, changed or removed: the stages are a classification, not a trust boundary.
 Security areas touched: 10 (parsing of external input: the new Go package `internal/logstages` reads journal and syslog text that local users can write; `internal/logship` feeds it and holds its state within the collector's memory bound)
 
@@ -29,8 +29,7 @@ the logic of `SystemLogGrouper` (`src/Vandox.Core/LogParsing/SystemLogGrouper.cs
 | 12 | The record check has no time bound, so a grouped record with its header's older capture time passes. | `internal/wire/encode.go:78-93` | confirmed |
 | 13 | `log_line.event` is in both decoders, and the golden batch carries one; an older backend accepts a batch with events. | `testdata/wire/all-kinds.jsonl` (1 `event`); `WireContractTests.DecodeGoldenBatchReadsEveryLogLineField` | confirmed |
 | 14 | The backend acknowledges a batch only after its commit. | `IngestEndpointTests.IngestEndpointValidBatchAnswers204AfterCommit`; project.md area 1 | confirmed |
-| 15 | Golden records written by the C# import and read by Go tests already bind the journal mapping. | `JournalExportParserTests.JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `internal/logship/journal_test.go:25-80` | confirmed |
-| 16 | The existing logship tests use no Postfix or Dovecot marker, no MariaDB line and no kernel start line, so their expectations do not change. | grep of `internal/logship/*_test.go` for `mariadbd`, `oom-killer`, `cut here`, `postfix/`, `dovecot`; `filter_test.go`'s `dovecot` lines have no marker at a marker position | confirmed |
+| 16 | No existing logship test has a mail marker, a MariaDB line or a kernel start line. | grep of `internal/logship/*_test.go` for `mariadbd`, `oom-killer`, `cut here`, `postfix/`, `dovecot` | confirmed |
 | 17 | The collector's live memory stays within 24 MiB when it holds 256 user IDs and 8 system IDs, at most two journal IDs and 16 files hold an open MariaDB entry and kernel report each at maximum size, in the committed state, a fork and the last dropped fork. | to verify: `TestLogs_HeapStaysBounded` extended to exactly that, run by the Dev in step 6; a failure goes back to the Lead. Estimate: about 50 KiB per holding source, 18 sources, 3 copies, about 2.7 MiB; an ID without open groups holds no stages | unverified |
 | 18 | The spool accepts records after the scheduler has stopped and before `store.Flush`: it is closed only after the last save. | `internal/agent/agent.go:176-186` (`wg.Wait()`, `store.Flush`, then `closeSpool`) | confirmed |
 | 19 | A syslog-file line's capture time is the time written in the line (by rsyslog, or the sender where rsyslog keeps the sender's time); a line dated after its run's start already does not move the file's bookkeeping time. | `internal/logship/files.go:356-386`; `docs/areas/agent.md` *Configured files* (record 0121 option 14) | confirmed |
@@ -49,7 +48,7 @@ Go tests sit next to the code. C# tests mirror the class under test.
 | AC2 | `BuiltInSignaturesFindEventSignaturesInClassifyGoldenRecords` (the detector on both golden files: `postfix_fatal`, `dovecot_fatal`, `mariadb_crash` with `signal`, `mariadb_recovery_start`, `mariadb_recovery_end`) | `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` |
 | AC3 | `TestLogs_GroupSpansRunsAndBatches` (lines of one entry and one report in three runs, each kept); `TestLogs_DroppedRunJoinsEachLineOnce` | `internal/logship/stages_test.go` |
 | AC4 | `TestLogs_CaughtUpEntryClosesAfterSixtySeconds` (closed at clock = first + 60 s + 1 µs, not at + 60 s); `TestLogs_BacklogLineJoinsByCaptureTime` (captured + 50 s, read 90 s later); `TestLogs_LineSixtyOneSecondsLaterClosesTheEntry`; `TestLogs_FutureDatedGroupClosesSixtySecondsAfterItsRun` (a forged kernel start line in a `syslog` file dated a year ahead closes by the clock 60 s after the start of the run that read it); `TestStages_Expire` | `internal/logship/stages_test.go`; `internal/logstages/stages_test.go` |
-| AC5 | `TestLogs_StopFlushSendsOpenGroupsAndSavesTheShippedPositions` (clean stop with an open entry and later shipped lines; new collector from the saved state: every line once, the entry possibly as two records); `TestLogs_KillWithoutFlushReadsAgainFromTheOldestHeldLine` (state of an earlier save: only that source's lines from the entry's first line on come again, nothing else); `TestLogs_FlushNotKeptLeavesThePositionsHeldBack`; `TestLogs_RestartWithANewDropRuleLosesNoLine` (held entry, restart without flush and a drop rule that matches its header: every line not dropped by the rule is shipped); `TestScheduler_FlushPutsTheRecordsAndReportsKept`; `TestRun_StopFlushesTheCollectorsBeforeTheLastSave`; backend part: existing `IngestEndpointValidBatchAnswers204AfterCommit`, unchanged (the backend holds no line) | `internal/logship/stages_test.go`; `internal/scheduler/scheduler_test.go`; `internal/agent/agent_test.go`; `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` (existing) |
+| AC5 | `TestLogs_StopFlushSendsOpenGroupsAndSavesTheShippedPositions` (clean stop with an open entry and later shipped lines; new collector from the saved state: every line once, the entry possibly as two records); `TestLogs_KillWithoutFlushReadsAgainFromTheOldestHeldLine` (state of an earlier save: only that source's lines from the entry's first line on come again, nothing else); `TestLogs_FlushNotKeptLeavesThePositionsHeldBack`; `TestLogs_RestartWithANewDropRuleLosesNoLine` (held entry, restart without flush and a drop rule that matches its header: every line not dropped by the rule is shipped); `TestScheduler_FlushPutsTheRecordsAndReportsKept`; `TestScheduler_FlushWaitsForAStoppedWorkerOrSkips` (a slow `Collect` across the stop, under `-race`: `Flush` never runs while it does, and is skipped when it outlasts the context); `TestScheduler_FlushHonoursItsContextWhenFlushBlocks`; `TestRun_StopFlushesTheCollectorsBeforeTheLastSave`; backend part: existing `IngestEndpointValidBatchAnswers204AfterCommit`, unchanged (the backend holds no line) | `internal/logship/stages_test.go`; `internal/scheduler/scheduler_test.go`; `internal/agent/agent_test.go`; `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` (existing) |
 | AC6 | `TestLogs_FilterDecidesBeforeClassification` (Postfix `warning:` with priority 6 dropped under `notice`; MariaDB journal header dropped under `warning`); `TestLogs_DroppedHeaderLeavesItsLinesToThePreviousEntry` | `internal/logship/stages_test.go` |
 | AC7 | `TestLogs_ForgedFloodHoldsOneEntryAndOneReportPerSource` (10,000 forged headers and start lines; other programs' records have lower indexes than the entry's); `TestLogs_HeapStaysBounded` (adapted as fact 17 says) | `internal/logship/stages_test.go`; `internal/logship/logship_test.go` |
 | AC8 | `TestLogs_JournalAndFileNeverJoin`; `TestLogs_UserJournalGetsMailClassificationOnly`; `TestLogs_UserFileEntriesOfASharedIDAreNotGrouped` (one seqnum ID over a system and a user file) | `internal/logship/stages_test.go` |
@@ -58,8 +57,7 @@ Go tests sit next to the code. C# tests mirror the class under test.
 
 ## Approach
 
-**Location.** The agent classifies live lines, after its filter, with a Go port of the import's stages. The plan reaches this by
-elimination (option 17 of record 0121): grouping at ingest would merge records that carry their own sequence numbers.
+**Location.** The agent classifies, after its filter, with a Go port (record 0121 option 17).
 
 **Package `internal/logstages`** (new) is a port of the C# stages, ordinal and on bytes, with the same bounds:
 
@@ -108,10 +106,16 @@ source, not from the area document; where the two disagree, the C# code wins and
    Nothing else is added to the state file. The cap of 256 journal positions is unchanged; an ID whose held-back position falls
    off it starts after a restart by the existing rules, with their gap.
 7. **Flush at the stop.** `Logs` implements the new `scheduler.Flusher`. After the runners have stopped and before
-   `store.Flush`, `agent.Run` calls `Scheduler.Flush` with the stop's 5-second deadline. That closes every open group of the
-   committed state, stamps and checks the records as a run does, puts them into the spool, and reports `Kept`. Kept, the fork is
-   committed and the shipped positions are saved; not kept, the held-back positions stay. A run still in flight at the stop is
-   abandoned as today.
+   `store.Flush`, `agent.Run` calls `Scheduler.Flush` with the stop's 5-second deadline.
+   - **No overlap with a run (B4).** A runner also keeps the result channel of a worker that the stop left out (today only a
+     timed-out one is kept, `runner.go:246-250`). `Scheduler.Flush` first waits on that channel within its context. A collector
+     whose worker has not returned by then is skipped. A skipped flush is a flush not kept.
+   - **Bounded.** The collector's `Flush` runs in a worker of its own, as `collect` runs `Collect`. When the context ends first,
+     that worker is abandoned, nothing is put, and no observer is told.
+   - **No commit before `Kept`.** `Logs.Flush` resolves an earlier pending run as dropped, as `begin` does, and forks the
+     committed state. It closes every group in the fork and returns the records, with the fork as its pending run. It commits
+     nothing itself. Only `Kept(true)`, called by `Scheduler.Flush` after the records were put, adopts the fork and saves the
+     shipped positions. An abandoned or unkept flush leaves the held-back positions.
 
 So a clean stop repeats nothing. A crash, or a flush that was not kept, reads a holding source again from its oldest held line,
 as E2 allows. Nothing read again is discarded, so a changed filter, zone or version cannot lose a held line. The recovery state
@@ -224,8 +228,9 @@ package list.
   - *Residuals*: replace "no classification until #290" with the differences from the import (out-of-order line after the close,
     ID and renamed end, user files, recovery state at a restart, records ordered at their close).
   - *Residuals*, two more: E1's clock close of a `syslog` file needs the source read to its end, and the times come from the line
-    as rsyslog writes them (reception time by default, not checked on the server), so a flood dated within the window holds a
-    group up to the import's bounds (N1). A crash re-reads a holding source from its oldest held line.
+    as rsyslog writes them (reception time by default, not checked on the server). A flood of lines dated within the window,
+    joining or not, holds a group and the held-back position as long as such a flood lasts, and a crash then reads the whole
+    span again (N1, N3).
   - *Agent state* and *Saving*: a source with open groups is saved at its oldest held line; the stop flushes the open groups
     before the last save.
   - *Implementation* and *Related decisions* (0121).
@@ -251,8 +256,7 @@ package list.
 - No loss without a gap and no duplicate beyond what E2 allows (record 0121): a held line is never covered by a saved position,
   and the rule "no saved position covers a record a crash can still lose" holds unchanged.
 - The wire format is unchanged (1.1). Storage, ingest and the live/backfill classification are unchanged.
-- Record 0073 (the agent does not reuse the .NET parsers): followed. This is a port bound by golden records, as for the syslog
-  and error-log grammars.
+- Record 0073 is followed: this is a port bound by golden records, not reuse.
 
 ## Security considerations
 
@@ -272,26 +276,22 @@ package list.
 
 ## Challenge
 
-Devil's Advocate, plan challenge. The reasoning is in record 0121, options 19-23.
-
-- **Major 1: the replay can lose held lines.** Accepted. Replay marks are replaced by your alternative: held-back positions and a
-  stop flush (*Approach* 6-7). Test: `TestLogs_RestartWithANewDropRuleLosesNoLine`.
-- **Major 2: a group dated in the future.** Accepted. Expiry is anchored at the earlier of the first capture time and the run
-  start (*Approach* 3). The test is in AC4, and the spec's AC4 names the case.
-- **Minor 3: user files.** Accepted. The rule decides by the file (*Approach* 2, spec E8 and AC8).
-- **Minor 4: a group's `from`.** Accepted (`Output.From`). Test: `TestLogs_RefusedGroupBecomesAGapOverTheGroup`.
+Devil's Advocate, plan challenge; the reasoning is in record 0121, options 19-23. All four accepted:
+- Major 1, replay loses lines: held-back positions and a stop flush (*Approach* 6-7).
+- Major 2, a group dated in the future: expiry anchored at the run start (*Approach* 3, AC4).
+- Minor 3, user files: decided by the file (*Approach* 2, spec E8).
+- Minor 4, a group's `from`: `Output.From`.
 
 ## Security review
 
-- **B1: marks.** Resolved by removing them. The state file is unchanged and area 9 is no longer touched. At most two journal IDs
-  hold groups (*Approach* 4).
-- **B2: heap.** Accepted.
-  - A `Stages` exists only for a source with an open group.
-  - Buffers exist only while a group is open.
-  - User files create no state.
-  - The heap test uses 256 user IDs and 8 system IDs (fact 17).
-- **B3: replay after a change.** Resolved: nothing read again is discarded. Same test as Major 1.
-- **N1 and N2.** Taken, as residuals and limitations in *Documentation updates*.
+- Round 1:
+  - B1 and B3 resolved: the marks and the replay are gone.
+  - B2 accepted: stages and buffers exist only while a group is open, and the heap test checks it (fact 17).
+  - N1 and N2 taken (*Documentation updates*).
+- Round 2:
+  - B4 accepted as required, decided in mode `decide` (*Approach* 7, tests in AC5).
+  - N3 taken: spec E1 is now conditional, E2 names the longer re-read, and the Agent area residual says "as long as such a
+    flood lasts".
 
 ## Out of scope / follow-ups
 

@@ -41,7 +41,9 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
   entry or kernel report closes at the import's own ends: a line that ends it, the 16,384-byte or 2,000-line bound, or a line of
   its source captured more than 60 seconds after its first line. It also closes when its source has been read to its end and
   the (injected) clock is more than 60 seconds past the earlier of the first line's capture time and the start of the run that
-  read it. A forged line dated in the future is therefore never held longer. It is never held indefinitely. In a backlog
+  read it. A forged line dated in the future is therefore never held longer. A group is never held indefinitely while its source
+  is read to its end, or while its line times are reception times. A flood of lines with chosen times within the window can keep
+  a group open as long as the flood lasts; the Agent area names this. It is never held indefinitely. In a backlog
   (after a restart, or runs cut by their 1,000-record budget), a continuation line captured within 60 seconds but read later still
   joins, as on import. Two closes differ from the import, which keeps such an entry open until a later line ends it, and both are
   named in the Agent area. First, a line captured within 60 seconds of the header that arrives after a line already more than 60
@@ -52,8 +54,9 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
   position the agent saved has reached the backend or the durable spool. After an unclean end of the agent, the lines repeated
   are at most those of the open entry's source captured from that entry's first line on, which spans up to 60 seconds of
   capture time, plus today's residual of up to 12 seconds (record 0121). They are stored again without a duplicate mark, as
-  today. A clean stop repeats nothing. In both cases the entry may be stored as two records, before and after the restart. A
-  recovery end read after the restart may lack `mariadb.recovery_end`. The Agent area names both.
+  today. A crash during a flood of E1 reads the flood's whole span again. A clean stop repeats nothing. In both cases the entry
+  may be stored as two records, before and after the restart. A recovery end read after the restart may lack
+  `mariadb.recovery_end`. The Agent area names both.
 - E3: The filter (`log_shipping.min_priority`, `log_shipping.drop`) judges each line as mapped, before classification, as today.
   A Postfix `warning:` line sent with priority `info` is filtered by its transport priority. Under a `min_priority` stricter than
   `info` the journal's MariaDB lines are not shipped, crash reports included, because they are all `info` (the unit's

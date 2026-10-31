@@ -104,7 +104,10 @@ For live classification (#290):
 19. **Emit the open groups at a clean stop through a new scheduler hook, and hold the saved position back at the oldest held
     line** (chosen, after the plan review). A clean stop sends every group, possibly cut in two, and repeats nothing. A crash
     reads the holding source again from that line, which the spec allows (E2). Nothing read again is ever discarded. The hook
-    runs after the runners stop and before the last save, while the spool is still open.
+    runs after the runners stop and before the last save, while the spool is still open. It waits for a worker the stop left
+    out, skips a collector whose worker does not return within the stop's deadline, runs the collector's flush in a worker of its
+    own, and commits only through `Kept`, so a hanging run or flush never overlaps the flush, the commit or the last save (plan
+    review, B4).
 20. **Replay marks** — the saved state would keep, per source, the oldest held line and the first positions of the open groups,
     and a restart would read again and send only those groups. Rejected in the plan review. Discarding "already sent" output is
     right only if the reading again is identical. A changed drop rule, zone or agent version breaks that, and held lines are then
