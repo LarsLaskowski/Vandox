@@ -62,7 +62,8 @@ only (below the bound) and its restart still reads everything.
    `rotate` sets `last: st.lastTime` when it makes the renamed file; `restoreFile` sets it to the restored `lastTime`. Neither is
    saved; `positionsOf`, `sameFile` and `agentstate` are unchanged. `clone` copies both by value already (fact 6).
 3. **Time.** In `line`, when `renamed` is true, `fr.st.renamed.last` moves under the same rule as `st.lastTime` (only when the line
-   is not dated after `r.start`). `st.lastTime` keeps today's behavior.
+   is not dated after `r.start`), and only by a line with a parsed header: a header-less line borrows `st.lastTime`, which may be a
+   current-file time, so it leaves `renamed.last` (AC3). `st.lastTime` keeps today's behavior.
 4. **Count.** `readRenamed` and `finishRenamed` note `before := rn.line.read` and hand `pump`'s result to `countRenamedRead`:
    - error and `rn.line.read > before` → `fails = 0`, reason `read failed`, return not given up;
    - error without progress → `fails++`; below `renamedFailsToGiveUp` (150) → reason `read failed`, not given up; at 150 →
