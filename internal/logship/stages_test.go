@@ -815,3 +815,34 @@ func TestLogs_FlushHoldsBackNothingAfterAKeptFlushOfAFile(t *testing.T) {
 		t.Errorf("file positions held back %+v and after the kept flush %+v, want the offset to move on past the entry", held, w.store.State().Logs)
 	}
 }
+
+func TestLogs_RenamedPartFinishedByTheLaterRunClosesItsGroups(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", fileLines(1, 2))
+	w.clock.set(fileLineTime(3))
+	w.start()
+	w.step()
+	w.rename("mail.log", "mail.log.1")
+	w.appendLog("mail.log.1", strings.TrimSuffix(fileLineAs(5, "mariadbd", 2345, header("Note", "entry")), "\n")) // unfinished line
+	w.writeLog("mail.log", fileLineAs(7, "app", 7, "new file"))
+	runB := w.step()
+	w.appendLog("mail.log", fileLineAs(8, "mariadbd", 2345, "cont of the new file"))
+
+	runC := w.step()
+	shipped := append(messages(runB), messages(runC)...)
+	w.crash()
+	w.clock.advance(time.Second)
+	shipped = append(shipped, messages(w.step())...)
+	w.clock.advance(61 * time.Second)
+	shipped = append(shipped, messages(w.step())...)
+
+	if got := messages(runC); !slices.Equal(got, []string{"entry", "cont of the new file"}) {
+		t.Errorf("lines of the run that finished the renamed part = %v, want the entry and the line of the new file as two records (the import groups per file)", head(got))
+	}
+	for _, want := range []string{"entry", "cont of the new file"} {
+		if !slices.Contains(shipped, want) {
+			t.Errorf("lines shipped before and after a crash = %v, want %q among them: a held line is covered by the saved position", head(shipped), want)
+		}
+	}
+}
