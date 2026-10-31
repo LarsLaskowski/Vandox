@@ -1426,7 +1426,7 @@ close, with the capture time, source and sequence of its first line; a record th
 - *The stop flush.* `Logs` implements `scheduler.Flusher`. After the scheduler has stopped and before the last save, the agent calls
   `Scheduler.Flush` with a deadline of 5 seconds. A collector whose worker the stop left out is waited for within that deadline and is
   skipped when it does not return, so a flush never runs beside a `Collect`. The collector's `Flush` runs in a worker of its own and is
-  abandoned at the deadline, with nothing put and no `Kept` call. `Logs.Flush` resolves an earlier pending run as dropped, forks the
+  abandoned at the deadline, with nothing put and no `Kept` call. A skipped flush logs the warning `flush skipped, collector still running` and an abandoned one `flush abandoned, deadline reached`, each with the collector's name only (fixed texts, no external text). `Logs.Flush` resolves an earlier pending run as dropped, forks the
   committed state, closes every group in the fork and returns the records, committing nothing; only `Kept(true)`, after the records
   were put, adopts the fork and saves the shipped positions. So a clean stop repeats nothing and loses nothing, and a flush that was
   not kept leaves the held-back positions. A group closed by the flush can be two records when the source goes on after a restart.
