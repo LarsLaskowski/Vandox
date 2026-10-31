@@ -31,4 +31,4 @@ are quoted in full.
 | 2026-10-31 14:27 | 5 Tests first G2 | squad-tester | 4 accepted-format rows fail on the skeleton (confirmed); 5 error rows pin the exact reason and already pass (sonnet/medium · 69,327 tokens · 4 tool uses · 18 s) |
 | 2026-10-31 14:27 | 6 Implement G2 | squad-dev | checkFiles accepts the five formats (slices.Contains); config tests green (sonnet/medium · 62,675 tokens · 5 tool uses · 22 s) |
 | 2026-10-31 14:28 | 4 Skeleton G3 | squad-dev | sources, fileFormat, formatOf and minTime stubs, formats/format fields, fileRecord source parameter; build and vet pass (sonnet/medium · 72,787 tokens · 5 tool uses · 24 s) |
-| 2026-10-31 14:36 | 5 Fixtures and C# golden tests G3 | squad-tester | fixtures, six golden record files from the C# import, three golden C# tests, signature test adapted; Vandox.Core.Tests 4029 passed (sonnet/medium · usage pending) |
+| 2026-10-31 14:36 | 5 Fixtures and C# golden tests G3 | squad-tester | fixtures, six golden record files from the C# import, three golden C# tests, signature test adapted; Vandox.Core.Tests 4029 passed (sonnet/medium · 104,894 tokens · 18 tool uses · 456 s) |
