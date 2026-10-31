@@ -1410,7 +1410,7 @@ again while a match runs, the end again with the gone-by time of the last kept c
   `backup_restore_helper` processes also run outside a backup (task polls, the dump list of the FTP storage) and are not rules.
   Between two archivers the run stays open while the gap is under 60 seconds. The prefixes hold Plesk's paths; another install path
   needs its own rule.
-- Any local user can start a process named `pzstd`; it counts as a backup run.
+- Any local user can start a process named `pzstd`, or one whose command line starts with one of the default prefixes (whoever starts a process chooses its command line); it counts as a backup run.
 - A backup process the agent cannot read is not recognized; one that becomes unreadable during a run can end the run early.
 - A state the `state` job saved between a dropped check and the next one survives a restart before that next check: the dropped start
   or end is then not written again.

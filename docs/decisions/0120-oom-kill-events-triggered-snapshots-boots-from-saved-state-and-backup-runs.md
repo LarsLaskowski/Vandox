@@ -40,9 +40,11 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
    time and the online file set the position, so a file of another seqnum ID can neither move it back in time nor hide the online
    file, and a file that keeps failing is given up with a gap after three runs instead of holding the position. **A scheduler signal telling a refused record from a dropped
    result** (a new `Run` field) — the same effect, but a change to the contract `processes` and `connections` also rely on.
-9. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data when the record was written; **Plesk's
-   documented tool names** — never captured, a wrong rule fails silently; **a capture first** — not available then. #287 added the
-   rules taken from a capture: `command` matches would also count a restore, so the two prefixes name the modes `--pack` and `--create`.
+9. **Default backup rules from a capture of a Plesk backup** (chosen, #287) — `pzstd` plus the prefixes
+   `/opt/psa/admin/sbin/backup-archiver --pack ` and `/usr/lib/plesk-9.0/sw-tar --create `; a `command` match on `backup-archiver` or
+   `sw-tar` would also count a restore, so the prefixes name the modes `--pack` and `--create`; **`pzstd` only** (the Product
+   Manager's default until the capture) — the one backup program seen in real data before #287, misses the database dumps;
+   **Plesk's documented tool names** — never captured, a wrong rule fails silently.
 10. **A backup run whose records were dropped is decided again: the collector restores its copy of the open run on
     `Run.PreviousLost`** (chosen) — a lost start or end is written again by the next check, and the state stays current for a
     restart; **commit the open run only at the next kept run**, as for the journal position — the stored run then lags one more
