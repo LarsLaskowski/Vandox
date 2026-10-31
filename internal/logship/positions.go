@@ -76,7 +76,7 @@ func restoreFile(p agentstate.FilePosition) fileState {
 		lastTime: p.LastTime.UTC(),
 	}
 	if r := p.Renamed; r != nil {
-		f.renamed = &renamedFile{id: identity{dev: r.Device, ino: r.Inode}, line: lineState{start: r.Offset, read: r.Offset}, size: r.Size}
+		f.renamed = &renamedFile{id: identity{dev: r.Device, ino: r.Inode}, line: lineState{start: r.Offset, read: r.Offset}, size: r.Size, last: f.lastTime}
 	}
 	return f
 }
