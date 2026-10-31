@@ -1,6 +1,6 @@
 # 0121: Log shipping reads the journal per seqnum ID with bounded zstd decoding and syslog and error log files without links, commits its positions when the scheduler keeps a run, and classifies live lines with a Go port of the import's stages
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-31
 - **Area:** Agent
 - **Source:** Issue #37, Issue #289, Issue #290
