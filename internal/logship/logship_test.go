@@ -889,6 +889,32 @@ func TestLogs_NewFillsTheSourcesThatAreNotGiven(t *testing.T) {
 	}
 }
 
+func TestLogs_NewRefusesAnUnknownFormat(t *testing.T) {
+	for _, format := range []string{"nginx", "NGINX-ERROR", "SYSLOG", "json", ""} {
+		t.Run(fmt.Sprintf("%q", format), func(t *testing.T) {
+			cfg := logship.Config{Files: []logship.FileSpec{{Path: "/var/log/a.log", Format: "syslog"}, {Path: "/var/log/b.log", Format: format}}}
+
+			l, err := logship.New(logship.Sources{Etc: fstestEmpty(), Journal: []fs.FS{fstestEmpty()}}, cfg, nil, slog.New(slog.DiscardHandler))
+
+			const want = "logship: log file 1 has an unknown format"
+			if err == nil || err.Error() != want || l != nil {
+				t.Errorf("New() = %v, %v, want no collector and the error %q", l, err, want)
+			}
+		})
+	}
+	t.Run("the five formats are known", func(t *testing.T) {
+		for _, format := range []string{"syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error"} {
+			cfg := logship.Config{Files: []logship.FileSpec{{Path: "/var/log/a.log", Format: format}}}
+
+			l, err := logship.New(logship.Sources{Etc: fstestEmpty(), Journal: []fs.FS{fstestEmpty()}}, cfg, nil, slog.New(slog.DiscardHandler))
+
+			if err != nil || l == nil {
+				t.Errorf("New(format %q) = %v, %v, want a collector", format, l, err)
+			}
+		}
+	})
+}
+
 // fstestEmpty returns a file system without a file.
 func fstestEmpty() fs.FS { return fstest.MapFS{} }
 
@@ -998,4 +1024,89 @@ func TestLogs_FourthDroppedRunWithNothingReadGivesAGapAtTheRunStart(t *testing.T
 	w.keep()
 
 	requireGap(t, oneGap(t, "the run that gives up", giveUp), start, start.Add(time.Microsecond))
+}
+
+// requireGapBetween checks that g is a gap of the collector logs that starts at from and ends neither before minTo nor after maxTo.
+func requireGapBetween(t *testing.T, g *model.Gap, from, minTo, maxTo time.Time) {
+	t.Helper()
+	if g.Collector != logship.Name || g.Cause != model.GapUnknown {
+		t.Errorf("gap = collector %q cause %q, want collector %q cause %q", g.Collector, g.Cause, logship.Name, model.GapUnknown)
+	}
+	if !g.From.Equal(from) || g.To.Before(minTo) || g.To.After(maxTo) {
+		t.Errorf("gap = [%v, %v], want it to start at %v and to end between %v and %v", g.From, g.To, from, minTo, maxTo)
+	}
+}
+
+func TestLogs_GiveUpAfterALineDatedAfterTheRunCoversTheRealSpan(t *testing.T) {
+	for _, k := range lineKinds() {
+		t.Run(k.format, func(t *testing.T) {
+			t.Run("a forged line in a dropped run", func(t *testing.T) { giveUpAfterAForgedLine(t, k) })
+			t.Run("the forged line is the last record of a run that was kept", func(t *testing.T) { giveUpAfterAForgedBudgetRun(t, k) })
+			t.Run("a forged line and a raw line after an earlier journal entry", func(t *testing.T) { giveUpAfterAForgedAndARawLine(t, k) })
+		})
+	}
+}
+
+// giveUpAfterFourDroppedRuns drops four runs that read the same lines and returns the start of the last one and the records of the run
+// that gives up the span together with its start.
+func giveUpAfterFourDroppedRuns(t *testing.T, w *world, k lineKind, wantLines []string) (dropped time.Time, giveUp []model.Record, giveUpStart time.Time) {
+	t.Helper()
+	for i := 1; i <= 4; i++ {
+		recs := w.collect()
+		requireMessages(t, fmt.Sprintf("lines of dropped run %d", i), ofSource(recs, k.source), wantLines)
+		dropped = w.run.Start
+		w.refuse()
+	}
+	giveUp = w.collect()
+	giveUpStart = w.run.Start
+	w.keep()
+	return dropped, giveUp, giveUpStart
+}
+
+func giveUpAfterAForgedLine(t *testing.T, k lineKind) {
+	w := kindWorld(t, k)
+	w.appendLog("mail.log", k.line(3, "file 3"))
+	w.step()
+	w.appendLog("mail.log", k.line(4, "file 4")+k.forged)
+
+	dropped, giveUp, giveUpStart := giveUpAfterFourDroppedRuns(t, w, k, append(k.msgs(4, 4), k.msg("forged")))
+
+	requireMessages(t, "lines of the run that gives up the span", messages(giveUp), nil)
+	requireGapBetween(t, oneGap(t, "the run that gives up", giveUp), fileLineTime(3), dropped, giveUpStart)
+}
+
+func giveUpAfterAForgedBudgetRun(t *testing.T, k lineKind) {
+	w := kindWorld(t, k)
+	forgedBudgetRun(t, w, k) // kept; the lines 1002 to 1004 are unread
+
+	_, giveUp, giveUpStart := giveUpAfterFourDroppedRuns(t, w, k, k.msgs(1002, 1004))
+
+	requireGapBetween(t, oneGap(t, "the run that gives up", giveUp), fileLineTime(1001), fileLineTime(1004), giveUpStart)
+}
+
+func giveUpAfterAForgedAndARawLine(t *testing.T, k lineKind) {
+	w := newWorld(t)
+	w.useFormat(k.format, "mail.log")
+	w.online(seqID(1), jentries(1, 2))
+	w.writeLog("mail.log", k.lines(1, 2))
+	w.start()
+	w.step()
+	w.appendLog("mail.log", k.line(3, "file 3"))
+	w.step()
+	w.online(seqID(1), jentries(1, 3))
+	w.appendLog("mail.log", k.forged+"continuation\n")
+
+	var dropped time.Time
+	for i := 1; i <= 4; i++ {
+		recs := w.collect()
+		requireMessages(t, fmt.Sprintf("file lines of dropped run %d", i), ofSource(recs, k.source), []string{k.msg("forged"), "continuation"})
+		requireMessages(t, fmt.Sprintf("journal lines of dropped run %d", i), ofSource(recs, "journal"), []string{"line 3"})
+		dropped = w.run.Start
+		w.refuse()
+	}
+	giveUp := w.collect()
+	giveUpStart := w.run.Start
+	w.keep()
+
+	requireGapBetween(t, oneGap(t, "the run that gives up", giveUp), fileLineTime(3), dropped, giveUpStart)
 }
