@@ -209,6 +209,9 @@ func (l *Logs) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, 
 		st.last = base.last // the span that is given up keeps where the dropped run got
 	}
 	r := newRun(l, run, st)
+	if len(givenUp) > 0 {
+		r.closeAllStages() // the groups are sent before the give-up gap
+	}
 	for _, g := range givenUp {
 		r.emit(g, run.Start)
 	}

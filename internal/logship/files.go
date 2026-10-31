@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/LarsLaskowski/Vandox/internal/errorlogline"
+	"github.com/LarsLaskowski/Vandox/internal/logstages"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/syslogline"
 )
@@ -200,6 +201,7 @@ func (fr *filesRun) findRenamed() bool {
 		r.fproblems[fr.i] = reasonOf(err)
 		return false
 	case f == nil:
+		r.closeStages(fileKey(fr.i))
 		r.emitGap(st.lastTime, r.start)
 		st.renamed = nil
 	default:
@@ -218,6 +220,7 @@ func (fr *filesRun) rotate(ctx context.Context, f *os.File, id identity, adopted
 	if st.renamed != nil && !fr.finishRenamed(ctx) {
 		return false
 	}
+	r.closeStages(fileKey(fr.i)) // the lines of the kept file move to the renamed part
 	old := st.cur
 	if old == nil {
 		found, err := findRotated(fr.spec.Path, st.id)
@@ -240,7 +243,7 @@ func (fr *filesRun) rotate(ctx context.Context, f *os.File, id identity, adopted
 // keeps the file, when the run stopped before the end or a read failed (then the reason is set).
 func (fr *filesRun) finishRenamed(ctx context.Context) bool {
 	rn := fr.st.renamed
-	done, err := fr.r.pump(ctx, rn.f, &rn.line, true, fr.emitter(ctx))
+	done, err := fr.r.pump(ctx, rn.f, &rn.line, true, fr.emitter(ctx, true))
 	if err != nil {
 		fr.r.fproblems[fr.i] = reasonReadFailed
 		return false
@@ -248,13 +251,14 @@ func (fr *filesRun) finishRenamed(ctx context.Context) bool {
 	if !done {
 		return false
 	}
+	fr.r.closeStages(fileKey(fr.i)) // the import groups per file
 	fr.st.renamed = nil
 	return true
 }
 
 // emitter returns the function that turns the lines of the file into records.
-func (fr *filesRun) emitter(ctx context.Context) emitLine {
-	return func(line []byte, cut bool, begin int64) bool { return fr.line(ctx, line, cut, begin) }
+func (fr *filesRun) emitter(ctx context.Context, renamed bool) emitLine {
+	return func(line []byte, cut bool, begin int64) bool { return fr.line(ctx, line, cut, begin, renamed) }
 }
 
 // truncated tells whether the file at the path is the kept file but was truncated or replaced in place: it is shorter than what was
@@ -276,8 +280,9 @@ func (fr *filesRun) truncated() bool {
 func (fr *filesRun) truncate(ctx context.Context) {
 	r, st := fr.r, fr.st
 	if len(st.line.held) > 0 {
-		fr.line(ctx, st.line.held, st.line.cut, st.line.start)
+		fr.line(ctx, st.line.held, st.line.cut, st.line.start, false)
 	}
+	r.closeStages(fileKey(fr.i))
 	r.emitGap(st.lastTime, r.start)
 	st.line, st.headLen, st.headSum = lineState{}, 0, ""
 }
@@ -316,8 +321,13 @@ func (fr *filesRun) read(ctx context.Context) {
 	if r.stopped || st.cur == nil {
 		return
 	}
-	if _, err := r.pump(ctx, st.cur, &st.line, false, fr.emitter(ctx)); err != nil {
+	if st.renamed != nil {
+		r.closeStages(fileKey(fr.i)) // the groups of the renamed part end before the lines of the file at the path
+	}
+	if done, err := r.pump(ctx, st.cur, &st.line, false, fr.emitter(ctx, false)); err != nil {
 		r.fproblems[fr.i] = reasonReadFailed
+	} else if done && !r.stopped {
+		r.expireStages(fileKey(fr.i))
 	}
 }
 
@@ -330,7 +340,7 @@ func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 		size = rn.size
 	}
 	finish := fr.size > 0 && rn.size == size
-	eof, err := r.pump(ctx, rn.f, &rn.line, finish, fr.emitter(ctx))
+	eof, err := r.pump(ctx, rn.f, &rn.line, finish, fr.emitter(ctx, true))
 	if err != nil {
 		r.fproblems[fr.i] = reasonReadFailed
 		return false
@@ -347,13 +357,14 @@ func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 func (fr *filesRun) endLostGap() {
 	if fr.lostPending {
 		fr.lostPending = false
+		fr.r.closeStages(fileKey(fr.i))
 		fr.r.emitGap(fr.lostFrom, fr.r.start)
 	}
 }
 
 // line turns one line of the file into a record, unless it is empty or filtered; it returns true when the run must stop. A line without a
 // syslog header gets the capture time of the line before it.
-func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64) bool {
+func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64, renamed bool) bool {
 	r, st := fr.r, fr.st
 	line, over := cutLine(line)
 	cut = cut || over
@@ -371,6 +382,7 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	from := st.lastTime
 	if fr.lostPending {
 		fr.lostPending = false
+		r.closeStages(fileKey(fr.i))
 		r.emitGap(fr.lostFrom, minTime(at, r.start))
 	}
 	if minTime(at, r.start).Equal(at) { // a line dated after the start of the run leaves lastTime, so that a gap never starts after a lost line
@@ -383,7 +395,12 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	if r.l.filter.drops(text) {
 		return r.tick(ctx, false)
 	}
-	r.emit(rec, from)
+	if fr.format.source == sourceSyslog {
+		mark := logstages.Mark{Renamed: renamed, At: uint64(max(begin, 0)), Before: from} // #nosec G115 -- a file offset
+		r.stage(fileKey(fr.i), logstages.Line{Rec: rec, Mark: mark, RunStart: r.start}, at)
+	} else {
+		r.emit(rec, from)
+	}
 	return r.tick(ctx, true)
 }
 

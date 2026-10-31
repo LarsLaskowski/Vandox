@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/logstages"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/syslogline"
@@ -30,8 +31,10 @@ type run struct {
 	havePos bool
 	newest  time.Time
 
-	records  []model.Record
-	froms    []time.Time
+	records []model.Record
+	froms   []time.Time
+	// spare is stages ready for a source that has none; it moves into the state when a group opens.
+	spare    *logstages.Stages
 	bytes    int
 	examined int
 	stopped  bool

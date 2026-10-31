@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
+	"github.com/LarsLaskowski/Vandox/internal/logstages"
 )
 
 const (
@@ -106,11 +107,15 @@ func positionsOf(s *state, files []FileSpec) *agentstate.LogPositions {
 		}
 	})
 	for _, e := range entries[:min(len(entries), agentstate.MaxLogJournals)] {
-		logs.Journal = append(logs.Journal, agentstate.JournalPosition{SeqnumID: formatUUID(e.id), Seqnum: e.p.seq, Realtime: e.p.rt.UTC()})
+		seq, rt := e.p.seq, e.p.rt
+		if held, ok := heldFrom(s, journalKey(e.id)); ok {
+			seq, rt = held.At, held.Before // a source that holds lines is saved before its oldest held line
+		}
+		logs.Journal = append(logs.Journal, agentstate.JournalPosition{SeqnumID: formatUUID(e.id), Seqnum: seq, Realtime: rt.UTC()})
 	}
 	for i := range s.files {
 		if s.files[i].have {
-			logs.Files = append(logs.Files, filePosition(&s.files[i], files[i].Path))
+			logs.Files = append(logs.Files, heldBack(s, i, filePosition(&s.files[i], files[i].Path)))
 		}
 	}
 	if len(logs.Journal) == 0 && len(logs.Files) == 0 {
@@ -168,4 +173,29 @@ func sameFile(x, y agentstate.FilePosition) bool {
 		return false
 	}
 	return x.Renamed == nil || *x.Renamed == *y.Renamed
+}
+
+// heldFrom returns the mark of the oldest line the stages of a source hold, and false when the source holds none.
+func heldFrom(s *state, key stageKey) (logstages.Mark, bool) {
+	if st := s.stages[key]; st != nil {
+		return st.HeldFrom()
+	}
+	return logstages.Mark{}, false
+}
+
+// heldBack moves the saved position of file i before the oldest line its stages hold: in the renamed part or in the file at the path,
+// as the line was read.
+func heldBack(s *state, i int, p agentstate.FilePosition) agentstate.FilePosition {
+	held, ok := heldFrom(s, fileKey(i))
+	if !ok {
+		return p
+	}
+	p.LastTime = held.Before.UTC()
+	switch {
+	case held.Renamed && p.Renamed != nil:
+		p.Renamed.Offset = int64(held.At) // #nosec G115 -- a file offset
+	case !held.Renamed:
+		p.Offset = int64(held.At) // #nosec G115 -- a file offset
+	}
+	return p
 }
