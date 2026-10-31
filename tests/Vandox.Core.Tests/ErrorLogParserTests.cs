@@ -335,6 +335,7 @@ public class ErrorLogParserTests
     [DataRow(ErrorLogParser.PleskPanelType, "[2262-04-11 23:47:16.999999] INFO x", OutsideRange)]
     [DataRow(ErrorLogParser.PleskPanelType, "[2262-04-11 23:47:17] INFO x", OutsideRange)]
     [DataRow(ErrorLogParser.PleskPanelType, "[1677-09-21 00:12:42] INFO x", OutsideRange)]
+    [DataRow(ErrorLogParser.PleskPanelType, "[1677-09-21 00:12:43.5] INFO x", OutsideRange)]
     [DataRow(ErrorLogParser.ApacheType, "[Fri Feb 30 03:12:12 2026] [error] x", InvalidDate)]
     [DataRow(ErrorLogParser.ApacheType, "[Fri Oct 09 24:00:00 2026] [error] x", InvalidDate)]
     [DataRow(ErrorLogParser.ApacheType, "[Fri Oct 99 03:12:12 2026] [error] x", InvalidDate)]

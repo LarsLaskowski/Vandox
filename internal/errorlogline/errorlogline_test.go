@@ -256,6 +256,7 @@ func TestParse_LinesNotOfTheFormatAreRaw(t *testing.T) {
 			raw("plesk-panel a second past the end", "[2262-04-11 23:47:17] INFO x"),
 			raw("plesk-panel a fraction that crosses the end", "[2262-04-11 23:47:16.999999] INFO x"),
 			raw("plesk-panel a second before the start", "[1677-09-21 00:12:42] INFO x"),
+			raw("plesk-panel a fraction on a whole second before the start", "[1677-09-21 00:12:43.5] INFO x"),
 		})
 		runCasesIn(t, errorlogline.Apache, time.UTC, []parseCase{
 			raw("apache a fraction that crosses the end", "[Sat Apr 11 23:47:16.999999 2262] [error] x"),
