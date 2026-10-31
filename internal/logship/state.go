@@ -74,6 +74,8 @@ type state struct {
 	refused map[string]time.Time
 	// stages holds a Stages only for a source with an open group.
 	stages map[stageKey]*logstages.Stages
+	// recovery holds the sources whose MariaDB crash recovery is open while they hold no stages.
+	recovery map[stageKey]bool
 }
 
 // clone returns a copy a run may change. The descriptors are shared; the files of the copy that are not in the original are the run's.
@@ -85,6 +87,10 @@ func (s *state) clone() *state {
 	c.stages = make(map[stageKey]*logstages.Stages, len(s.stages))
 	for k, st := range s.stages {
 		c.stages[k] = st.Clone()
+	}
+	c.recovery = maps.Clone(s.recovery)
+	if c.recovery == nil {
+		c.recovery = map[stageKey]bool{}
 	}
 	for id, p := range s.journal {
 		cp := *p

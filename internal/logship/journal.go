@@ -299,6 +299,7 @@ func (r *run) forgetLost(groups []idGroup) {
 			}
 		}
 		r.closeStages(journalKey(id))
+		delete(r.st.recovery, journalKey(id))
 		r.emitGap(p.rt, to)
 		delete(r.st.journal, id)
 	}
@@ -348,6 +349,7 @@ func (r *run) settle(groups []idGroup) {
 		p.online = g.hasOnline()
 		if !p.online && p.seq >= g.last().hdr.TailSeqnum && p.rt.Before(newest) {
 			r.closeStages(journalKey(g.id))
+			delete(r.st.recovery, journalKey(g.id))
 			delete(r.st.journal, g.id)
 		}
 	}

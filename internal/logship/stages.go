@@ -51,6 +51,7 @@ func (r *run) stage(key stageKey, line logstages.Line, captured time.Time) {
 			r.spare = logstages.New()
 		}
 		st = r.spare
+		st.SetRecovery(r.st.recovery[key])
 	}
 	var buf [2]logstages.Output
 	out := st.Expire(minTime(captured, r.start), buf[:0])
@@ -61,6 +62,7 @@ func (r *run) stage(key stageKey, line logstages.Line, captured time.Time) {
 
 // keepStages stores the stages of key while a group is open and drops them when the last group closed.
 func (r *run) keepStages(key stageKey, st *logstages.Stages) {
+	r.keepRecovery(key, st)
 	switch {
 	case st.Open():
 		if r.st.stages[key] == nil {
@@ -69,6 +71,15 @@ func (r *run) keepStages(key stageKey, st *logstages.Stages) {
 		}
 	default:
 		delete(r.st.stages, key)
+	}
+}
+
+// keepRecovery keeps an open crash recovery of a source beyond its stages, and forgets it when it ended.
+func (r *run) keepRecovery(key stageKey, st *logstages.Stages) {
+	if st.Recovery() {
+		r.st.recovery[key] = true
+	} else {
+		delete(r.st.recovery, key)
 	}
 }
 
@@ -87,6 +98,7 @@ func (r *run) closeStages(key stageKey) {
 	}
 	delete(r.st.stages, key)
 	r.emitOutputs(st.Close(nil))
+	r.keepRecovery(key, st)
 }
 
 // expireStages closes the groups of the source key that the clock has outlasted: the source was read to its end in this run.

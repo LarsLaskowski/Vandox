@@ -148,3 +148,13 @@ func (s *Stages) forward(ready []item, out []Output) []Output {
 
 	return out
 }
+
+// Recovery reports whether a MariaDB crash recovery is open: the next InnoDB "started" line ends it.
+func (s *Stages) Recovery() bool {
+	return s.recoveryOpen
+}
+
+// SetRecovery sets the open crash recovery of new stages to what an earlier stages of the same source ended with.
+func (s *Stages) SetRecovery(open bool) {
+	s.recoveryOpen = open
+}
