@@ -179,3 +179,16 @@ one `int` and one `time.Time` per renamed file per state copy.
 ## Out of scope / follow-ups
 
 As in the spec, *Out of scope*. No follow-up issue.
+
+## Challenge notes
+
+Minor objections of the Devil's Advocate (plan mode), verbatim:
+
+1. **minor — AC9 test, the dropped give-up run.** Why: the plan's wording "logged again by the run after a dropped give-up run" can be read as `log file readable again` being logged twice, and the code makes that false. `fileBad` lives in `Logs` and is not rolled back (`logship.go:344-353`). The dropped give-up run's `logOutcome` already logs `log file readable again` and clears `fileBad[i]`, before `Kept` is called (`logship.go:220`). Tester: in `TestFiles_GiveUpLogsAFixedWarningWithTheFileIndexOnly`, check that `renamed log file given up` is logged once by the dropped run and once more by the repeated run. Check that `log file readable again` is logged exactly once across both runs, by the dropped run.
+2. **minor — the `SwapReadAt` seam is package state.** Why: a test that ran in parallel while it is swapped would race under `-race`. Dev: give `SwapReadAt` in `internal/logship/export_test.go` the same doc sentence as `SwapRecordCheck` ("Tests that swap it never run in parallel"). Tester: `failRenamedReads` restores it with `t.Cleanup`, and no test that uses it calls `t.Parallel`. No test in `internal/logship` calls it today.
+
+## Security notes
+
+Non-blocking finding of Security (plan mode), verbatim:
+
+1. The `readAt` seam is a global variable swapped from `export_test.go`. Like `SwapRecordCheck`, whose comment says "Tests that swap it never run in parallel", it is only safe while no test in `internal/logship` calls `t.Parallel` (today none does). The doc comment on `SwapReadAt` should carry the same sentence so that stays true.
