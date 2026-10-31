@@ -1,7 +1,7 @@
 # Spec: Ship the Plesk and web server error logs from the agent
 
 Source: Issue #289
-Status: Draft
+Status: Draft (escalation on file access and formats answered by the Product Manager)
 
 ## Problem
 
@@ -49,8 +49,8 @@ the agent does not reuse the .NET parsers (record 0073) and needs the same mappi
 - E1: A `format` that is none of the five names is refused at start-up with the line of the key and the reason `must be one of
   syslog, plesk-panel, sw-cp-server-error, nginx-error, apache-error` (exit code 1), replacing today's `must be syslog`.
 - E2: A configured error log the agent's user and groups (`adm`, `systemd-journal`) cannot read is not shipped and logged `log file
-  not readable` with `permission denied`, no gap — the existing rule; the agent gets no new right (record 0122). Whether the four
-  files are readable that way on the server is the escalated question below.
+  not readable` with `permission denied`, no gap — the existing rule; the agent gets no new right (record 0122, Product Manager's
+  answer below). `deploy/agent/README.md` tells the operator how to grant read access by hand.
 - E3: A file in another format at a configured path (an Apache error log configured as `nginx-error`) has every non-empty line
   shipped raw under the configured source, as the import does at a configured path. The agent logs nothing per line: no warning for
   a raw line, unlike the import's summary.
@@ -79,7 +79,10 @@ the agent does not reuse the .NET parsers (record 0073) and needs the same mappi
   (positions) stay valid; a file whose `format` changes keeps its position (positions are matched by path).
 - Wire format: version unchanged. The new sources fit the name pattern of `source`; the backend stores and searches them like the
   journal and `syslog` sources.
-- Rights and dependencies: no new capability, group, dependency or program; files are opened through the existing link-free walk.
+- Rights and dependencies: no new capability, group, ACL, installer step, dependency or program (Product Manager's answer); files are
+  opened through the existing link-free walk.
+- Formats: built and tested from the samples in `testdata/logs/`; the Plesk panel format and `sw-cp-server`'s use of nginx's format
+  stay unverified against the server (record 0092), and a line in another form is shipped raw.
 - Time and memory: the line grammars are hand-written, without regular expressions, linear in the length of a line; the collector's
   24 MiB memory bound and its run budgets are unchanged.
 - Logs: no new agent log line; as before, fixed texts only, never a path or a message.
@@ -135,7 +138,8 @@ the agent does not reuse the .NET parsers (record 0073) and needs the same mappi
 - Are the samples real logs of the server, as the issue says?
   Answered: no. They are written from documentation (example.org, documentation addresses 198.51.100.x); record 0092 states that
   the Plesk panel format, its time zone, `sw-cp-server`'s use of nginx's format and Plesk's paths are not verified. For parity with
-  the import (the issue's goal) they suffice; what the server really writes is part of the escalated question.
+  the import (the issue's goal) they suffice; real server lines are not available (Product Manager, below), so the formats stay
+  unverified.
 - Which zone does the agent read the local times in?
   Answered: the zone of `/etc/localtime`, as for `syslog` files (Agent, *Time of a year-less line*); the error log formats carry their
   year, so no year rule applies.
@@ -145,9 +149,11 @@ the agent does not reuse the .NET parsers (record 0073) and needs the same mappi
 - How does the agent tell `sw-cp-server-error` from `nginx-error`, when the import decides by path?
   Answered: the operator names the format per file; the agent detects nothing.
 - Are the four files readable by the agent's user and groups on the server, at the default paths, and in the documented formats?
-  Answered: not yet — escalated to the Product Manager (the `ls -l` of the files and their directories, and a few anonymized lines of
-  `panel.log` and `sw-cp-server/error_log`). Until the answer the spec assumes the existing rule (E2, no new right) and the formats of
-  record 0092.
+  Answered: by the Product Manager (escalation, option A): the existing rights stay — no new right, group or installer step, so the
+  change is not tier `security` on this account. A file the agent cannot read is logged `permission denied` and not shipped (E2), and
+  `deploy/agent/README.md` documents how the operator grants read access by hand. No real server lines are available: the spec is
+  built on the samples in `testdata/logs/`, and the formats of the Plesk panel log and of `sw-cp-server` stay unverified, as record
+  0092 states.
 
 ## Area documents
 
@@ -159,4 +165,5 @@ the agent does not reuse the .NET parsers (record 0073) and needs the same mappi
 - [Wire format](../../docs/areas/wire-format.md), `log_line` producers: the agent's sources include the four error log types.
 - [Log import](../../docs/areas/log-import.md), *Duplicates*: live error log records and an import of the same period are stored twice.
 - Besides the area documents: `deploy/agent/agent.yaml` (example entries for the four logs and the per-domain logs),
-  `deploy/agent/README.md` (*What the log collector reads*) and the `log_shipping.files` row of `README.md`.
+  `deploy/agent/README.md` (*What the log collector reads*: the four logs, that the group `adm` may not read every one of them, and
+  how the operator grants read access by hand) and the `log_shipping.files` row of `README.md`.
