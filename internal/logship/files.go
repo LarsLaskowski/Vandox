@@ -234,7 +234,7 @@ func (fr *filesRun) rotate(ctx context.Context, f *os.File, id identity, adopted
 		old = found
 	}
 	if old != nil {
-		st.renamed = &renamedFile{f: old, id: st.id, line: st.line, size: -1}
+		st.renamed = &renamedFile{f: old, id: st.id, line: st.line, size: -1, last: st.lastTime}
 	} else {
 		fr.lostPending, fr.lostFrom = true, st.lastTime
 	}
@@ -243,12 +243,16 @@ func (fr *filesRun) rotate(ctx context.Context, f *os.File, id identity, adopted
 }
 
 // finishRenamed reads the rest of the renamed file, ships its unfinished last line as it is and lets the file go. It returns false, and
-// keeps the file, when the run stopped before the end or a read failed (then the reason is set).
+// keeps the file, when the run stopped before the end or a read failed (then the reason is set); a file given up at the bound of failed
+// reads is let go too, so it returns true.
 func (fr *filesRun) finishRenamed(ctx context.Context) bool {
 	rn := fr.st.renamed
+	before := rn.line.read
 	done, err := fr.r.pump(ctx, rn.f, &rn.line, true, fr.emitter(ctx, true))
+	if fr.countRenamedRead(ctx, rn, before, done, err) {
+		return true
+	}
 	if err != nil {
-		fr.r.fproblems[fr.i] = reasonReadFailed
 		return false
 	}
 	if !done {
@@ -334,7 +338,8 @@ func (fr *filesRun) read(ctx context.Context) {
 	}
 }
 
-// readRenamed reads the renamed file to its end and returns false when a read failed, which stops the reading of the file in this run.
+// readRenamed reads the renamed file to its end and returns false when a read failed, which stops the reading of the file in this run;
+// a file given up at the bound of failed reads is let go and the reading goes on with the file at the path.
 // It is finished, with its unfinished last line shipped as it is, in the run in which the file at the path has data and the renamed file did not grow since the previous run: the writer has moved to the new file.
 func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 	r, st := fr.r, fr.st
@@ -343,9 +348,12 @@ func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 		size = rn.size
 	}
 	finish := fr.size > 0 && rn.size == size
+	before := rn.line.read
 	eof, err := r.pump(ctx, rn.f, &rn.line, finish, fr.emitter(ctx, true))
+	if fr.countRenamedRead(ctx, rn, before, eof, err) {
+		return true
+	}
 	if err != nil {
-		r.fproblems[fr.i] = reasonReadFailed
 		return false
 	}
 	if finish && eof {
@@ -358,12 +366,38 @@ func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 }
 
 // countRenamedRead counts a read of the renamed file rn that started at the offset before; it returns true when the file was given up.
+// A failed read that moved the offset, and any read that finished or moved it, start the count anew; a run that did not read leaves it.
 func (fr *filesRun) countRenamedRead(ctx context.Context, rn *renamedFile, before int64, done bool, err error) bool {
+	progress := rn.line.read > before
+	switch {
+	case err != nil && progress:
+		rn.fails = 0
+		fr.r.fproblems[fr.i] = reasonReadFailed
+	case err != nil:
+		rn.fails++
+		if rn.fails >= renamedFailsToGiveUp {
+			fr.giveUpRenamed(ctx)
+			return true
+		}
+		fr.r.fproblems[fr.i] = reasonReadFailed
+	case done || progress:
+		rn.fails = 0
+	}
 	return false
 }
 
-// giveUpRenamed gives up the rest of the renamed file.
+// giveUpRenamed gives up the rest of the renamed file: its unfinished line is shipped as it is and one gap covers the span from its last
+// line to the start of the run.
 func (fr *filesRun) giveUpRenamed(ctx context.Context) {
+	r, st := fr.r, fr.st
+	rn := st.renamed
+	if len(rn.line.held) > 0 {
+		fr.line(ctx, rn.line.held, rn.line.cut, rn.line.start, true)
+	}
+	r.closeStages(fileKey(fr.i))
+	r.emitGap(rn.last, r.start)
+	st.renamed = nil
+	r.renamedGivenUp[fr.i] = true
 }
 
 // endLostGap closes the gap over lines lost to a rotation when the file at the path had no line to close it with.
@@ -400,6 +434,9 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	}
 	if minTime(at, r.start).Equal(at) { // a line dated after the start of the run leaves lastTime, so that a gap never starts after a lost line
 		st.lastTime = at
+		if rn := st.renamed; renamed && parsed.Header && rn != nil {
+			rn.last = at
+		}
 	}
 	if bound := minTime(at, r.start); bound.After(r.st.last) {
 		r.st.last = bound
@@ -462,7 +499,7 @@ func (r *run) pump(ctx context.Context, f *os.File, ls *lineState, finish bool, 
 		if r.stopped || ctx.Err() != nil {
 			return false, nil // the offset and the held line carry into the next run
 		}
-		n, err := f.ReadAt(buf, ls.read)
+		n, err := readAt(f, buf, ls.read)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return false, err
 		}

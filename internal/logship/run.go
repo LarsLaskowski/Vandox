@@ -65,6 +65,8 @@ func newRun(l *Logs, sr scheduler.Run, st *state) *run {
 		havePos:   have,
 		newest:    newest,
 		fproblems: make([]string, len(l.cfg.Files)),
+
+		renamedGivenUp: make([]bool, len(l.cfg.Files)),
 	}
 	for i := range r.fproblems {
 		r.fproblems[i] = noProblem

@@ -346,6 +346,9 @@ func (l *Logs) logOutcome(r *run) {
 		l.journalBad = false
 	}
 	for i, reason := range r.fproblems {
+		if r.renamedGivenUp[i] {
+			l.log.Warn(msgRenamedGivenUp, "file", i)
+		}
 		switch {
 		case reason == noProblem:
 		case reason != "" && reason != l.fileBad[i]:
