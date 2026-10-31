@@ -251,8 +251,68 @@ func (r *runner) collect(ctx context.Context, run Run) (result, outcome) {
 		}
 		return result{}, outcomeTimedOut
 	case <-ctx.Done():
+		// The stop leaves a running worker out: Scheduler.Flush waits for its result before the collector flushes.
+		select {
+		case <-ch:
+		default:
+			r.pending = ch
+		}
 		return result{}, outcomeStopped
 	}
+}
+
+// flush runs after the loop returned: it waits for the worker the stop left out, runs the collector's Flush in a worker of
+// its own, puts the records and tells an Observer collector whether they were kept. A collector whose worker is still out
+// or whose Flush outlasts ctx is skipped or abandoned: nothing is put and no observer is told.
+func (r *runner) flush(ctx context.Context) {
+	f, ok := r.job.Collector.(Flusher)
+	if !ok {
+		return
+	}
+	if r.pending != nil {
+		select {
+		case <-r.pending:
+			r.pending, r.skipped = nil, 0
+		case <-ctx.Done():
+			r.s.log.Warn("flush skipped, collector still running", "collector", r.name)
+			return
+		}
+	}
+	run := Run{Start: time.Now().UTC(), Pressure: r.s.mode.Load().high, PreviousLost: r.lost}
+	ch := make(chan result, 1)
+	go func() { ch <- r.invokeFlush(ctx, f, run) }()
+	var res result
+	select {
+	case res = <-ch:
+	case <-ctx.Done():
+		r.s.log.Warn("flush abandoned, deadline reached", "collector", r.name)
+		return
+	}
+	kept := false
+	if res.err != nil {
+		r.logFailure(res.err)
+	} else {
+		records, refused := r.stamp(res.records, run)
+		if refused != nil {
+			r.s.log.Warn("record refused", "collector", r.name, "err", refused)
+		}
+		err := r.deliver(ctx, records...)
+		kept = refused == nil && err == nil
+	}
+	r.lost = !kept
+	if o, ok := r.job.Collector.(Observer); ok {
+		o.Kept(run, kept)
+	}
+}
+
+// invokeFlush calls the collector's Flush and turns a panic into a *PanicError.
+func (r *runner) invokeFlush(ctx context.Context, f Flusher, run Run) (res result) {
+	defer func() {
+		if v := recover(); v != nil {
+			res = result{err: &PanicError{Value: v, Stack: debug.Stack()}}
+		}
+	}()
+	return result{records: f.Flush(ctx, run)}
 }
 
 // invoke calls the collector and turns a panic into a *PanicError.

@@ -135,6 +135,11 @@ func (s *Scheduler) Run(ctx context.Context) {
 // Flush runs after Run has returned. For each collector that implements Flusher it waits for a worker the stop left out,
 // runs the collector's Flush within ctx, puts the records and reports to an observer whether they were kept.
 func (s *Scheduler) Flush(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, r := range s.runners {
+		wg.Go(func() { r.flush(ctx) })
+	}
+	wg.Wait()
 }
 
 // SetPressure switches memory pressure mode on or off. A runner with a pressure interval then counts its next due time
