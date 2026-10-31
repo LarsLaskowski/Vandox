@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/LarsLaskowski/Vandox/internal/errorlogline"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/syslogline"
 )
@@ -66,11 +67,33 @@ type fileFormat struct {
 
 // formatOf returns the format of the configured name and whether the name is known.
 func formatOf(name string) (fileFormat, bool) {
+	switch name {
+	case "syslog":
+		return fileFormat{source: sourceSyslog, parse: syslogline.Parse}, true
+	case "plesk-panel":
+		return errorFormat(sourcePleskPanel, errorlogline.PleskPanel), true
+	case "sw-cp-server-error":
+		return errorFormat(sourceSwCpServerError, errorlogline.Nginx), true
+	case "nginx-error":
+		return errorFormat(sourceNginxError, errorlogline.Nginx), true
+	case "apache-error":
+		return errorFormat(sourceApacheError, errorlogline.Apache), true
+	}
 	return fileFormat{}, false
+}
+
+// errorFormat returns the format of an error log of the given source and layout.
+func errorFormat(source string, layout errorlogline.Format) fileFormat {
+	return fileFormat{source: source, parse: func(line []byte, clock *syslogline.Clock, _ time.Time) syslogline.Line {
+		return errorlogline.Parse(layout, line, clock)
+	}}
 }
 
 // minTime returns the earlier of two times.
 func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
 	return a
 }
 
@@ -117,7 +140,7 @@ func (r *run) readFile(ctx context.Context, i int) {
 		return
 	}
 	r.fproblems[i] = "" // opened: a later failure of the reading sets its reason
-	fr := &filesRun{r: r, i: i, st: st, spec: r.l.cfg.Files[i], clock: st.clockOf(loc), size: size}
+	fr := &filesRun{r: r, i: i, st: st, spec: r.l.cfg.Files[i], clock: st.clockOf(loc), size: size, format: r.l.formats[i]}
 	if !st.have {
 		fromStart := st.waiting
 		fr.begin(f, id, fromStart)
@@ -340,7 +363,7 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	if len(line) == 0 {
 		return r.tick(ctx, false)
 	}
-	parsed := syslogline.Parse(line, fr.clock, r.start)
+	parsed := fr.format.parse(line, fr.clock, r.start)
 	at := parsed.Time
 	if !parsed.Header {
 		at = st.lastTime
@@ -348,13 +371,15 @@ func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64
 	from := st.lastTime
 	if fr.lostPending {
 		fr.lostPending = false
-		r.emitGap(fr.lostFrom, at)
+		r.emitGap(fr.lostFrom, minTime(at, r.start))
 	}
-	st.lastTime = at
-	if at.After(r.st.last) {
-		r.st.last = at
+	if minTime(at, r.start).Equal(at) { // a line dated after the start of the run leaves lastTime, so that a gap never starts after a lost line
+		st.lastTime = at
 	}
-	rec, text := fileRecord(sourceSyslog, fr.spec.Path, parsed, at, cut)
+	if bound := minTime(at, r.start); bound.After(r.st.last) {
+		r.st.last = bound
+	}
+	rec, text := fileRecord(fr.format.source, fr.spec.Path, parsed, at, cut)
 	if r.l.filter.drops(text) {
 		return r.tick(ctx, false)
 	}
