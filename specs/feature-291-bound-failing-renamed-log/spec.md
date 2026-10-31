@@ -1,7 +1,7 @@
 # Spec: Bound how long a failing renamed log file holds back its newer lines
 
 Source: Issue #291
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -39,7 +39,8 @@ of record 0121.
   cannot be opened (*E13* of the error log formats, unchanged), or the time zone is not readable. The count does not change.
 - E3: The run that gives the file up is dropped (an error, a refused record, a sink refusal) or abandoned. Its count and its give-up
   are undone with its reading state; the next run reads again from the committed state and gives the file up again, so the gap is
-  shipped once with a kept run, never lost and never twice, and the warning is logged again by that run.
+  shipped once with a kept run, never lost and never twice, and the warning is logged again by that run. At the fourth dropped run
+  in a row the existing give-up of the span applies instead (*Commit, save and give-up*), whose gap replaces this one.
 - E4: At the give-up the renamed file holds the start of a line whose rest is unreadable. That start is shipped as it is, as at a
   truncation, before the gap.
 - E5: The gap starts at the **renamed part's last time**: the file's last time at the rotation, moved afterwards only by lines read
@@ -86,11 +87,12 @@ of record 0121.
   file read so far becomes the renamed file and the new file is read from its start (S3).
 - [ ] AC6: After a restart the count starts at zero; a renamed file found again is read on and given up after 150 failing runs from
   that start, one not found gives today's gap (S4, E8).
-- [ ] AC7: When the give-up run is dropped, the following runs give the file up again from the committed state, and the kept records
-  hold the give-up gap exactly once (E3).
+- [ ] AC7: When the give-up run is dropped (fewer than four times in a row), the following run gives the file up again from the
+  committed state, and the kept records hold the give-up gap exactly once (E3).
 - [ ] AC8: The count and the give-up of one configured file do not change the reading of another file or the journal (E7).
-- [ ] AC9: Each run that gives the file up logs the warning `renamed log file given up` with the attribute `file` and nothing else; a
-  later run that reads the file at the path without a problem logs `log file readable again` (S2).
+- [ ] AC9: Each run that gives the file up logs the warning `renamed log file given up` with the attribute `file` and nothing else; the
+  first run after it that reads the file at the path without a problem logs `log file readable again`, which is the give-up run itself
+  when its read of that file succeeds (S2).
 
 ## Out of scope
 
@@ -108,8 +110,7 @@ of record 0121.
   and asks for the bound with a recorded gap (Lead decision).
 - Which bound? Answered: 150 failing runs in a row, about 5 minutes (Lead decision). It is counted in runs so that the clock cannot
   move it (record 0121 already distrusts line times after the run's start). It is longer than the journal's give-up of a damaged file
-  after three runs, because a damaged structure stays damaged while an I/O error can be transient; 5 minutes delays the alerts of
-  one file by at most that and lets a short failure pass without loss.
+  after three runs, because a damaged structure stays damaged while an I/O error can be transient.
 - Does the issue's "until a read succeeds or the agent restarts" hold? Answered: partly. Confirmed: a read error stops the reading of
   the configured file for the run (`internal/logship/files.go`, `read` and `readRenamed`; `rotate` through `finishRenamed`), the
   warning stands, and no gap is recorded (*Log shipping*, the paragraph after the gaps list). Refuted: a restart ends it only when the
@@ -145,3 +146,6 @@ of record 0121.
   file's read offset forward (E1, AC4).
 - m4 (groups before the give-up gap; area document lists): accepted. AC2 closes the file's open groups before the gap; *Area
   documents* adds the give-up gap to *When a group closes* and to the bounded starts of *A file's last time*.
+- Lead, while planning (spec defects fixed): AC9 said "a later run" logs `log file readable again`, but the give-up run reads the file
+  at the path itself and logs it when that read succeeds; AC9 now says so. E3 and AC7 did not name the fourth dropped run, at which
+  the existing give-up of the span takes over; both now do.

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-31
 - **Area:** Agent
-- **Source:** Issue #37, Issue #289, Issue #290
+- **Source:** Issue #37, Issue #289, Issue #290, Issue #291
 - **Supersedes:** —
 
 ## Context
@@ -125,6 +125,22 @@ For live classification (#290):
     writer may choose, and a group dated in the future would never expire by the clock. **The earlier of the first capture time
     and the start of the run that read it** (chosen), the rule of option 14.
 
+For #291, a renamed file whose reads keep failing held back the newer lines of its configured file without end:
+
+24. **No bound** — no readable line is ever lost. But the newer lines of the file never alert, and a restart does not help, because
+    the renamed file is found again by its identity. Rejected.
+25. **A bound by the wall clock (T minutes since the first failure)** — but a clock step would shorten or stretch it, and the run's
+    start is already distrusted for line times (option 14). **150 kept runs in a row whose read of the renamed file fails without
+    moving its offset, about 5 minutes at the 2-second interval** (chosen). Longer than the three runs of a damaged journal file,
+    because a damaged structure stays damaged while an I/O error can pass. The count lives in the reading state a run works on, so a
+    dropped run undoes it.
+26. **Skip only the unreadable part and read on behind it** — but an I/O error has no known extent. **Give up the whole rest with
+    one gap** (chosen), as at a truncation.
+27. **Start the gap at the file's last time** — the time that is saved. But lines of the file at the path move it while the renamed
+    file is still read, so the gap could start after lines it loses. **Keep the renamed part's own last time in memory** (chosen), set
+    at the rotation and moved only by its lines. **Save that time in the state file** would cover a restart too, but adds a key to a
+    strictly decoded file for a case that needs a restart during a failing read. Rejected; a stated residual.
+
 ## Decision
 
 The `logs` collector reads every system and user journal file of the machine's journal directory with a position per seqnum ID,
@@ -150,6 +166,9 @@ alone. An open group closes:
 A source with an open group is saved at its oldest held line. The agent's stop sends the open groups before the last save
 (options 15 to 23). The rules are in the Agent area (*Log shipping*).
 
+For #291 a renamed file whose read fails in 150 kept runs in a row is given up with one gap from its own last time, and the newer
+file is read on in the same run (options 24 to 27). The rules are in the Agent area (*Log shipping*, *Rotation*).
+
 ## Consequences
 
 - The agent gains its first dependency besides the YAML library; `govulncheck` covers it, and its decoder bounds are a security
@@ -172,7 +191,8 @@ A source with an open group is saved at its oldest held line. The agent's stop s
 - What a local writer controls must not hide lines without a gap: an entry keeps only the first item of each read name (the import's
   rule), so repeating a name cannot push `MESSAGE` out of the kept items; a run that stops on its time inside a line goes on there in
   the next run, so a line of any length cannot block its file; a renamed file is finished, even across runs, before a newer file is
-  taken, and a read error of it holds the newer file back, so neither a budget stop nor an error drops or reorders its rest. For the
+  taken, and a read error of it holds the newer file back for at most 150 runs (#291), so neither a budget stop nor a passing error
+  drops or reorders its rest. For the
   same reason the agent refuses to start when the collector cannot be built instead of running without it.
 - The positions within the journal favor no loss over no gap: the newest journal position is never forgotten (forgetting it would
   let the time rule read a forgotten ID again), and a vacuum is judged only where no file of the ID holds the position, so it may
@@ -203,5 +223,9 @@ A source with an open group is saved at its oldest held line. The agent's stop s
   an invalid byte replaced one by one) and where a raw line's borrowed old time makes the record backfilled (0130); the Agent area names
   each.
 - A grant by hand can be lost by a rotation with a restrictive mode or a Plesk repair; the standing `log file not readable` warning is
-  the sign, and the renamed file's rest waits until the path opens again. MariaDB's and Dovecot's own files remain import-only.
+  the sign, and the renamed file's rest waits until the path opens again (a path that cannot be opened is not a failing read, so the
+  bound of #291 does not count it).
+- The give-up of #291 trades lines that may still be readable later for the live lines of the newer file. The count is not saved, so
+  an agent restarted within every 150 runs never gives up, and after a restart the gap starts at the saved file's last time, which
+  can lie after lines it loses (Agent area, *Residuals (record 0121)*). MariaDB's and Dovecot's own files remain import-only.
 - The `COMPACT` layout of systemd 252 and later is read like the server's layout, by the same reader (0119, #286).
