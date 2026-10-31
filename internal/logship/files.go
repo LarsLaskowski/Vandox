@@ -346,6 +346,7 @@ func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 		return false
 	}
 	if finish && eof {
+		r.closeStages(fileKey(fr.i)) // the import groups per file
 		st.renamed = nil
 		return true
 	}

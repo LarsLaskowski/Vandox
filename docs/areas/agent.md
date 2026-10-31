@@ -1394,7 +1394,7 @@ within 60 seconds of its header by capture time (before or after); a report of a
 close, with the capture time, source and sequence of its first line; a record the check refuses becomes a gap over the group.
 
 - *Order.* The filter (`min_priority`, `drop`) decides first, on the line as mapped; only lines that pass are classified. A dropped
-  MariaDB header leaves its continuation lines to the entry before it. `log_shipping.min_priority: notice` or stricter therefore drops
+  MariaDB header leaves its continuation lines to the open entry of the same host, program and process within 60 seconds, or else they are shipped as plain lines. `log_shipping.min_priority: notice` or stricter therefore drops
   the MariaDB journal lines, which carry priority 6 (assumed from the unit's `SyslogLevel=`, not checked on the server) and so never
   reach the entry stage; the event signatures see nothing of them (*Residuals*).
 - *Which sources.* Every configured file of the format `syslog` and every journal sequence-number ID has its own stages, so a journal

@@ -192,7 +192,7 @@ Backend:
     lines of a traditional syslog file) is never dropped by it. The names are compared exactly (lower case). The filter decides before the
     agent classifies the line ([Agent](agent.md), *Classification*): a MariaDB entry begins with a header line, and the journal's MariaDB
     lines are assumed to carry priority 6 (the unit's `SyslogLevel=`, not checked on the server), so `notice` or stricter drops them and
-    no `mariadb.*` event is made from the journal; a dropped header leaves its continuation lines to the entry before it. A drop rule
+    no `mariadb.*` event is made from the journal; a dropped header leaves its continuation lines to the open entry of the same host, program and process within 60 seconds, or else they are shipped as plain lines. A drop rule
     works the same way.
   - `log_shipping.files` names the log files shipped besides the journal, in file order: each a mapping with `path`, an absolute,
     clean path (no trailing slash, no empty, `.` or `..` element) of 2 to 1,024 bytes, listed once, and `format`, which is one of `syslog`,
