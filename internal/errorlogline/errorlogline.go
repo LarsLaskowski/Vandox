@@ -74,18 +74,18 @@ func parsePlesk(line []byte) (ts stamp, priority, start int, ok bool) {
 		return ts, 0, 0, false
 	}
 	pos := 1
-	if ts, ok = dateTime(line, &pos, '-'); ok == false {
+	if ts, ok = dateTime(line, &pos, '-'); !ok {
 		return ts, 0, 0, false
 	}
-	if ts.nanos, ok = fraction(line, &pos, 1); ok == false {
+	if ts.nanos, ok = fraction(line, &pos, 1); !ok {
 		return ts, 0, 0, false
 	}
-	if bytes.HasPrefix(line[pos:], []byte("] ")) == false {
+	if !bytes.HasPrefix(line[pos:], []byte("] ")) {
 		return ts, 0, 0, false
 	}
 	pos += 2
 	start = pos
-	if pos < len(line) && isDigit(line[pos]) && skipProcessAndRequest(line, &pos) == false {
+	if pos < len(line) && isDigit(line[pos]) && !skipProcessAndRequest(line, &pos) {
 		return ts, 0, 0, false
 	}
 	end := bytes.IndexByte(line[pos:], ' ')
@@ -122,10 +122,10 @@ func skipProcessAndRequest(line []byte, pos *int) bool {
 // parseNginx reads YYYY/MM/DD HH:MM:SS [level]( message).
 func parseNginx(line []byte) (ts stamp, priority, start int, ok bool) {
 	pos := 0
-	if ts, ok = dateTime(line, &pos, '/'); ok == false {
+	if ts, ok = dateTime(line, &pos, '/'); !ok {
 		return ts, 0, 0, false
 	}
-	if bytes.HasPrefix(line[pos:], []byte(" [")) == false {
+	if !bytes.HasPrefix(line[pos:], []byte(" [")) {
 		return ts, 0, 0, false
 	}
 	start = pos + 1
@@ -140,10 +140,10 @@ func parseApache(line []byte) (ts stamp, priority, start int, ok bool) {
 		return ts, 0, 0, false
 	}
 	pos := 1
-	if ts, ok = apacheTime(line, &pos); ok == false {
+	if ts, ok = apacheTime(line, &pos); !ok {
 		return ts, 0, 0, false
 	}
-	if bytes.HasPrefix(line[pos:], []byte("] [")) == false {
+	if !bytes.HasPrefix(line[pos:], []byte("] [")) {
 		return ts, 0, 0, false
 	}
 	start = pos + 2
@@ -161,21 +161,21 @@ func parseApache(line []byte) (ts stamp, priority, start int, ok bool) {
 
 // apacheTime reads Www Mmm DD HH:MM:SS(.uuuuuu) YYYY, up to the closing bracket.
 func apacheTime(line []byte, pos *int) (ts stamp, ok bool) {
-	if name(line, pos, weekdays[:]) < 0 || expect(line, pos, ' ') == false {
+	if name(line, pos, weekdays[:]) < 0 || !expect(line, pos, ' ') {
 		return ts, false
 	}
 	month := name(line, pos, months[:])
-	if month < 0 || expect(line, pos, ' ') == false {
+	if month < 0 || !expect(line, pos, ' ') {
 		return ts, false
 	}
 	ts.month = month + 1
-	if ts.day, ok = number(line, pos, pairDigits); ok == false || expect(line, pos, ' ') == false {
+	if ts.day, ok = number(line, pos, pairDigits); !ok || !expect(line, pos, ' ') {
 		return ts, false
 	}
-	if ts.hour, ts.minute, ts.second, ok = clockTime(line, pos); ok == false {
+	if ts.hour, ts.minute, ts.second, ok = clockTime(line, pos); !ok {
 		return ts, false
 	}
-	if ts.nanos, ok = fraction(line, pos, maxFractionDigits); ok == false || expect(line, pos, ' ') == false {
+	if ts.nanos, ok = fraction(line, pos, maxFractionDigits); !ok || !expect(line, pos, ' ') {
 		return ts, false
 	}
 	ts.year, ok = number(line, pos, yearDigits)
@@ -184,13 +184,13 @@ func apacheTime(line []byte, pos *int) (ts stamp, ok bool) {
 
 // dateTime reads YYYY-MM-DD HH:MM:SS or YYYY/MM/DD HH:MM:SS without a range check.
 func dateTime(line []byte, pos *int, separator byte) (ts stamp, ok bool) {
-	if ts.year, ok = number(line, pos, yearDigits); ok == false || expect(line, pos, separator) == false {
+	if ts.year, ok = number(line, pos, yearDigits); !ok || !expect(line, pos, separator) {
 		return ts, false
 	}
-	if ts.month, ok = number(line, pos, pairDigits); ok == false || expect(line, pos, separator) == false {
+	if ts.month, ok = number(line, pos, pairDigits); !ok || !expect(line, pos, separator) {
 		return ts, false
 	}
-	if ts.day, ok = number(line, pos, pairDigits); ok == false || expect(line, pos, ' ') == false {
+	if ts.day, ok = number(line, pos, pairDigits); !ok || !expect(line, pos, ' ') {
 		return ts, false
 	}
 	ts.hour, ts.minute, ts.second, ok = clockTime(line, pos)
@@ -199,10 +199,10 @@ func dateTime(line []byte, pos *int, separator byte) (ts stamp, ok bool) {
 
 // clockTime reads HH:MM:SS without a range check.
 func clockTime(line []byte, pos *int) (hour, minute, second int, ok bool) {
-	if hour, ok = number(line, pos, pairDigits); ok == false || expect(line, pos, ':') == false {
+	if hour, ok = number(line, pos, pairDigits); !ok || !expect(line, pos, ':') {
 		return 0, 0, 0, false
 	}
-	if minute, ok = number(line, pos, pairDigits); ok == false || expect(line, pos, ':') == false {
+	if minute, ok = number(line, pos, pairDigits); !ok || !expect(line, pos, ':') {
 		return 0, 0, 0, false
 	}
 	second, ok = number(line, pos, pairDigits)
@@ -220,7 +220,7 @@ func fraction(line []byte, pos *int, minDigits int) (nanos int, ok bool) {
 		return 0, false
 	}
 	value, ok := number(line, pos, digits)
-	if ok == false {
+	if !ok {
 		return 0, false
 	}
 	for missing := digits; missing < 9; missing++ {
@@ -278,7 +278,7 @@ func number(line []byte, pos *int, count int) (int, bool) {
 	value := 0
 	for i := 0; i < count; i++ {
 		c := line[*pos+i]
-		if isDigit(c) == false {
+		if !isDigit(c) {
 			return 0, false
 		}
 		value = value*10 + int(c-'0')
@@ -296,10 +296,10 @@ func expect(line []byte, pos *int, c byte) bool {
 	return false
 }
 
-// countWhile counts the bytes from pos that satisfy pred, at most max.
-func countWhile(line []byte, pos int, pred func(byte) bool, max int) int {
+// countWhile counts the bytes from pos that satisfy pred, at most limit.
+func countWhile(line []byte, pos int, pred func(byte) bool, limit int) int {
 	count := 0
-	for count < max && pos+count < len(line) && pred(line[pos+count]) {
+	for count < limit && pos+count < len(line) && pred(line[pos+count]) {
 		count++
 	}
 	return count
