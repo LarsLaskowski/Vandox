@@ -1371,7 +1371,7 @@ test and the C# import's test both read.
 
 The collector `backups` (interval 10 seconds, timeout 5 seconds, placed after `logs` in the job list) records the start and the end
 of each backup run as `backup_run` records with source `backups` ([wire format](wire-format.md)). It runs only when
-`backups.processes` holds at least one rule (default: one rule, `command: pzstd`; [Configuration and
+`backups.processes` holds at least one rule (default: three rules, `command: pzstd` and the prefixes of `backup-archiver --pack` and `sw-tar --create`; [Configuration and
 secrets](configuration-and-secrets.md)); with `backups.processes: []` it does not run and writes no record and no log line.
 
 **Matching.** Each run lists `/proc` as the process collector does (its 4,096 lowest PIDs) and reads `stat` and `cmdline` of each
@@ -1404,9 +1404,13 @@ again while a match runs, the end again with the gone-by time of the last kept c
 
 **Residuals (record 0120).**
 
-- With the default rule a backup is recognized only while `pzstd` runs: Plesk's own backup processes have not been captured (#45), so
-  a phase without `pzstd` (the database dump before the compression) is not part of the run unless the operator adds a rule.
-- Any local user can start a process named `pzstd`; it counts as a backup run.
+- The default rules come from the processes captured during a Plesk backup (#287): `backup-archiver --pack` runs for every part,
+  the database dumps included, and `sw-tar --create` with `pzstd` for the file archives; the rules name the creating modes, so a
+  restore (`--unpack`, `--extract`, assumed from the mode names, not captured) does not count. The panel's `pmmcli`, `pmm-ras` and
+  `backup_restore_helper` processes also run outside a backup (task polls, the dump list of the FTP storage) and are not rules.
+  Between two archivers the run stays open while the gap is under 60 seconds. The prefixes hold Plesk's paths; another install path
+  needs its own rule.
+- Any local user can start a process named `pzstd`, or one whose command line starts with one of the default prefixes (whoever starts a process chooses its command line); it counts as a backup run.
 - A backup process the agent cannot read is not recognized; one that becomes unreadable during a run can end the run early.
 - A state the `state` job saved between a dropped check and the next one survives a restart before that next check: the dropped start
   or end is then not written again.
@@ -2172,7 +2176,7 @@ denies the six calls of record 0122, `LoadCredential=agent-token:/etc/vandox/age
 - [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why a live kill requests
   extra snapshots through the scheduler and names them by its identity, why boots come from a saved state file, why the journal
   position is committed only after a kept run with at most three re-reads, and why backup runs are a record kind of their own with
-  `pzstd` as the default rule.
+  `pzstd` and Plesk's two creating processes as the default rules.
 - [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why the log
   collector reads every system and user journal file with a position per sequence-number ID, decodes zstd items with a library under
   fixed bounds, opens configured files only through a link-free walk, stores their positions by the hash of the path, commits when the

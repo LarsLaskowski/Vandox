@@ -51,7 +51,7 @@ Agent:
 | `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | a list of at most 64 service unit names or patterns of 1 to 255 bytes (see below) |
 | `mariadb.enabled` | `true` | `true` or `false` (see below) |
 | `mariadb.socket` | `/run/mysqld/mysqld.sock` | absolute, clean path of 2 to 107 bytes (see below) |
-| `backups.processes` | `[{command: pzstd}]` | a list of at most 64 rules, each a mapping of exactly one of `command` and `cmdline_prefix` (see below) |
+| `backups.processes` | `[{command: pzstd}, {cmdline_prefix: "/opt/psa/admin/sbin/backup-archiver --pack "}, {cmdline_prefix: "/usr/lib/plesk-9.0/sw-tar --create "}]` | a list of at most 64 rules, each a mapping of exactly one of `command` and `cmdline_prefix` (see below) |
 | `log_shipping.journal` | `true` | `true` or `false` (see below) |
 | `log_shipping.min_priority` | `info` | `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info` or `debug` (see below) |
 | `log_shipping.files` | `[]` | a list of at most 16 mappings of `path` and `format` (see below) |
@@ -165,7 +165,7 @@ Backend:
   format or line-separating character by the general string rule above, and a null value as "has no value"; no error contains the
   value. The agent stops at start-up with exit code 1 on each of them. The collector itself never logs the path.
 - `backups.processes` names the processes that mark a running backup ([Agent](agent.md), *Backup runs*). The list replaces the
-  default (one rule, `command: pzstd`; Plesk's own backup processes are not in it until they are captured, #45); an empty list `[]`
+  default (three rules: `command: pzstd` and the prefixes `/opt/psa/admin/sbin/backup-archiver --pack ` and `/usr/lib/plesk-9.0/sw-tar --create `, the Plesk backup processes captured on a real server, #287; `--pack` and `--create` leave out a restore); an empty list `[]`
   switches the `backups` collector off, so it writes no record and no log line, and a section without the key or a null section keeps
   the default. It is a list of at most 64 rules in file order; a process is part of a backup when any rule matches it. Each rule is a
   mapping with exactly one of `command` (compared with the command of the process as a whole) and `cmdline_prefix` (compared literally
@@ -344,7 +344,7 @@ Backend:
 - [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process grouping rules are a list of mappings of literal comparisons that the strict decoder checks.
 - [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the units to track are a list of names and patterns, an entry without a suffix is a service, and other unit types are refused.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the MariaDB collector, which these options switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
-- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why backup runs are named by literal process rules with `pzstd` as the only default, and why the agent's state lives in `spool.directory` without a new option.
+- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why backup runs are named by literal process rules with `pzstd` and Plesk's two creating processes as the defaults, and why the agent's state lives in `spool.directory` without a new option.
 - [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why log shipping reads the journal and `syslog` files only, why drop patterns are bounded by their compiled size, and why the state file stores a file's position by the hash of its path.
 - [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why `spool.max_size` is
   at most 64 GiB and the spool's files are uncompressed.

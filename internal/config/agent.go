@@ -168,6 +168,17 @@ var serviceOtherTypes = []string{
 	".socket", ".timer", ".target", ".mount", ".automount", ".swap", ".path", ".slice", ".scope", ".device",
 }
 
+// DefaultBackupRules returns the default value of backups.processes: the compressor pzstd and, from the processes captured during
+// a Plesk backup (#287), the archiver and tar commands that create the backup files. The prefixes name the creating mode
+// (--pack, --create), so a restore does not count as a backup run.
+func DefaultBackupRules() []BackupRule {
+	return []BackupRule{
+		{Command: "pzstd"},
+		{CmdlinePrefix: "/opt/psa/admin/sbin/backup-archiver --pack "},
+		{CmdlinePrefix: "/usr/lib/plesk-9.0/sw-tar --create "},
+	}
+}
+
 // DefaultServiceUnits returns the default value of services.units.
 func DefaultServiceUnits() []string {
 	return []string{
@@ -329,7 +340,7 @@ func DefaultAgent() Agent {
 		Log:     Log{Level: "info"},
 
 		Filesystem: Filesystem{MountPoints: []string{"/"}},
-		Backups:    Backups{Processes: []BackupRule{{Command: "pzstd"}}},
+		Backups:    Backups{Processes: DefaultBackupRules()},
 		Services:   Services{Units: DefaultServiceUnits()},
 		MariaDB:    MariaDB{Enabled: true, Socket: DefaultMariaDBSocket},
 

@@ -1291,8 +1291,13 @@ func TestLoadAgent_MariaDBRefusesEnabledAndUnknownKey(t *testing.T) {
 	})
 }
 
-// wantDefaultBackupRules is the default of backups.processes: one rule, command pzstd.
-var wantDefaultBackupRules = []BackupRule{{Command: "pzstd"}}
+// wantDefaultBackupRules is the default of backups.processes: command pzstd and the two prefixes of the Plesk backup
+// processes (--pack of backup-archiver, --create of sw-tar).
+var wantDefaultBackupRules = []BackupRule{
+	{Command: "pzstd"},
+	{CmdlinePrefix: "/opt/psa/admin/sbin/backup-archiver --pack "},
+	{CmdlinePrefix: "/usr/lib/plesk-9.0/sw-tar --create "},
+}
 
 // backupsKeyLine is the line of the key backups.processes in a document built by backupsDoc.
 const backupsKeyLine = 5
@@ -1360,8 +1365,8 @@ func TestLoadAgent_BackupProcessesEmptyListSwitchesTheCheckOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAgent(default) error = %v, want nil", err)
 	}
-	if len(withDefault.Backups.Processes) != 1 {
-		t.Fatalf("LoadAgent(default) Backups.Processes = %#v, want the one default rule", withDefault.Backups.Processes)
+	if len(withDefault.Backups.Processes) != len(wantDefaultBackupRules) {
+		t.Fatalf("LoadAgent(default) Backups.Processes = %#v, want the default rules %#v", withDefault.Backups.Processes, wantDefaultBackupRules)
 	}
 
 	for _, value := range []string{" []", " [ ]"} {
