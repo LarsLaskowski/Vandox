@@ -1,9 +1,9 @@
-# 0121: Log shipping reads the journal per seqnum ID with bounded zstd decoding and syslog files without links, and commits its positions when the scheduler keeps a run
+# 0121: Log shipping reads the journal per seqnum ID with bounded zstd decoding and syslog and error log files without links, and commits its positions when the scheduler keeps a run
 
 - **Status:** Accepted
 - **Date:** 2026-10-23
 - **Area:** Agent
-- **Source:** Issue #37
+- **Source:** Issue #37, Issue #289
 - **Supersedes:** —
 
 ## Context
@@ -17,6 +17,12 @@ content size, no checksum, no dictionary and one compressed block, content (and 
 bytes; and a `user-10000.journal` whose seqnum ID differs from that of both system files while its sequence numbers continue the system
 counter. The agent must stay static, start no program (0019), add no right (0030) and bound its memory (0025); a service user can
 replace its own log file with a link, and the agent can read every file.
+
+#289 adds the Plesk panel log and the `sw-cp-server`, nginx and Apache error logs, which exist on the server only as files, so that the
+web signatures (record 0094) read live lines. The import parses them (record 0092: three line grammars, raw records for unreadable
+lines); the agent does not reuse the .NET parsers (0073). The Product Manager decided that the agent keeps its rights: a file the group
+`adm` cannot read is not shipped, and the operator grants read access by hand as `deploy/agent/README.md` describes. No line of the
+server's logs is available, so the formats stay as unverified as record 0092 states.
 
 ## Options considered
 
@@ -41,6 +47,21 @@ replace its own log file with a link, and the agent can read every file.
    each element of the path with `openat` and `O_NOFOLLOW` from `/` (chosen) gives the same refusal with the standard library, without
    a window between check and open. `os.Root` was not taken: it follows links inside the root.
 
+For the error logs (#289):
+
+9. **Detect the format by content, as the import does** — no new option values, but a file's first line would choose its source, and
+   `sw-cp-server`'s log cannot be told from nginx's by content; the operator names the format per file (chosen), as `syslog` today.
+10. **Extend the syslog package with the error log grammars** — one package, but its name and its `Parse` are about syslog headers; a
+    package `internal/errorlogline` of its own (chosen) holds the three grammars and resolves their times through the syslog `Clock`,
+    which gains a resolve for a local time with its year, so the repeated-hour rule exists once.
+11. **A raw line takes the file's modification time where it has no predecessor, as the import does** — a live file's modification time is
+    that of its newest line, not of the raw line; the file's last time (chosen) is the rule `syslog` raw lines already follow.
+12. **Prove parity with hand-written Go expectations** — they would pass a Go port that misreads the grammar as the test's author did;
+    golden records written by the C# import and read by the Go tests (chosen) bind both languages, as the journal's `live-records.jsonl`.
+13. **File access** — `CAP_DAC_READ_SEARCH` is ruled out by 0122; an ACL set by the installer would be a new right (a `security`
+    change); the Product Manager chose no new right and a documented by-hand grant, with a default ACL on the directory so that a file a
+    rotation creates inherits it, its effect on the real server unverified.
+
 ## Decision
 
 The `logs` collector reads every system and user journal file of the machine's journal directory with a position per seqnum ID,
@@ -49,6 +70,10 @@ through a link-free `openat` walk, and commits its positions when the scheduler 
 up a span after the fourth dropped run as the kernel collector does; the agent saves its state once more when it stops. The rules are
 in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
 [Configuration and secrets](../areas/configuration-and-secrets.md) area (`log_shipping`).
+
+For #289 the configured files also take the formats `plesk-panel`, `sw-cp-server-error`, `nginx-error` and `apache-error`, parsed by
+`internal/errorlogline` with the import's mapping and raw lines, and the agent gains no right (options 9 to 13). The rules are in the
+Agent area (*Log shipping*).
 
 ## Consequences
 
@@ -83,5 +108,11 @@ in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
   ordered per source, not across sources.
 - A crash repeats at most one state interval plus one collector interval of lines (the spec's E1); exact delivery across a crash needs
   the spool (#38) to store positions with the records.
-- Live lines carry no classification (`event`, mail markers) until #290; the error log formats follow in #289.
+- Live lines carry no classification (`event`, mail markers) until #290.
+- Error log records equal the import's except `log` for a line of valid UTF-8 read after its predecessor in the same zone. They differ
+  where the agent cannot know what the import knows (a raw line without a predecessor, the previous instant carried across a rotation,
+  an invalid byte replaced one by one) and where a raw line's borrowed old time makes the record backfilled (0130); the Agent area names
+  each.
+- A grant by hand can be lost by a rotation with a restrictive mode or a Plesk repair; the standing `log file not readable` warning is
+  the sign, and the renamed file's rest waits until the path opens again. MariaDB's and Dovecot's own files remain import-only.
 - The `COMPACT` layout of systemd 252 and later is read like the server's layout, by the same reader (0119, #286).

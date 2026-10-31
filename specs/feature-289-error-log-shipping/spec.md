@@ -1,7 +1,7 @@
 # Spec: Ship the Plesk and web server error logs from the agent
 
 Source: Issue #289
-Status: Draft (escalation on file access and formats answered by the Product Manager; spec challenge answered)
+Status: Approved by Product Manager
 
 ## Problem
 
