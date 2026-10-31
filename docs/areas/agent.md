@@ -1213,7 +1213,7 @@ line read from the file. The import skips such lines; live, a skipped line would
 
 **Error log lines.** The grammar of a line, the level and the mapping to `priority` and `message` are the import's
 ([Log import](log-import.md), *Plesk and web server error logs*), ported to Go in `internal/errorlogline`: hand-written, linear, on bytes, with
-the import's limits (a process ID of at most 10 digits, a request ID and a module of at most 64 characters, a fraction of 1 to 6 digits).
+the import's limits (a process ID of at most 10 digits, a request ID and a module of at most 64 characters, a fraction of 1 to 6 digits in the Plesk panel log and of exactly 6 in the Apache log, none in nginx's).
 `log` is the configured path, `source` the format's name (`plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error`), `host` and
 `program` are empty, `pid` is 0 and there is no `event`; the texts are cleaned and cut as for the journal. A line of the format whose time
 exists and lies in the storable range gets its priority (`debug` for Plesk `DEBUG`, nginx `debug` and Apache `trace1` to `trace8`), so `log_shipping.min_priority`
@@ -1222,7 +1222,7 @@ from FastCGI's standard error, a stack trace of the panel log, an Apache start-u
 line of the format with a time that does not exist or lies outside the storable range) is **shipped raw** as for a `syslog` file,
 without a warning per line: the whole line as `message`, no priority, and the capture time of the line read from the file before it.
 The time of a line carries its year; it is local time in the zone of `/etc/localtime` (*Time of a year-less line*), resolved by the
-import's rules (month 1 to 12, a day that exists, hour 0 to 23, minute and second 0 to 59, the year 1677 to 2262), with the skipped
+import's rules (month 1 to 12, a day that exists, hour 0 to 23, minute and second 0 to 59, the year 1677 to 2262, and the storable range checked on the whole second and again with the fraction), with the skipped
 hour shifted forward and the repeated hour resolved by the previous instant of the file's lines of the format, which is kept per
 configured path across runs and rotations. While `/etc/localtime` cannot be read, an error log file is not read either (positions
 kept, no gap). Where the agent differs from the import:
