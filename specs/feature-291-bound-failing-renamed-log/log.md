@@ -14,3 +14,4 @@ are quoted in full.
 | 2026-10-31 19:24 | 2b Plan challenge | squad-devils-advocate | OBJECTIONS 0 major, 2 minor (AC9 test: readable-again logged once; SwapReadAt never parallel); appended as Challenge notes (opus/medium · 70,146 tokens · 21 tool uses · 238 s) |
 | 2026-10-31 19:24 | 3 Plan notes | Orchestrator | Challenge notes and Security notes appended to plan.md verbatim; no revision needed |
 | 2026-10-31 19:25 | 4 Skeleton (G1) | squad-dev | Skeleton compiles (readAt, countRenamedRead, giveUpRenamed stubs, renamedFile fails/last, run.renamedGivenUp, constants, SwapReadAt); build+vet verified (sonnet/medium · 65,894 tokens · 5 tool uses · 31 s) |
+| 2026-10-31 19:34 | 5 Tests first (G1) | squad-tester | 10 tests for AC1-AC9 + helper failRenamedReads; confirmed failing on skeleton (seam readAt not yet wired in pump: Dev must wire it); AC1 regression pin (sonnet/medium · 178,125 tokens · 23 tool uses · 541 s) |

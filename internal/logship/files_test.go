@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/logship"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -2119,5 +2121,550 @@ func rawLineAfterTheForgedLine(t *testing.T, k lineKind) {
 	}
 	if !recs[1].CapturedAt.Equal(k.forgedAt) || lines[2].Message != "continuation" || !recs[2].CapturedAt.Equal(fileLineTime(3)) {
 		t.Errorf("the forged line was captured at %v and the raw line %q at %v, want %v and %v", recs[1].CapturedAt, lines[2].Message, recs[2].CapturedAt, k.forgedAt, fileLineTime(3))
+	}
+}
+
+const (
+	// renamedBound is the number of runs in a row whose read of a renamed file fails before the file is given up.
+	renamedBound = 150
+	// giveUpMsg is the warning of the give-up of a renamed file.
+	giveUpMsg = "renamed log file given up"
+	// chunk is the size of the buffer the files are read through.
+	chunk = 64 << 10
+	// renamedLog is the name the rotated mail.log gets in the tests of the give-up.
+	renamedLog = "mail.log.1"
+)
+
+// errInjected is the error of a read that failRenamedReads fails; its text names a path, which must reach no log.
+var errInjected = errors.New("input/output error at /secretpath/mail.log.1")
+
+// readFailer makes the reads of one file fail: those at an offset from allow on, as long as on is set.
+type readFailer struct {
+	file   os.FileInfo
+	on     bool
+	allow  int64
+	failed int
+}
+
+// failRenamedReads makes the reads of the file at path fail through the seam of the collector; the file is found by its identity, so
+// the failure follows the file across a rename and a restart. The seam is put back when the test ends. A test that uses it never runs in
+// parallel.
+func failRenamedReads(t *testing.T, path string) *readFailer {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v, want nil", path, err)
+	}
+	rf := &readFailer{file: info, on: true}
+	restore := logship.SwapReadAt(func(f *os.File, p []byte, off int64) (int, error) {
+		if rf.on && off >= rf.allow {
+			if cur, statErr := f.Stat(); statErr == nil && os.SameFile(rf.file, cur) {
+				rf.failed++
+				return 0, errInjected
+			}
+		}
+		return f.ReadAt(p, off)
+	})
+	t.Cleanup(restore)
+	return rf
+}
+
+// requireInjected checks that the seam failed at least want reads, so that a test of a failing read cannot pass with reads that work.
+func requireInjected(t *testing.T, rf *readFailer, want int) {
+	t.Helper()
+	if rf.failed < want {
+		t.Errorf("the seam failed %d reads, want at least %d", rf.failed, want)
+	}
+}
+
+// quietRuns runs the collector n times and fails the test when a run returns a record.
+func quietRuns(t *testing.T, w *world, n int, what string) {
+	t.Helper()
+	for i := 1; i <= n; i++ {
+		if recs := w.step(); len(recs) != 0 {
+			t.Fatalf("run %d of %s returned %v and %d gaps, want nothing", i, what, head(recordKinds(recs)), len(gapsOf(recs)))
+		}
+	}
+}
+
+// recordKinds returns the message of every log line among the records and "GAP" for every gap, in the order of the records.
+func recordKinds(recs []model.Record) []string {
+	var out []string
+	for _, r := range recs {
+		switch d := r.Data.(type) {
+		case *model.LogLine:
+			out = append(out, d.Message)
+		case *model.Gap:
+			out = append(out, "GAP")
+		}
+	}
+	return out
+}
+
+// savedRenamed returns the renamed file saved with the position of the configured file i.
+func savedRenamed(t *testing.T, w *world, i int) *agentstate.RenamedFile {
+	t.Helper()
+	logs := w.store.State().Logs
+	if logs == nil || len(logs.Files) <= i {
+		t.Fatalf("saved log positions = %+v, want a position of the file %d", logs, i)
+	}
+	return logs.Files[i].Renamed
+}
+
+// requireNotGivenUp checks that the collector has not logged the give-up of a renamed file.
+func requireNotGivenUp(t *testing.T, w *world, what string) {
+	t.Helper()
+	if n := len(w.logsOf(giveUpMsg)); n != 0 {
+		t.Errorf("%q was logged %d times %s, want never", giveUpMsg, n, what)
+	}
+}
+
+// requireGivenUp runs the collector once more and checks that this run gives the renamed file up with one gap; the gap is returned.
+func requireGivenUp(t *testing.T, w *world) (recs []model.Record, gap *model.Gap) {
+	t.Helper()
+	recs = w.step()
+	gap = oneGap(t, "the give-up run", recs)
+	if n := len(w.logsOf(giveUpMsg)); n != 1 {
+		t.Errorf("%q was logged %d times by the give-up run, want once", giveUpMsg, n)
+	}
+	return recs, gap
+}
+
+// requireGivenUpAt is requireGivenUp with a gap that starts at from and ends at the start of the run.
+func requireGivenUpAt(t *testing.T, w *world, from time.Time) []model.Record {
+	t.Helper()
+	recs, gap := requireGivenUp(t, w)
+	requireGap(t, gap, from, w.run.Start)
+	return recs
+}
+
+// requireForgotten checks that the renamed file is no longer saved and that what it still gets is not shipped.
+func requireForgotten(t *testing.T, w *world, rf *readFailer) {
+	t.Helper()
+	if rn := savedRenamed(t, w, 0); rn != nil {
+		t.Errorf("saved renamed file = %+v after the give-up, want none", rn)
+	}
+	rf.on = false
+	w.appendLog(renamedLog, fileLines(30, 30))
+	if later := w.drain(3); len(later) != 0 {
+		t.Errorf("runs after the give-up returned %v and %d gaps, want nothing: the renamed file is forgotten", head(recordKinds(later)), len(gapsOf(later)))
+	}
+}
+
+func TestFiles_RenamedFileReadAgainBeforeTheBoundLosesNothing(t *testing.T) {
+	w, _ := rotate(t)
+	rf := failRenamedReads(t, w.logPath(renamedLog))
+	quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+	requireNotGivenUp(t, w, "before the bound")
+	w.appendLog(renamedLog, fileLines(5, 5))
+	w.appendLog("mail.log", fileLines(11, 11))
+	rf.on = false
+
+	recs := w.drain(5)
+
+	requireInjected(t, rf, renamedBound-1)
+	requireMessages(t, "file lines once the reads work", fileMsgs(recs), []string{"file 4", "file 5", "file 10", "file 11"})
+	requireNoGaps(t, "the runs once the reads work", recs)
+	logs := w.logsOf("log file not readable")
+	if len(logs) != 1 || logs[0].attrs["file"] != "0" || logs[0].attrs["err"] != "read failed" {
+		t.Errorf("warnings %q = %+v, want exactly one with file 0 and err %q", "log file not readable", logs, "read failed")
+	}
+	if logs := w.logsOf("log file readable again"); len(logs) != 1 || logs[0].attrs["file"] != "0" {
+		t.Errorf("%q = %+v, want exactly one with file 0", "log file readable again", logs)
+	}
+	requireNotGivenUp(t, w, "although the reads worked before the bound")
+	if rn := savedRenamed(t, w, 0); rn != nil {
+		t.Errorf("saved renamed file = %+v, want none: the renamed file was read to its end", rn)
+	}
+}
+
+func TestFiles_RenamedFileFailingAtTheBoundIsGivenUpWithOneGap(t *testing.T) {
+	t.Run("a held partial line is shipped as it is before the gap", func(t *testing.T) {
+		w := mailWorld(t)
+		partial := fileLine(4, "cut off before its line feed")
+		w.appendLog("mail.log", fileLines(3, 3)+partial[:len(partial)-1])
+		requireMessages(t, "file lines of the run that held the partial line", fileMsgs(w.step()), []string{"file 3"})
+		w.rename("mail.log", renamedLog)
+		w.writeLog("mail.log", fileLines(10, 11))
+		rf := failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+		if rn := savedRenamed(t, w, 0); rn == nil {
+			t.Error("saved renamed file = none before the bound, want it kept")
+		}
+
+		recs := requireGivenUpAt(t, w, fileLineTime(4))
+
+		requireInjected(t, rf, renamedBound)
+		requireMessages(t, "records of the give-up run", recordKinds(recs), []string{"cut off before its line feed", "GAP", "file 10", "file 11"})
+		requireForgotten(t, w, rf)
+	})
+	t.Run("a renamed file without a held line", func(t *testing.T) {
+		w, _ := rotate(t)
+		rf := failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+
+		recs := requireGivenUpAt(t, w, fileLineTime(3))
+
+		requireInjected(t, rf, renamedBound)
+		requireMessages(t, "records of the give-up run", recordKinds(recs), []string{"GAP", "file 10"})
+		requireForgotten(t, w, rf)
+	})
+	t.Run("an open syslog group of the renamed part is closed before the gap", func(t *testing.T) {
+		w := newWorld(t)
+		w.useFiles("mail.log")
+		w.writeLog("mail.log", fileLines(1, 2))
+		w.clock.set(fileLineTime(3)) // the lines are as new as the entries of a group that stays open
+		w.start()
+		w.step()
+		var text strings.Builder
+		text.WriteString(fileLineAs(5, "mariadbd", 2345, header("Note", "entry")) + fileLineAs(6, "mariadbd", 2345, "cont"))
+		for text.Len() < chunk+chunk/2 {
+			text.WriteString(fileLineAs(7, "app", 7, strings.Repeat("p", 120)))
+		}
+		w.appendLog("mail.log", text.String())
+		w.rename("mail.log", renamedLog)
+		w.writeLog("mail.log", fileLines(2000, 2001))
+		rf := failRenamedReads(t, w.logPath(renamedLog))
+		rf.allow = chunk // the first chunk is read, the second one fails
+		first := w.step()
+		if slices.Contains(messages(first), "entry\ncont") {
+			t.Fatalf("the run that read the first chunk shipped the group %q, want it open", "entry\ncont")
+		}
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+
+		recs := w.step()
+
+		kinds := recordKinds(recs)
+		group, gap := slices.Index(kinds, "entry\ncont"), slices.Index(kinds, "GAP")
+		if group < 0 || gap < 0 || group > gap {
+			t.Errorf("records of the give-up run = %v, want the group %q before the gap", head(kinds), "entry\ncont")
+		}
+		if len(kinds) < 2 || !slices.Equal(kinds[len(kinds)-2:], []string{"file 2000", "file 2001"}) || slices.Index(kinds, "file 2000") < gap {
+			t.Errorf("records of the give-up run = %v, want the lines of the new file last, behind the gap", head(kinds))
+		}
+		requireInjected(t, rf, renamedBound)
+	})
+}
+
+func TestFiles_GiveUpGapStartsAtTheRenamedPartsLastTime(t *testing.T) {
+	t.Run("lines of the new file dated later were read while the renamed file grew", func(t *testing.T) {
+		w, _ := rotate(t)
+		w.step() // line 4 of the renamed file and line 10 of the new one
+		w.appendLog(renamedLog, fileLines(5, 5))
+		w.appendLog("mail.log", fileLines(11, 11))
+		w.step()
+		failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+
+		requireGivenUpAt(t, w, fileLineTime(5))
+	})
+	t.Run("no line of the renamed file read since the rotation", func(t *testing.T) {
+		w, _ := rotate(t)
+		failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+
+		requireGivenUpAt(t, w, fileLineTime(3))
+	})
+	t.Run("a line of the renamed file dated after its run", func(t *testing.T) {
+		w := mailWorld(t)
+		future := fileLineTime(5400) // ten minutes after the time of reading
+		w.appendLog("mail.log", fileLine(4, "file 4")+fileLine(5400, "future"))
+		w.rename("mail.log", renamedLog)
+		w.writeLog("mail.log", fileLines(10, 10))
+		w.step()
+		failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+		if !future.After(w.clock.peek()) {
+			t.Fatalf("the test line is dated %v, want it after the time of reading %v", future, w.clock.peek())
+		}
+
+		requireGivenUpAt(t, w, fileLineTime(4))
+	})
+	t.Run("after a restart the saved last time of the file", func(t *testing.T) {
+		w, _ := rotate(t)
+		w.step() // line 4 of the renamed file and line 10 of the new one: the file's last time is that of line 10
+		w.restart()
+		failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+
+		requireGivenUpAt(t, w, fileLineTime(10))
+	})
+}
+
+// bigLines returns lines first..last of about 290 bytes.
+func bigLines(first, last int) string {
+	var b strings.Builder
+	for n := first; n <= last; n++ {
+		b.WriteString(fileLine(n, "pad "+strings.Repeat("y", 250)))
+	}
+	return b.String()
+}
+
+// failingRenamedWorld returns a world whose mail.log was rotated: the renamed file holds data (not read yet) and the new file the lines
+// 10 and 11. The reads of the renamed file fail from the first byte on.
+func failingRenamedWorld(t *testing.T, data string) (*world, *readFailer) {
+	t.Helper()
+	w := mailWorld(t)
+	w.appendLog("mail.log", data)
+	w.rename("mail.log", renamedLog)
+	w.writeLog("mail.log", fileLines(10, 11))
+	return w, failRenamedReads(t, w.logPath(renamedLog))
+}
+
+func TestFiles_RenamedFailCountStartsAnewWhenTheOffsetMoves(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{"whole lines are read and then a read fails", bigLines(3, 502)},
+		{"a line longer than the read buffer is read a chunk per run", fileLine(3, strings.Repeat("x", 200000))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, rf := failingRenamedWorld(t, tt.data)
+			quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+			rf.allow = chunk // the next run reads the first chunk and fails on the second one
+			w.step()
+			quietRuns(t, w, renamedBound-1, "failing reads of the renamed file after the offset moved")
+			requireNotGivenUp(t, w, "although the offset moved 149 runs ago")
+
+			requireGivenUp(t, w)
+		})
+	}
+	t.Run("a run that reads without an error", func(t *testing.T) {
+		w, rf := failingRenamedWorld(t, fileLines(3, 4))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+		rf.on = false
+		w.step()
+		rf.on = true
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file after a run that read it")
+		requireNotGivenUp(t, w, "although a run read the file 149 runs ago")
+
+		requireGivenUp(t, w)
+	})
+}
+
+func TestFiles_RunsThatDoNotReadTheRenamedFileLeaveTheCount(t *testing.T) {
+	w, _ := rotate(t)
+	failRenamedReads(t, w.logPath(renamedLog))
+	quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 2 { // runs that end before the file is read
+		run := scheduler.Run{Start: w.clock.peek().UTC()}
+		if recs, err := w.l.Collect(ctx, run); err != nil || len(recs) != 0 {
+			t.Fatalf("Collect() of a canceled run = %d records and error %v, want none and nil", len(recs), err)
+		}
+		w.l.Kept(run, true)
+		w.clock.advance(runInterval)
+	}
+	w.etc.remove("localtime")
+	quietRuns(t, w, 2, "the runs with an unreadable zone")
+	w.etc.set("localtime", tzFixed(utcPlus2))
+	w.rename("mail.log", "mail.hold")
+	quietRuns(t, w, 2, "the runs without the file at the path")
+	w.rename("mail.hold", "mail.log")
+	requireNotGivenUp(t, w, "by runs that did not read the renamed file")
+
+	requireGivenUpAt(t, w, fileLineTime(3))
+}
+
+func TestFiles_SecondRotationWhileTheRenamedFileFailsGivesItUpAtTheBound(t *testing.T) {
+	w, _ := rotate(t)
+	failRenamedReads(t, w.logPath(renamedLog))
+	quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+	info, err := os.Stat(w.logPath("mail.log"))
+	if err != nil {
+		t.Fatalf("Stat() error = %v, want nil", err)
+	}
+	second, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("Sys() = %T, want *syscall.Stat_t", info.Sys())
+	}
+	w.rename("mail.log", "mail.log.2")
+	w.writeLog("mail.log", fileLines(20, 21)) // a third file
+
+	recs := requireGivenUpAt(t, w, fileLineTime(3))
+
+	requireMessages(t, "records of the give-up run", recordKinds(recs), []string{"GAP", "file 10", "file 20", "file 21"})
+	rn := savedRenamed(t, w, 0)
+	if rn == nil || rn.Inode != second.Ino {
+		t.Errorf("saved renamed file = %+v, want the second file (inode %d): it was read so far", rn, second.Ino)
+	}
+	if later := w.drain(3); len(later) != 0 {
+		t.Errorf("runs after the rotation returned %v and %d gaps, want nothing", head(recordKinds(later)), len(gapsOf(later)))
+	}
+	if rn := savedRenamed(t, w, 0); rn != nil {
+		t.Errorf("saved renamed file = %+v after the second file was finished, want none", rn)
+	}
+}
+
+func TestFiles_RestartStartsTheRenamedFailCountAnew(t *testing.T) {
+	t.Run("a renamed file found again is given up 150 failing runs after the restart", func(t *testing.T) {
+		w, _ := rotate(t)
+		failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, 100, "failing reads of the renamed file before the restart")
+		w.restart()
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file after the restart")
+		requireNotGivenUp(t, w, "149 runs after the restart")
+
+		requireGivenUpAt(t, w, fileLineTime(3))
+	})
+	t.Run("a renamed file that is gone at the restart is today's gap", func(t *testing.T) {
+		w, _ := rotate(t)
+		failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, 100, "failing reads of the renamed file before the restart")
+		if err := os.Remove(w.logPath(renamedLog)); err != nil {
+			t.Fatalf("removing the renamed file: %v", err)
+		}
+		w.restart()
+
+		recs := w.step()
+
+		requireMessages(t, "records of the run after the restart", recordKinds(recs), []string{"GAP", "file 10"})
+		requireGap(t, oneGap(t, "the run after the restart", recs), fileLineTime(3), w.run.Start)
+		requireNotGivenUp(t, w, "for a file that is gone")
+	})
+}
+
+func TestFiles_DroppedGiveUpRunIsRepeatedWithOneGap(t *testing.T) {
+	w, _ := rotate(t)
+	failRenamedReads(t, w.logPath(renamedLog))
+	quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+
+	dropped := w.collect()
+	w.refuse()
+	repeated := w.step()
+	after := w.drain(3)
+
+	requireMessages(t, "records of the dropped give-up run", recordKinds(dropped), []string{"GAP", "file 10"})
+	requireMessages(t, "records of the repeated run", recordKinds(repeated), []string{"GAP", "file 10"})
+	requireGap(t, oneGap(t, "the repeated run", repeated), fileLineTime(3), w.run.Start)
+	if len(after) != 0 {
+		t.Errorf("runs after the repeated one returned %v, want nothing", head(recordKinds(after)))
+	}
+	if n := len(w.logsOf(giveUpMsg)); n != 2 {
+		t.Errorf("%q was logged %d times by the dropped and the repeated run, want twice", giveUpMsg, n)
+	}
+}
+
+func TestFiles_GiveUpOfOneFileLeavesTheOtherFilesAndTheJournal(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log", "other.log")
+	w.writeLog("mail.log", fileLines(1, 2))
+	w.writeLog("other.log", fileLines(1, 2))
+	w.online(seqID(1), jentries(1, 2))
+	w.start()
+	w.step()
+	w.appendLog("mail.log", fileLines(3, 3))
+	w.rename("mail.log", renamedLog)
+	w.writeLog("mail.log", fileLines(10, 11))
+	w.appendLog("other.log", fileLine(3, "other 3"))
+	w.rename("other.log", "other.log.1")
+	w.writeLog("other.log", fileLine(4, "other 4"))
+	failRenamedReads(t, w.logPath(renamedLog))
+	gaps := 0
+
+	for run := 1; run <= renamedBound; run++ {
+		if run > 1 {
+			w.appendLog("other.log", fileLine(3+run, fmt.Sprintf("other %d", 3+run)))
+		}
+		w.online(seqID(1), jentries(1, uint64(2+run))) // #nosec G115 -- a small run number
+		recs := w.step()
+
+		want := []string{fmt.Sprintf("other %d", 3+run)}
+		if run == 1 {
+			want = []string{"other 3", "other 4"}
+		}
+		requireMessages(t, fmt.Sprintf("lines of other.log in run %d", run), withPrefix(fileMsgs(recs), "other "), want)
+		requireMessages(t, fmt.Sprintf("lines of the journal in run %d", run), ofSource(recs, "journal"), []string{fmt.Sprintf("line %d", 2+run)})
+		wantMail := []string(nil)
+		if run == renamedBound {
+			wantMail = []string{"file 10", "file 11"}
+		}
+		requireMessages(t, fmt.Sprintf("lines of mail.log in run %d", run), withPrefix(fileMsgs(recs), "file "), wantMail)
+		gaps += len(gapsOf(recs))
+	}
+
+	if gaps != 1 {
+		t.Errorf("the runs recorded %d gaps, want 1: the give-up of the renamed file of mail.log", gaps)
+	}
+	if rn := savedRenamed(t, w, 1); rn != nil {
+		t.Errorf("saved renamed file of other.log = %+v, want none: it was finished as usual", rn)
+	}
+	if n := len(w.logsOf(giveUpMsg)); n != 1 {
+		t.Errorf("%q was logged %d times, want once", giveUpMsg, n)
+	}
+}
+
+// withPrefix returns the messages that start with prefix.
+func withPrefix(msgs []string, prefix string) []string {
+	var out []string
+	for _, m := range msgs {
+		if strings.HasPrefix(m, prefix) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func TestFiles_GiveUpLogsAFixedWarningWithTheFileIndexOnly(t *testing.T) {
+	w, _ := rotate(t)
+	failRenamedReads(t, w.logPath(renamedLog))
+	quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+	requireNotGivenUp(t, w, "before the bound")
+
+	w.collect() // the give-up run, which the scheduler drops
+	w.refuse()
+	given := w.logsOf(giveUpMsg)
+	readable := w.logsOf("log file readable again")
+	w.step() // the repeated run
+
+	if len(given) != 1 || given[0].level != slog.LevelWarn || len(given[0].attrs) != 1 || given[0].attrs["file"] != "0" {
+		t.Errorf("%q after the dropped run = %+v, want one warning with the attribute file = 0 only", giveUpMsg, given)
+	}
+	if len(readable) != 1 || readable[0].attrs["file"] != "0" {
+		t.Errorf("%q after the give-up run = %+v, want one with file 0: the run read the file at the path", "log file readable again", readable)
+	}
+	if n := len(w.logsOf(giveUpMsg)); n != 2 {
+		t.Errorf("%q was logged %d times by the dropped and the repeated run, want twice", giveUpMsg, n)
+	}
+	if n := len(w.logsOf("log file readable again")); n != 1 {
+		t.Errorf("%q was logged %d times across both runs, want once", "log file readable again", n)
+	}
+	requireLogOrder(t, w)
+	requireNoSecrets(t, w)
+}
+
+// requireLogOrder checks that the give-up of the first run is logged before the file is readable again.
+func requireLogOrder(t *testing.T, w *world) {
+	t.Helper()
+	given, readable := -1, -1
+	for i, e := range w.entries {
+		switch e.msg {
+		case giveUpMsg:
+			if given < 0 {
+				given = i
+			}
+		case "log file readable again":
+			readable = i
+		}
+	}
+	if given < 0 || readable < 0 || given > readable {
+		t.Errorf("log lines %q at %d and %q at %d, want the give-up first", giveUpMsg, given, "log file readable again", readable)
+	}
+}
+
+// requireNoSecrets checks that no log line names the path of the world or the text of the error of a read.
+func requireNoSecrets(t *testing.T, w *world) {
+	t.Helper()
+	for _, e := range w.entries {
+		text := e.msg
+		for k, v := range e.attrs {
+			text += " " + k + "=" + v
+		}
+		if strings.Contains(text, w.root) || strings.Contains(text, "secretpath") || strings.Contains(text, "input/output") {
+			t.Errorf("log line %q holds %q, want no path and no error text", e.msg, text)
+		}
 	}
 }
