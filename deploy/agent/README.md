@@ -470,12 +470,13 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
   `user-<UID>@*.journal`, `user-<UID>@*.journal~`) below `/var/log/journal/<machine-id>`, else `/run/log/journal/<machine-id>`, are read with the
   group `systemd-journal`; journald's default `SplitMode=uid` puts the entries of users with a UID of 1000 or more (on Plesk the web-space
   users) into the user files. The agent reads the machine ID from `/etc/machine-id` and decodes zstd-compressed items itself (no `journalctl`).
-- **Configured files.** Each file of `log_shipping.files` is read with the group `adm`, or because its mode lets any user read it; a file that is
+- **Configured files.** Each file of `log_shipping.files` has a `format`: `syslog`, or an error log of Plesk and the web servers (`plesk-panel`,
+  `nginx-error`, `sw-cp-server-error`, `apache-error`; the grant they usually need is in *Error logs of Plesk and the web servers* below). Each file is read with the group `adm`, or because its mode lets any user read it; a file that is
   readable by neither, or below a directory the agent has no search right on, is logged `log file not readable` with the reason
   `permission denied` and not shipped, because `CAP_DAC_READ_SEARCH` is not granted (record 0122). The path is walked from `/` without following a link; the directory of a rotated file is reached the same way when the
   agent looks for it after a rotation that happened while it was stopped (`<name>.1` and `<name>-YYYYMMDD`).
-- **The time zone.** `/etc/localtime` (readable by anyone) gives the zone of the year-less times of `syslog` files. When it cannot be read the
-  agent logs `time zone not readable` once, reads no `syslog` file until it can, keeps their positions and records no gap; the journal is
+- **The time zone.** `/etc/localtime` (readable by anyone) gives the zone of the year-less times of `syslog` files and of the times of the error log files. When it cannot be read the
+  agent logs `time zone not readable` once, reads no configured file until it can, keeps their positions and records no gap; the journal is
   not affected.
 - **What it logs.** Fixed texts only, one per change: `journal not readable` (with a reason such as `journal: no journal directory`),
   `log file not readable` (with the index of the file in `log_shipping.files` and a reason: `missing`, `not a regular file`, `link refused`,
@@ -483,6 +484,72 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
   reaches the agent's own log.
 - **Duplicates.** A file that holds what the journal ships (rsyslog's `/var/log/syslog` on a server that forwards the journal to rsyslog) is shipped
   twice, once per source. The agent does not remove them.
+
+### Error logs of Plesk and the web servers
+
+The log collector ships `/var/log/nginx/error.log` (format `nginx-error`), `/var/log/apache2/error.log` (`apache-error`), `/var/log/plesk/panel.log`
+(`plesk-panel`) and `/var/log/sw-cp-server/error_log` (`sw-cp-server-error`) when they are listed in `log_shipping.files` (examples in `agent.yaml`)
+**and** the user `vandox-agent` can read them. Nothing in the installer or the unit grants that: the agent holds no capability that overrides file
+rights (record 0122), so a file its user and groups cannot read is logged `log file not readable` (`permission denied`) and not shipped. The grant is
+made by hand, as root, once for each configured file `<dir>/<file>`, with the commands below. It adds no right to the unit, but it widens what a
+compromised agent can read to these files.
+
+```
+namei -l <dir>/<file>
+setfacl -P -m u:vandox-agent:x <element>
+setfacl -P -m u:vandox-agent:r <dir>/<file>
+setfacl -P -d -m u::rw,u:vandox-agent:r,g::r,o::- <dir>
+sudo -u vandox-agent head -c 0 <dir>/<file>
+```
+
+1. `namei -l <dir>/<file>` first: it shows the user, group and mode of every element from `/` and marks any link. A link anywhere in the path is
+   refused by the agent (`link refused`) and no grant fixes it, so stop there (a path behind the link that holds no link can be listed in
+   `log_shipping.files` instead). Make the grant only where `namei -l` shows every element above the file's directory owned by root; if another
+   user owns one, stop: `-P` protects the last path element only, and that user could swap a directory for a link.
+2. The second command grants search (`x`) on each element `namei -l` shows denying it to the agent, **every ancestor included**, not only
+   `<dir>`: with search on `<dir>` alone the agent still could not open the file.
+3. The third grants read on the file.
+4. `-P` never follows a link, and skips one silently with exit 0, so the last command is the check after the grant: no output means readable.
+   `head` follows a link that the agent refuses, which is why `namei -l` comes first.
+5. The fourth, the default ACL on the directory, is only for a log that is rotated with `create <mode>`: a file that rotation creates loses the
+   ACL of the file it replaces, and the default ACL gives the new file the agent's read. Skip it for `copytruncate` and for `create` without a mode.
+   It applies to **every** file and subdirectory that any program creates in `<dir>` in the future, not only to the log, and it replaces the
+   umask for them: a file created with umask 077 got mode 640 and the entries above, not 600. So set its `g::` and `o::` entries no wider than those of
+   the directory's current files (the command shows `g::r,o::-`, which fits files of mode 0640; adapt it to what `getfacl <dir>/<file>` shows), and use it
+   only in a directory that holds log files alone. Its `u::rw` entry applies to a new subdirectory too, whose user then lacks search. With
+   `create 0600` it has no effect at all: the new file's mask is empty, and the agent cannot read it.
+
+What the stand-in dry run showed (the agent's read after one rotation by logrotate; measured on Ubuntu 24.04 with acl 2.3.2 and logrotate 3.21.0
+in a directory with mode 0750 below an ancestor with mode 0750, not on a Plesk server):
+
+| logrotate directive | the file's ACL alone | the file's ACL and the default ACL |
+| ------------------- | -------------------- | ---------------------------------- |
+| `create 0640 root root` | read lost | read kept |
+| `create 0600 root root` | read lost | read lost (the entry stays, the mask is empty) |
+| `create` without a mode | read kept (logrotate copies the old file's mode and ACL) | read kept |
+| `copytruncate` | read kept | read kept |
+
+Also measured there: `setfacl -P` on a link leaves the link and its target untouched with exit 0 and the check then fails, while the same command
+without `-P` grants on the target; `namei -l` showed an ancestor denying search and the second command fixed it; a new subdirectory inherits the default ACL
+with mode 640, so the agent cannot search it. These results are those of the stand-in, not of a Plesk server.
+
+The statements below are not known; no Plesk server was available to check them.
+
+The owner, group and mode of the four files and of their directories on the server, and so whether the grant is needed at all, are not known
+(not verified on a Plesk server).
+
+How Plesk rotates `/var/log/plesk/panel.log` and `/var/log/sw-cp-server/error_log`, whether by logrotate with `create <mode>`, with `copytruncate` or
+by its own mechanism, is not known, so whether the default ACL is needed is not known (not verified on a Plesk server).
+
+Whether `plesk repair fs` resets an ACL set this way is not known (not verified on a Plesk server).
+
+**The sign of a lost grant.** A rotation, a permission reset or a repair of the file permissions can drop the grant. The sign is the standing
+`log file not readable` (`permission denied`) in the agent's log (`journalctl -u vandox-agent`); the file's lines stay in place and the renamed file's rest is
+read once the path opens again, so repeat the grant. A restart in between loses the renamed file's descriptor, and a renamed file no longer found
+becomes a gap. Without read right on the directory (the commands do not grant it) a restart finds only `<file>.1`.
+
+**What is sent.** These logs carry client IP addresses, request lines with query strings, host names and PHP output that can hold request data, all
+shipped to the backend as written. Grant the agent only the logs whose content may leave the server.
 
 ### What the process collector reads and what it needs
 
@@ -692,6 +759,7 @@ The results are in the last column; they are the first run's, with a note where 
 | Reboot | `sudo reboot`, then `systemctl is-active vandox-agent` | `active`, started by itself after the journal flush | `active` and enabled, started by itself after the reboot; memory 25.8M of `MemoryMax=256M`; measured in the first run only: the unit file is unchanged since, and the re-run on the production server did not reboot |
 | Files and modes | `stat -c '%U:%G %a %n' /etc/vandox/agent-token /etc/vandox/agent.yaml /var/lib/vandox/spool` | `root:root 600`, `root:vandox-agent 640`, `vandox-agent:vandox-agent 700` | as expected |
 | Transmission to the backend | the agent's log (`journalctl -u vandox-agent`) after the start; the fourth line of *Tailscale on the monitored server*, step 4 | the line prints `401`; the agent logs no `backend not accepting batches`, and the backend stores its batches | not part of this run (part of the v0.2.0 release check): the backend was `vandoxd` v0.1.0, which has no ingest API (it came with PR #316 and will first be released in v0.2.0), so the agent logged `backend not accepting batches reason=status status=404` and kept its records in the spool. The other log lines seen in the run were `mariadb down`, then `mariadb answering again`, and `socket owners partly unknown`. |
+| Error logs readable by the agent | for each error log in `log_shipping.files`: `sudo -u vandox-agent head -c 0 <dir>/<file>` after the grant of *Error logs of Plesk and the web servers* | no output; the agent logs no `log file not readable` for it | not yet run: no Plesk server was available; the grant was tried only in a stand-in on Ubuntu 24.04 |
 | rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
 | Peak memory | `VmHWM` in `/proc/<pid>/status` of the running agent after 24 hours (BENCHMARKS, *Agent footprint*); under memory pressure the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | 20.4 MB peak RSS (`VmHWM`) over 24 h in normal mode (BENCHMARKS, *Agent footprint*); under memory pressure to be measured (#45) |
 | Tailscale policy file | save `deploy/agent/tailnet-policy.hujson` as the tailnet's policy (step 2 of *Tailscale on the monitored server*); then save it once with the agent's rule widened to `tcp:*` and once to `"8081"` | the console accepts the file; both widened saves are refused by the `tests` entries | not yet run (issue #338) |

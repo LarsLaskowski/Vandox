@@ -7,7 +7,7 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the log shipping collector (the journal and configured `syslog` files), the backup run check, the agent's state file, the on-disk spool and the notification of systemd exist, as do
+switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the log shipping collector (the journal and the configured `syslog` and error log files), the backup run check, the agent's state file, the on-disk spool and the notification of systemd exist, as do
 the shared data model and the wire encoder, and the sender (*Spool and sending*, *Sending*). The systemd unit and the install and uninstall scripts exist (*Installation*); the other collectors are **not implemented
 yet**. The backend's ingest endpoint accepts the sender's batches ([Backend host](backend-host.md), *Ingest endpoint*); while the
 backend is unreachable or not accepting, the sender waits and tries again (*Sending*), and the spool fills up to `spool.max_size` and
@@ -1175,7 +1175,11 @@ not checked, and the rule may record a gap where only such entries lay between. 
 with an online file first, then the others, newest first; a further ID keeps its position in memory only and after a restart starts
 at its tail by the rule above, with its one gap.
 
-**Configured files.** Each file is opened through a walk from `/` that follows no link: every directory element with
+**Configured files.** Each file of `log_shipping.files` has a `format`: `syslog` (the traditional or RFC 3339 form of rsyslog's files, *Syslog lines*) or
+one of the error log formats `plesk-panel` (the Plesk panel log, `/var/log/plesk/panel.log`), `nginx-error` (`/var/log/nginx/error.log`),
+`sw-cp-server-error` (Plesk's own web server, `/var/log/sw-cp-server/error_log`, which reads nginx's line format and differs from
+`nginx-error` only in its source) and `apache-error` (`/var/log/apache2/error.log`), *Error log lines*. The file handling below is the same
+for all five. Each file is opened through a walk from `/` that follows no link: every directory element with
 `openat(O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC)` (so a directory that may only be searched works), the file with
 `openat(O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC)`, and `fstat` of the opened descriptor must show a regular file with exactly one
 link, so a symbolic link in any element and a hard link to another file are refused alike. Against an attacker who races the check, the refusal of a hard link relies on the distribution default `fs.protected_hardlinks=1` (Ubuntu's default), which stops a user from linking a file he neither owns nor can write. `O_PATH` is the constant `0x200000` of
@@ -1206,6 +1210,46 @@ a syslog header (an RFC 5424 line, a continuation, other text) and a line whose 
 29 February of a common year; hour 24 or minute or second 60 is no header time at all) or lies outside the storable range are
 **shipped raw**: the whole line as the message, empty `host` and `program`, pid 0, no priority, and the capture time of the previous
 line read from the file. The import skips such lines; live, a skipped line would be lost without a gap.
+
+**Error log lines.** The grammar of a line, the level and the mapping to `priority` and `message` are the import's
+([Log import](log-import.md), *Plesk and web server error logs*), ported to Go in `internal/errorlogline`: hand-written, linear, on bytes, with
+the import's limits (a process ID of at most 10 digits, a request ID and a module of at most 64 characters, a fraction of 1 to 6 digits).
+`log` is the configured path, `source` the format's name (`plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error`), `host` and
+`program` are empty, `pid` is 0 and there is no `event`; the texts are cleaned and cut as for the journal. A line of the format whose time
+exists and lies in the storable range gets its priority (`debug` for Plesk `DEBUG`, nginx `debug` and Apache `trace1` to `trace8`), so `log_shipping.min_priority`
+(default `info`) drops those lines; a drop rule's `program` never matches them. Every other non-empty line (PHP output that nginx copied
+from FastCGI's standard error, a stack trace of the panel log, an Apache start-up message, a line of another format in the file, a
+line of the format with a time that does not exist or lies outside the storable range) is **shipped raw** as for a `syslog` file,
+without a warning per line: the whole line as `message`, no priority, and the capture time of the line read from the file before it.
+The time of a line carries its year; it is local time in the zone of `/etc/localtime` (*Time of a year-less line*), resolved by the
+import's rules (month 1 to 12, a day that exists, hour 0 to 23, minute and second 0 to 59, the year 1677 to 2262), with the skipped
+hour shifted forward and the repeated hour resolved by the previous instant of the file's lines of the format, which is kept per
+configured path across runs and rotations. While `/etc/localtime` cannot be read, an error log file is not read either (positions
+kept, no gap). Where the agent differs from the import:
+
+- A raw line whose predecessor the agent did not read (the first line after a first start at the end of the file, of a file that appeared
+  later, after a truncation or a lost rotation) takes the file's last time, where the import takes the file's modification time; the
+  first raw line of the new file after a found rotation takes the renamed file's last time. Such a record differs from the import's in
+  `captured_at` only.
+- The first lines of a new file in the repeated hour can get another offset than on import, which starts each file afresh; the agent keeps the
+  previous instant across rotations but not across a restart.
+- The agent reads local times in the zone of `/etc/localtime`, the import in `import.time_zone`; the capture times differ by any
+  difference between them, and by the panel log's own zone should it differ (unverified, record 0092).
+- **E11, backfilled records.** A record whose capture time lies more than 10 minutes from its receive time is stored backfilled and never
+  alerts ([Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*; record 0130). That holds for a raw line
+  that takes an hours-old predecessor's time (an Apache start-up message at dawn) and for every panel line should the panel log's
+  zone differ from the host's.
+- **E12, invalid UTF-8.** The agent replaces each invalid byte with U+FFFD, the import each maximal invalid sequence: for the bytes
+  `e2 82 41` the agent's message holds two U+FFFD and the import's one (measured with `procstats.CleanText` and `Utf8Text.Decode`; `ff fe` and
+  `c0 af` give two on both, `f0 9f 98 41` three and one), so `message`, and near the 16,384-byte cut `truncated`, can differ. This is the
+  existing difference of every agent file format, not of the error logs alone.
+- **E13.** When a rotation leaves a new file the agent cannot read, the rest of the renamed file waits with it under the standing
+  `log file not readable` warning and is read once the path opens again; a restart in between loses the renamed file's descriptor, and a
+  renamed file no longer found then becomes a gap (*Rotation while the agent was stopped*).
+- A live record of one of these sources and an import of the same period are both stored ([Log import](log-import.md), *Duplicates*).
+
+A client who can write a line feed into a logged request can forge a line of the format; it is shipped as such and matched by the
+signatures, as on import. The agent cannot read these files unless the operator grants it by hand (*Rights*, `deploy/agent/README.md`).
 
 **Time of a year-less line.** It is local time in the zone of `/etc/localtime` (at most 64 KiB, read at every run that reads a file;
 an error never falls back to UTC). The year is the year of the run's start in that zone, or the year before when the line would lie
@@ -1245,7 +1289,13 @@ and reading restarts at offset 0.
 
 **A file's last time** (`last_time` of its position) is the capture time of the last line read from it, shipped or filtered (a raw
 line takes the previous line's); when the collector takes a position without reading a line, it is the start of that run. It starts
-the gaps of a truncation and of a lost rotation.
+the gaps of a truncation and of a lost rotation. **Its bound (every file format).** A line dated after the start of the run that reads it
+(a forged year such as `2262/04/11`, an RFC 3339 `syslog` time in 2262, a clock stepped back) keeps its own capture time but leaves
+the file's last time at its previous value (an earlier line's time, else the start of the run that took the position), and a raw line
+after it takes that value; the run's latest time takes at most the run's start, and the gap closing a lost rotation ends at most at the
+run's start. So the gaps of a truncation, a lost rotation and a given-up span start at or before every line they lose, also after a run
+stopped on its budget right after the line, and end at or before the run's start, a given-up span's not before the start of the dropped
+run that read the line. A future time saved in the state file before this rule stays until a line dated before its run (record 0121).
 
 **First start and changed files.** Without a saved position — a first start, no usable state, a file added to `log_shipping.files` —
 a file that exists starts at its end, so nothing older is shipped (history is imported with `vandoxd import`); a file that is missing
@@ -1365,7 +1415,7 @@ test and the C# import's test both read.
 - A refused journal file gives its gap again after every agent start; a file replaced by a link between the listing and the read of the
   journal directory is followed, as for the kernel collector.
 - Lines are shipped per source and, in the journal, per ID, not merged by time across sources.
-- Live lines carry no classification (`event`, the mail markers) until #290; the error log formats follow in #289.
+- Live lines carry no classification (`event`, the mail markers) until #290.
 
 ## Backup runs
 
@@ -1964,7 +2014,11 @@ by the agent logs nothing.
   walk of *Log shipping* that refuses a symbolic link in any element and a file with more than one link, so a service user who replaces
   its log file or a directory with a link to another file (`/etc/shadow`) never gets that file shipped. A file that the agent's user and
   groups cannot read, or that lies below a directory they cannot search, is logged `log file not readable` with the reason
-  `permission denied` and not shipped. The unit must keep the journal directories and the configured files reachable (no
+  `permission denied` and not shipped. The error logs of Plesk and the web servers (`/var/log/nginx/error.log`, `/var/log/apache2/error.log`,
+  `/var/log/plesk/panel.log`, `/var/log/sw-cp-server/error_log`) are such files unless the operator has granted the agent read by hand with the
+  commands of `deploy/agent/README.md` (*Error logs of Plesk and the web servers*; record 0121): no new right of the agent in the unit or the installer, but
+  the grant widens what a compromised agent can read, and the README's statements about the server's own file rights, rotation and `plesk repair fs`
+  are marked unverified. The unit must keep the journal directories and the configured files reachable (no
   `InaccessiblePaths=` or `TemporaryFileSystem=` over them).
 - **Backup check.** It reads `/proc` as the process collector does and needs no right of its own.
 - **State file and spool.** The agent writes only in `spool.directory`: `agent-state.json` (*Agent state*) and the spool's own files
@@ -2180,7 +2234,9 @@ denies the six calls of record 0122, `LoadCredential=agent-token:/etc/vandox/age
 - [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why the log
   collector reads every system and user journal file with a position per sequence-number ID, decodes zstd items with a library under
   fixed bounds, opens configured files only through a link-free walk, stores their positions by the hash of the path, commits when the
-  scheduler reports a run kept and saves once more at the stop, and bounds drop patterns by their compiled size.
+  scheduler reports a run kept and saves once more at the stop, and bounds drop patterns by their compiled size; for the error log
+  files (#289) why the grammars are ported from the import and pinned by golden records, why a line dated after its run never moves a gap start, and why
+  the read grant is made by hand.
 - [0122](../decisions/0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) — why the
   agent holds `CAP_SYS_PTRACE` alone and not `CAP_DAC_READ_SEARCH`, which barrier stops each write vector examined, which residual
   remains (files whose own mode grants the agent write, reached through other processes' `cwd`, `root` and `exe` links), why the bounding set
@@ -2215,8 +2271,9 @@ under `testdata/journal/compact/`, and under `testdata/journal/systemd-255/` two
 `kernel.export` and `live.export` (header machine ID replaced); `live.export`, `live-records.jsonl` and
 `zstd-frames.txt` for the log collector, whose binary files the writer generates at test time with zstd frames), `internal/kernevents` (kernel event
 collector and boot check), `internal/logship` (log shipping collector: journal, configured files with the link-free open, filter,
-positions; fixtures `testdata/logs/mail.log`, `kern.log-oom`), `internal/syslogline` (the syslog line rules, the year-less time and
-`/etc/localtime`), `internal/zstdfield` (the bounded zstd decoder over `github.com/klauspost/compress`), `internal/backups` (backup run
+positions; fixtures `testdata/logs/mail.log`, `kern.log-oom`), `internal/syslogline` (the syslog line rules, the year-less time, `Clock.ResolveLocal` for a time with its year and
+`/etc/localtime`), `internal/errorlogline` (the line grammars of the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs; fixtures
+`testdata/logs/` with golden records the C# import writes), `internal/zstdfield` (the bounded zstd decoder over `github.com/klauspost/compress`), `internal/backups` (backup run
 check), `internal/agentstate` (the state file, the `state` job and the save at the stop), `internal/sender` (the sender, its HTTP transport and the backfill throttle; tests use a fake transport and `net/http/httptest`; the
 measurements `TestSender_MemoryBound` and, in `internal/spool`, `TestReferenceStream_BackfillRate`), `internal/spool` (the spool: data and meta
 files, sequence numbers, reading, acknowledgements, drops and damage; its tests generate the reference stream and run the hard-kill and

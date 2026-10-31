@@ -121,7 +121,7 @@ Dovecot. The web server and PHP have a signature each: `nginx_disk_full` reads n
 `pwritev()`, `writev()` at `crit` or `alert`), `php_disk_full` PHP's `Notice` about a failed write and `php_too_many_connections`
 the `mysqli` and PDO errors above, as nginx, `sw-cp-server` (nginx's format) and Apache (`mod_proxy_fcgi`, `mod_fcgid`, PHP's Apache
 module) log them. The formats were checked against the sources of nginx 1.18.0, Apache httpd 2.4.52, `mod_fcgid` and PHP 7.4 and
-8.3, not against logs of the server. Only the **first PHP message** after the server's prefix is read, so an error that follows an
+8.3, not against logs of the server. The signatures read the agent's live records of these sources (`nginx-error`, `sw-cp-server-error`, `apache-error`) as they read the imported ones: the agent's mapping gives the same source, priority and message ([Agent](agent.md), *Error log lines*), and the golden records of the import pin it. Only the **first PHP message** after the server's prefix is read, so an error that follows an
 earlier PHP message of the same request is missed. An Apache line without a module name (`[:warn]`) is not read, and PHP's write
 error is read only when ` in /<script path>` follows the error text, so a write error without a script (origins `Unknown`,
 `PHP Request Shutdown`, `in Unknown on line 0`, e.g. a session or output flush at shutdown) is not recognized. Not read at all: the

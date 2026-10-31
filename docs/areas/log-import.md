@@ -350,7 +350,8 @@ every message twice as well (sources `journal` and `syslog`), MariaDB entries in
 export of the same period store each mail line up to three times with the same classification. The lines the agent ships live
 ([Agent](agent.md), *Log shipping*) and an import of the same period are stored twice as well: the import does not know which lines
 arrived live, and the live records carry the agent's `log` (the absolute path of a file) where the import's carry the listed name, and
-no classification. The agent itself ships no history from before its first start, which is what the import is for.
+no classification. That holds for the Plesk and web server error logs as well: a line the agent ships live from a configured
+`plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error` file is stored again when the same period is imported. The agent itself ships no history from before its first start, which is what the import is for.
 
 ## MariaDB error log
 

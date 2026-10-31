@@ -324,8 +324,9 @@ see *Name pattern*: the event a producer recognized in the line, such as `mariad
 empty `host` and an empty `event`; the C# decoder reads a line without them as empty.
 
 Producers: the import ([Log import](log-import.md)) and the agent's `logs` collector ([Agent](agent.md), *Log shipping*). The agent's
-records have source `journal` with `log` `journal`, or source `syslog` with `log` the configured absolute path, and the `host`,
-`program`, `pid`, `priority` and `message` the import's journal and syslog mappings give for the same line; like the import it sets
+records have source `journal` with `log` `journal`, or source `syslog`, `plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error` with `log` the
+configured absolute path, and the `host`, `program`, `pid`, `priority` and `message` the import's journal, syslog and error log mappings give for the
+same line (an error log line has no `host`, `program` or `pid`); like the import it sets
 `truncated` also when it cut `host` or `program` to 1,024 bytes. Its `event` is always empty: live lines are not classified. A
 journal line and the same line of an rsyslog file are two records, as in the import.
 

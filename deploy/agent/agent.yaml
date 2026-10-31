@@ -126,8 +126,11 @@ log_shipping:
   min_priority: info
   # Log files shipped besides the journal: a list of at most 16 mappings with `path` (an absolute, clean path
   # of at most 1024 bytes, each listed once; it must not be, or lie behind, a symbolic link) and `format`
-  # (only `syslog` so far: the traditional or the RFC 3339 form of rsyslog's files). Their year-less times
-  # are read in the time zone of /etc/localtime. A file that did not exist when the agent started is read
+  # (`syslog`: the traditional or the RFC 3339 form of rsyslog's files; or an error log of Plesk and the web
+  # servers: `plesk-panel`, `nginx-error`, `sw-cp-server-error` for Plesk's own web server, `apache-error`; any
+  # other value is refused). The year-less times of `syslog` files and the times of the error logs, which carry
+  # their year, are read in the time zone of /etc/localtime. A line that is not of the configured format is
+  # shipped as it is, without a priority. A file that did not exist when the agent started is read
   # from its first line once it appears, a file that exists starts at its end: the history before the first
   # start is imported with `vandoxd import`. The agent follows a rotation by rename and a truncation in place.
   # The agent's groups (`adm`, `systemd-journal`) decide which files it can read; any other file is logged
@@ -137,6 +140,17 @@ log_shipping:
   #
   #   files:
   #     - {path: /var/log/mail.log, format: syslog}
+  #     - {path: /var/log/nginx/error.log, format: nginx-error}
+  #     - {path: /var/log/apache2/error.log, format: apache-error}
+  #     - {path: /var/log/plesk/panel.log, format: plesk-panel}
+  #     - {path: /var/log/sw-cp-server/error_log, format: sw-cp-server-error}
+  #     # The logs of one domain, listed one by one within the limit of 16 files (the agent finds no file by pattern);
+  #     # the format of each depends on the web server that writes it, and a line of another format is shipped as it is:
+  #     - {path: /var/www/vhosts/system/<domain>/logs/error_log, format: apache-error}
+  #     - {path: /var/www/vhosts/system/<domain>/logs/proxy_error_log, format: nginx-error}
+  # The agent can read these error logs only after you grant it read by hand (deploy/agent/README.md, "Error
+  # logs of Plesk and the web servers"): they carry client IP addresses and request lines with query strings,
+  # all shipped to the backend.
   files: []
   # Rules for lines that are not shipped: a list of at most 64 mappings, each with at least one of `log`
   # (`journal` or a path listed in `files`), `program` (compared whole and literally), `priority` (a line of

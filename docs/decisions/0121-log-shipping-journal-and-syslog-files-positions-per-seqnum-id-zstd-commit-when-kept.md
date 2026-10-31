@@ -65,7 +65,10 @@ For the error logs (#289):
     rotation creates inherits it, its effect on the real server unverified. Measured in the plan review: plain `setfacl` follows a link
     planted by a directory's owner and would grant the agent its target, so the procedure uses `setfacl -P` after `namei -l`; a default
     ACL replaces the umask for every later file and subdirectory, so it is recommended only where rotation uses `create <mode>`, with
-    `g::` and `o::` no wider than the current files.
+    `g::` and `o::` no wider than the current files. The stand-in dry run of the plan (Ubuntu 24.04, acl 2.3.2, logrotate 3.21.0; no container
+    daemon was available) showed the file's ACL alone survives `copytruncate` and `create` without a mode and is lost by `create 0640` and
+    `create 0600`; the default ACL keeps it for `create 0640`, and with `create 0600` it has no effect (the mask is empty). The README states each
+    result as measured there, not on a Plesk server.
 14. **A line's time as the file's bookkeeping time** — as #37 did; but these formats, and RFC 3339 syslog lines, carry a year the
     writer controls, and a forged year in 2262 would move the start of a truncation's or a given-up span's gap past the lost lines.
     **The run's start plus the 24-hour tolerance of year-less times** still lets a gap start a day ahead. **The earlier of the line's
