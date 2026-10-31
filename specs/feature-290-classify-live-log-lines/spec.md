@@ -40,7 +40,8 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
 - E1: Live input has no "normal end of input". The import's bounds count capture time, and so do the live ones. An open MariaDB
   entry or kernel report closes at the import's own ends: a line that ends it, the 16,384-byte or 2,000-line bound, or a line of
   its source captured more than 60 seconds after its first line. It also closes when its source has been read to its end and
-  the (injected) clock is more than 60 seconds past the first line's capture time. It is never held indefinitely. In a backlog
+  the (injected) clock is more than 60 seconds past the earlier of the first line's capture time and the start of the run that
+  read it. A forged line dated in the future is therefore never held longer. It is never held indefinitely. In a backlog
   (after a restart, or runs cut by their 1,000-record budget), a continuation line captured within 60 seconds but read later still
   joins, as on import. Two closes differ from the import, which keeps such an entry open until a later line ends it, and both are
   named in the Agent area. First, a line captured within 60 seconds of the header that arrives after a line already more than 60
@@ -68,9 +69,9 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
 - E7: Lines that the import does not run through these stages stay unchanged: the error log formats (`plesk-panel`,
   `nginx-error`, `sw-cp-server-error`, `apache-error`) and the raw lines of a `syslog` file (no syslog header, an impossible time).
 - E8: Lines of different sources (the journal; each configured file) are never grouped or ordered together, as the import groups
-  only within one file. In the journal each sequence-number ID of the system files is a source of its own, with its own recovery
-  state. The entries of the user files (`user-<UID>.journal`, web-space users under journald's `SplitMode=uid`) get the mail
-  classification only: no MariaDB entries and no kernel reports. They never join or end the server's entries. journald writes
+  only within one file. In the journal each sequence-number ID is a source of its own, with its own recovery state. An entry read
+  from a user file (`user-<UID>.journal`, web-space users under journald's `SplitMode=uid`) gets the mail classification only:
+  no MariaDB entries and no kernel reports. That holds whatever ID journald gives the file. They never join or end the server's entries. journald writes
   the MariaDB server's and the kernel's lines to the system files, so this differs from the import only for `mariadbd` or
   `kernel` lines that a user forged in a user file. The import groups those; live they stay single lines. The Agent area names
   the difference.
@@ -112,7 +113,8 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
   - an entry with no further line, its source read to its end, is stored once the clock is more than 60 seconds past its first
     line's capture time, and not before;
   - in a backlog, a continuation line captured 50 seconds after the header but read 90 seconds later joins the entry;
-  - a line of the source captured 61 seconds after the header closes the entry, even if it is read at once.
+  - a line of the source captured 61 seconds after the header closes the entry, even if it is read at once;
+  - a header dated after the start of the run that reads it closes 60 seconds after that run's start, by the clock.
   (E1)
 - [ ] AC5: An entry or report is open, and one of these ends happens:
   - a clean agent stop and start: every line of it is stored exactly once;
@@ -132,8 +134,8 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
   import's bounds. Lines of other programs are stored without waiting for the open entry: their records have a lower record
   identity than the entry's (E4, S8).
 - [ ] AC8: Lines of the journal and of a configured file are never joined into one record. A `mariadbd` header and a kernel OOM
-  start line in a user journal file stay single lines with the mail classification only, and do not end an open entry of the
-  system files (E8).
+  start line in a user journal file stay single lines with the mail classification only, also when the user file shares its ID
+  with a system file, and do not end an open entry of the system files (E8).
 - [ ] AC9: A batch of the previous agent version is accepted by the new backend and a batch of the new agent by the previous
   backend's decoder; records stored before the change are not altered (E6).
 - [ ] AC10: A gap the logs collector records in a source ends that source's open entry and report; the next line does not join
@@ -183,7 +185,8 @@ Devil's Advocate, spec challenge. Every objection was accepted.
   - One grouping state per user journal ID would make memory grow with the number of web-space users.
 
   E8 and AC8 now give each system-file ID its own grouping state and give user journal entries the mail classification only.
-  This also takes away the forgery that the revision accepted. The AC1 fixture uses one system ID.
+  This also takes away the forgery that the revision accepted. The AC1 fixture uses one system ID. After the plan challenge, a user
+  file is decided by the file it comes from, not by its ID.
 - Minor 4, lines without an equal import record. Accepted. AC1 compares only lines that have an import record; raw and error
   log lines must equal today's live record. The fixture is valid UTF-8 and read in one zone.
 - Minor 5, dropped runs and gaps. Accepted. E9 with AC3: a re-read line never joins twice. E10 with AC10: a gap ends the open

@@ -101,19 +101,26 @@ For live classification (#290):
     and the timeline do not change.
 18. **Keep the open groups in the state file** — a restart would resume exactly. But one MariaDB entry and one kernel report per
     source are up to 16 KiB each, for the journal and 16 files, against the state file's 64 KiB bound. Rejected.
-19. **Emit the open groups at a clean stop through a new scheduler hook** — no state needed. But it needs a last run after the
-    stop signal, which the scheduler does not have, and it does not help a crash. Rejected.
-20. **Replay marks** (chosen). The saved state keeps, per source, the position of the oldest held line and the first positions of
-    the open groups (at most two). After a restart the collector reads again from the mark up to the saved position and runs the
-    stages, but sends only the records of those open groups. This covers a clean stop and a crash alike. A crash repeats only
-    today's residual, plus a group that closed after the last save.
-21. **One grouping state for the whole journal, in shipping order** — close to the time-merged export. But a replay over several
-    IDs does not reproduce the original interleaving. And one state per user ID would grow with the number of web-space users.
-    **One state per seqnum ID of the system files; user files get the mail classification only** (chosen). journald writes the
-    MariaDB server's and the kernel's lines to the system files (`SplitMode=uid` splits off only UIDs of regular users).
+19. **Emit the open groups at a clean stop through a new scheduler hook, and hold the saved position back at the oldest held
+    line** (chosen, after the plan review). A clean stop sends every group, possibly cut in two, and repeats nothing. A crash
+    reads the holding source again from that line, which the spec allows (E2). Nothing read again is ever discarded. The hook
+    runs after the runners stop and before the last save, while the spool is still open.
+20. **Replay marks** — the saved state would keep, per source, the oldest held line and the first positions of the open groups,
+    and a restart would read again and send only those groups. Rejected in the plan review. Discarding "already sent" output is
+    right only if the reading again is identical. A changed drop rule, zone or agent version breaks that, and held lines are then
+    lost without a gap. The marks also needed new invariants in the state file: their count, and agreement with the 256-position
+    cap.
+21. **One grouping state for the whole journal, in shipping order** — close to the time-merged export. But stages for every user
+    ID would grow with the number of web-space users. **Stages per seqnum ID, kept only while a group is open, with every entry
+    of a user file given the mail classification alone** (chosen). The rule decides by the file, not the ID, so it does not
+    depend on how a systemd version assigns IDs. journald writes the MariaDB server's and the kernel's lines to the system
+    files.
 22. **Keep the MariaDB recovery state in the state file** — `mariadb.recovery_end` would survive a restart in the middle of a
     recovery. But it adds a field for a case that needs both a restart and a crash recovery at once, and the spec accepts the
     loss. Rejected.
+23. **Expire a group 60 seconds after its first capture time** — what the import counts. But a `syslog` line carries a time its
+    writer may choose, and a group dated in the future would never expire by the clock. **The earlier of the first capture time
+    and the start of the run that read it** (chosen), the rule of option 14.
 
 ## Decision
 
@@ -129,12 +136,16 @@ For #289 the configured files also take the formats `plesk-panel`, `sw-cp-server
 never moves the bookkeeping times (options 9 to 14). The rules are in the
 Agent area (*Log shipping*).
 
-For #290 the `logs` collector runs, after its filter, a Go port of the import's three stages (`internal/logstages`) on the
-journal's system-file IDs and on configured `syslog` files, and the mail classification alone on user journal files. An open
-group closes on the import's ends, on a shipped line of its source captured more than 60 seconds after the group's first line,
-or, once the source is read to its end, by the clock. It also closes at a gap of its source, at the end of a renamed file and at
-the end of every journal ID except the online system file's. Replay marks in the state file let a restart rebuild the open groups
-without sending a line twice (options 15 to 22). The rules are in the Agent area (*Log shipping*).
+For #290 the `logs` collector runs a Go port of the import's three stages (`internal/logstages`) after its filter. It runs
+them per journal seqnum ID and per configured `syslog` file, and gives entries of user journal files the mail classification
+alone. An open group closes:
+- on the import's ends;
+- on a shipped line of its source captured more than 60 seconds after its anchor;
+- by the clock once the source is read to its end;
+- at a gap of its source, at the end of a renamed file, and at the end of every journal ID except the online system file's.
+
+A source with an open group is saved at its oldest held line. The agent's stop sends the open groups before the last save
+(options 15 to 23). The rules are in the Agent area (*Log shipping*).
 
 ## Consequences
 
@@ -171,9 +182,16 @@ without sending a line twice (options 15 to 22). The rules are in the Agent area
   the spool (#38) to store positions with the records.
 - Live lines get the import's classification (#290). The C# and Go stages must change together: the golden records of
   `testdata/journal/classify.export` and of `testdata/logs/classify-syslog.log` fail when one changes alone.
-- A live record differs from the import's at the edges named in the Agent area: an entry is closed by a line more than 60
-  seconds later or by the end of an ID or renamed file, user journal files are not grouped, and the recovery state is lost at a
-  restart. Its record identity orders it at its close, not at its header.
+- A live record differs from the import's at the edges named in the Agent area:
+  - an entry is closed by a line more than 60 seconds later, by the clock, or by the end of an ID or renamed file;
+  - user journal files are not grouped;
+  - the recovery state is lost at a restart.
+
+  Its record identity orders it at its close, not at its header.
+- A crash repeats the lines of a holding source from its oldest held line; a clean stop repeats nothing. The scheduler gains a
+  stop hook that only this collector uses so far.
+- Forged mail, MariaDB and kernel lines now make events live, not only on import. Later alert rules (#56, #61) must weigh that
+  ([Detection, alerts and reports](../areas/detection-and-reports.md), *Limitations*).
 - A MariaDB line now waits up to 60 seconds, plus the shipping delay, unless the next MariaDB line ends its entry earlier. That is
   well inside the 10-minute live allowance (record 0130).
 - Error log records equal the import's except `log` for a line of valid UTF-8 read after its predecessor in the same zone. They differ
