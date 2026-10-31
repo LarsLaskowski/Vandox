@@ -22,3 +22,5 @@ are quoted in full.
 | 2026-10-31 19:55 | 6 Documentation (G2) | squad-dev | Docs written: agent.md (Rotation, last time, Gaps, Logging, group close, Residuals), deploy/agent/README.md, .squad/project.md; decision-check clean (sonnet/medium · 10,126 tokens · 4 tool uses · 29 s · continued from 6 Implement (G1)) |
 | 2026-10-31 19:58 | 7 Code check | Orchestrator | main unchanged since branch; gofmt, build, vet, analyzer gate (golangci-lint), scope-check, decision-check, config-check PASS; Coverage gate PASS; Sonar gate not verified locally (HTTP 403: non-main branch data), authoritative check: sonar-check.py pr on the PR |
 | 2026-10-31 20:01 | 8 Review round 1 | squad-reviewer | APPROVE at 0c2e83f; no blocking or non-blocking findings (opus/medium · 77,539 tokens · 14 tool uses · 161 s) |
+| 2026-10-31 20:02 | 9 PR approval | squad-lead | APPROVED: no open decision; record 0121 Accepted, area docs complete (opus/medium · 43,687 tokens · 7 tool uses · 37 s) |
+| 2026-10-31 20:02 | 10 Pull request | Orchestrator | Working record posted to issue #291; work folder removed; draft PR opened |
