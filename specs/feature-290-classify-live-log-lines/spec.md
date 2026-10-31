@@ -41,9 +41,8 @@ single lines. The event signatures (`mariadb_crash`, `mariadb_recovery_start`, `
   entry or kernel report closes at the import's own ends: a line that ends it, the 16,384-byte or 2,000-line bound, or a line of
   its source captured more than 60 seconds after its first line. It also closes when its source has been read to its end and
   the (injected) clock is more than 60 seconds past the earlier of the first line's capture time and the start of the run that
-  read it. A forged line dated in the future is therefore never held longer. A group is never held indefinitely while its source
-  is read to its end, or while its line times are reception times. A flood of lines with chosen times within the window can keep
-  a group open as long as the flood lasts; the Agent area names this. It is never held indefinitely. In a backlog
+  read it. A forged line dated in the future therefore closes 60 seconds after its run. A flood of lines with chosen times within the window can keep
+  a group open as long as the flood lasts; the Agent area names this. In a backlog
   (after a restart, or runs cut by their 1,000-record budget), a continuation line captured within 60 seconds but read later still
   joins, as on import. Two closes differ from the import, which keeps such an entry open until a later line ends it, and both are
   named in the Agent area. First, a line captured within 60 seconds of the header that arrives after a line already more than 60

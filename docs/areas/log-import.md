@@ -198,7 +198,8 @@ matters); the syslog parser claims weakly (name match) a file named `syslog` or 
 `-YYYYMMDD` suffix, or whose first line has a syslog header. Both parsers produce `log_line` records with origin `import`
 and sequence 0 and pass them through three stages in this order: the classification of mail lines (see *Mail lines
 (Postfix and Dovecot)* below), MariaDB entries (see *Lines from the journal and syslog* under *MariaDB error log*), then
-kernel reports (see *Kernel reports* below).
+kernel reports (see *Kernel reports* below). The agent's `logs` collector runs a Go port of the same three stages on its live lines
+([Agent](agent.md), *Log shipping*, *Classification*), bound to the same golden records, with the differences named there.
 
 **Journal export (`journalctl -o export`).** Entries are blocks of fields separated by an empty line. Text fields are
 `NAME=value\n`, binary fields `NAME\n`, a 64-bit little-endian length, the bytes and `\n`. Mapping: `captured_at` from
@@ -349,8 +350,8 @@ There is no deduplication across sources. Importing a journal export and the sys
 every message twice as well (sources `journal` and `syslog`), MariaDB entries included. `mail.log`, `syslog` and a journal
 export of the same period store each mail line up to three times with the same classification. The lines the agent ships live
 ([Agent](agent.md), *Log shipping*) and an import of the same period are stored twice as well: the import does not know which lines
-arrived live, and the live records carry the agent's `log` (the absolute path of a file) where the import's carry the listed name, and
-no classification. That holds for the Plesk and web server error logs as well: a line the agent ships live from a configured
+arrived live, and the live records carry the agent's `log` (the absolute path of a file) where the import's carry the listed name; they carry
+the same classification, but a MariaDB entry or kernel report can be split differently at a restart. That holds for the Plesk and web server error logs as well: a line the agent ships live from a configured
 `plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error` file is stored again when the same period is imported. The agent itself ships no history from before its first start, which is what the import is for.
 
 ## MariaDB error log
