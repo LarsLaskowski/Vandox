@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/logstages"
 	"github.com/LarsLaskowski/Vandox/internal/syslogline"
 )
 
@@ -55,6 +56,14 @@ type fileState struct {
 	clock *syslogline.Clock
 }
 
+// stageKey names the source of a Stages: one journal sequence number ID, or one configured file by its index.
+type stageKey struct {
+	// file tells that the source is a configured file, whose index is index; otherwise the source is the journal ID id.
+	file  bool
+	id    [16]byte
+	index int
+}
+
 // state is what the collector knows about its sources: the committed state, or the fork a run works on.
 type state struct {
 	journal map[[16]byte]*jpos
@@ -63,6 +72,10 @@ type state struct {
 	last time.Time
 	// refused holds the journal files the reader refuses, by name, with the end of the last gap recorded for them.
 	refused map[string]time.Time
+	// stages holds a Stages only for a source with an open group.
+	stages map[stageKey]*logstages.Stages
+	// recovery holds the sources whose MariaDB crash recovery is open while they hold no stages.
+	recovery map[stageKey]bool
 }
 
 // clone returns a copy a run may change. The descriptors are shared; the files of the copy that are not in the original are the run's.
@@ -70,6 +83,14 @@ func (s *state) clone() *state {
 	c := &state{journal: make(map[[16]byte]*jpos, len(s.journal)), files: slices.Clone(s.files), refused: maps.Clone(s.refused)}
 	if c.refused == nil {
 		c.refused = map[string]time.Time{}
+	}
+	c.stages = make(map[stageKey]*logstages.Stages, len(s.stages))
+	for k, st := range s.stages {
+		c.stages[k] = st.Clone()
+	}
+	c.recovery = maps.Clone(s.recovery)
+	if c.recovery == nil {
+		c.recovery = map[stageKey]bool{}
 	}
 	for id, p := range s.journal {
 		cp := *p

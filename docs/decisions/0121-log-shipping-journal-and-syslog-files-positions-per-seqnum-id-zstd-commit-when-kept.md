@@ -1,9 +1,9 @@
-# 0121: Log shipping reads the journal per seqnum ID with bounded zstd decoding and syslog and error log files without links, and commits its positions when the scheduler keeps a run
+# 0121: Log shipping reads the journal per seqnum ID with bounded zstd decoding and syslog and error log files without links, commits its positions when the scheduler keeps a run, and classifies live lines with a Go port of the import's stages
 
 - **Status:** Accepted
-- **Date:** 2026-10-23
+- **Date:** 2026-10-31
 - **Area:** Agent
-- **Source:** Issue #37, Issue #289
+- **Source:** Issue #37, Issue #289, Issue #290
 - **Supersedes:** —
 
 ## Context
@@ -23,6 +23,11 @@ web signatures (record 0094) read live lines. The import parses them (record 009
 lines); the agent does not reuse the .NET parsers (0073). The Product Manager decided that the agent keeps its rights: a file the group
 `adm` cannot read is not shipped, and the operator grants read access by hand as `deploy/agent/README.md` describes. No line of the
 server's logs is available, so the formats stay as unverified as record 0092 states.
+
+#290 gives live lines the import's three stages: the mail classification, MariaDB entries and kernel reports
+([Log import](../areas/log-import.md), *System log parsers*). A live record must equal the import's record of the same line
+(spec of #290). The stages hold lines for up to 60 seconds of capture time, and live input never ends. No held line may be lost
+silently, neither at an agent crash nor at a backend crash. The filter keeps judging the mapped line.
 
 ## Options considered
 
@@ -81,6 +86,45 @@ For the error logs (#289):
     gap at the run's start rather than at an earlier honest time. The record keeps its own time. Positions saved before this change with a future time (RFC 3339 syslog lines only)
     stay unbounded until the next line dated before its run is read: accepted.
 
+For live classification (#290):
+
+15. **Classify at ingest, in the backend, with the C# stages** — one implementation, so parity holds by construction. But a MariaDB
+    entry or kernel report merges several agent records, each with its own sequence number, into one stored record. Storage
+    deduplicates and finds sequence gaps by those numbers (security area 1, record 0130), so the merged members would read as
+    missing, and every later record would be stored backfilled. The backend also acknowledges a batch before an entry it holds is
+    complete, so it would have to persist the open entries in a new table to survive a crash. Rejected.
+16. **Classify each line at ingest without grouping** — no state, but it fails the spec's equality and cuts crash reports into
+    single lines, which have no `mariadb.abort` message to match. Rejected.
+17. **Port the stages to Go and run them in the `logs` collector after the filter** (chosen). This is the third port of an import
+    grammar to Go, after `internal/syslogline` and `internal/errorlogline`. Parity is bound, as in option 12, by golden records
+    that the C# import writes and the Go tests read. Each grouped record gets its own sequence number when it is sent, so storage
+    and the timeline do not change.
+18. **Keep the open groups in the state file** — a restart would resume exactly. But one MariaDB entry and one kernel report per
+    source are up to 16 KiB each, for the journal and 16 files, against the state file's 64 KiB bound. Rejected.
+19. **Emit the open groups at a clean stop through a new scheduler hook, and hold the saved position back at the oldest held
+    line** (chosen, after the plan review). A clean stop sends every group, possibly cut in two, and repeats nothing. A crash
+    reads the holding source again from that line, which the spec allows (E2). Nothing read again is ever discarded. The hook
+    runs after the runners stop and before the last save, while the spool is still open. It waits for a worker the stop left
+    out, skips a collector whose worker does not return within the stop's deadline, runs the collector's flush in a worker of its
+    own, and commits only through `Kept`, so a hanging run or flush never overlaps the flush, the commit or the last save (plan
+    review, B4).
+20. **Replay marks** — the saved state would keep, per source, the oldest held line and the first positions of the open groups,
+    and a restart would read again and send only those groups. Rejected in the plan review. Discarding "already sent" output is
+    right only if the reading again is identical. A changed drop rule, zone or agent version breaks that, and held lines are then
+    lost without a gap. The marks also needed new invariants in the state file: their count, and agreement with the 256-position
+    cap.
+21. **One grouping state for the whole journal, in shipping order** — close to the time-merged export. But stages for every user
+    ID would grow with the number of web-space users. **Stages per seqnum ID, kept only while a group is open, with every entry
+    of a user file given the mail classification alone** (chosen). The rule decides by the file, not the ID, so it does not
+    depend on how a systemd version assigns IDs. journald writes the MariaDB server's and the kernel's lines to the system
+    files.
+22. **Keep the MariaDB recovery state in the state file** — `mariadb.recovery_end` would survive a restart in the middle of a
+    recovery. But it adds a field for a case that needs both a restart and a crash recovery at once, and the spec accepts the
+    loss. Rejected.
+23. **Expire a group 60 seconds after its first capture time** — what the import counts. But a `syslog` line carries a time its
+    writer may choose, and a group dated in the future would never expire by the clock. **The earlier of the first capture time
+    and the start of the run that read it** (chosen), the rule of option 14.
+
 ## Decision
 
 The `logs` collector reads every system and user journal file of the machine's journal directory with a position per seqnum ID,
@@ -94,6 +138,17 @@ For #289 the configured files also take the formats `plesk-panel`, `sw-cp-server
 `internal/errorlogline` with the import's mapping and raw lines, the agent gains no right, and a file line dated after its run's start
 never moves the bookkeeping times (options 9 to 14). The rules are in the
 Agent area (*Log shipping*).
+
+For #290 the `logs` collector runs a Go port of the import's three stages (`internal/logstages`) after its filter. It runs
+them per journal seqnum ID and per configured `syslog` file, and gives entries of user journal files the mail classification
+alone. An open group closes:
+- on the import's ends;
+- on a shipped line of its source captured more than 60 seconds after its anchor;
+- by the clock once the source is read to its end;
+- at a gap of its source, at the end of a renamed file, and at the end of every journal ID except the online system file's.
+
+A source with an open group is saved at its oldest held line. The agent's stop sends the open groups before the last save
+(options 15 to 23). The rules are in the Agent area (*Log shipping*).
 
 ## Consequences
 
@@ -128,7 +183,21 @@ Agent area (*Log shipping*).
   ordered per source, not across sources.
 - A crash repeats at most one state interval plus one collector interval of lines (the spec's E1); exact delivery across a crash needs
   the spool (#38) to store positions with the records.
-- Live lines carry no classification (`event`, mail markers) until #290.
+- Live lines get the import's classification (#290). The C# and Go stages must change together: the golden records of
+  `testdata/journal/classify.export` and of `testdata/logs/classify-syslog.log` fail when one changes alone.
+- A live record differs from the import's at the edges named in the Agent area:
+  - an entry is closed by a line more than 60 seconds later, by the clock, by the end of an ID, or at a rotation of its file;
+  - every time is capped at its run's start, so a future-dated line can neither hold a group nor close one early;
+  - user journal files are not grouped;
+  - the recovery state is lost at a restart (it outlives a source's stages otherwise).
+
+  Its record identity orders it at its close, not at its header.
+- A crash repeats the lines of a holding source from its oldest held line; a clean stop repeats nothing. The scheduler gains a
+  stop hook that only this collector uses so far.
+- Forged mail, MariaDB and kernel lines now make events live, not only on import. Later alert rules (#56, #61) must weigh that
+  ([Detection, alerts and reports](../areas/detection-and-reports.md), *Limitations*).
+- A MariaDB line now waits up to 60 seconds, plus the shipping delay, unless the next MariaDB line ends its entry earlier. That is
+  well inside the 10-minute live allowance (record 0130).
 - Error log records equal the import's except `log` for a line of valid UTF-8 read after its predecessor in the same zone. They differ
   where the agent cannot know what the import knows (a raw line without a predecessor, the previous instant carried across a rotation,
   an invalid byte replaced one by one) and where a raw line's borrowed old time makes the record backfilled (0130); the Agent area names

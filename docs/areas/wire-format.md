@@ -327,7 +327,7 @@ Producers: the import ([Log import](log-import.md)) and the agent's `logs` colle
 records have source `journal` with `log` `journal`, or source `syslog`, `plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error` with `log` the
 configured absolute path, and the `host`, `program`, `pid`, `priority` and `message` the import's journal, syslog and error log mappings give for the
 same line (an error log line has no `host`, `program` or `pid`); like the import it sets
-`truncated` also when it cut `host` or `program` to 1,024 bytes. Its `event` is always empty: live lines are not classified. A
+`truncated` also when it cut `host` or `program` to 1,024 bytes. Its `event` and priority are set by the stages of the agent's classification ([Agent](agent.md), *Classification*) as the import sets them: the mail events of Postfix and Dovecot lines and the MariaDB events, and a MariaDB entry or a kernel report is sent as one record; the error log sources have no `event`. A
 journal line and the same line of an rsyslog file are two records, as in the import.
 
 ### `gap`
