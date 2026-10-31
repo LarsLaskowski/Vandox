@@ -42,6 +42,13 @@ type Observer interface {
 	Kept(run Run, kept bool)
 }
 
+// Flusher is implemented by a Collector that has something to emit when the agent stops.
+type Flusher interface {
+	// Flush returns the records the collector still holds. It honors ctx where its source allows; the scheduler stops
+	// waiting at the deadline either way. The records are kept only when the collector's Kept reports true.
+	Flush(ctx context.Context, run Run) []model.Record
+}
+
 // Schedule is how often and how long a collector runs.
 type Schedule struct {
 	Interval         time.Duration // between the starts of two runs
@@ -123,6 +130,11 @@ func (s *Scheduler) Run(ctx context.Context) {
 		wg.Go(func() { r.loop(ctx) })
 	}
 	wg.Wait()
+}
+
+// Flush runs after Run has returned. For each collector that implements Flusher it waits for a worker the stop left out,
+// runs the collector's Flush within ctx, puts the records and reports to an observer whether they were kept.
+func (s *Scheduler) Flush(ctx context.Context) {
 }
 
 // SetPressure switches memory pressure mode on or off. A runner with a pressure interval then counts its next due time
