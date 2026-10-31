@@ -61,7 +61,7 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 - E8: Client text with a line feed can forge a line of the format, shipped as such and matched by signatures, as on import.
 - E9: The agent reads local times in the zone of `/etc/localtime`, the import in `import.time_zone`; capture times differ by any
   difference, and by the panel log's own zone should it differ (unverified, record 0092).
-- E10: A raw-line flood stays within the run budgets and memory bound.
+- E10: A raw-line flood stays within the existing run budgets.
 - E11: A record whose capture time lies more than 10 minutes from its receive time is stored **backfilled** and never alerts
   (*Live data and backfill*, record 0130): a raw line that takes an hours-old predecessor's time (an Apache start-up message at dawn) and every panel line under E9's zone difference. Accepted; named in the Agent area.
 - E12: Invalid UTF-8: the agent replaces each invalid byte with U+FFFD, the import each maximal invalid sequence, so `message`, and
@@ -123,8 +123,8 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   E11, E12).
 - [ ] AC12: After a line dated in 2262, the gaps of a truncation, a lost rotation and a given-up span start at or before the time of
   the first line they lose, also when the run that read it stopped on its budget right after it, and end at or before the run's
-  start, for an error log and for an RFC 3339 `syslog` line; the line keeps its own `captured_at` and a raw line after it gets the
-  file's time from before it (E14).
+  start, a given-up span's no earlier than the start of the dropped run that read the line, for an error log and for an RFC 3339
+  `syslog` line; the line keeps its own `captured_at` and a raw line after it gets the file's time from before it (E14).
 
 ## Out of scope
 
@@ -141,9 +141,9 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   Answered: no (`BuiltInSignaturesErrorLogFixturesYieldNothing`); AC2 uses the lines of
   `BuiltInSignaturesWebServerErrorLogsYieldPhpAndNginxEvents`, moved to a shared fixture.
 - Are the samples real server logs, as the issue says?
-  Answered: no, written from documentation; enough for parity with the import. No real lines exist (Product Manager).
-- Which zone, and does a raw line get an event or warning?
-  Answered: `/etc/localtime`; no event, no warning.
+  Answered: no, written from documentation; no real lines exist.
+- Which zone; does a raw line get an event or warning?
+  Answered: `/etc/localtime`; neither.
 - Are the four files readable by the agent on the server?
   Answered: Product Manager, option A: no new right; the README documents the by-hand grant; target-host facts stay unverified.
 

@@ -24,9 +24,9 @@ accepts only `syslog` (`internal/config/logshipping.go`, `logFormatReason`, `che
 | 7 | Any `log_line` source fitting the name pattern is accepted; signatures match stored lines by source and message, whatever the origin; the samples give no event (the signature lines are C# constants); `tzCentralEurope()` has Berlin's 2026 transitions; golden import records read by Go exist. | `docs/areas/wire-format.md:93`; `SignatureDetector.cs:132-135`; `BuiltInSignaturesTests.cs:806-861`; `world_test.go:648-660`; `journal_test.go:25-53` | confirmed |
 | 12 | Go replaces each invalid byte with one U+FFFD and .NET's decoder each maximal invalid subsequence, so `\xe2\x82A` gives two and one. | to verify: Dev, step 6, a scratch Go test of `procstats.CleanText` and a scratch C# run of `Utf8Text.Decode` on the bytes, before E12 is written into `docs/areas/agent.md` | unverified |
 | 13 | Measured by Security on Ubuntu 24.04 (acl 2.3.2, logrotate 3.21.0): with the file's ACL alone, `copytruncate` and `create` without a mode keep the agent's read, `create 0640 root root` and `create 0600 root root` lose it; with a default ACL, `create 0640` keeps it and `create 0600` leaves it without effect; a default ACL replaces the umask for new files (umask 077 gave 0644 in a 0755 directory) and is inherited by new subdirectories; `setfacl -P` leaves a link argument and its target untouched with exit 0, plain `setfacl` grants on the target. | to verify: Dev, step 6, the dry run's matrix on Ubuntu 22.04 (*Approach*); measured so far by Security on the session host | unverified |
-| 17 | A line time is used, besides the record, as the file's last time and the run's latest time (`files.go:326-337`), which start and end the gaps of a truncation, a lost rotation (`files.go:162,192,240,333`) and a given-up span (`state.go:106-114`, `logship.go:242-247`), and the state file keeps it (`internal/agentstate/agentstate.go:578,606`). A syslog year-less time is bounded to 24 h ahead (`clock.go:41-52`), an RFC 3339 syslog time and the new formats' times are not. | the files and lines named; Security's finding B1 | confirmed |
+| 17 | A line time is used, besides the record, as the file's last time and the run's latest time (`files.go:326-337`), which start and end the gaps of a truncation, a lost rotation (`files.go:162,192,240,333`) and a given-up span (`state.go:106-114`, `logship.go:242-247`), and the state file keeps it (`agentstate.go:578,606`); only a year-less syslog time is bounded (24 h, `clock.go:41-52`). | the files named | confirmed |
 | 18 | The existing test `truncationAfterAFutureLine` pins today's gap of a future-dated line, `[line, line + 1 µs)`. | `internal/logship/files_test.go:382-395` | confirmed |
-| 19 | A run stops on its budget right after any record (1,000 records, 4 MiB, 1 s), so lines written before its start can stay unread behind the line it stopped on; a bound of `minTime(at, r.start)` then starts the next gap at that run's start, past them. | `internal/logship/logship.go:28-33`, `run.go:86-95`; Security's finding B1, 2nd review | confirmed |
+| 19 | A run can stop on its budget right after any record, leaving lines written before its start unread. | `internal/logship/logship.go:28-33`, `run.go:86-95` | confirmed |
 | 14 | The owner, group and mode of the four files and their directories on the server, how Plesk rotates `panel.log` and `sw-cp-server/error_log`, and whether `plesk repair fs` resets ACLs. | to verify: the Product Manager on the server, in the earliest real run; no server access now (escalation answer), so the README marks each statement unverified | unverified |
 | 15 | Record 0121 is unreleased, 0092 released; the unit hides nothing under `/var/log`. | `git ls-remote --tags origin` (`v0.1.0`), `git cat-file -e`; `vandox-agent.service` | confirmed |
 
@@ -258,11 +258,7 @@ As in [spec.md](spec.md), *Out of scope*. No follow-up issue.
 
 ## Security review
 
-- B1: resolved by the rule of *Approach* (Lead decision and the Product Manager's answer after the Security delta: Security's fixes
-  taken 1:1, no scope change; the options in record 0121, option 14).
-- B2, B3, N1-N4: resolved as recorded in record 0121, option 13, and *Approach*. 2nd review, non-blocking, taken: the subdirectory
-  effect of `u::rw` (README, dry-run `mkdir`), `-P` on the last element only (README: grant only below root-owned elements), saved
-  future times (accepted residual, *Approach*).
+- B1-B3, N1-N4 and the 2nd review's non-blocking items: resolved in *Approach* and record 0121, options 13 and 14.
 
 ## Security notes
 
