@@ -24,3 +24,4 @@ are quoted in full.
 | 2026-10-31 14:19 | 3 Plan trim (revise) | squad-lead | plan.md trimmed under 4000 words; AC12 gains the give-up end lower bound; Security note kept in Security notes; RESULT: DONE (opus/medium · 5,862 tokens · 7 tool uses · 37 s · continued) |
 | 2026-10-31 14:20 | 4 Skeleton G1 | squad-dev | ResolveLocal and package errorlogline (Format, PleskPanel/Nginx/Apache, Parse) as zero-value stubs; go build passes (sonnet/medium · 63,750 tokens · 5 tool uses · 23 s) |
 | 2026-10-31 14:22 | 5 Tests first G1 | squad-tester | 7 tests in errorlogline_test.go and clock_test.go compile and fail on the skeleton (confirmed); none deferred (sonnet/medium · 111,993 tokens · 10 tool uses · 131 s) |
+| 2026-10-31 14:24 | 6 Implement G1 | squad-dev | ResolveLocal and Parse implemented; 4 tests disputed (tab after Plesk level; 3 storable-range cases in non-UTC zones) (sonnet/medium · usage pending) |
