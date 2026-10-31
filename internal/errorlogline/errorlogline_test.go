@@ -32,12 +32,18 @@ func raw(name, line string) parseCase {
 	return parseCase{name: name, line: line}
 }
 
-// runCases parses every line with a fresh clock and checks the result.
+// runCases parses every line with a fresh clock of zonePlusTwo and checks the result.
 func runCases(t *testing.T, format errorlogline.Format, cases []parseCase) {
+	t.Helper()
+	runCasesIn(t, format, zonePlusTwo, cases)
+}
+
+// runCasesIn parses every line with a fresh clock of loc and checks the result.
+func runCasesIn(t *testing.T, format errorlogline.Format, loc *time.Location, cases []parseCase) {
 	t.Helper()
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			got := errorlogline.Parse(format, []byte(tt.line), syslogline.NewClock(zonePlusTwo))
+			got := errorlogline.Parse(format, []byte(tt.line), syslogline.NewClock(loc))
 			requireLine(t, tt, got)
 		})
 	}
@@ -76,7 +82,7 @@ func TestParse_PleskPanelLines(t *testing.T) {
 		{"with process and request", stamp + ".123] 4821:5f3a9c1e INFO [panel] Session opened", at(2026, time.October, 9, 1, 12, 12, 123000000), 6, "4821:5f3a9c1e INFO [panel] Session opened"},
 		{"without process and request", stamp + "] ERR [panel] failed", local, 3, "ERR [panel] failed"},
 		{"the level ends the line", stamp + "] WARN", local, 4, "WARN"},
-		{"the message keeps tabs and more spaces", stamp + "] INFO\tx  y", local, 6, "INFO\tx  y"},
+		{"the message keeps tabs and more spaces", stamp + "] INFO x\ty  z", local, 6, "INFO x\ty  z"},
 		{"the message keeps non-ASCII text", stamp + "] NOTICE Größe ü", local, 5, "NOTICE Größe ü"},
 		{"one fraction digit", stamp + ".5] INFO x", at(2026, time.October, 9, 1, 12, 12, 500000000), 6, "INFO x"},
 		{"six fraction digits", stamp + ".123456] INFO x", at(2026, time.October, 9, 1, 12, 12, 123456000), 6, "INFO x"},
@@ -196,6 +202,7 @@ func TestParse_LinesNotOfTheFormatAreRaw(t *testing.T) {
 			raw("an nginx line", "2026/10/09 03:12:12 [error] x"),
 			raw("an apache line", "[Fri Oct 09 03:12:12 2026] [error] x"),
 			raw("invalid UTF-8 stays as it is", "\xff\xfe not a line"),
+			raw("a tab after the level", "[2026-10-09 03:12:12] INFO\tx  y"),
 			raw("30 February", "[2026-02-30 03:12:12] INFO x"),
 			raw("month 13", "[2026-13-01 03:12:12] INFO x"),
 			raw("month 0", "[2026-00-01 03:12:12] INFO x"),
@@ -206,9 +213,6 @@ func TestParse_LinesNotOfTheFormatAreRaw(t *testing.T) {
 			raw("year 1600", "[1600-01-01 00:00:00] INFO x"),
 			raw("year 1676", "[1676-12-31 23:59:59] INFO x"),
 			raw("year 2263", "[2263-01-01 00:00:00] INFO x"),
-			raw("a second past the end of the storable range", "[2262-04-11 23:47:17] INFO x"),
-			raw("a fraction that crosses the end of the storable range", "[2262-04-11 23:47:16.999999] INFO x"),
-			raw("a second before the start of the storable range", "[1677-09-21 00:12:42] INFO x"),
 		}},
 		{"nginx", errorlogline.Nginx, []parseCase{
 			raw("a syslog line", "Oct  9 03:12:12 web-1 sshd[1]: x"),
@@ -239,7 +243,6 @@ func TestParse_LinesNotOfTheFormatAreRaw(t *testing.T) {
 			raw("second 60", "[Fri Oct 09 03:12:60 2026] [error] x"),
 			raw("year 1500", "[Fri Oct 09 03:12:12 1500] [error] x"),
 			raw("year 2263", "[Fri Oct 09 03:12:12 2263] [error] x"),
-			raw("a fraction that crosses the end of the storable range", "[Sat Apr 11 23:47:16.999999 2262] [error] x"),
 		}},
 	}
 	for _, f := range formats {
@@ -247,4 +250,15 @@ func TestParse_LinesNotOfTheFormatAreRaw(t *testing.T) {
 			runCases(t, f.format, f.lines)
 		})
 	}
+	// The end and the start of the storable range are reached by the clock in UTC, as in the import's tests.
+	t.Run("storable range", func(t *testing.T) {
+		runCasesIn(t, errorlogline.PleskPanel, time.UTC, []parseCase{
+			raw("plesk-panel a second past the end", "[2262-04-11 23:47:17] INFO x"),
+			raw("plesk-panel a fraction that crosses the end", "[2262-04-11 23:47:16.999999] INFO x"),
+			raw("plesk-panel a second before the start", "[1677-09-21 00:12:42] INFO x"),
+		})
+		runCasesIn(t, errorlogline.Apache, time.UTC, []parseCase{
+			raw("apache a fraction that crosses the end", "[Sat Apr 11 23:47:16.999999 2262] [error] x"),
+		})
+	})
 }

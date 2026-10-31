@@ -249,7 +249,7 @@ func TestClock_ResolveLocalKeepsThePreviousInstantOnFailure(t *testing.T) {
 		{"hour 24", 2026, 10, 25, 24, 0, 0, 0},
 		{"year 1676", 1676, 10, 25, 2, 0, 0, 0},
 		{"year 2263", 2263, 10, 25, 2, 0, 0, 0},
-		{"a fraction that crosses the end of the storable range", 2262, 4, 11, 23, 47, 16, 999999999},
+		{"a fraction that crosses the end of the storable range", 2262, 4, 12, 0, 47, 16, 999999999},
 	}
 	for _, f := range failures {
 		t.Run(f.name, func(t *testing.T) {
