@@ -1269,8 +1269,17 @@ did not change since the previous run: the writer has moved (rsyslog reopens its
 to it after that is never read. A rotation while a renamed file is still read finishes that file first: the run reads the renamed file
 to its end and ships its held line; when the run stops before that (its budget, its time), the new file at the path is not taken in
 that run, and the next runs go on with the renamed file until it is finished, then with the newer ones. While the renamed file cannot be
-read (a read error), the run reads nothing else of that configured file, so its lines are never shipped after the newer file's. The
-renamed file's device,
+read (a read error), the run reads nothing else of that configured file, so its lines are never shipped after the newer file's, but
+only for a bound: at the 150th run in a row (about 5 minutes at the 2-second interval) whose read of the renamed file fails without
+moving its offset, the rest of it is **given up**: its held line is shipped as it is, one gap runs from the renamed part's last time to
+the run's start, the renamed file is let go and the file at the path is read on in that run (a rotation that waited for the renamed
+file goes on with it). Every kept run whose read fails without moving the offset counts; a run whose read moves the offset (a whole
+line or a 64 KiB chunk, also one that then fails) or reads without an error starts the count anew, and a run that does not read the
+renamed file (the path or the time zone cannot be read, the run stopped before it) leaves it. The count belongs to the reading state of
+a run, so a dropped run's count is never kept and a dropped give-up run is repeated with one gap. It is not saved: a restart opens
+the renamed file anew by its identity and starts the count at 0. The **renamed part's last time** is set to the file's last time at the
+rotation and moved only by the renamed file's own lines that carry a parsed header (a raw line leaves it); it is not saved, so after
+a restart it is the saved file's last time. The renamed file's device,
 inode, offset and last seen size are saved with the file's position, so it survives a restart.
 
 **Rotation while the agent was stopped.** After a restart the collector has no descriptor. A saved renamed file, and the saved file
@@ -1296,7 +1305,9 @@ the file's last time at its previous value (an earlier line's time, else the sta
 after it takes that value; the run's latest time takes at most the run's start, and the gap closing a lost rotation ends at most at the
 run's start. So the gaps of a truncation, a lost rotation and a given-up span start at or before every line they lose, also after a run
 stopped on its budget right after the line, and end at or before the run's start, a given-up span's not before the start of the dropped
-run that read the line. A future time saved in the state file before this rule stays until a line dated before its run (record 0121).
+run that read the line. A future time saved in the state file before this rule stays until a line dated before its run (record 0121). The give-up of a renamed
+file starts at the renamed part's last time (*Rotation*), not at the file's last time, which lines of the newer file can have moved
+meanwhile; it follows the same bound.
 
 **First start and changed files.** Without a saved position — a first start, no usable state, a file added to `log_shipping.files` —
 a file that exists starts at its end, so nothing older is shipped (history is imported with `vandoxd import`); a file that is missing
@@ -1344,6 +1355,9 @@ journal or the file still holds. A run that is abandoned never moves a committed
 gap whose end would not be after its start ends 1 µs after it. Besides the gaps of the journal positions, a lost rotation, a
 truncation, a refused record and a given-up span above, gaps are recorded for:
 
+- a renamed file given up after 150 failing runs (*Rotation*): from the renamed part's last time (after a restart the saved file's last
+  time, which can lie after lines of the renamed file it loses) to the run's start, after the renamed file's held line, shipped as it
+  is; the lines of the newer file follow in the same run;
 - an unreadable entry: from the previous entry read in the ID (shipped or filtered; else the position's time, else the run's start) to
   the next readable entry (else the run's start, or the last unreadable entry's time when the run stopped before the end of the ID);
   several in a row give one gap;
@@ -1363,7 +1377,7 @@ truncation, a refused record and a given-up span above, gaps are recorded for:
 
 No gap is recorded while a source cannot be read and its position stays, because its lines are still there: no machine ID, no journal
 directory, a directory that cannot be listed, a journal file that cannot be opened or read for another reason (the run stops reading
-the journal or that ID), a configured file that is missing, not readable, not a regular file or behind a link, and an unknown time zone.
+the journal or that ID), a read error of a renamed file below the bound of 150 failing runs, a configured file that is missing, not readable, not a regular file or behind a link, and an unknown time zone.
 Reading resumes at the position; a file that returns with another inode is a rotation.
 
 **Logging.** One line per change, fixed texts only, never a path, a field value or a message, and no line per shipped line, so the
@@ -1375,13 +1389,15 @@ agent's own entries in the journal, which it ships like any other, cause no loop
 | info `journal readable again` | — | the first run that lists and reads the journal without a problem after that |
 | warning `log file not readable` | `file` (the index in `log_shipping.files`), `err`: `missing`, `not a regular file`, `link refused`, `permission denied` or `read failed` | the first run with that reason for the file; a different reason is logged again |
 | info `log file readable again` | `file` | the first run that opens and reads the file without a problem after that |
+| warning `renamed log file given up` | `file` | each run that gives a renamed file up after 150 failing runs (also a run that is dropped and repeated); logged before the `log file readable again` of the same run |
 | warning `time zone not readable` | `err`: `localtime not readable` | the first run that cannot load the zone |
 | info `time zone readable again` | — | the first run that loads it after that |
 
 A `read failed` is also logged for a read error on an open file, the kept current or renamed one; the lines before the error are
 shipped and the position stays at the last whole line. A read error of the renamed file stops the reading of that configured file for
-the run, the current file included, so the order of its lines is kept; the next run tries again (after a restart the renamed file is
-opened anew by its identity).
+the run, the current file included, so the order of its lines is kept; the next run tries again, for at most 150 runs in a row without
+progress, then the rest is given up (*Rotation*); after a restart the renamed file is opened anew by its identity. The give-up logs no
+path, error text or content.
 
 **Classification.** The agent classifies its live lines with a Go port of the import's three stages in `internal/logstages` (record
 0121, options 15 to 23), ordinal and on bytes, bound by the same golden records as the import ([Log import](log-import.md), *System log
@@ -1413,7 +1429,7 @@ close, with the capture time, source and sequence of its first line; a record th
   counts as captured at the start for the expiry, as for a file's last time. By the source: at the end of the reading of any journal ID in
   a run, except the ID whose online file is `system.journal`; at the end of a renamed file (the import groups per file); at a
   rotation, where the lines of the kept file move to the renamed part (a group open across a rotation is two records); before a file
-  is read at the path while a renamed part is still read; before every gap of the source (truncation, lost rotation, vacuumed span,
+  is read at the path while a renamed part is still read; before every gap of the source (truncation, lost rotation, the give-up of a renamed file, vacuumed span,
   unreadable entry, refused journal file, an ID forgotten with its gap), so the group is sent before the gap and the next line does
   not join; and, after a give-up, before the give-up gap, from the dropped fork.
 - *Held-back positions.* A source with an open group is saved at its oldest held line, not at its read position: for the journal the
@@ -1457,8 +1473,9 @@ test and the C# import's test both read.
 - Any local user can write journal entries with any `SYSLOG_IDENTIFIER`, `PRIORITY` and message (`logger`, the native socket), and a
   service user anything into its own log file; such lines are shipped as written. The trusted journal fields (`_PID`, `_COMM`,
   `_HOSTNAME`) are journald's.
-- A renamed file whose reads keep failing holds back the newer lines of its configured file, with the warning `log file not readable`
-  (`read failed`) standing, until it reads again or the agent restarts.
+- The count of failing runs of a renamed file is not saved, so an agent restarted within every 150 runs never gives the file up and
+  the newer lines of its configured file stay held back, with the warning `log file not readable` (`read failed`) standing. After a
+  restart the gap of a give-up starts at the saved file's last time, which can lie after lines of the renamed file it loses.
 - A journal without keyed hashes, XZ or LZ4 items and entries with more than four compressed items are lost to recorded gaps.
 - The user files of the server's sample were empty: user-journal entries are read like system entries without a real one checked. That
   rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked by the installation (a manual step in `deploy/agent/README.md`); the renamed file
