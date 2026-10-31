@@ -71,10 +71,11 @@ For the error logs (#289):
     **The run's start plus the 24-hour tolerance of year-less times** still lets a gap start a day ahead. **The earlier of the line's
     time and the run's start** moves a gap start to that run's start, past honest lines written before it that a run stopped on its
     budget right after the forged line left unread. **A line dated after the start of the run that reads it does not move the file's
-    last time or the run's latest time** (chosen): they keep their previous value, an earlier line's time or the start of the run that
-    took the position, which lies at or before the forged line's real write time, so the start of a truncation's, a lost rotation's or
-    a given-up span's gap never passes a lost line; the end of a pending lost-rotation gap is the earlier of the line's time and the
-    run's start. The record keeps its own time. Positions saved before this change with a future time (RFC 3339 syslog lines only)
+    last time** (chosen): it keeps its previous value, an earlier line's time or the start of the run that took the position, which
+    lies at or before the forged line's real write time, so the start of a truncation's, a lost rotation's or a given-up span's gap
+    never passes a lost line. The run's latest time, the end of a given-up span's gap, and the end of a pending lost-rotation gap take
+    the earlier of the line's time and the run's start, so a forged line and the raw lines after it in a dropped run still end that
+    gap at the run's start rather than at an earlier honest time. The record keeps its own time. Positions saved before this change with a future time (RFC 3339 syslog lines only)
     stay unbounded until the next line dated before its run is read: accepted.
 
 ## Decision

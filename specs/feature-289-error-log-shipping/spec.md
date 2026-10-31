@@ -46,42 +46,40 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 - E1: A `format` that is none of the five names is refused at start-up with the line of the key and the reason `must be one of
   syslog, plesk-panel, sw-cp-server-error, nginx-error, apache-error` (exit code 1), replacing today's `must be syslog`.
 - E2: A configured error log the agent's user and groups (`adm`, `systemd-journal`) cannot read is not shipped and logged `log file
-  not readable` with `permission denied`, no gap — the existing rule; the agent gets no new right (record 0122).
+  not readable` with `permission denied`, no gap — the existing rule; no new right (record 0122).
 - E3: A file in another format (an Apache log configured as `nginx-error`) has every line shipped raw, without a warning per line.
 - E4: A raw line whose predecessor the agent did not read — the first line after a first start at the end of the file, of a file that
   appeared later, after a truncation or a lost rotation — gets the file's last time (the run's start when the position was taken
   without a line; E14 when a line dated after its run came before), where the import takes the file's modification time. After a rotation whose renamed file was found, the first raw
   line of the new file gets the time of the renamed file's last line. Either record differs from the import's in `captured_at` only.
-- E5: Long lines, a byte order mark, `\r\n` and empty lines are handled as for `syslog` files (cut at 16,384 bytes as the import).
+- E5: Long lines, a byte order mark, `\r\n` and empty lines are handled as for `syslog` files (cut at 16,384 bytes).
 - E6: A time in the skipped hour at the start of daylight saving time is shifted forward; one in the repeated hour takes the earlier
   offset unless that lies more than ten minutes before the previous line of the format (the import's rule). The previous instant is
   kept per configured path across runs and rotations, not across a restart; the import starts each file afresh, so the first lines of
   a new file in the repeated hour can get another offset than on import.
-- E7: While `/etc/localtime` cannot be read, no configured file is read (positions stay, no gap) — the existing rule.
+- E7: While `/etc/localtime` cannot be read, no configured file is read (positions kept, no gap).
 - E8: Client text with a line feed can forge a line of the format, shipped as such and matched by signatures, as on import.
 - E9: The agent reads local times in the zone of `/etc/localtime`, the import in `import.time_zone`; capture times differ by any
   difference, and by the panel log's own zone should it differ (unverified, record 0092).
-- E10: A flood of raw lines stays within the run budgets and memory bound.
+- E10: A raw-line flood stays within the run budgets and memory bound.
 - E11: A record whose capture time lies more than 10 minutes from its receive time is stored **backfilled** and never alerts
-  (*Live data and backfill*, record 0130): a raw line that takes an hours-old predecessor's time (an Apache start-up message after a
-  quiet night) and every panel line under E9's zone difference. Accepted; named in the Agent area.
+  (*Live data and backfill*, record 0130): a raw line that takes an hours-old predecessor's time (an Apache start-up message at dawn) and every panel line under E9's zone difference. Accepted; named in the Agent area.
 - E12: Invalid UTF-8: the agent replaces each invalid byte with U+FFFD, the import each maximal invalid sequence, so `message`, and
-  near the 16,384-byte cut `truncated`, can differ for such a line — an existing difference of every agent file format, named in the
-  Agent area.
+  near the 16,384-byte cut `truncated`, can differ — an existing difference of every agent file format, named in the Agent area.
 - E14: A line dated after the start of the run that reads it (a forged year such as `2262/04/11`, a clock stepped back) keeps its
-  own `captured_at`, but leaves the file's last time and the run's latest time at their previous value (an earlier line's time or the
-  start of the run that took the position); a raw line after it takes that time. So the gaps of a truncation, a lost rotation and a
-  given-up span start at or before every lost line, also after a run stopped on its budget, and end at or before the run's start.
-  This fixes `syslog` files too (RFC 3339 years, #37); a future time saved earlier stays until a line dated before its run.
+  own `captured_at`, but leaves the file's last time at its previous value (an earlier line's time or the start of the run that took
+  the position), and a raw line after it takes that time; the run's latest time takes the run's start at most. So the gaps of a
+  truncation, a lost rotation and a given-up span start at or before every lost line, also after a run stopped on its budget, and end
+  at or before the run's start, a given-up span's not before the start of the dropped run that read the line.
+  This fixes RFC 3339 `syslog` lines too (#37); a future time saved earlier stays until a line dated before its run.
 - E13: When a rotation leaves a new file the agent cannot read, the rest of the renamed file waits with it under the standing
   `log file not readable` warning and is read once the path opens again; a restart in between loses the renamed file's descriptor, and
   a renamed file no longer found then becomes a gap — the existing rule of #37.
 
 ## Non-functional requirements
 
-- Configuration: no new key. `log_shipping.files[].format` accepts `plesk-panel`, `sw-cp-server-error`, `nginx-error` and
+- Wire format unchanged. Configuration: no new key. `log_shipping.files[].format` accepts `plesk-panel`, `sw-cp-server-error`, `nginx-error` and
   `apache-error` besides `syslog`; the default stays `[]`. Existing configurations and saved positions stay valid (matched by path).
-- Wire format unchanged.
 - Rights and dependencies: no new capability, group, ACL, installer step, dependency or program (Product Manager); files are opened
   through the existing link-free walk.
 - Formats: built and tested from the samples in `testdata/logs/`; the Plesk panel format, its zone and `sw-cp-server`'s use of

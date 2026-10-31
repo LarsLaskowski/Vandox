@@ -1,7 +1,7 @@
 # Plan: Ship the Plesk and web server error logs from the agent
 
 Source: Issue #289 | [spec.md](spec.md)
-Status: Revised (2), Lead decision after the 2nd Security review
+Status: Revised (3)
 Tier: standard — a new parser of external log lines and new values of an existing option in the agent, with no new right, guard or other security control (the Product Manager's option A keeps the agent's rights).
 Security areas touched: 6 Agent privileges (`deploy/agent/README.md` gains the by-hand read grant; no right of the unit or the installer changes), 10 Parsing of external input (the new line grammars in `internal/errorlogline`, the new values of `log_shipping.files[].format`, line times bounded for the collector's bookkeeping), 12 Logging and display of external data (four new sources of external text through `fileRecord`)
 
@@ -56,7 +56,7 @@ The feature's criteria are AC1-AC12 in [spec.md](spec.md).
 | AC9 | `ErrorLogParserParseAsyncParsesTheDaylightSavingFixtureAsTheGoldenRecords` (`Europe/Berlin`) | `tests/Vandox.Core.Tests/ErrorLogParserTests.cs` |
 | AC10 | `TestFiles_HoldsErrorLogFilesWhileTheZoneIsUnknown` | `internal/logship/files_test.go` |
 | AC11 | `TestReadme_ErrorLogGrantIsDocumentedAndMarkedUnverified` (README read through `normalizeLineEnds`: the four paths; the commands of *Approach* as the README finally holds them — written from *Approach* in step 5 and adapted by the Tester in step 6 when the dry run changes them; every `setfacl` with `-P`; the default ACL's reach; `log file not readable` and `link refused`; the data sent; the unverified marker on each statement of fact 14); the Reviewer checks that `docs/areas/agent.md` names E11 and E12 | `deploy/agent/readme_test.go` |
-| AC12 | `TestFiles_LineDatedAfterTheRunKeepsTheGapBounds` (subtests for `nginx-error` with `2262/04/11 23:47:16 [error] ...` and for an RFC 3339 `syslog` line in 2262; each: an honest line, the forged line as the 1,000th record, unread lines dated before that run's start; then a truncation, or a lost rotation (renamed file not found): the gap starts at or before the first unread line's time; a new file starting with a forged line: its lost-rotation gap ends at that run's start; the record keeps its own `captured_at`; a raw line after the forged one gets the honest line's time); adapt `truncationAfterAFutureLine` (fact 18); `TestLogs_GiveUpAfterALineDatedAfterTheRunCoversTheRealSpan` (a forged line in one file of a dropped run, also as the budget's last record: the give-up gap starts at or before the first unread line and the journal's committed time, ends at or before the run's start) | `internal/logship/files_test.go`, `internal/logship/logship_test.go` |
+| AC12 | `TestFiles_LineDatedAfterTheRunKeepsTheGapBounds` (subtests for `nginx-error` with `2262/04/11 23:47:16 [error] ...` and for an RFC 3339 `syslog` line in 2262; each: an honest line, the forged line as the 1,000th record, unread lines dated before that run's start; then a truncation, or a lost rotation (renamed file not found): the gap starts at or before the first unread line's time; a new file starting with a forged line: its lost-rotation gap ends at that run's start; the record keeps its own `captured_at`; a raw line after the forged one gets the honest line's time); adapt `truncationAfterAFutureLine` (fact 18); `TestLogs_GiveUpAfterALineDatedAfterTheRunCoversTheRealSpan` (a forged line in one file of a dropped run, also as the budget's last record: the give-up gap starts at or before the first unread line and the journal's committed time, ends at or before the run's start; a dropped run whose last lines in the file are a forged line and a raw line, after an earlier journal entry: the gap ends at or after that dropped run's start and at or before the next run's start) | `internal/logship/files_test.go`, `internal/logship/logship_test.go` |
 
 The README test uses the existing `normalizeLineEnds` (`deploy/agent/service_test.go:680`); it covers presence, the dry run the behavior.
 
@@ -83,13 +83,13 @@ does for a line without a header. It allocates nothing but the message string.
 **`internal/logship`.** `formatOf` maps the five names to a source and a parse function (`syslog` keeps `syslogline.Parse`); `New`
 resolves every file's format once and refuses an unknown one; `filesRun.line` calls the file's parse function instead of
 `syslogline.Parse` and passes the source to `fileRecord`. **Bookkeeping times (E14, B1):** in `filesRun.line` the record keeps the
-line's time. A line dated after `r.start` leaves `st.lastTime` and `r.st.last` unchanged, so they keep an earlier line's time or the
-start of the run that took the position, at or before the line's real write time, and a raw line after it takes that kept time; a
-line dated at or before `r.start` sets them as today. The end of a pending lost-rotation gap is `minTime(at, r.start)`. Thus a gap
-start never passes a lost line, also after a run stopped on its budget right after the forged line (fact 19). This also fixes the
-same defect for RFC 3339 `syslog` lines. Nothing else in the file handling changes; the state file's format is unchanged. A future time
-saved before the fix (only RFC 3339 `syslog` positions) stays until the next line dated before its run is read: accepted (record
-0121, option 14).
+line's time. A line dated after `r.start` leaves `st.lastTime` unchanged, so it keeps an earlier line's time or the start of the run
+that took the position, at or before the line's real write time, and a raw line after it takes that kept time; a line dated at or
+before `r.start` sets it as today. `r.st.last`, used only as the end of a give-up gap, takes the later of its value and
+`minTime(at, r.start)` for every line, so a dropped run's forged and raw lines still end that gap at its start. The end of a pending
+lost-rotation gap is `minTime(at, r.start)`. Thus a gap
+start never passes a lost line, also after a budget stop (fact 19); RFC 3339 `syslog` lines are fixed too. The state file's format is unchanged; a future time saved before the fix stays until the next line
+dated before its run: accepted (record 0121, option 14).
 
 **`internal/config`.** The format must be one of the five names, compared exactly; the reason is the spec's E1 text.
 
@@ -230,7 +230,8 @@ Dev, after the code is green, against it (sweep: `grep -n -i "syslog" docs/areas
 
 No guarantee of `.squad/project.md` changes. *No data gaps unless explicitly recorded*: the new formats use the file handling of #37,
 a raw line is shipped, never skipped, and the bookkeeping rule (E14, AC12) keeps a line time the writer controls from moving a gap
-start past the lines it must cover: a line dated after its run never moves it, and a lost rotation's gap ends at or before the run's start. *A hanging collector never blocks the agent*: parsing is in-memory and linear
+start past the lines it must cover: a line dated after its run never moves the file's last time, and the run's latest time and a lost
+rotation's gap end take the earlier of the line's time and the run's start. *A hanging collector never blocks the agent*: parsing is in-memory and linear
 within the existing run budgets. *Backfilled data never alerts*: E11 is that rule applied, not a change. `docs/ARCHITECTURE.md` changes
 only its enumerations (Dev, above); record 0121 is already linked there.
 
@@ -257,10 +258,8 @@ As in [spec.md](spec.md), *Out of scope*. No follow-up issue.
 
 ## Security review
 
-- B1: the 1st revision's `minTime(at, r.start)` still lost lines after a run stopped on its budget (fact 19). Lead decision (*Loop
-  limits*, accept and fix): Security's supplied fix taken whole — a line dated after its run never moves the file's last time or
-  `r.st.last`; E4, E14 and AC12 reworded to it (no new scope: E14 already promised gaps covering the lost lines); the budget case
-  tested; `truncationAfterAFutureLine` re-adapted; "only widens" corrected here and in record 0121, option 14.
+- B1: resolved by the rule of *Approach* (Lead decision and the Product Manager's answer after the Security delta: Security's fixes
+  taken 1:1, no scope change; the options in record 0121, option 14).
 - B2, B3, N1-N4: resolved as recorded in record 0121, option 13, and *Approach*. 2nd review, non-blocking, taken: the subdirectory
   effect of `u::rw` (README, dry-run `mkdir`), `-P` on the last element only (README: grant only below root-owned elements), saved
   future times (accepted residual, *Approach*).
