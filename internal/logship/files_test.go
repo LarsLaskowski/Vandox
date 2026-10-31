@@ -2535,11 +2535,12 @@ func TestFiles_DroppedGiveUpRunIsRepeatedWithOneGap(t *testing.T) {
 	dropped := w.collect()
 	w.refuse()
 	repeated := w.step()
+	start := w.run.Start
 	after := w.drain(3)
 
 	requireMessages(t, "records of the dropped give-up run", recordKinds(dropped), []string{"GAP", "file 10"})
 	requireMessages(t, "records of the repeated run", recordKinds(repeated), []string{"GAP", "file 10"})
-	requireGap(t, oneGap(t, "the repeated run", repeated), fileLineTime(3), w.run.Start)
+	requireGap(t, oneGap(t, "the repeated run", repeated), fileLineTime(3), start)
 	if len(after) != 0 {
 		t.Errorf("runs after the repeated one returned %v, want nothing", head(recordKinds(after)))
 	}
