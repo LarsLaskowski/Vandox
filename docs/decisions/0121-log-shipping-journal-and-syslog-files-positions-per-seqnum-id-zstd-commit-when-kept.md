@@ -51,16 +51,26 @@ For the error logs (#289):
 
 9. **Detect the format by content, as the import does** — no new option values, but a file's first line would choose its source, and
    `sw-cp-server`'s log cannot be told from nginx's by content; the operator names the format per file (chosen), as `syslog` today.
-10. **Extend the syslog package with the error log grammars** — one package, but its name and its `Parse` are about syslog headers; a
-    package `internal/errorlogline` of its own (chosen) holds the three grammars and resolves their times through the syslog `Clock`,
-    which gains a resolve for a local time with its year, so the repeated-hour rule exists once.
+10. **Extend the syslog package with the error log grammars** — one package, but its name and its `Parse` are about syslog headers;
+    **a package with a clock of its own** would hold the skipped- and repeated-hour rules twice; a package `internal/errorlogline`
+    (chosen) holds the three grammars and resolves their times through the syslog `Clock`, which gains a resolve for a local time with
+    its year.
 11. **A raw line takes the file's modification time where it has no predecessor, as the import does** — a live file's modification time is
     that of its newest line, not of the raw line; the file's last time (chosen) is the rule `syslog` raw lines already follow.
 12. **Prove parity with hand-written Go expectations** — they would pass a Go port that misreads the grammar as the test's author did;
-    golden records written by the C# import and read by the Go tests (chosen) bind both languages, as the journal's `live-records.jsonl`.
+    golden records written by the C# import and read by the Go tests (chosen) bind both languages, as the journal's `live-records.jsonl`,
+    without `log`, which differs by design (the configured path against the listed name).
 13. **File access** — `CAP_DAC_READ_SEARCH` is ruled out by 0122; an ACL set by the installer would be a new right (a `security`
     change); the Product Manager chose no new right and a documented by-hand grant, with a default ACL on the directory so that a file a
-    rotation creates inherits it, its effect on the real server unverified.
+    rotation creates inherits it, its effect on the real server unverified. Measured in the plan review: plain `setfacl` follows a link
+    planted by a directory's owner and would grant the agent its target, so the procedure uses `setfacl -P` after `namei -l`; a default
+    ACL replaces the umask for every later file and subdirectory, so it is recommended only where rotation uses `create <mode>`, with
+    `g::` and `o::` no wider than the current files.
+14. **A line's time as the file's bookkeeping time** — as #37 did; but these formats, and RFC 3339 syslog lines, carry a year the
+    writer controls, and a forged year in 2262 would move the start of a truncation's or a given-up span's gap past the lost lines.
+    **The run's start plus the 24-hour tolerance of year-less times** still lets a gap start a day ahead. **The earlier of the line's
+    time and the run's start** (chosen): a line cannot be written after the run that reads it began, except after a clock step or a
+    forgery, so the bound can only widen a gap; the record keeps its own time.
 
 ## Decision
 
@@ -72,7 +82,8 @@ in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
 [Configuration and secrets](../areas/configuration-and-secrets.md) area (`log_shipping`).
 
 For #289 the configured files also take the formats `plesk-panel`, `sw-cp-server-error`, `nginx-error` and `apache-error`, parsed by
-`internal/errorlogline` with the import's mapping and raw lines, and the agent gains no right (options 9 to 13). The rules are in the
+`internal/errorlogline` with the import's mapping and raw lines, the agent gains no right, and every file's bookkeeping times are
+bounded by the run's start (options 9 to 14). The rules are in the
 Agent area (*Log shipping*).
 
 ## Consequences

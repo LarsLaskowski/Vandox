@@ -37,9 +37,9 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   `debug` (`DEBUG`, nginx `debug`, Apache `trace1` to `trace8`) is not shipped at the default, a raw line always passes the priority
   filter, and a rule with `program` set never matches these lines (their program is empty).
 - S8: Given `log file not readable` (`permission denied`) for an error log, when the operator follows `deploy/agent/README.md`, then
-  they can check what the agent's user can read and grant read access by hand on the file and, so that a file created by a rotation
-  inherits it, as a default ACL on its directory; the README says that the warning returns when a rotation or a Plesk repair drops
-  the grant, and marks every statement about the server that no run has shown as unverified.
+  they check the path for links and for elements that deny search, grant read by hand with commands that never follow a link, and
+  learn when a default ACL on the directory is needed, that it widens what every future file there grants, that the returning
+  warning is the sign of a lost grant, which client data these logs send, and which statements no run has shown.
 
 ## Errors and edge cases
 
@@ -62,13 +62,17 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 - E9: The agent reads local times in the zone of `/etc/localtime`, the import in `import.time_zone`; when they differ, the capture
   times differ. Should Plesk write the panel log in another zone than `/etc/localtime` (unverified, record 0092), its lines are off by
   that difference.
-- E10: A flood of raw lines (nginx's multi-line FastCGI output) stays within the run budgets and memory bound of `syslog` files.
+- E10: A flood of raw lines stays within the run budgets and memory bound of `syslog` files.
 - E11: A record whose capture time lies more than 10 minutes from its receive time is stored **backfilled** and never alerts
   (*Live data and backfill*, record 0130): a raw line that takes an hours-old predecessor's time (an Apache start-up message after a
   quiet night) and every panel line under E9's zone difference. Accepted; named in the Agent area.
 - E12: Invalid UTF-8: the agent replaces each invalid byte with U+FFFD, the import each maximal invalid sequence, so `message`, and
   near the 16,384-byte cut `truncated`, can differ for such a line — an existing difference of every agent file format, named in the
   Agent area.
+- E14: A line dated after the start of the run that reads it (a forged year such as `2262/04/11`, a clock stepped back) keeps its
+  own time as `captured_at`, but the file's last time and the run's latest time take the run's start instead, so the gaps of a
+  truncation, a lost rotation and a given-up span still cover the lost lines, and a raw line after it gets the run's start. This holds
+  for `syslog` files too, whose RFC 3339 lines carry a year (a defect of #37 fixed here).
 - E13: When a rotation leaves a new file the agent cannot read, the rest of the renamed file waits with it under the standing
   `log file not readable` warning and is read once the path opens again; a restart in between loses the renamed file's descriptor, and
   a renamed file no longer found then becomes a gap — the existing rule of #37.
@@ -87,7 +91,7 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   (package `acl`) is installed and whether `plesk repair fs` resets permissions are unknown; the README marks each as unverified.
 - Hand-written line grammars, linear in the line length; memory bound, run budgets and agent log lines unchanged.
 - Parity: for a line of valid UTF-8 read after its predecessor in the same file, the agent's record equals the import's in every
-  field but `log` (the configured absolute path) given the same zone; E4, E6, E9 and E12 name the exceptions.
+  field but `log` (the configured absolute path) given the same zone; E4, E6, E9, E12 and E14 name the exceptions.
 
 ## Acceptance criteria
 
@@ -116,9 +120,11 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   and a line in the skipped hour get the import's instants (golden records); across a rotation the instant carries over (E6).
 - [ ] AC10: While `/etc/localtime` cannot be read, a file of an error log format is not read and keeps its position, without a gap
   (E7).
-- [ ] AC11: `deploy/agent/README.md` holds the check and the by-hand grant of S8 (file and default directory ACL), names the
-  returning warning as the sign of a lost grant, and marks each target-host statement of *Non-functional requirements* that no run
-  has shown as unverified; the Agent area names E11 and E12 (S8, E11, E12).
+- [ ] AC11: `deploy/agent/README.md` holds the checks and grant commands of S8 as the plan fixes them after the dry run, the default
+  ACL's reach, the returning warning, the data sent, and the unverified marks of *Target host*; the Agent area names E11 and E12 (S8,
+  E11, E12).
+- [ ] AC12: After a line dated in 2262, a truncation's gap and a given-up span's gap still start at or before the run that read it and
+  end at or before the run's start, for an error log and for an RFC 3339 `syslog` line, and the line keeps its own `captured_at` (E14).
 
 ## Out of scope
 
@@ -136,14 +142,10 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
   `BuiltInSignaturesWebServerErrorLogsYieldPhpAndNginxEvents`, moved to a shared fixture.
 - Are the samples real server logs, as the issue says?
   Answered: no, written from documentation; enough for parity with the import. No real lines exist (Product Manager).
-- Which zone, and is there an event or a warning for a raw line?
-  Answered: `/etc/localtime` as for `syslog` files (the formats carry their year); no event (the import sets none), no warning (the
-  agent logs fixed texts per change only).
-- How does the agent tell `sw-cp-server-error` from `nginx-error`?
-  Answered: the operator names the format per file.
+- Which zone, and does a raw line get an event or warning?
+  Answered: `/etc/localtime`; no event, no warning.
 - Are the four files readable by the agent on the server?
-  Answered: Product Manager, option A: the existing rights stay (not tier `security` on this account); an unreadable file is logged
-  and not shipped, the README documents the by-hand grant, and with no server access the target-host facts stay unverified.
+  Answered: Product Manager, option A: no new right; the README documents the by-hand grant; target-host facts stay unverified.
 
 ## Area documents
 
@@ -158,13 +160,10 @@ the .NET parsers (record 0073) and needs the same mapping of its own.
 
 ## Challenge
 
-1. Major, target-host facts. Accepted in part: the Product Manager has no server access, so the facts are listed as unknown
-   (*Target host*), and S8 and AC11 make the README mark each unverified, name the default directory ACL that a rotated file inherits
-   and the returning warning as the sign of a lost grant. No criterion that the grant survives each rotation: no run can show it
-   without the server; the plan schedules a stand-in dry run where possible (routing.md, *Dry run*), else it stays marked unverified.
-   An unreadable new file after a rotation is E13, the existing rule of #37; changing it is out of scope.
-2. Minor, golden records. Accepted: AC1, AC2 and AC9 compare with golden records of the C# import, as `live-records.jsonl`; the
-   signature lines move to `testdata/logs/`.
-3. Minor, invalid UTF-8. Accepted: parity for valid UTF-8 only; the difference is E12 (AC11).
-4. Minor, old raw-line times backfilled. Accepted as E11 (AC11).
-5. Minor, rotation differences. Accepted in E4 and E6; AC7 and AC9 test the agent's rule, AC1 reads each sample from its first line.
+1. Major, target-host facts. Accepted in part: they are unknown to the Product Manager and listed under *Target host*; S8 and AC11
+   make the README mark them unverified. A stand-in dry run replaces the server run (plan, *Approach*); E13 stays the rule of #37.
+2. Minor, golden records. Accepted: AC1, AC2 and AC9 compare with golden records of the C# import; the signature lines move to
+   `testdata/logs/`.
+3. Minor, invalid UTF-8. Accepted: parity for valid UTF-8 only (E12).
+4. Minor, old raw-line times backfilled. Accepted as E11.
+5. Minor, rotation differences. Accepted in E4 and E6.
