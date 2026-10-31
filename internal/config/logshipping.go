@@ -113,7 +113,7 @@ func (s *LogShipping) checkFiles(file string, lines map[string]int) error {
 			return elementError(file, lines, element, element+".path", logPathReason)
 		case slices.ContainsFunc(s.Files[:i], func(o LogFile) bool { return o.Path == f.Path }):
 			return elementError(file, lines, element, element+".path", logPathTwiceReason)
-		case f.Format != logFormats[0]:
+		case !slices.Contains(logFormats, f.Format):
 			return elementError(file, lines, element, element+".format", logFormatReason)
 		}
 	}

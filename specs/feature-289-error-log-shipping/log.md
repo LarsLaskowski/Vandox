@@ -29,3 +29,4 @@ are quoted in full.
 | 2026-10-31 14:26 | 6 Fix G1 tests (Lead decision) | squad-tester | 4 disputed tests fixed (tab case, UTC clock for storable range cases, later local time); G1 green with unchanged code (sonnet/medium · 3,307 tokens · 2 tool uses · 17 s · continued) |
 | 2026-10-31 14:26 | 4 Skeleton G2 | squad-dev | logFormats and logFormatReason in config/logshipping.go; validation still accepts only syslog; build passes (sonnet/medium · 65,399 tokens · 3 tool uses · 15 s) |
 | 2026-10-31 14:27 | 5 Tests first G2 | squad-tester | 4 accepted-format rows fail on the skeleton (confirmed); 5 error rows pin the exact reason and already pass (sonnet/medium · 69,327 tokens · 4 tool uses · 18 s) |
+| 2026-10-31 14:27 | 6 Implement G2 | squad-dev | checkFiles accepts the five formats (slices.Contains); config tests green (sonnet/medium · 62,675 tokens · 5 tool uses · 22 s) |
