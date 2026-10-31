@@ -25,6 +25,9 @@ const (
 	bom = "\xef\xbb\xbf"
 )
 
+// readAt reads from a file at an offset; it is a variable so that a test can make the read of a renamed file fail.
+var readAt = (*os.File).ReadAt
+
 // emitLine hands one line of a file over; it returns true when the run must stop.
 type emitLine func(line []byte, cut bool, begin int64) bool
 
@@ -352,6 +355,15 @@ func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 	}
 	rn.size = size
 	return true
+}
+
+// countRenamedRead counts a read of the renamed file rn that started at the offset before; it returns true when the file was given up.
+func (fr *filesRun) countRenamedRead(ctx context.Context, rn *renamedFile, before int64, done bool, err error) bool {
+	return false
+}
+
+// giveUpRenamed gives up the rest of the renamed file.
+func (fr *filesRun) giveUpRenamed(ctx context.Context) {
 }
 
 // endLostGap closes the gap over lines lost to a rotation when the file at the path had no line to close it with.

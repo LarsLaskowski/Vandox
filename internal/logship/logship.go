@@ -48,6 +48,9 @@ const (
 	failuresToGiveUp = 3
 	// maxTracked bounds the journal files whose refusal is remembered.
 	maxTracked = 1024
+	// renamedFailsToGiveUp is the number of runs in a row whose read of a renamed file fails without moving its offset before the rest
+	// of it is given up.
+	renamedFailsToGiveUp = 150
 
 	keyErr = "err"
 
@@ -56,6 +59,7 @@ const (
 	msgFileNotReadable    = "log file not readable"
 	msgFileReadable       = "log file readable again"
 	msgZoneNotReadable    = "time zone not readable"
+	msgRenamedGivenUp     = "renamed log file given up"
 	msgZoneReadable       = "time zone readable again"
 	reasonZone            = "localtime not readable"
 )

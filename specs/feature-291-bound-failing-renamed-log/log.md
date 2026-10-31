@@ -13,3 +13,4 @@ are quoted in full.
 | 2026-10-31 19:22 | 3 Plan security review | squad-security | APPROVED; 1 non-blocking: SwapReadAt doc comment must state tests that swap it never run in parallel (opus/medium · 54,051 tokens · 11 tool uses · 117 s) |
 | 2026-10-31 19:24 | 2b Plan challenge | squad-devils-advocate | OBJECTIONS 0 major, 2 minor (AC9 test: readable-again logged once; SwapReadAt never parallel); appended as Challenge notes (opus/medium · 70,146 tokens · 21 tool uses · 238 s) |
 | 2026-10-31 19:24 | 3 Plan notes | Orchestrator | Challenge notes and Security notes appended to plan.md verbatim; no revision needed |
+| 2026-10-31 19:25 | 4 Skeleton (G1) | squad-dev | Skeleton compiles (readAt, countRenamedRead, giveUpRenamed stubs, renamedFile fails/last, run.renamedGivenUp, constants, SwapReadAt); build+vet verified (sonnet/medium · usage pending) |

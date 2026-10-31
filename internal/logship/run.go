@@ -48,6 +48,9 @@ type run struct {
 	zone        *time.Location
 	zoneChecked bool
 	zoneBad     bool
+
+	// renamedGivenUp tells per configured file that its renamed file was given up in this run.
+	renamedGivenUp []bool
 }
 
 // newRun returns a run on the fork st.
