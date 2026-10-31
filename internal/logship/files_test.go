@@ -2380,6 +2380,16 @@ func TestFiles_GiveUpGapStartsAtTheRenamedPartsLastTime(t *testing.T) {
 
 		requireGivenUpAt(t, w, fileLineTime(4))
 	})
+	t.Run("a line without a header after lines of the new file leaves the renamed part's last time", func(t *testing.T) {
+		w, _ := rotate(t)
+		w.step() // line 4 of the renamed file and line 10 of the new one: the file's last time is that of line 10
+		w.appendLog(renamedLog, "continuation without a header\n")
+		w.step() // the line without a header gets the time of line 10 but is not a line of the renamed part's time
+		failRenamedReads(t, w.logPath(renamedLog))
+		quietRuns(t, w, renamedBound-1, "failing reads of the renamed file")
+
+		requireGivenUpAt(t, w, fileLineTime(4))
+	})
 	t.Run("after a restart the saved last time of the file", func(t *testing.T) {
 		w, _ := rotate(t)
 		w.step() // line 4 of the renamed file and line 10 of the new one: the file's last time is that of line 10
