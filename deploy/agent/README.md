@@ -480,7 +480,8 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
   not affected.
 - **What it logs.** Fixed texts only, one per change: `journal not readable` (with a reason such as `journal: no journal directory`),
   `log file not readable` (with the index of the file in `log_shipping.files` and a reason: `missing`, `not a regular file`, `link refused`,
-  `permission denied`, `read failed`), `time zone not readable` and their `... readable again`. A path, a field value or a message never
+  `permission denied`, `read failed`), `renamed log file given up` (with the index of the file; a rotated file that could not be read for
+  150 runs in a row is given up with one gap), `time zone not readable` and the `... readable again` of the others. A path, a field value or a message never
   reaches the agent's own log.
 - **Duplicates.** A file that holds what the journal ships (rsyslog's `/var/log/syslog` on a server that forwards the journal to rsyslog) is shipped
   twice, once per source. The agent does not remove them.

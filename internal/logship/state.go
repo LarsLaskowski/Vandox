@@ -36,6 +36,10 @@ type renamedFile struct {
 	line lineState
 	// size is the size seen at the last run, -1 when it is not known yet.
 	size int64
+	// fails is the number of runs in a row whose read of the file failed without moving its offset.
+	fails int
+	// last is the time of the newest line of the file, the start of the gap when the file is given up.
+	last time.Time
 }
 
 // fileState is the reading state of one configured file.
