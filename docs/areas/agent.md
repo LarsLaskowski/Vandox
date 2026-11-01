@@ -1459,8 +1459,12 @@ and 16 files among 256 user IDs and 8 further IDs (measured peak: 1.63 MiB above
 **Checked against the server.** The reader with the decoder read every entry of the two real system files of the server (72,909 and
 73,265 entries, 340 compressed objects, all zstd frames of descriptor `0x60`) with no unreadable item
 (`TestReal_NextWithDecodesEveryEntry`, run on a developer's machine with `VANDOX_REAL_JOURNAL_DIR`; nothing of the files is
-committed). CI reads generated files: `testdata/journal/live.export` (21 generated entries covering the server's transports, field
-forms and a 20,000-byte message) written as binary journal files with zstd frames of the server's form
+committed). A later copy with a non-empty user journal (`system.journal`, `user-10000.journal` and its 22 archived files) read the same
+way gave no unreadable item in any of its 24 files (54,360 system entries, 38 to 444 per user file); the user files' seqnum IDs differ
+from the system file's, their sequence numbers rise strictly within each file and across the archives, and those of the current user
+file lie inside the system file's range without colliding with a system sequence number, as record 0121 assumes. CI reads generated
+files: `testdata/journal/live.export` (21 generated entries covering the server's transports, field forms and a 20,000-byte message)
+written as binary journal files with zstd frames of the server's form
 (`TestWrite_CompressedFramesMatchTheServerForm` compares them with `testdata/journal/zstd-frames.txt`, the frame headers seen on the
 server), and `testdata/journal/live-records.jsonl`, the records the import's journal mapping gives for them, which the Go collector's
 test and the C# import's test both read.
@@ -1477,9 +1481,8 @@ test and the C# import's test both read.
   the newer lines of its configured file stay held back, with the warning `log file not readable` (`read failed`) standing. After a
   restart the gap of a give-up starts at the saved file's last time, which can lie after lines of the renamed file it loses.
 - A journal without keyed hashes, XZ or LZ4 items and entries with more than four compressed items are lost to recorded gaps.
-- The user files of the server's sample were empty: user-journal entries are read like system entries without a real one checked. That
-  rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked by the installation (a manual step in `deploy/agent/README.md`); the renamed file
-  is read until the writer has moved whatever that window is.
+- That rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked by the installation (a manual
+  step in `deploy/agent/README.md`); the renamed file is read until the writer has moved whatever that window is.
 - A refused journal file gives its gap again after every agent start; a file replaced by a link between the listing and the read of the
   journal directory is followed, as for the kernel collector.
 - Lines are shipped per source and, in the journal, per ID, not merged by time across sources.
