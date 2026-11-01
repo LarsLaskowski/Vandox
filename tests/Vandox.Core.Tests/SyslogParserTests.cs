@@ -1284,6 +1284,27 @@ public class SyslogParserTests
     }
 
     /// <summary>
+    /// The classification fixture of the syslog file becomes the records of <c>classify-syslog.records.jsonl</c>, and its line that is no syslog line is skipped.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParsesClassifyFixtureAsTheGoldenRecords()
+    {
+        // Arrange
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/logs/classify-syslog.log"), TestContext.CancellationToken);
+        var golden = await ErrorLogGolden.ReadLinesAsync("testdata/logs/classify-syslog.records.jsonl", TestContext.CancellationToken);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), new LogFile("classify-syslog.log", null), content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual([(36L, "not a syslog line")], emitter.Skips.ToList(), "only the raw line is skipped");
+        Assert.HasCount(39, golden, "39 golden records for the 73 lines");
+        ErrorLogGolden.AssertClassifiedCoverage(golden);
+        ErrorLogGolden.AssertClassifiedEqual(emitter.Records, golden);
+    }
+
+    /// <summary>
     /// Returns a syslog file with an open MariaDB entry, a line of sshd written inside it, and more lines of the entry's process.
     /// </summary>
     /// <returns>The text</returns>

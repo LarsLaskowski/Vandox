@@ -489,6 +489,7 @@ type env struct {
 	k     *Kernel
 	start time.Time
 	runs  int
+	last  *scheduler.Run // the last run not yet reported to the collector, nil for none
 }
 
 // newEnv returns an environment in boot bootB with a far uptime (no kill is live), a first-start state and no journal files.
@@ -528,6 +529,7 @@ func (e *env) openStore() {
 }
 
 func (e *env) newKernel() {
+	e.keep() // the scheduler reports every run that finished in time before the agent stops
 	e.k = New(Sources{Journal: []fs.FS{e.j}, Etc: e.etc, Proc: e.proc}, e.store, slog.New(e.logs))
 	e.k.SetTrigger(e.trig.fn)
 }
@@ -557,10 +559,54 @@ func (e *env) run(lost bool) []model.Record {
 	return recs
 }
 
-// collect makes one run and returns the records and the error.
+// keep reports the last run not yet reported as kept, as the scheduler does right after the hand-over of its records.
+func (e *env) keep() {
+	e.t.Helper()
+	e.report(true)
+}
+
+// drop reports the last run not yet reported as not kept, as the scheduler does when the spool did not take its records.
+func (e *env) drop() {
+	e.t.Helper()
+	e.report(false)
+}
+
+// restartOnSavedFile saves the state as the state job does, opens the file again and starts a new collector over it, as a restart
+// of the agent does; nothing is reported for the last run.
+func (e *env) restartOnSavedFile() {
+	e.t.Helper()
+	if _, err := agentstate.NewSaver(e.store, e.proc).Collect(context.Background(), scheduler.Run{Start: e.start.Add(time.Hour)}); err != nil {
+		e.t.Fatalf("Saver.Collect() error = %v, want nil", err)
+	}
+	e.openStore()
+	e.last = nil
+	e.k = New(Sources{Journal: []fs.FS{e.j}, Etc: e.etc, Proc: e.proc}, e.store, slog.New(e.logs))
+	e.k.SetTrigger(e.trig.fn)
+}
+
+// abandon marks the last run as never reported, as when its worker was abandoned or the agent stopped before the report.
+func (e *env) abandon() {
+	e.last = nil
+}
+
+// report tells the collector what happened to the records of the last run not yet reported.
+func (e *env) report(kept bool) {
+	e.t.Helper()
+	if e.last == nil || e.k == nil {
+		return
+	}
+	run := *e.last
+	e.last = nil
+	e.k.Kept(run, kept)
+}
+
+// collect makes one run and returns the records and the error; the run before it is reported first, kept unless lost says that
+// its result was dropped.
 func (e *env) collect(lost bool) ([]model.Record, error) {
 	e.t.Helper()
+	e.report(lost == false)
 	run := scheduler.Run{Start: e.start, PreviousLost: lost}
+	e.last = &run
 	e.start = e.start.Add(2 * time.Second)
 	e.runs++
 	return e.k.Collect(context.Background(), run)

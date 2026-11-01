@@ -23,8 +23,8 @@ rules below for the parts not implemented are the target the implementation is h
   describes. When that fails it logs one error line with the loader's error text and exits with 1, before it notifies systemd of
   anything. It then opens its state file (*Agent state*) and, after it, its spool (*Spool and sending*); a spool that cannot be
   opened ends the start the same way, with the error line `agent cannot start`.
-- It runs until it receives SIGTERM or SIGINT, then stops its collectors (a collector stuck in a run is not waited for), tells systemd
-  that it is stopping and exits with 0.
+- It runs until it receives SIGTERM or SIGINT, then stops its collectors (a collector stuck in a run is not waited for), lets the collectors that hold lines
+  put them (*Classification*, **The stop flush**), tells systemd that it is stopping and exits with 0.
 
 ## Logging
 
@@ -98,13 +98,13 @@ rules below for the parts not implemented are the target the implementation is h
 - A run learns whether the previous sample of its collector was lost (`Run.PreviousLost`): its result was not kept, because the run
   timed out, was skipped, returned an error or panicked, had a record refused, or the sink refused its records. A run that starts
   late does not set it. A run whose records were all kept and accepted clears it. A collector that records only changes uses it to
-  record its full state again after a lost sample; the `kernel` collector reads the lost run's entries again and the `backups`
-  collector decides the lost check again (*Kernel events*, *Backup runs*); the `logs` collector counts a lost run it was not told
+  record its full state again after a lost sample; the `kernel` collector reads the lost run's entries again (*Kernel events*); the `logs` collector counts a lost run it was not told
   about (below) as dropped (*Log shipping*); the other collectors ignore it.
 - A collector may ask to be **told whether a run was kept** (an observer): after the delivery of a run that finished in time the
   scheduler calls it with the run and whether its records were kept — true when the run returned no error and did not panic, no
   record was refused and the sink accepted the records, false otherwise. An abandoned or skipped run calls nothing; its loss shows
-  only in the next run's `Run.PreviousLost`. The `logs` collector is the observer (*Log shipping*).
+  only in the next run's `Run.PreviousLost`. The `logs` (*Log shipping*), `kernel` (the boot, *Boots*) and `backups` (the check's change, *Backup runs*)
+  collectors are observers.
 - An **extra run** of a collector is requested through the scheduler (the `kernel` collector does so for `processes` and
   `connections`, *Kernel events*). A runner waiting for its next due time starts it at once; a runner in a run starts it when that
   run ends. Requests made before the extra run starts merge into one, which names at most 64 kills and counts the rest. The extra run
@@ -1079,11 +1079,6 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
 - The listing skips symbolic links, but a journal file is then opened by its name in the journal directory, so a file replaced by a
   symbolic link between the listing and the read is followed. The directory belongs to root, so only root or journald can place one,
   and they can change the journal anyway.
-- The boot change of *Boots* is written to the state inside the run, before the run's records reach the spool (record 0123). A state
-  save that falls between the two, followed by a power loss or kernel crash within the spool's next sync (one second), can lose the
-  `boot` event while the saved state already holds the new boot, so it is never recorded again and no gap says so; the backend still
-  sees the new boot in the batch headers' `boot_id`. Accepted for #38 as a stated residual; #300 moves the update behind the
-  scheduler's report that the run was kept and must be merged before the agent's first release.
 
 ## Boots
 
@@ -1098,9 +1093,12 @@ UUID and at most one line feed) and compares it with the boot in the agent's sta
   start for as long as no state is usable (each with the same `boot_id`).
 
 The capture time is `booted_at`; when the boot time cannot be read, `booted_at` is left out and the capture time is the run's start.
-With the event the state's boot becomes the current one, with the first field of `/proc/uptime` as its uptime (0 when unreadable)
-and its boot time; the `state` job keeps that uptime current. The boot event is returned again by every run until a run's result is kept; the boot is
-in the state from the first run on, so a restart after that state was saved and before a run was kept records no boot event. A boot ID that
+The state's boot becomes the current one, with the first field of `/proc/uptime` as its uptime (0 when unreadable, read then) and its
+boot time, only when the scheduler reports kept the latest run that returned the event (*Scheduling*, the observer); until then the
+state holds the previous boot, so a restart before that records the event again with the same `boot_id`, `previous_boot_id` and
+`previous_uptime_ns`. The boot event is returned again by every run until such a report; a run reported not kept, or not reported at
+all, changes nothing. The `state` job keeps the stored boot's uptime current only while that boot is the current one (the boot ID
+of `/proc` equals the stored `id`), so a start-up save never overwrites the previous boot's uptime with the new boot's. A boot ID that
 cannot be read or is not a lower-case UUID gives no boot event, leaves the state's boot alone, makes no kill live and logs one
 warning `boot ID not readable`; the other features run. The agent does not start without a readable boot ID (the spool needs it,
 *Spool and sending*), so this warning comes only from a read that fails after a successful start.
@@ -1129,10 +1127,11 @@ so every entry of every transport is seen.
 are read, each value up to 16,384 bytes (a longer value is cut without reading the rest); of every other item only the first 64
 bytes, to see its name. Of each read name only the first item is kept (a later item of that name is passed over, a plain one
 without reading its value), so an entry keeps at most seven items however often its writer repeats a name. The mapping is the import's journal mapping
-([Log import](log-import.md), *Journal export*) before its mail, MariaDB and kernel report stages: the capture time from
+([Log import](log-import.md), *Journal export*), which the stages of *Classification* follow: the capture time from
 `__REALTIME_TIMESTAMP`, `host` from `_HOSTNAME`, `program` from `SYSLOG_IDENTIFIER` (else `_COMM` when it is absent or empty), `pid`
 from `_PID`, else `SYSLOG_PID` (1 to 10 digits, 1 to 2,147,483,647, else 0), `priority` from `PRIORITY` when it is one digit 0 to 7,
-`message` from `MESSAGE`, the first value of a repeated item, `log` and `source` `journal`, no `event`. Every text is made valid
+`message` from `MESSAGE`, the first value of a repeated item, `log` and `source` `journal`. The stages of *Classification* then set
+`event` and the priority of mail lines and join MariaDB entries and kernel reports. Every text is made valid
 UTF-8 (each invalid byte becomes U+FFFD) and cut at a character boundary — `message` to 16,384 bytes, `host` and `program` to 1,024 —
 with `truncated` set when one of them was cut, here or at the read; control and format characters are kept as written, for whoever
 displays the line to escape. An entry without `MESSAGE`, or with a `__REALTIME_TIMESTAMP` of 0 or above 9,223,372,036,854,775 µs,
@@ -1205,7 +1204,7 @@ run that reaches the file, and never holds back the lines after it; after a rest
 **Syslog lines.** The line rules are the import's syslog rules ([Log import](log-import.md), *Syslog*), ported to Go: an optional
 `<PRI>` (priority PRI modulo 8), a traditional or RFC 3339 time, `HOST` (1 to 255 bytes), a tag `PROGRAM[PID]:` or `PROGRAM:` (the
 program 1 to 128 bytes; a process ID above 2,147,483,647 gives pid 0) and the message after the colon and at most one space. `log` is
-the configured path, `source` `syslog`, no `event`; the texts are cleaned and cut as for the journal. Unlike the import, a line without
+the configured path, `source` `syslog`; the texts are cleaned and cut as for the journal, and the stages of *Classification* follow. Unlike the import, a line without
 a syslog header (an RFC 5424 line, a continuation, other text) and a line whose header time does not exist (30 February, 31 November,
 29 February of a common year; hour 24 or minute or second 60 is no header time at all) or lies outside the storable range are
 **shipped raw**: the whole line as the message, empty `host` and `program`, pid 0, no priority, and the capture time of the previous
@@ -1215,7 +1214,7 @@ line read from the file. The import skips such lines; live, a skipped line would
 ([Log import](log-import.md), *Plesk and web server error logs*), ported to Go in `internal/errorlogline`: hand-written, linear, on bytes, with
 the import's limits (a process ID of at most 10 digits, a request ID and a module of at most 64 characters, a fraction of 1 to 6 digits in the Plesk panel log and of exactly 6 in the Apache log, none in nginx's).
 `log` is the configured path, `source` the format's name (`plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error`), `host` and
-`program` are empty, `pid` is 0 and there is no `event`; the texts are cleaned and cut as for the journal. A line of the format whose time
+`program` are empty, `pid` is 0 and there is no `event` (these formats pass no stages); the texts are cleaned and cut as for the journal. A line of the format whose time
 exists and lies in the storable range gets its priority (`debug` for Plesk `DEBUG`, nginx `debug` and Apache `trace1` to `trace8`), so `log_shipping.min_priority`
 (default `info`) drops those lines; a drop rule's `program` never matches them. Every other non-empty line (PHP output that nginx copied
 from FastCGI's standard error, a stack trace of the panel log, an Apache start-up message, a line of another format in the file, a
@@ -1268,8 +1267,17 @@ did not change since the previous run: the writer has moved (rsyslog reopens its
 to it after that is never read. A rotation while a renamed file is still read finishes that file first: the run reads the renamed file
 to its end and ships its held line; when the run stops before that (its budget, its time), the new file at the path is not taken in
 that run, and the next runs go on with the renamed file until it is finished, then with the newer ones. While the renamed file cannot be
-read (a read error), the run reads nothing else of that configured file, so its lines are never shipped after the newer file's. The
-renamed file's device,
+read (a read error), the run reads nothing else of that configured file, so its lines are never shipped after the newer file's, but
+only for a bound: at the 150th run in a row (about 5 minutes at the 2-second interval) whose read of the renamed file fails without
+moving its offset, the rest of it is **given up**: its held line is shipped as it is, one gap runs from the renamed part's last time to
+the run's start, the renamed file is let go and the file at the path is read on in that run (a rotation that waited for the renamed
+file goes on with it). Every kept run whose read fails without moving the offset counts; a run whose read moves the offset (a whole
+line or a 64 KiB chunk, also one that then fails) or reads without an error starts the count anew, and a run that does not read the
+renamed file (the path or the time zone cannot be read, the run stopped before it) leaves it. The count belongs to the reading state of
+a run, so a dropped run's count is never kept and a dropped give-up run is repeated with one gap. It is not saved: a restart opens
+the renamed file anew by its identity and starts the count at 0. The **renamed part's last time** is set to the file's last time at the
+rotation and moved only by the renamed file's own lines that carry a parsed header (a raw line leaves it); it is not saved, so after
+a restart it is the saved file's last time. The renamed file's device,
 inode, offset and last seen size are saved with the file's position, so it survives a restart.
 
 **Rotation while the agent was stopped.** After a restart the collector has no descriptor. A saved renamed file, and the saved file
@@ -1295,7 +1303,9 @@ the file's last time at its previous value (an earlier line's time, else the sta
 after it takes that value; the run's latest time takes at most the run's start, and the gap closing a lost rotation ends at most at the
 run's start. So the gaps of a truncation, a lost rotation and a given-up span start at or before every line they lose, also after a run
 stopped on its budget right after the line, and end at or before the run's start, a given-up span's not before the start of the dropped
-run that read the line. A future time saved in the state file before this rule stays until a line dated before its run (record 0121).
+run that read the line. A future time saved in the state file before this rule stays until a line dated before its run (record 0121). The give-up of a renamed
+file starts at the renamed part's last time (*Rotation*), not at the file's last time, which lines of the newer file can have moved
+meanwhile; it follows the same bound.
 
 **First start and changed files.** Without a saved position — a first start, no usable state, a file added to `log_shipping.files` —
 a file that exists starts at its end, so nothing older is shipped (history is imported with `vandoxd import`); a file that is missing
@@ -1343,6 +1353,9 @@ journal or the file still holds. A run that is abandoned never moves a committed
 gap whose end would not be after its start ends 1 µs after it. Besides the gaps of the journal positions, a lost rotation, a
 truncation, a refused record and a given-up span above, gaps are recorded for:
 
+- a renamed file given up after 150 failing runs (*Rotation*): from the renamed part's last time (after a restart the saved file's last
+  time, which can lie after lines of the renamed file it loses) to the run's start, after the renamed file's held line, shipped as it
+  is; the lines of the newer file follow in the same run;
 - an unreadable entry: from the previous entry read in the ID (shipped or filtered; else the position's time, else the run's start) to
   the next readable entry (else the run's start, or the last unreadable entry's time when the run stopped before the end of the ID);
   several in a row give one gap;
@@ -1362,7 +1375,7 @@ truncation, a refused record and a given-up span above, gaps are recorded for:
 
 No gap is recorded while a source cannot be read and its position stays, because its lines are still there: no machine ID, no journal
 directory, a directory that cannot be listed, a journal file that cannot be opened or read for another reason (the run stops reading
-the journal or that ID), a configured file that is missing, not readable, not a regular file or behind a link, and an unknown time zone.
+the journal or that ID), a read error of a renamed file below the bound of 150 failing runs, a configured file that is missing, not readable, not a regular file or behind a link, and an unknown time zone.
 Reading resumes at the position; a file that returns with another inode is a rotation.
 
 **Logging.** One line per change, fixed texts only, never a path, a field value or a message, and no line per shipped line, so the
@@ -1374,26 +1387,82 @@ agent's own entries in the journal, which it ships like any other, cause no loop
 | info `journal readable again` | — | the first run that lists and reads the journal without a problem after that |
 | warning `log file not readable` | `file` (the index in `log_shipping.files`), `err`: `missing`, `not a regular file`, `link refused`, `permission denied` or `read failed` | the first run with that reason for the file; a different reason is logged again |
 | info `log file readable again` | `file` | the first run that opens and reads the file without a problem after that |
+| warning `renamed log file given up` | `file` | each run that gives a renamed file up after 150 failing runs (also a run that is dropped and repeated); logged before the `log file readable again` of the same run |
 | warning `time zone not readable` | `err`: `localtime not readable` | the first run that cannot load the zone |
 | info `time zone readable again` | — | the first run that loads it after that |
 
 A `read failed` is also logged for a read error on an open file, the kept current or renamed one; the lines before the error are
 shipped and the position stays at the last whole line. A read error of the renamed file stops the reading of that configured file for
-the run, the current file included, so the order of its lines is kept; the next run tries again (after a restart the renamed file is
-opened anew by its identity).
+the run, the current file included, so the order of its lines is kept; the next run tries again, for at most 150 runs in a row without
+progress, then the rest is given up (*Rotation*); after a restart the renamed file is opened anew by its identity. The give-up logs no
+path, error text or content.
+
+**Classification.** The agent classifies its live lines with a Go port of the import's three stages in `internal/logstages` (record
+0121, options 15 to 23), ordinal and on bytes, bound by the same golden records as the import ([Log import](log-import.md), *System log
+parsers*): the mail classification (priority and `event` of Postfix and Dovecot lines, `postfix.fatal`, `dovecot.database_unavailable` and
+the others), the joining of MariaDB error log lines into one entry per header (the events `mariadb.start`, `ready`, `shutdown`,
+`shutdown_complete`, `abort`, `recovery_start` and `recovery_end`) and the grouping of kernel reports (OOM kills and `cut here` reports)
+into one record. The bounds are the import's: an entry of at most 16,384 bytes, joined from lines of the same host, program and process
+within 60 seconds of its header by capture time (before or after); a report of at most 2,000 lines, with a head of 8,192 bytes, a tail and
+`[N lines omitted]`, joined from kernel lines of its host within 60 seconds after its first line. A group is always one record at its
+close, with the capture time, source and sequence of its first line; a record the check refuses becomes a gap over the group.
+
+- *Order.* The filter (`min_priority`, `drop`) decides first, on the line as mapped; only lines that pass are classified. A dropped
+  MariaDB header leaves its continuation lines to the open entry of the same host, program and process within 60 seconds, or else they are shipped as plain lines. `log_shipping.min_priority: notice` or stricter therefore drops
+  the MariaDB journal lines, which carry priority 6 (assumed from the unit's `SyslogLevel=`, not checked on the server) and so never
+  reach the entry stage; the event signatures see nothing of them (*Residuals*).
+- *Which sources.* Every configured file of the format `syslog` and every journal sequence-number ID has its own stages, so a journal
+  line and a file line never join. A line from a user journal file (`user-<UID>.journal` and its archives) gets the mail
+  classification only and passes the stages without touching them; the rule decides by the file, not by the ID, so it holds however
+  journald assigns IDs. The files of the error log formats get no stages.
+- *Memory.* A source holds a `Stages` only while one of its groups is open, and a group allocates its buffers only then; the state
+  holds one bool per source for an open MariaDB crash recovery (`recovery_start` seen, `recovery_end` not yet), only while it is set.
+  So the 256 user IDs cost nothing and at most one entry and one report per source are held, however many forged headers or start lines
+  come (`TestLogs_ForgedFloodHoldsOneEntryAndOneReportPerSource`).
+- *When a group closes.* At the ends the stages know: a line that ends it (a header, a line of its key that does not join or does not fit,
+  an end line of a report, a start line, the 2,000th line). By time: when a shipped line of its source is captured more than 60 seconds
+  after the **anchor** of the group, and, when the source has been read to its end in a run, when the run's start is more than 60
+  seconds past the anchor. The anchor is the earlier of the first line's capture time and the start of the run that read it, so a
+  line dated in the future (a forged line of a `syslog` file) closes 60 seconds after its run. A line dated after the start of its run
+  counts as captured at the start for the expiry, as for a file's last time. By the source: at the end of the reading of any journal ID in
+  a run, except the ID whose online file is `system.journal`; at the end of a renamed file (the import groups per file); at a
+  rotation, where the lines of the kept file move to the renamed part (a group open across a rotation is two records); before a file
+  is read at the path while a renamed part is still read; before every gap of the source (truncation, lost rotation, the give-up of a renamed file, vacuumed span,
+  unreadable entry, refused journal file, an ID forgotten with its gap), so the group is sent before the gap and the next line does
+  not join; and, after a give-up, before the give-up gap, from the dropped fork.
+- *Held-back positions.* A source with an open group is saved at its oldest held line, not at its read position: for the journal the
+  sequence number and time before that entry, for a file the offset of that line in the current or the renamed part and the time of the
+  line before. A line a group holds is therefore never covered by a saved position. After a crash, or a stop whose flush was not kept,
+  the source is read again from its oldest held line: the lines of the open groups, and the lines shipped after them, come again as
+  duplicates (at most the span of one group plus the state interval), and none is lost, also with a filter or time zone that changed in
+  between. The state file keeps its shape and its bounds; an ID whose held-back position falls off the 256 positions starts by the
+  existing rules, with their gap.
+- *The stop flush.* `Logs` implements `scheduler.Flusher`. After the scheduler has stopped and before the last save, the agent calls
+  `Scheduler.Flush` with a deadline of 5 seconds. A collector whose worker the stop left out is waited for within that deadline and is
+  skipped when it does not return, so a flush never runs beside a `Collect`. The collector's `Flush` runs in a worker of its own and is
+  abandoned at the deadline, with nothing put and no `Kept` call. A skipped flush logs the warning `flush skipped, collector still running` and an abandoned one `flush abandoned, deadline reached`, each with the collector's name only (fixed texts, no external text). `Logs.Flush` resolves an earlier pending run as dropped, forks the
+  committed state, closes every group in the fork and returns the records, committing nothing; only `Kept(true)`, after the records
+  were put, adopts the fork and saves the shipped positions. So a clean stop repeats nothing and loses nothing, and a flush that was
+  not kept leaves the held-back positions. A group closed by the flush can be two records when the source goes on after a restart.
 
 **Memory.** The collector holds at most 24 MiB live, independent of the size of the journal, of the files, of the backlog, of an entry
 and of a line: the records of one run (at most 4 MiB of text, the crossing record and the fixed part of at most 1,000 records), the
 journal reader's buffers and at most 1,024 file headers, the zstd path (the output buffer above and one input buffer grown once to at
-most 4 MiB, both reused), the 64 KiB read buffer, and the held lines of at most 16,385 bytes per current and renamed file in the
-committed state and up to two copies. `TestLogs_HeapStaysBounded` asserts the bound with records at the maximum of every field, a
-journal of 100,000 entries and lines over 16 KiB; `TestDecoder_HeapStaysBoundedForTheLargestFrame` pins the decoder's buffer.
+most 4 MiB, both reused), the 64 KiB read buffer, the held lines of at most 16,385 bytes per current and renamed file in the
+committed state and up to two copies, and the open groups of *Classification*: an entry (at most 16,384 bytes) and a report (at most
+about 16 KiB) per holding source, in the committed state, a fork and the last dropped fork. `TestLogs_HeapStaysBounded` asserts the bound with records at the maximum of every field, a
+journal of 100,000 entries and lines over 16 KiB, and with an entry and a report at the maximum size held by the online system journal
+and 16 files among 256 user IDs and 8 further IDs (measured peak: 1.63 MiB above the base, three copies included); `TestDecoder_HeapStaysBoundedForTheLargestFrame` pins the decoder's buffer.
 
 **Checked against the server.** The reader with the decoder read every entry of the two real system files of the server (72,909 and
 73,265 entries, 340 compressed objects, all zstd frames of descriptor `0x60`) with no unreadable item
 (`TestReal_NextWithDecodesEveryEntry`, run on a developer's machine with `VANDOX_REAL_JOURNAL_DIR`; nothing of the files is
-committed). CI reads generated files: `testdata/journal/live.export` (21 generated entries covering the server's transports, field
-forms and a 20,000-byte message) written as binary journal files with zstd frames of the server's form
+committed). A later copy with a non-empty user journal (`system.journal`, `user-10000.journal` and its 22 archived files) read the same
+way gave no unreadable item in any of its 24 files (54,360 system entries, 38 to 444 per user file); the user files' seqnum IDs differ
+from the system file's, their sequence numbers rise strictly within each file and across the archives, and those of the current user
+file lie inside the system file's range without colliding with a system sequence number, as record 0121 assumes. CI reads generated
+files: `testdata/journal/live.export` (21 generated entries covering the server's transports, field forms and a 20,000-byte message)
+written as binary journal files with zstd frames of the server's form
 (`TestWrite_CompressedFramesMatchTheServerForm` compares them with `testdata/journal/zstd-frames.txt`, the frame headers seen on the
 server), and `testdata/journal/live-records.jsonl`, the records the import's journal mapping gives for them, which the Go collector's
 test and the C# import's test both read.
@@ -1406,16 +1475,30 @@ test and the C# import's test both read.
 - Any local user can write journal entries with any `SYSLOG_IDENTIFIER`, `PRIORITY` and message (`logger`, the native socket), and a
   service user anything into its own log file; such lines are shipped as written. The trusted journal fields (`_PID`, `_COMM`,
   `_HOSTNAME`) are journald's.
-- A renamed file whose reads keep failing holds back the newer lines of its configured file, with the warning `log file not readable`
-  (`read failed`) standing, until it reads again or the agent restarts.
+- The count of failing runs of a renamed file is not saved, so an agent restarted within every 150 runs never gives the file up and
+  the newer lines of its configured file stay held back, with the warning `log file not readable` (`read failed`) standing. After a
+  restart the gap of a give-up starts at the saved file's last time, which can lie after lines of the renamed file it loses.
 - A journal without keyed hashes, XZ or LZ4 items and entries with more than four compressed items are lost to recorded gaps.
-- The user files of the server's sample were empty: user-journal entries are read like system entries without a real one checked. That
-  rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked by the installation (a manual step in `deploy/agent/README.md`); the renamed file
-  is read until the writer has moved whatever that window is.
+- That rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked by the installation (a manual
+  step in `deploy/agent/README.md`); the renamed file is read until the writer has moved whatever that window is.
 - A refused journal file gives its gap again after every agent start; a file replaced by a link between the listing and the read of the
   journal directory is followed, as for the kernel collector.
 - Lines are shipped per source and, in the journal, per ID, not merged by time across sources.
-- Live lines carry no classification (`event`, the mail markers) until #290.
+- Differences from the import, whose classification the live stages follow (*Classification*): (a) a group closes by the clock as well,
+  because live input has no end; (b) a line captured within 60 seconds of the header that arrives after a line already more than 60
+  seconds later no longer joins (only when the clock steps back); (c) an entry open when its journal ID or renamed file ends, or at a
+  rotation or a gap, is closed there, and the lines after it start a new group; (d) a line dated after the start of its run counts as
+  captured at that start for the expiry; (e) records come out in the order their groups close, not by capture time; (f) the recovery
+  state of the MariaDB entries is kept per source while it is set, but not in the state file: a restart loses an open recovery, and its
+  `recovery_end` gets no event; (g) a line without a syslog header is shipped raw and passes the stages, where the import skips it.
+- A group is held as long as its closing needs: a `syslog` file that is not read to its end (a budget-limited backlog) closes its
+  groups only by capture time. The times of a `syslog` file are those of the line as rsyslog writes it, reception time by default
+  (not checked on the server). A flood of lines dated within the window, joining or not, keeps a group and the held-back position as
+  long as such a flood lasts, and a crash then reads the whole span again.
+- Event signatures see live lines now: forged `postfix/*`, `dovecot`, and, in the system files, `mariadbd` and `kernel` lines make
+  events live too, which alert rules built on them (#56, #61) must weigh. A line of a user journal file never joins an entry.
+- A strict `log_shipping.min_priority` (`notice` or stricter) drops the MariaDB journal lines before the stages see them, so no
+  `mariadb.*` event comes from the journal then; `deploy/agent/agent.yaml` says so.
 
 ## Backup runs
 
@@ -1445,9 +1528,12 @@ with the stored `last_seen_at` (at most a minute before the stop) and `gone_by` 
 is a new run with its own start. The gone-by time is not stored: after a restart the first check without a match is the gone-by
 time, so it is never before the real end.
 
-**Lost runs.** After a check whose result was dropped (`Run.PreviousLost`), the collector first restores the open run, the gone-by
-time and the first-check flag as they were before that check, so the dropped start or end is decided again: the start is written
-again while a match runs, the end again with the gone-by time of the last kept check. The scheduler's gap covers the lost check.
+**Lost runs.** A check decides from the committed state and writes nothing itself: its change (the open run, the gone-by time and
+the first-check flag) takes effect only when the scheduler reports the check kept (*Scheduling*, the observer), right after its records
+reached the spool, so a state save never holds a start, sighting or end whose record the spool has not taken. A check that was
+dropped, abandoned or not reported changes nothing and the next check decides again: the start is written again while a match runs,
+the end again with the gone-by time of the last kept check. After a restart a stored run whose end was dropped ends with `gone_by` the
+first check without a match (*Restarts and reboots*). The scheduler's gap covers the lost check.
 
 **Errors.** A boot ID that cannot be read or is not a lower-case UUID (the rule of *Boots*), a boot time that cannot be read, a `/proc` that cannot be listed or the run's deadline fail the run (a gap,
 *Scheduling*); the error texts name the file and a fixed reason, never a command or command line.
@@ -1462,13 +1548,6 @@ again while a match runs, the end again with the gone-by time of the last kept c
   needs its own rule.
 - Any local user can start a process named `pzstd`, or one whose command line starts with one of the default prefixes (whoever starts a process chooses its command line); it counts as a backup run.
 - A backup process the agent cannot read is not recognized; one that becomes unreadable during a run can end the run early.
-- A state the `state` job saved between a dropped check and the next one survives a restart before that next check: the dropped start
-  or end is then not written again.
-- A backup start, sighting or end is written to the state inside the check, before the check's records reach the spool (record
-  0123). A state save that falls between the two, followed by a power loss or kernel crash within the spool's next sync (one second),
-  can lose the `backup_run` record while the saved state already holds the change, so it is never written again and no gap says so.
-  Accepted for #38 as a stated residual; #300 moves the update behind the scheduler's report that the check was kept and must be
-  merged before the agent's first release.
 
 ## Agent state
 
@@ -1482,7 +1561,7 @@ directory; the installation does (*Installation*).
 "device","inode","offset","head_sha256","head_len","last_time","renamed":{"device","inode","offset","size"}}]}}`, the four sections,
 `logs.journal`, `logs.files` and `renamed` optional, IDs as lower-case UUIDs, times in RFC 3339 UTC. A file position names its
 configured file by the SHA-256 of the path (64 lower-case hex digits), never by the path, so every position has the same size;
-`offset` is the start of the first line not yet shipped, `head_sha256` the SHA-256 of the file's first `head_len` bytes (that of no
+`offset` is the start of the first line not yet shipped (or, while the source holds an open group, of the oldest line the group holds), `head_sha256` the SHA-256 of the file's first `head_len` bytes (that of no
 bytes when `head_len` is 0) and `renamed` the rotated file still being read (*Log shipping*). At most 256 journal and 16 file
 positions are written, which fit the 64 KiB bound with room.
 
@@ -1507,12 +1586,11 @@ by a run that read kills) or a log position the `logs` collector committed — a
 else once 50 seconds have passed, the uptime heartbeat (a kernel position that moved over other kernel lines waits for this). The job
 runs on a 10-second grid and a run starts a little after its tick, so the 5 seconds (half the interval) let an urgent change be saved
 at the next run, within one state interval, however the start times jitter. Every save first refreshes the stored uptime from
-`/proc/uptime`, so the saved uptime is never more than a minute old. A save removes a left-over `agent-state.json.tmp`, creates it anew
+`/proc/uptime` when the stored boot is the current boot (its `id` equals the boot ID of `/proc`; another boot keeps its saved uptime), so the current boot's saved uptime is never more than a minute old. A save removes a left-over `agent-state.json.tmp`, creates it anew
 (exclusively, without following a link, mode 0600), writes and syncs it, renames it over `agent-state.json` and syncs the directory.
 One write lock of the store covers the encoding, the write and the bookkeeping of a save, so a save of the job and the save at the
 stop never run at once. **Every save first makes the spool durable** (the spool's `Sync`, within the save's deadline: the job's
-timeout, or 5 seconds at the stop), so no saved position or state covers a record a crash can still lose (the exception is the boot
-and backup change of record 0123, *Kernel events* and *Backup runs*). When that sync fails or does not finish in time, the save is
+timeout, or 5 seconds at the stop), so no saved position or state, the boot and the open backup run included, covers a record a crash can still lose. When that sync fails or does not finish in time, the save is
 not written. A failure, also a missing directory, is logged once as warning `agent state not saved` with `err`
 `agentstate: save: <system error text>` (never a path), or `agentstate: save: spool not durable` when the spool's sync failed, until
 a save succeeds, whether the job or the stop saved, and the agent goes on;
@@ -1520,9 +1598,10 @@ a save that hangs past the job's timeout is a gap of collector `state`, as for a
 
 **Saving at the stop.** When the agent stops, after the scheduler has stopped (a collector stuck in a run is not waited for), it saves
 the state once more when anything changed since the last save, so the positions of the last kept runs survive a restart (a stop with
-SIGTERM neither repeats nor loses a log line). It waits at most 5 seconds for a save of the `state` job that is still running; when
+SIGTERM neither repeats nor loses a log line). Before that save the collectors that hold lines put them (*Log shipping*,
+*Classification*, **The stop flush**), so the saved positions of the `logs` collector cover them. It waits at most 5 seconds for a save of the `state` job that is still running; when
 that save does not end, it saves nothing and logs the warning `agent state not saved` with `err` `agentstate: save still running`
-(every time it gives up), and the agent exits as usual. The order at the stop is: the scheduler stops, this last save (which makes
+(every time it gives up), and the agent exits as usual. The order at the stop is: the scheduler stops, the flush of the collectors (at most 5 seconds), this last save (which makes
 the spool durable first), then the spool is closed (*Spool and sending*).
 
 **The spool leaves it alone.** The state file is not part of the spool: the spool never reads, counts, overwrites or deletes it
@@ -1753,8 +1832,8 @@ while the agent stops are kept; the context only accompanies the spool's log lin
 directory; at most one sync is in flight, outside the spool's lock, so a slow sync never holds up a hand-over, and a caller that finds
 one running waits for its result. An OS crash or power loss therefore loses at most the records of about the last second, never a
 damaged record handed out and never a number issued twice; the backend sees the loss as a sequence gap ([Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*), and the `kernel` and
-`logs` collectors read their entries again because every state save first makes the spool durable (*Agent state*). The exception is
-the boot and backup change written before the hand-over (*Kernel events* and *Backup runs*, residuals; #300). At the stop, after the
+`logs` collectors read their entries again because every state save first makes the spool durable (*Agent state*). The boot and the open backup run are
+written to the state only after the run's records are kept, so that sync covers them too. At the stop, after the
 scheduler has stopped and the state file's last save, the spool is closed: synced, the meta file written with `clean` true and
 synced. A close that fails or does not end within 5 seconds is given up with the warning `spool not closed`, and the agent exits as
 usual. A disk whose writes hang is not covered: a hand-over that blocks holds up its collector, the watchdog is withheld and systemd
@@ -1829,8 +1908,8 @@ holds 32 acknowledged ranges the attempt reads from the live position instead (n
 acknowledged batch ends the episode (info `backend accepting batches again`, `seconds` the length) and releases the backfill. The
 records between the live position and the jump stay unacknowledged until the backfill covers them: the **holes** are bounded at 32 so
 the spool, which keeps at most 64 acknowledged ranges, never refuses an acknowledgement and deletes acknowledged files. A request that
-hangs is ended after 30 seconds; once 4,096 bytes of an answer's body were read the request's context is cancelled so the transport closes the
-connection instead of reading on. A failed delivery inside a backfill pass (an acknowledgement the spool did not keep, a wait for a free
+hangs is ended after 30 seconds; once 4,096 bytes of an answer's body were read the agent closes the connection itself and cancels the
+request's context, so the transport does not read on. A failed delivery inside a backfill pass (an acknowledgement the spool did not keep, a wait for a free
 give-up slot) does not end the pass: after its wait the pass reads again from its position, so it never moves past an unacknowledged
 record.
 
@@ -2229,12 +2308,12 @@ denies the six calls of record 0122, `LoadCredential=agent-token:/etc/vandox/age
   timed by its receipt corrected for the kernel clock's drift.
 - [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why a live kill requests
   extra snapshots through the scheduler and names them by its identity, why boots come from a saved state file, why the journal
-  position is committed only after a kept run with at most three re-reads, and why backup runs are a record kind of their own with
+  position is committed only after a kept run with at most three re-reads, why boots and backup runs reach the state only once a run is kept, and why backup runs are a record kind of their own with
   `pzstd` and Plesk's two creating processes as the default rules.
 - [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why the log
   collector reads every system and user journal file with a position per sequence-number ID, decodes zstd items with a library under
   fixed bounds, opens configured files only through a link-free walk, stores their positions by the hash of the path, commits when the
-  scheduler reports a run kept and saves once more at the stop, and bounds drop patterns by their compiled size; for the error log
+  scheduler reports a run kept, saves once more at the stop after flushing the open groups, joins and classifies live lines with the import's stages (option 15 to 23), and bounds drop patterns by their compiled size; for the error log
   files (#289) why the grammars are ported from the import and pinned by golden records, why a line dated after its run never moves a gap start, and why
   the read grant is made by hand.
 - [0122](../decisions/0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) — why the
@@ -2271,7 +2350,7 @@ under `testdata/journal/compact/`, and under `testdata/journal/systemd-255/` two
 `kernel.export` and `live.export` (header machine ID replaced); `live.export`, `live-records.jsonl` and
 `zstd-frames.txt` for the log collector, whose binary files the writer generates at test time with zstd frames), `internal/kernevents` (kernel event
 collector and boot check), `internal/logship` (log shipping collector: journal, configured files with the link-free open, filter,
-positions; fixtures `testdata/logs/mail.log`, `kern.log-oom`), `internal/syslogline` (the syslog line rules, the year-less time, `Clock.ResolveLocal` for a time with its year and
+positions, the stages' feeding and the stop flush), `internal/logstages` (the Go port of the import's mail, MariaDB and kernel report stages; fixtures `testdata/logs/mail.log`, `kern.log-oom`), `internal/syslogline` (the syslog line rules, the year-less time, `Clock.ResolveLocal` for a time with its year and
 `/etc/localtime`), `internal/errorlogline` (the line grammars of the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs; fixtures
 `testdata/logs/` with golden records the C# import writes), `internal/zstdfield` (the bounded zstd decoder over `github.com/klauspost/compress`), `internal/backups` (backup run
 check), `internal/agentstate` (the state file, the `state` job and the save at the stop), `internal/sender` (the sender, its HTTP transport and the backfill throttle; tests use a fake transport and `net/http/httptest`; the

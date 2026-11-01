@@ -610,6 +610,93 @@ func TestLogs_HeapStaysBounded(t *testing.T) {
 	t.Run("records at the maximum of every field", heapOfMaximalRecords)
 	t.Run("a journal of 100,000 entries", heapOfALargeJournal)
 	t.Run("a file of lines over 16 KiB", heapOfLongLines)
+	t.Run("groups held by system IDs and files among 256 user IDs", heapOfHeldGroups)
+}
+
+// heldEntries returns the lines of a MariaDB entry and a kernel report that each reach the maximum size, as journal entries from the
+// sequence number first on, all dated within a few microseconds of the journal base so that no group expires.
+func heldEntries(first uint64) []map[string][]byte {
+	line := strings.Repeat("x", 4000)
+	at := func(seq uint64) string {
+		return fmt.Sprint(journalBase.Add(time.Duration(seq) * time.Microsecond).UnixMicro()) // #nosec G115 -- small test values
+	}
+	entries := []map[string][]byte{mariaEntry(first, header("Note", line), "__REALTIME_TIMESTAMP", at(first))}
+	for i := uint64(1); i <= 3; i++ {
+		entries = append(entries, mariaEntry(first+i, line, "__REALTIME_TIMESTAMP", at(first+i)))
+	}
+	entries = append(entries, kernelEntry(first+7, oomStart+line, "__REALTIME_TIMESTAMP", at(first+7)))
+	return entries
+}
+
+// writeHeldJournals writes the journals of the host: the online system journal and an archived one that hold groups, six more
+// archived system IDs and 256 user journals.
+func writeHeldJournals(w *world) {
+	w.writeJournal(journalSpec{name: "system.journal", seqnumID: seqID(1), online: true, entries: heldEntries(10)})
+	archived := heldEntries(10)
+	for seq := uint64(30); seq < 1200; seq++ {
+		archived = append(archived, slimEntry(seq))
+	}
+	w.archived(seqID(2), archived)
+	for id := byte(3); id <= 8; id++ {
+		w.archived(seqID(id), jentries(10, 12))
+	}
+	for uid := range 256 {
+		user := [16]byte{0: 0xaa, 14: byte(uid >> 8), 15: byte(uid)} // #nosec G115 -- the low and high byte of a small number
+		w.writeJournal(journalSpec{name: fmt.Sprintf("user-%d.journal", 1000+uid), seqnumID: user, online: true,
+			entries: []map[string][]byte{mariaEntry(1, header("Note", "user")), jentry(2, "user line")}})
+	}
+}
+
+// appendHeldLines appends to each file an open MariaDB entry and an open kernel report of the maximum size.
+func appendHeldLines(w *world, names []string) {
+	line := strings.Repeat("y", 4000)
+	var b strings.Builder
+	b.WriteString(fileLineAs(1, "mariadbd", 2345, header("Note", line)))
+	for n := 2; n <= 4; n++ {
+		b.WriteString(fileLineAs(n, "mariadbd", 2345, line))
+	}
+	b.WriteString(fileLineAs(8, "kernel", 0, oomStart+line))
+	for n := 9; n <= 14; n++ {
+		b.WriteString(fileLineAs(n, "kernel", 0, line))
+	}
+	for _, name := range names {
+		w.appendLog(name, b.String())
+	}
+}
+
+func heapOfHeldGroups(t *testing.T) {
+	w := newWorld(t)
+	names := make([]string, 16)
+	for i := range names {
+		names[i] = fmt.Sprintf("held%02d.log", i)
+	}
+	w.useFiles(names...)
+	for _, name := range names {
+		w.writeLog(name, fileLine(0, "init"))
+	}
+	writeHeldJournals(w)
+	for id := byte(1); id <= 8; id++ {
+		w.position(seqID(id), 0)
+	}
+	w.clock.set(journalBase.Add(16 * time.Second))
+	w.start()
+	for range 3 {
+		w.step()
+	}
+	appendHeldLines(w, names)
+	base := liveHeap()
+	w.collect()
+	w.refuse()
+
+	peak, _, _ := peakLive(w, base, 5)
+	held := w.flush()
+
+	if peak > liveLimit {
+		t.Errorf("the collector held %d bytes of live heap above the base, want at most %d", peak, liveLimit)
+	}
+	if n := len(logLines(held)); n < 34 {
+		t.Errorf("the flush returned %d log lines, want at least 34: an entry and a report in each of the 16 files and in the online system journal", n)
+	}
 }
 
 func heapOfMaximalRecords(t *testing.T) {

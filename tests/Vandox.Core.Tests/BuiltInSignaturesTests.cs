@@ -777,6 +777,30 @@ public class BuiltInSignaturesTests
     }
 
     /// <summary>
+    /// The detector finds the event signatures in the golden records of the classification fixtures, the journal and the syslog file alike: the mail fatal errors and panics, the crash with its signal, and the recovery start and end.
+    /// </summary>
+    /// <param name="path">The golden file</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("testdata/journal/classify-records.jsonl")]
+    [DataRow("testdata/logs/classify-syslog.records.jsonl")]
+    public async Task BuiltInSignaturesFindEventSignaturesInClassifyGoldenRecords(string path)
+    {
+        // Arrange
+        var records = ErrorLogGolden.AgentRecords(await ErrorLogGolden.ReadLinesAsync(path, TestContext.CancellationToken), 0);
+
+        // Act
+        var events = SignatureSamples.Run(BuiltInSignatures.Catalog, records);
+
+        // Assert
+        Assert.AreSequenceEqual(["postfix_fatal", "dovecot_fatal", "mariadb_recovery_start", "mariadb_recovery_end", "mariadb_crash", "oom_kill"], events.Select(detected => detected.SignatureId).ToList(), $"events of {path}");
+        Assert.AreEqual(2L, events[0].LineCount, $"the Postfix fatal error and panic of {path}");
+        Assert.AreEqual(2L, events[1].LineCount, $"the Dovecot panic and fatal error of {path}");
+        Assert.AreEqual("n:signal=11", SignatureSamples.Fields(events[4]), $"signal of the crash of {path}");
+        Assert.AreEqual(1L, events[4].LineCount, $"the crash is one grouped record of {path}");
+    }
+
+    /// <summary>
     /// The Dovecot log fixture gives one fatal event that links the panic and the fatal line, and nothing for the forged user name or the connect error.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

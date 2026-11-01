@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 	"unicode/utf8"
 
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
@@ -443,59 +444,272 @@ func TestBackups_LogsHoldNoProcessText(t *testing.T) {
 	}
 }
 
+// nextRun makes a run at sec seconds after t0 whose previous result is reported lost or not, as the scheduler marks it.
+func (e *env) nextRun(sec int, lost bool) []*model.BackupRun {
+	e.t.Helper()
+	return e.runWith(scheduler.Run{Start: at(sec), PreviousLost: lost})
+}
+
 func TestBackups_LostRunIsDecidedAgain(t *testing.T) {
-	t.Run("dropped start is written again while the process runs", func(t *testing.T) {
-		e := newEnv(t, pzstdRule)
-		e.w.addPzstd(100, at(-5))
-		want := startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1}
-		requireOneStart(t, e.run(0), want)
-
-		requireOneStart(t, e.runLost(10), want)
-
-		e.quiet(20)
-		requireOpenRun(t, e.store, agentstate.OpenRun{BootID: bootA, StartedAt: at(-5), LastSeen: at(20), MaxProcesses: 1})
-	})
-
-	t.Run("dropped start gives nothing once the process has ended", func(t *testing.T) {
-		e := newEnv(t, pzstdRule)
-		e.w.addPzstd(100, at(-5))
-		requireOneStart(t, e.run(0), startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1})
-		e.w.remove(100)
-
-		if got := e.runLost(10); len(got) != 0 {
-			t.Errorf("lost run after a dropped start returned %s, want no record (no open run, no match)", describe(got))
+	for _, lost := range []bool{true, false} {
+		name := "next run marked lost"
+		if lost == false {
+			name = "next run not marked lost"
 		}
-		requireNoOpenRun(t, e.store)
-		e.quiet(20)
-	})
+		t.Run(name, func(t *testing.T) {
+			t.Run("dropped start is written again while the process runs", func(t *testing.T) {
+				e := newEnv(t, pzstdRule)
+				e.w.addPzstd(100, at(-5))
+				want := startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1}
+				requireOneStart(t, e.runDropped(0), want)
 
-	t.Run("dropped end is written again with the gone_by of the last kept check", func(t *testing.T) {
-		e := newEnv(t, pzstdRule)
-		e.w.addPzstd(100, at(-5))
-		requireOneStart(t, e.run(0), startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1})
-		e.quiet(10)
-		e.w.remove(100)
-		e.quietRuns(20, 30)
-		want := endWant{boot: bootA, started: at(-5), lastSeen: at(10), goneBy: at(20), max: 1}
-		requireOneEnd(t, e.run(100), want)
+				requireOneStart(t, e.nextRun(10, lost), want)
 
-		requireOneEnd(t, e.runLost(110), want)
+				e.quiet(20)
+				requireOpenRun(t, e.store, agentstate.OpenRun{BootID: bootA, StartedAt: at(-5), LastSeen: at(20), MaxProcesses: 1})
+			})
 
-		requireNoOpenRun(t, e.store)
-		e.quiet(120)
-	})
+			t.Run("dropped start gives nothing once the process has ended", func(t *testing.T) {
+				e := newEnv(t, pzstdRule)
+				e.w.addPzstd(100, at(-5))
+				requireOneStart(t, e.runDropped(0), startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1})
+				e.w.remove(100)
 
-	t.Run("dropped first check after a restart is repeated", func(t *testing.T) {
-		e := openRunEnv(t)
-		e.w.remove(100)
-		e.restart()
-		requireOneEnd(t, e.run(300), endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(300), max: 1})
+				if got := e.nextRun(10, lost); len(got) != 0 {
+					t.Errorf("run after a dropped start returned %s, want no record (no open run, no match)", describe(got))
+				}
+				requireNoOpenRun(t, e.store)
+				e.quiet(20)
+			})
 
-		requireOneEnd(t, e.runLost(310), endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(310), max: 1})
+			t.Run("dropped end is written again with the gone_by of the last kept check", func(t *testing.T) {
+				e := newEnv(t, pzstdRule)
+				e.w.addPzstd(100, at(-5))
+				requireOneStart(t, e.run(0), startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1})
+				e.quiet(10)
+				e.w.remove(100)
+				e.quietRuns(20, 30)
+				want := endWant{boot: bootA, started: at(-5), lastSeen: at(10), goneBy: at(20), max: 1}
+				requireOneEnd(t, e.runDropped(100), want)
 
-		requireNoOpenRun(t, e.store)
-		e.quiet(320)
-	})
+				requireOneEnd(t, e.nextRun(110, lost), want)
+
+				requireNoOpenRun(t, e.store)
+				e.quiet(120)
+			})
+
+			t.Run("dropped first check after a restart is repeated", func(t *testing.T) {
+				e := openRunEnv(t)
+				e.w.remove(100)
+				e.restart()
+				requireOneEnd(t, e.runDropped(300), endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(300), max: 1})
+
+				requireOneEnd(t, e.nextRun(310, lost), endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(310), max: 1})
+
+				requireNoOpenRun(t, e.store)
+				e.quiet(320)
+			})
+		})
+	}
+}
+
+func TestBackups_UnreportedCheckIsDecidedAgain(t *testing.T) {
+	for _, lost := range []bool{true, false} {
+		name := "next run not marked lost"
+		if lost {
+			name = "next run marked lost"
+		}
+		t.Run(name+" start", func(t *testing.T) {
+			e := newEnv(t, pzstdRule)
+			e.w.addPzstd(100, at(-5))
+			want := startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1}
+			requireOneStart(t, e.runUnreported(0), want)
+
+			requireOneStart(t, e.nextRun(10, lost), want)
+
+			requireOpenRun(t, e.store, agentstate.OpenRun{BootID: bootA, StartedAt: at(-5), LastSeen: at(10), MaxProcesses: 1})
+		})
+		t.Run(name+" end", func(t *testing.T) {
+			e := openRunEnv(t)
+			e.w.remove(100)
+			e.quiet(20)
+			want := endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(20), max: 1}
+			requireOneEnd(t, e.runUnreported(100), want)
+
+			requireOneEnd(t, e.nextRun(110, lost), want)
+
+			requireNoOpenRun(t, e.store)
+		})
+	}
+}
+
+// openRunCase is one check of TestBackups_SaveBeforeTheHandOverKeepsThePreviousOpenRun: the state it starts from, the change
+// it makes to the processes, its time and what it returns.
+type openRunCase struct {
+	name   string
+	setup  func(t *testing.T) *env
+	change func(e *env)
+	sec    int
+	before *agentstate.OpenRun // the open run the state holds before the check, nil for none
+	after  *agentstate.OpenRun // the open run once the check is kept, nil for none
+	start  *startWant
+	end    *endWant
+	// endAfterRestart is the end the restarted collector returns, nil when it is end.
+	endAfterRestart *endWant
+}
+
+func openRunCases() []openRunCase {
+	prior := &agentstate.OpenRun{BootID: bootA, StartedAt: at(-20), LastSeen: at(10), MaxProcesses: 1}
+	return []openRunCase{
+		{
+			name: "start",
+			setup: func(t *testing.T) *env {
+				e := newEnv(t, pzstdRule)
+				e.quietRuns(0)
+				return e
+			},
+			change: func(e *env) { e.w.addPzstd(100, at(-5)) },
+			sec:    10,
+			after:  &agentstate.OpenRun{BootID: bootA, StartedAt: at(-5), LastSeen: at(10), MaxProcesses: 1},
+			start:  &startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1},
+		},
+		{
+			name:   "higher count",
+			setup:  openRunEnv,
+			change: func(e *env) { e.w.addPzstd(101, at(-3)) },
+			sec:    20,
+			before: prior,
+			after:  &agentstate.OpenRun{BootID: bootA, StartedAt: at(-20), LastSeen: at(20), MaxProcesses: 2},
+		},
+		{
+			name:   "sighting",
+			setup:  openRunEnv,
+			change: func(*env) {},
+			sec:    20,
+			before: prior,
+			after:  &agentstate.OpenRun{BootID: bootA, StartedAt: at(-20), LastSeen: at(20), MaxProcesses: 1},
+		},
+		{
+			name: "end",
+			setup: func(t *testing.T) *env {
+				e := openRunEnv(t)
+				e.w.remove(100)
+				e.quiet(20)
+				return e
+			},
+			change: func(*env) {},
+			sec:    100,
+			before: prior,
+			end:    &endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(20), max: 1},
+
+			endAfterRestart: &endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(100), max: 1},
+		},
+	}
+}
+
+// requireRecordsOf checks the records of a case's check: its start, its end, or none.
+func requireRecordsOf(t *testing.T, start *startWant, end *endWant, got []*model.BackupRun, when string) {
+	t.Helper()
+	switch {
+	case start != nil:
+		requireOneStart(t, got, *start)
+	case end != nil:
+		requireOneEnd(t, got, *end)
+	default:
+		if len(got) != 0 {
+			t.Errorf("%s returned %s, want no record", when, describe(got))
+		}
+	}
+}
+
+// requireOpenOrNone checks the open run of the state: want, or none when want is nil.
+func requireOpenOrNone(t *testing.T, store *agentstate.Store, want *agentstate.OpenRun) {
+	t.Helper()
+	if want == nil {
+		requireNoOpenRun(t, store)
+		return
+	}
+	requireOpenRun(t, store, *want)
+}
+
+func TestBackups_SaveBeforeTheHandOverKeepsThePreviousOpenRun(t *testing.T) {
+	for _, tc := range openRunCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			e := tc.setup(t)
+			// Something else in the state, so that a save writes the file whatever the open run is.
+			e.store.Update(false, func(st *agentstate.State) {
+				st.Boot = &agentstate.Boot{ID: bootA, Uptime: time.Hour, BootedAt: t0.Add(-120 * time.Hour)}
+			})
+			tc.change(e)
+
+			requireRecordsOf(t, tc.start, tc.end, e.runUnreported(tc.sec), "the check")
+
+			requireOpenOrNone(t, e.store, tc.before)
+			e.reopen(tc.sec)
+			requireOpenOrNone(t, e.store, tc.before)
+			restartEnd := tc.end
+			if tc.endAfterRestart != nil {
+				restartEnd = tc.endAfterRestart
+			}
+			requireRecordsOf(t, tc.start, restartEnd, e.run(tc.sec), "the same check after a restart on the saved file")
+			requireOpenOrNone(t, e.store, tc.after)
+		})
+	}
+}
+
+func TestBackups_KeptChangeIsSavedUrgentlyOnlyForStartEndAndHigherCount(t *testing.T) {
+	for _, tc := range openRunCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			e := tc.setup(t)
+			tc.change(e)
+			save := func(sec int) {
+				if _, err := agentstate.NewSaver(e.store, e.w.fs).Collect(t.Context(), scheduler.Run{Start: at(sec)}); err != nil {
+					t.Fatalf("Saver.Collect() error = %v, want nil", err)
+				}
+			}
+			save(tc.sec - 1)
+
+			requireRecordsOf(t, tc.start, tc.end, e.run(tc.sec), "the kept check")
+			save(tc.sec + 5)
+
+			saved, _ := agentstate.Open(e.dir, e.log)
+			got := saved.State().Backup
+			want := tc.after
+			urgent := tc.start != nil || tc.end != nil || tc.name == "higher count"
+			if urgent == false {
+				want = tc.before // a sighting alone waits for the heartbeat
+			}
+			if (got == nil) != (want == nil) || (got != nil && (got.MaxProcesses != want.MaxProcesses || got.LastSeen.Equal(want.LastSeen) == false)) {
+				t.Errorf("file 6 s after the previous save holds open run %+v, want %+v (urgent: %v)", got, want, urgent)
+			}
+		})
+	}
+}
+
+func TestBackups_FailedCollectForgetsTheEarlierCheck(t *testing.T) {
+	e := newEnv(t, pzstdRule)
+	e.w.addPzstd(100, at(-5))
+	first := scheduler.Run{Start: at(0)}
+	if _, err := e.b.Collect(t.Context(), first); err != nil {
+		t.Fatalf("Collect() error = %v, want nil", err)
+	}
+	good := e.w.fs["sys/kernel/random/boot_id"]
+	e.w.fs["sys/kernel/random/boot_id"] = &fstest.MapFile{Data: []byte("not-a-uuid\n")}
+	if _, err := e.b.Collect(t.Context(), scheduler.Run{Start: at(10)}); err == nil {
+		t.Fatalf("Collect() with a malformed boot ID error = nil, want an error")
+	}
+	e.w.fs["sys/kernel/random/boot_id"] = good
+
+	e.b.Kept(first, true)
+
+	requireNoOpenRun(t, e.store)
+}
+
+func TestBackups_IsASchedulerObserver(t *testing.T) {
+	var c scheduler.Collector = New(fstest.MapFS{}, nil, nil, nil)
+	if _, ok := c.(scheduler.Observer); ok == false {
+		t.Errorf("%T does not implement scheduler.Observer, want it to", c)
+	}
 }
 
 func TestBackups_MalformedBootIDFailsTheRun(t *testing.T) {

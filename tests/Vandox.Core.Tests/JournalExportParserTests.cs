@@ -1247,6 +1247,27 @@ public class JournalExportParserTests
     }
 
     /// <summary>
+    /// The classification fixture of the journal becomes the records of <c>classify-records.jsonl</c>: the golden records the Go collector's stages are compared with.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParsesClassifyFixtureAsTheGoldenRecords()
+    {
+        // Arrange
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/journal/classify.export"), TestContext.CancellationToken);
+        var golden = await ErrorLogGolden.ReadLinesAsync("testdata/journal/classify-records.jsonl", TestContext.CancellationToken);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(39, golden, "39 golden records for the 73 entries");
+        ErrorLogGolden.AssertClassifiedCoverage(golden);
+        ErrorLogGolden.AssertClassifiedEqual(emitter.Records, golden);
+    }
+
+    /// <summary>
     /// Returns a journal export with an open MariaDB entry, a line of sshd written inside it, and more lines of the entry's process.
     /// </summary>
     /// <returns>The bytes</returns>

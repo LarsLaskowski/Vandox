@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/journal"
+	"github.com/LarsLaskowski/Vandox/internal/logstages"
 )
 
 const (
@@ -222,8 +223,10 @@ func (r *run) refuse(f fileInfo) {
 	}
 	switch {
 	case !met:
+		r.closeJournalStages() // the refused file may hold lines of any ID
 		r.emitGap(from, r.start)
 	case f.online && r.start.Sub(last) >= refusedGapEvery:
+		r.closeJournalStages()
 		r.emitGap(last, r.start)
 	default:
 		return
@@ -295,6 +298,8 @@ func (r *run) forgetLost(groups []idGroup) {
 				to = head
 			}
 		}
+		r.closeStages(journalKey(id))
+		delete(r.st.recovery, journalKey(id))
 		r.emitGap(p.rt, to)
 		delete(r.st.journal, id)
 	}
@@ -343,6 +348,8 @@ func (r *run) settle(groups []idGroup) {
 		}
 		p.online = g.hasOnline()
 		if !p.online && p.seq >= g.last().hdr.TailSeqnum && p.rt.Before(newest) {
+			r.closeStages(journalKey(g.id))
+			delete(r.st.recovery, journalKey(g.id))
 			delete(r.st.journal, g.id)
 		}
 	}
@@ -355,12 +362,27 @@ func (r *run) readGroup(ctx context.Context, dir fs.FS, g *idGroup) {
 		return
 	}
 	r.detectVacuumed(g, p)
+	done := true
 	for _, fi := range g.files {
 		if r.stopped || !r.readJournalFile(ctx, dir, g, fi, p) {
+			done = false
 			break
 		}
 	}
 	r.endGap()
+	if done && !r.stopped {
+		r.endOfID(g)
+	}
+}
+
+// endOfID handles an ID that was read to its end in this run: its groups expire by the clock, and unless an online system file may
+// still grow them, they close, because the import groups per file.
+func (r *run) endOfID(g *idGroup) {
+	key := journalKey(g.id)
+	r.expireStages(key)
+	if !slices.ContainsFunc(g.files, func(f fileInfo) bool { return f.online && f.name == systemJournal }) {
+		r.closeStages(key)
+	}
 }
 
 // endGap closes the pending gap of an ID at the end of its reading: at the last unreadable entry when the run stopped before the end,
@@ -411,6 +433,7 @@ func (r *run) detectVacuumed(g *idGroup, p *jpos) {
 	if next == nil || next.hdr.HeadSeqnum == p.seq+1 {
 		return
 	}
+	r.closeStages(journalKey(g.id))
 	if head := next.hdr.HeadRealtime; head.After(p.rt) {
 		r.emitGap(p.rt, head)
 	} else {
@@ -491,8 +514,10 @@ func (fr *fileReader) entry(ctx context.Context, e *journal.Entry) {
 	if from.IsZero() {
 		from = r.start
 	}
+	before := p.seq
 	switch {
 	case e.Undecoded > 0:
+		r.closeStages(journalKey(fr.g.id))
 		r.openGapFrom(from)
 		p.seq = e.Seqnum
 		if !e.Realtime.IsZero() {
@@ -519,7 +544,8 @@ func (fr *fileReader) entry(ctx context.Context, e *journal.Entry) {
 		r.tick(ctx, false)
 		return
 	}
-	r.emit(rec, from)
+	line := logstages.Line{Rec: rec, Mark: logstages.Mark{At: before, Before: from}, RunStart: r.start, MailOnly: isUserFile(fr.fi.name)}
+	r.stage(journalKey(fr.g.id), line, rec.CapturedAt)
 	r.tick(ctx, true)
 }
 
@@ -567,6 +593,7 @@ func (fr *fileReader) endBroken(damaged bool) {
 	if to.IsZero() {
 		to = r.start
 	}
+	r.closeStages(journalKey(fr.g.id))
 	r.emitGap(from, to)
 	p.seq = max(p.seq, h.TailSeqnum)
 	if h.TailRealtime.After(p.rt) {

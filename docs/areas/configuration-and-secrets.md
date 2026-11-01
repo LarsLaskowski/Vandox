@@ -189,7 +189,11 @@ Backend:
   - `log_shipping.journal` switches the shipping of the journal (the system and the user journal files); `false` reads no journal. A
     value that is not a boolean is refused by the decoder with the key and the line.
   - `log_shipping.min_priority`: a line with a known priority less severe than this is not shipped; a line without a priority (the
-    lines of a traditional syslog file) is never dropped by it. The names are compared exactly (lower case).
+    lines of a traditional syslog file) is never dropped by it. The names are compared exactly (lower case). The filter decides before the
+    agent classifies the line ([Agent](agent.md), *Classification*): a MariaDB entry begins with a header line, and the journal's MariaDB
+    lines are assumed to carry priority 6 (the unit's `SyslogLevel=`, not checked on the server), so `notice` or stricter drops them and
+    no `mariadb.*` event is made from the journal; a dropped header leaves its continuation lines to the open entry of the same host, program and process within 60 seconds, or else they are shipped as plain lines. A drop rule
+    works the same way.
   - `log_shipping.files` names the log files shipped besides the journal, in file order: each a mapping with `path`, an absolute,
     clean path (no trailing slash, no empty, `.` or `..` element) of 2 to 1,024 bytes, listed once, and `format`, which is one of `syslog`,
     `plesk-panel`, `nginx-error`, `apache-error` and `sw-cp-server-error`, compared exactly (lower case). The last one is for Plesk's own web server

@@ -682,3 +682,10 @@ func TestKernel_DroppedRunSendsNoLateTrigger(t *testing.T) {
 		}
 	})
 }
+
+func TestKernel_IsASchedulerObserver(t *testing.T) {
+	var c scheduler.Collector = New(Sources{}, nil, slog.New(&logSink{}))
+	if _, ok := c.(scheduler.Observer); ok == false {
+		t.Errorf("%T does not implement scheduler.Observer, want it to", c)
+	}
+}
