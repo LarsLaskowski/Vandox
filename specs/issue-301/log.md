@@ -11,3 +11,4 @@ are quoted in full.
 | 2026-11-01 15:20 | 3 Plan security | Security | APPROVED; 2 non-blocking findings appended as Security notes (opus/medium · 32,158 tokens · 7 tool uses · 72 s) |
 | 2026-11-01 15:21 | 4 Skeleton | Dev | statAvailable(fd) stub and addSize added; call sites adapted; builds (sonnet/medium · 66,490 tokens · 8 tool uses · 38 s) |
 | 2026-11-01 15:23 | 5 Tests first | Tester | 5 tests written, fail on skeleton for the right reasons; launched without the security-tier model (ran on sonnet), re-checked by an opus launch (sonnet/medium · 87,254 tokens · 11 tool uses · 93 s) |
+| 2026-11-01 15:30 | 5 Tests first (security-tier pass) | Tester | Reviewed and strengthened tests; 5 tests fail on skeleton for intended reasons; none deferred (opus/medium · 109,314 tokens · 18 tool uses · 416 s) |
