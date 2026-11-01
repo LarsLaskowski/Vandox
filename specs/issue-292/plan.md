@@ -17,8 +17,8 @@ logrotate and its single `HUP`), which must stay as a bullet of its own.
 
 | # | Claim | Evidence | Status |
 | - | ----- | -------- | ------ |
-| 1 | The real check passed: no read error, 0 undecoded entries in all 24 files (`system.journal` 54,360 entries, `user-10000.journal` 152, 21 archives 38 to 444 each) | Orchestrator's run of `TestReal_NextWithDecodesEveryEntry` with `VANDOX_REAL_JOURNAL_DIR` on a copy of the server's journal | confirmed |
-| 2 | The user files' seqnum IDs differ from the system file's; seqnums rise strictly per file and across the archives; the active user file lies inside the system range 31,249,816..31,304,291; 0 collisions with system seqnums | Orchestrator's temporary check (not committed) | confirmed |
+| 1 | The real check passed: no read error, 0 undecoded entries in all 24 files (`system.journal` 54,360 entries, `user-10000.journal` 152, 22 archives 38 to 444 each: 21 of the current series and 1 older) | Orchestrator's run of `TestReal_NextWithDecodesEveryEntry` with `VANDOX_REAL_JOURNAL_DIR` on a copy of the server's journal | confirmed |
+| 2 | The user files' seqnum IDs differ from the system file's; seqnums rise strictly per file and across the archives; the active user file's seqnums lie inside the current system file's range 31,249,816..31,304,291 with 0 collisions; the collision check covered the current system file only, as the copy had no system archives | Orchestrator's temporary check (not committed) | confirmed |
 | 3 | The copy held only the current `system.journal`, no archived system files | Orchestrator's report | confirmed |
 | 4 | The residual's only occurrence is `docs/areas/agent.md:1480`; record 0121 states no such residual | `grep -rn -i` over `docs/` (records included) for the residual text, "empty user", `user-*.journal`, `#292` | confirmed |
 | 5 | Line 1480's bullet joins the user-journal residual and the rsyslog logrotate residual (lines 1480 to 1482) | Read `docs/areas/agent.md:1476-1484` | confirmed |
@@ -106,10 +106,10 @@ Edit 2, *Checked against the server* (about line 1456): after the sentence endin
 `CI reads generated files:`, insert
 
 ```
-A later copy with a non-empty user journal (`system.journal`, `user-10000.journal` and its 21 archived files) read the same way gave
+A later copy with a non-empty user journal (`system.journal`, `user-10000.journal` and its 22 archived files) read the same way gave
 no unreadable item in any of its 24 files (54,360 system entries, 38 to 444 per user file); the user files' seqnum IDs differ from the
-system file's, and their sequence numbers rise strictly within each file and across the archives and continue the system counter
-without colliding with a system sequence number, as record 0121 assumes.
+system file's, their sequence numbers rise strictly within each file and across the archives, and those of the current user file lie
+inside the system file's range without colliding with a system sequence number, as record 0121 assumes.
 ```
 
 `docs/ARCHITECTURE.md`: none (lines 58 and the agent area's lines 2094 and 2318 describe the reading in general and claim no
