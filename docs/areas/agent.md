@@ -1912,8 +1912,8 @@ holds 32 acknowledged ranges the attempt reads from the live position instead (n
 acknowledged batch ends the episode (info `backend accepting batches again`, `seconds` the length) and releases the backfill. The
 records between the live position and the jump stay unacknowledged until the backfill covers them: the **holes** are bounded at 32 so
 the spool, which keeps at most 64 acknowledged ranges, never refuses an acknowledgement and deletes acknowledged files. A request that
-hangs is ended after 30 seconds; once 4,096 bytes of an answer's body were read the request's context is cancelled so the transport closes the
-connection instead of reading on. A failed delivery inside a backfill pass (an acknowledgement the spool did not keep, a wait for a free
+hangs is ended after 30 seconds; once 4,096 bytes of an answer's body were read the agent closes the connection itself and cancels the
+request's context, so the transport does not read on. A failed delivery inside a backfill pass (an acknowledgement the spool did not keep, a wait for a free
 give-up slot) does not end the pass: after its wait the pass reads again from its position, so it never moves past an unacknowledged
 record.
 
