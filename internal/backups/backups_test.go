@@ -554,6 +554,8 @@ type openRunCase struct {
 	after  *agentstate.OpenRun // the open run once the check is kept, nil for none
 	start  *startWant
 	end    *endWant
+	// endAfterRestart is the end the restarted collector returns, nil when it is end.
+	endAfterRestart *endWant
 }
 
 func openRunCases() []openRunCase {
@@ -599,18 +601,20 @@ func openRunCases() []openRunCase {
 			sec:    100,
 			before: prior,
 			end:    &endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(20), max: 1},
+
+			endAfterRestart: &endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(100), max: 1},
 		},
 	}
 }
 
 // requireRecordsOf checks the records of a case's check: its start, its end, or none.
-func requireRecordsOf(t *testing.T, tc *openRunCase, got []*model.BackupRun, when string) {
+func requireRecordsOf(t *testing.T, start *startWant, end *endWant, got []*model.BackupRun, when string) {
 	t.Helper()
 	switch {
-	case tc.start != nil:
-		requireOneStart(t, got, *tc.start)
-	case tc.end != nil:
-		requireOneEnd(t, got, *tc.end)
+	case start != nil:
+		requireOneStart(t, got, *start)
+	case end != nil:
+		requireOneEnd(t, got, *end)
 	default:
 		if len(got) != 0 {
 			t.Errorf("%s returned %s, want no record", when, describe(got))
@@ -638,14 +642,73 @@ func TestBackups_SaveBeforeTheHandOverKeepsThePreviousOpenRun(t *testing.T) {
 			})
 			tc.change(e)
 
-			requireRecordsOf(t, &tc, e.runUnreported(tc.sec), "the check")
+			requireRecordsOf(t, tc.start, tc.end, e.runUnreported(tc.sec), "the check")
 
 			requireOpenOrNone(t, e.store, tc.before)
 			e.reopen(tc.sec)
 			requireOpenOrNone(t, e.store, tc.before)
-			requireRecordsOf(t, &tc, e.run(tc.sec), "the same check after a restart on the saved file")
+			restartEnd := tc.end
+			if tc.endAfterRestart != nil {
+				restartEnd = tc.endAfterRestart
+			}
+			requireRecordsOf(t, tc.start, restartEnd, e.run(tc.sec), "the same check after a restart on the saved file")
 			requireOpenOrNone(t, e.store, tc.after)
 		})
+	}
+}
+
+func TestBackups_KeptChangeIsSavedUrgentlyOnlyForStartEndAndHigherCount(t *testing.T) {
+	for _, tc := range openRunCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			e := tc.setup(t)
+			tc.change(e)
+			save := func(sec int) {
+				if _, err := agentstate.NewSaver(e.store, e.w.fs).Collect(t.Context(), scheduler.Run{Start: at(sec)}); err != nil {
+					t.Fatalf("Saver.Collect() error = %v, want nil", err)
+				}
+			}
+			save(tc.sec - 1)
+
+			requireRecordsOf(t, tc.start, tc.end, e.run(tc.sec), "the kept check")
+			save(tc.sec + 5)
+
+			saved, _ := agentstate.Open(e.dir, e.log)
+			got := saved.State().Backup
+			want := tc.after
+			urgent := tc.start != nil || tc.end != nil || tc.name == "higher count"
+			if urgent == false {
+				want = tc.before // a sighting alone waits for the heartbeat
+			}
+			if (got == nil) != (want == nil) || (got != nil && (got.MaxProcesses != want.MaxProcesses || got.LastSeen.Equal(want.LastSeen) == false)) {
+				t.Errorf("file 6 s after the previous save holds open run %+v, want %+v (urgent: %v)", got, want, urgent)
+			}
+		})
+	}
+}
+
+func TestBackups_FailedCollectForgetsTheEarlierCheck(t *testing.T) {
+	e := newEnv(t, pzstdRule)
+	e.w.addPzstd(100, at(-5))
+	first := scheduler.Run{Start: at(0)}
+	if _, err := e.b.Collect(t.Context(), first); err != nil {
+		t.Fatalf("Collect() error = %v, want nil", err)
+	}
+	good := e.w.fs["sys/kernel/random/boot_id"]
+	e.w.fs["sys/kernel/random/boot_id"] = &fstest.MapFile{Data: []byte("not-a-uuid\n")}
+	if _, err := e.b.Collect(t.Context(), scheduler.Run{Start: at(10)}); err == nil {
+		t.Fatalf("Collect() with a malformed boot ID error = nil, want an error")
+	}
+	e.w.fs["sys/kernel/random/boot_id"] = good
+
+	e.b.Kept(first, true)
+
+	requireNoOpenRun(t, e.store)
+}
+
+func TestBackups_IsASchedulerObserver(t *testing.T) {
+	var c scheduler.Collector = New(fstest.MapFS{}, nil, nil, nil)
+	if _, ok := c.(scheduler.Observer); ok == false {
+		t.Errorf("%T does not implement scheduler.Observer, want it to", c)
 	}
 }
 

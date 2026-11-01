@@ -1540,6 +1540,9 @@ func TestRun_SavesTheStateWhenItStops(t *testing.T) {
 		if logs == nil || len(logs.Journal) != 1 || logs.Journal[0].Seqnum != 4 {
 			t.Errorf("saved log positions = %+v, want the one journal position at the sequence number 4: the agent saves the state when it stops", logs)
 		}
+		if boot := store.State().Boot; boot == nil || boot.ID != kernelBootRaw {
+			t.Errorf("saved boot = %+v, want the boot %s of the kept boot event", boot, kernelBootRaw)
+		}
 	})
 }
 
