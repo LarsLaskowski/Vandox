@@ -158,6 +158,7 @@ public class ReportDownloadEndpointTests
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, "status");
         Assert.Contains(heading, body, "the download has the section");
         Assert.Contains($"  - tcp 0.0.0.0:23, PID 200 ` telnetd `, {(language == "en" ? "socket UID" : "Socket-UID")} 33 ``` ab``{new string('x', 28)} ``` {(language == "en" ? "(cut)" : "(gekürzt)")}", body, "the download lists the new listener with its owner and the cut user of its socket");
+
         var label = language == "en" ? "socket UID" : "Socket-UID";
 
         Assert.Contains($"  - tcp6 [::]:8443, {(language == "en" ? "no owner" : "kein Besitzer")}, {label} 33 ` www-data `", body, "the download lists the listener without an owner and with its socket UID");
