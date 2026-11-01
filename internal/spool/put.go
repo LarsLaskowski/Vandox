@@ -189,7 +189,8 @@ func (s *Spool) shortage(h *handover) (string, error) {
 	if s.rollNeeded(frames) && len(s.files) >= maxFiles {
 		return "file_limit", nil
 	}
-	if s.diskUsed()+metaSlack+need > s.opts.MaxBytes {
+	total := addSize(addSize(s.diskUsed(), metaSlack), need)
+	if total == math.MaxInt64 || total > s.opts.MaxBytes {
 		return "size_bound", nil
 	}
 	if s.opts.MinFreeBytes <= 0 {

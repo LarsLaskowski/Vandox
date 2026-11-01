@@ -58,7 +58,16 @@ File access inside the spool directory:
 3. **`syscall.Openat` with `O_NOFOLLOW`, `Unlinkat` and `Renameat` relative to the directory's descriptor, each file trusted only
    after `Fstat` on its descriptor shows a regular, agent-owned, 0600 file with one link** (chosen) — standard library only; a link
    fails to open, a hard link fails the link count, and removing or renaming a name never touches a target. `syscall` exports no
-   `Fstatat` on amd64, so the check before a removal or rename is the same open.
+   `Fstatat` on amd64, so the check before a removal or rename is the same open. The free-space check reads `Fstatfs` on the same
+   descriptor (issue #301): `Statfs` on the configured path would read another file system once the path is swapped after the start.
+
+Size accounting with planted files (issue #301):
+
+1. **A data file larger than the sealing size plus the largest hand-over is damage** — the largest legitimate file depends on the
+   `spool.max_size` of the run that wrote it, which a start after a lowered cap does not know: a bound from the current cap deletes good
+   records, and a fixed bound needs a ceiling of its own in the spool package.
+2. **Sizes add up saturating at 2^63 - 1, and a saturated sum is no room** (chosen) — every file a real spool writes keeps today's
+   behavior; a sum that cannot be represented fails closed, so the size bound drops the oldest files until the sum fits again.
 
 Order of state and records:
 
@@ -72,7 +81,8 @@ Order of state and records:
 
 The spool is option 4 for storage, the clock bound for a lost counter, at most 64 acknowledged ranges, option 3 for the file count,
 `syscall` calls relative to the directory's descriptor for file access (never `os.Root`), and a spool sync as a barrier before every state save. Values read back from its files are held to consistency rules, and a break is
-damage, never a number. Its size bound and free-space reserve drop the oldest segments with `spool_dropped` gaps.
+damage, never a number. Its size bound and free-space reserve drop the oldest segments with `spool_dropped` gaps; the size bound adds
+file sizes saturating, and the reserve reads the file system of the directory's descriptor.
 
 ## Consequences
 

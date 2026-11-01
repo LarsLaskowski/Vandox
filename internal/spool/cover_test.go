@@ -15,15 +15,24 @@ import (
 )
 
 func TestStatAvailable(t *testing.T) {
-	t.Run("a real directory has space", func(t *testing.T) {
-		got, err := statAvailable(t.TempDir())
+	t.Run("an open directory has space", func(t *testing.T) {
+		fd, openErr := syscall.Open(t.TempDir(), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+		if openErr != nil {
+			t.Fatalf("Open(temp dir) = %v, want a descriptor", openErr)
+		}
+		t.Cleanup(func() {
+			if closeErr := syscall.Close(fd); closeErr != nil {
+				t.Errorf("Close(descriptor) = %v, want nil", closeErr)
+			}
+		})
+		got, err := statAvailable(fd)
 		needNoErr(t, "statAvailable", err)
-		expect(t, got > 0, "statAvailable(temp dir) = %d, want a positive number of bytes", got)
+		expect(t, got > 0, "statAvailable(open directory) = %d, want a positive number of bytes", got)
 	})
-	t.Run("a missing directory is an error", func(t *testing.T) {
-		got, err := statAvailable(filepath.Join(t.TempDir(), "missing"))
-		expect(t, err != nil, "statAvailable(missing) error = nil, want an error")
-		expect(t, got == 0, "statAvailable(missing) = %d, want 0", got)
+	t.Run("an invalid descriptor is an error", func(t *testing.T) {
+		got, err := statAvailable(-1)
+		expect(t, err != nil, "statAvailable(-1) error = nil, want an error")
+		expect(t, got == 0, "statAvailable(-1) = %d, want 0", got)
 	})
 	t.Run("the default check is used without an injected one", func(t *testing.T) {
 		r := newRig(t)
@@ -33,6 +42,50 @@ func TestStatAvailable(t *testing.T) {
 		needNoErr(t, "available", err)
 		expect(t, got > 0, "available() = %d, want a positive number of bytes", got)
 	})
+	t.Run("the default check reads the opened directory after its path moved", func(t *testing.T) {
+		requireDefaultCheckAfterMove(t, "")
+	})
+	t.Run("the default check ignores a full file system planted at the old path", func(t *testing.T) {
+		var st syscall.Statfs_t
+		needNoErr(t, "Statfs(/proc)", syscall.Statfs("/proc", &st))
+		need(t, st.Bavail == 0, "Statfs(/proc) reports %d available blocks, want 0 for a full file system to plant", st.Bavail)
+		requireDefaultCheckAfterMove(t, "/proc")
+	})
+}
+
+// requireDefaultCheckAfterMove opens a spool with the default free-space check and a reserve of one byte, renames its
+// directory away, plants a symlink to plant at the old path unless plant is empty, and checks that the check still
+// reads the opened directory: available() is positive and a hand-over is written. The directory is moved back before
+// the spool is closed.
+func requireDefaultCheckAfterMove(t *testing.T, plant string) {
+	t.Helper()
+
+	r := newRig(t)
+	r.opts.Available = nil
+	r.opts.MinFreeBytes = 1
+	sp := r.open()
+	t.Cleanup(func() { r.closeSpool(sp) })
+	moved := r.dir() + "-moved"
+	needNoErr(t, "rename away", os.Rename(r.dir(), moved))
+	t.Cleanup(func() {
+		if plant != "" {
+			if removeErr := os.Remove(r.dir()); removeErr != nil {
+				t.Errorf("Remove(planted symlink) = %v, want nil", removeErr)
+			}
+		}
+		if renameErr := os.Rename(moved, r.dir()); renameErr != nil {
+			t.Errorf("Rename(back) = %v, want nil", renameErr)
+		}
+	})
+	if plant != "" {
+		needNoErr(t, "plant symlink", os.Symlink(plant, r.dir()))
+	}
+	got, err := sp.available()
+	needNoErr(t, "available after the move", err)
+	expect(t, got > 0, "available() after the path moved (planted %q) = %d, want a positive number of bytes", plant, got)
+	mustPut(t, sp, batchOf(epoch, "moved", 1, 100))
+	names := segmentNumbers(t, moved)
+	expect(t, len(names) == 1, "data files in the moved directory = %v, want the one written after the move", names)
 }
 
 func TestNewSpool_RefusesBadOptions(t *testing.T) {

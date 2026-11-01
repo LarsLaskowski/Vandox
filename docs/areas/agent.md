@@ -1701,7 +1701,7 @@ directory, up to 100,000 of them within the memory bound) is foreign: never open
 
 **File access (security area 9).** `spool.directory` must be absolute and clean and its last element must not be a symbolic link (links
 above it are followed as configured); the spool opens it with `O_DIRECTORY|O_NOFOLLOW` and keeps the descriptor. Every later open,
-create, remove and rename is relative to that descriptor on a plain name (`openat`, `unlinkat`, `renameat`), never by path and never
+create, remove and rename is relative to that descriptor on a plain name (`openat`, `unlinkat`, `renameat`), and the free-space check reads the file system of the same descriptor (`fstatfs`), never by path and never
 through Go's `os.Root`, which follows a symbolic link whose target stays inside the directory. A file is opened with `O_NOFOLLOW` and
 `O_NONBLOCK` (a link fails, a FIFO does not block) and trusted only when `fstat` on that descriptor shows a regular file of the
 agent's effective user without any group or other permission bit and with exactly one link; it is created exclusively. Because the
@@ -1765,11 +1765,15 @@ holds at most that file and the meta file, at most one sixteenth of `spool.max_s
 and summaries included, and the meta file). Before every write the spool checks its room: the data files plus 32 KiB for the meta
 file and its temporary file plus the write (its frames, a header and a summary when a file is created or sealed, and 1 KiB for each
 gap record it owes) must stay within `spool.max_size`; unless `spool.min_free` is 0, the space available to unprivileged users on the
-file system (`statfs` `f_bavail` times `f_bsize`) must be at least the write and what remains after it at least `spool.min_free`,
+file system (`fstatfs` on the directory's descriptor, `f_bavail` times `f_bsize`, so it stays the file system the spool writes into
+even if the path is renamed or replaced) must be at least the write and what remains after it at least `spool.min_free`,
 compared without overflow; and a new data file may not make more than 1,024. While there is no room the spool drops its oldest data
 file whole and checks again; the file being written to is never dropped, and when only it is left the hand-over is refused
 (`spool: no room for the records`, a write failure below). A hand-over that alone, with the gaps it owes and the 32 KiB, exceeds
 `spool.max_size` is refused before anything is dropped. A full spool therefore never refuses records: it drops its oldest.
+The sizes are added saturating at 2^63 - 1 and a sum that reaches it counts as no room (`size_bound`), so an oversized file, such as a
+planted sparse file, is dropped like any other oldest file; `agent_spool_bytes` saturates the same way. The oldest-first order stays: a
+planted oversized file with a higher number is dropped only after every older file, so the older real records become `spool_dropped` gaps.
 
 - Every drop owes one `gap` with cause `spool_dropped` per run of unacknowledged numbers of the dropped file (acknowledged numbers
   split runs; runs that join across the files one hand-over drops give one gap): origin and source `agent`, `first_seq` and

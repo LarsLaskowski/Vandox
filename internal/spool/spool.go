@@ -63,7 +63,7 @@ type Options struct {
 	SyncInterval time.Duration
 	// Now returns the current time; nil means time.Now.
 	Now func() time.Time
-	// Available returns the bytes available in a directory; nil means statfs f_bavail times f_bsize.
+	// Available returns the bytes available in a directory; nil means fstatfs on the spool directory's descriptor, f_bavail times f_bsize.
 	Available func(dir string) (uint64, error)
 }
 
@@ -172,14 +172,14 @@ func (s *Spool) SpoolBytes(ctx context.Context) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.diskUsed() + s.metaSize, nil
+	return addSize(s.diskUsed(), s.metaSize), nil
 }
 
 // diskUsed returns the size of the data files.
 func (s *Spool) diskUsed() int64 {
 	var sum int64
 	for _, f := range s.files {
-		sum += f.size
+		sum = addSize(sum, f.size)
 	}
 
 	return sum
@@ -191,13 +191,13 @@ func (s *Spool) available() (uint64, error) {
 		return s.opts.Available(s.opts.Dir)
 	}
 
-	return statAvailable(s.opts.Dir)
+	return statAvailable(s.dir.fd)
 }
 
-// statAvailable returns f_bavail times f_bsize of the file system holding dir.
-func statAvailable(dir string) (uint64, error) {
+// statAvailable returns f_bavail times f_bsize of the file system holding the directory descriptor fd.
+func statAvailable(fd int) (uint64, error) {
 	var st syscall.Statfs_t
-	if err := syscall.Statfs(dir, &st); err != nil {
+	if err := retry(func() error { return syscall.Fstatfs(fd, &st) }); err != nil {
 		return 0, err
 	}
 	if st.Bsize <= 0 {
@@ -209,6 +209,15 @@ func statAvailable(dir string) (uint64, error) {
 	}
 
 	return lo, nil
+}
+
+// addSize returns the sum of two non-negative sizes, saturating at the largest int64.
+func addSize(a, b int64) int64 {
+	if b > math.MaxInt64-a {
+		return math.MaxInt64
+	}
+
+	return a + b
 }
 
 // fitsDisk reports whether a write of need bytes passes the free-space check: the space is at least the write and what
