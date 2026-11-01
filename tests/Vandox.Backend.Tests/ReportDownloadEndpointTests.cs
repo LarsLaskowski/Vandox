@@ -123,7 +123,7 @@ public class ReportDownloadEndpointTests
             var written = await seeding.WriteBatchAsync(AgentBatch("web-1",
                                                                    IncidentSamples.Base.AddDays(1),
                                                                    ConnectionRecord(1, IncidentSamples.Base, "none", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd")),
-                                                                   ConnectionRecord(2, IncidentSamples.Base.AddHours(1), "start", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd"), Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd", 33, user))),
+                                                                   ConnectionRecord(2, IncidentSamples.Base.AddHours(1), "start", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd"), Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd", 33, user), Entry(Proto.Tcp6, "::", 8443, uid: 33, user: "www-data"), Entry(Proto.Tcp, "0.0.0.0", 25, 311, "exim4", 0, "root", true))),
                                                         TestContext.CancellationToken);
 
             Assert.AreEqual(2, written.Stored, "both snapshots are stored");
@@ -158,6 +158,10 @@ public class ReportDownloadEndpointTests
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, "status");
         Assert.Contains(heading, body, "the download has the section");
         Assert.Contains($"  - tcp 0.0.0.0:23, PID 200 ` telnetd `, {(language == "en" ? "socket UID" : "Socket-UID")} 33 ``` ab``{new string('x', 28)} ``` {(language == "en" ? "(cut)" : "(gekürzt)")}", body, "the download lists the new listener with its owner and the cut user of its socket");
+        var label = language == "en" ? "socket UID" : "Socket-UID";
+
+        Assert.Contains($"  - tcp6 [::]:8443, {(language == "en" ? "no owner" : "kein Besitzer")}, {label} 33 ` www-data `", body, "the download lists the listener without an owner and with its socket UID");
+        Assert.Contains($"  - tcp 0.0.0.0:25, PID 311 ` exim4 `, {label} 0 ` root ` {(language == "en" ? "(lowest of several)" : "(niedrigste von mehreren)")}", body, "the download lists the listener of several UIDs");
         Assert.AreEqual(expected, body, "the text of the report command");
     }
 
