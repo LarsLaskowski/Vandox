@@ -158,3 +158,16 @@ reads the descriptor too, and the size bound can no longer be defeated by wrap-a
 ## Out of scope / follow-ups
 
 - Refusing an oversized sealed file at start (option a) — not planned.
+
+## Challenge notes
+
+Devil's Advocate, mode plan (0 major, 1 minor), appended verbatim:
+
+1. **minor** (test hygiene: a descriptor leak the Tester can avoid without a plan change). In `TestStatAvailable` "an open directory has space" (`internal/spool/cover_test.go`), close the descriptor opened with `syscall.Open(t.TempDir(), O_RDONLY|O_DIRECTORY|O_CLOEXEC, 0)` in a `t.Cleanup` that ignores no error silently: report a failed `syscall.Close` with `t.Errorf`. Fail the test with `t.Fatalf` if the open itself fails, before calling `statAvailable`.
+
+## Security notes
+
+Security, mode plan, APPROVED, non-blocking findings appended verbatim:
+
+1. Under option (b), a planted oversized sealed file that has the *highest* file number is dropped only after every older legitimate file. Each `size_bound` round drops `files[0]` until the planted file is reached, so all older unacknowledged records turn into `spool_dropped` gaps. This doesn't add any capability: a file only passes `trusted()` if it belongs to the agent's own user, and that user can delete spool files directly. Still, the area document text saying "an oversized file is dropped like any other oldest file" could say plainly that the oldest-first order stays, so newer planted files cost the older real data. The Dev can add this in the `docs/areas/agent.md` *Size bound* update, or the Lead in record 0123 *Size accounting*. It needs no code change.
+2. Fact 13 in the plan's table can be marked confirmed with the measurement above (rename: `Statfs(path)` fails with ENOENT, `Fstatfs(fd)` succeeds; a symlink planted at the old path makes `Statfs` report another file system, `Fstatfs` the held one), as a record update only.
