@@ -203,12 +203,19 @@ func statAvailable(fd int) (uint64, error) {
 	if st.Bsize <= 0 {
 		return 0, nil
 	}
-	hi, lo := bits.Mul64(uint64(st.Bavail), uint64(st.Bsize))
+	hi, lo := bits.Mul64(widen64(st.Bavail), uint64(st.Bsize))
 	if hi != 0 {
 		return math.MaxUint64, nil
 	}
 
 	return lo, nil
+}
+
+// widen64 returns the block count v as a uint64. Statfs_t.Bavail is uint64 on 64-bit GOARCH targets and uint32 on
+// 32-bit ones, so the widening is written once for both widths: at a call site it is a no-op on the 64-bit build the
+// analyzer gate runs, which unconvert reports.
+func widen64[T uint32 | uint64](v T) uint64 {
+	return uint64(v)
 }
 
 // addSize returns the sum of two non-negative sizes, saturating at the largest int64.
