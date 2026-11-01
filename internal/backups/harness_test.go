@@ -163,13 +163,49 @@ func (e *env) runLost(sec int) []*model.BackupRun {
 	return e.runWith(scheduler.Run{Start: at(sec), PreviousLost: true})
 }
 
-// runWith collects for run, checks every record and returns the backup run payloads.
+// runDropped collects at sec seconds after t0 and reports the run's records as dropped (Observer.Kept with false), as the
+// scheduler does when the spool did not take them.
+func (e *env) runDropped(sec int) []*model.BackupRun {
+	e.t.Helper()
+	return e.collectReporting(scheduler.Run{Start: at(sec)}, reportDropped)
+}
+
+// runUnreported collects at sec seconds after t0 and reports nothing, as when the run was abandoned or the agent stopped.
+func (e *env) runUnreported(sec int) []*model.BackupRun {
+	e.t.Helper()
+	return e.collectReporting(scheduler.Run{Start: at(sec)}, reportNone)
+}
+
+// report is what the scheduler tells the collector about a run's records after the run.
+type report int
+
+const (
+	reportKept report = iota
+	reportDropped
+	reportNone
+)
+
+// runWith collects for run, reports the records as kept, checks every record and returns the backup run payloads.
 func (e *env) runWith(run scheduler.Run) []*model.BackupRun {
+	e.t.Helper()
+	return e.collectReporting(run, reportKept)
+}
+
+// collectReporting collects for run, tells the collector what happened to the records as rep says, checks every record and
+// returns the backup run payloads.
+func (e *env) collectReporting(run scheduler.Run, rep report) []*model.BackupRun {
 	e.t.Helper()
 	sec := int(run.Start.Sub(t0) / time.Second)
 	records, err := e.b.Collect(context.Background(), run)
 	if err != nil {
 		e.t.Fatalf("Collect(run at +%d s) error = %v, want nil", sec, err)
+	}
+	switch rep {
+	case reportKept:
+		e.b.Kept(run, true)
+	case reportDropped:
+		e.b.Kept(run, false)
+	case reportNone:
 	}
 	runs := make([]*model.BackupRun, 0, len(records))
 	for i := range records {

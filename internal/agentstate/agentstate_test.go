@@ -103,8 +103,12 @@ func update(t *testing.T, s *Store, urgent bool, fn func(*State)) {
 	s.Update(urgent, fn)
 }
 
+// procFS returns a proc tree of the boot bootID with the given uptime.
 func procFS(uptime string) fstest.MapFS {
-	return fstest.MapFS{"uptime": {Data: []byte(uptime + " 4000.00\n")}}
+	return fstest.MapFS{
+		"uptime":                    {Data: []byte(uptime + " 4000.00\n")},
+		"sys/kernel/random/boot_id": {Data: []byte(bootID + "\n")},
+	}
 }
 
 func fullState(seq uint64) func(*State) {
@@ -1765,5 +1769,85 @@ func TestStore_NilBarrierRemovesIt(t *testing.T) {
 	}
 	if !fileExists(path) {
 		t.Error("the state file is missing, want the save to run without a barrier")
+	}
+}
+
+func TestSaverRefreshesOnlyTheUptimeOfTheCurrentBoot(t *testing.T) {
+	otherBoot := "1f8fad5b-d9cb-469f-a165-70867728950f"
+	cases := []struct {
+		name    string
+		bootRaw *string // content of the proc boot_id file, nil removes the file
+		current bool
+	}{
+		{"current boot", strPtr(bootID + "\n"), true},
+		{"another boot", strPtr(otherBoot + "\n"), false},
+		{"boot ID missing", nil, false},
+		{"boot ID malformed", strPtr("not-a-uuid\n"), false},
+		{"boot ID upper case", strPtr(strings.ToUpper(bootID) + "\n"), false},
+		{"boot ID empty", strPtr(""), false},
+	}
+	for _, tc := range cases {
+		for _, urgent := range []bool{false, true} {
+			name := tc.name + " heartbeat"
+			if urgent {
+				name = tc.name + " urgent save"
+			}
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				s, _ := Open(dir, slog.New(slog.DiscardHandler))
+				update(t, s, true, fullState(1))
+				collect(t, NewSaver(s, procFS("1000.00")), t0)
+
+				proc := procFS("1049.50")
+				if tc.bootRaw == nil {
+					delete(proc, "sys/kernel/random/boot_id")
+				} else {
+					proc["sys/kernel/random/boot_id"] = &fstest.MapFile{Data: []byte(*tc.bootRaw)}
+				}
+				at := t0.Add(50 * time.Second)
+				if urgent {
+					update(t, s, true, func(st *State) { st.Journal.Seqnum = 2 })
+					at = t0.Add(6 * time.Second)
+				}
+				collect(t, NewSaver(s, proc), at)
+
+				got, _ := Open(dir, slog.New(slog.DiscardHandler))
+				boot := got.State().Boot
+				if boot == nil || boot.ID != bootID {
+					t.Fatalf("saved boot = %+v, want the boot %s", boot, bootID)
+				}
+				want := 1000 * time.Second
+				if tc.current {
+					want = 1049*time.Second + 500*time.Millisecond
+				}
+				if boot.Uptime != want {
+					t.Errorf("saved uptime = %v, want %v (refreshed only when the stored boot is the boot of proc: %v)", boot.Uptime, want, tc.current)
+				}
+				if urgent && got.State().Journal.Seqnum != 2 {
+					t.Errorf("saved journal seqnum = %d, want 2 (the urgent change is saved either way)", got.State().Journal.Seqnum)
+				}
+			})
+		}
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestSaverFirstHeartbeatKeepsThePreviousBootUptime(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := Open(dir, slog.New(slog.DiscardHandler))
+	update(t, old, true, fullState(1))
+	collect(t, NewSaver(old, procFS("1000.00")), t0)
+
+	// The agent restarts in a new boot; the state job's first run (a heartbeat) comes before the kernel collector's.
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	proc := procFS("30.00")
+	proc["sys/kernel/random/boot_id"] = &fstest.MapFile{Data: []byte("1f8fad5b-d9cb-469f-a165-70867728950f\n")}
+	update(t, s, true, func(st *State) { st.Journal.Seqnum = 9 })
+	collect(t, NewSaver(s, proc), t0.Add(time.Hour))
+
+	got, _ := Open(dir, slog.New(slog.DiscardHandler))
+	if b := got.State().Boot; b == nil || b.ID != bootID || b.Uptime != 1000*time.Second {
+		t.Errorf("saved boot after the first heartbeat of a new boot = %+v, want the previous boot %s with its saved uptime 1000s", b, bootID)
 	}
 }
