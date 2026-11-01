@@ -59,6 +59,23 @@ func (b *Backups) Name() string {
 	return Name
 }
 
+// Kept applies the change of the check run when the scheduler reports its records kept and forgets it otherwise.
+func (b *Backups) Kept(_ scheduler.Run, _ bool) {
+}
+
+// change is what one check decided for the collector's state.
+type change struct {
+	start  time.Time           // the check's run start, matched by Kept
+	open   *agentstate.OpenRun // the open run after the check, nil for none
+	write  bool                // whether the state's open run changes
+	urgent bool                // a start, an end or a higher process count
+	goneBy time.Time           // the gone-by time after the check
+}
+
+// apply writes the change into the state and the collector.
+func (b *Backups) apply(_ *change) {
+}
+
 // sighting is what one check found: the number of matching processes and the earliest of them.
 type sighting struct {
 	count    uint32

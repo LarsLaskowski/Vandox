@@ -759,7 +759,7 @@ func (v *Saver) prepare(now time.Time) (State, uint64, bool) {
 
 	elapsed := now.Sub(s.lastSave)
 	if elapsed >= heartbeatInterval && s.state.Boot != nil {
-		if up, ok := ReadUptime(v.proc); ok {
+		if up, ok := v.currentUptime(s.state.Boot); ok {
 			s.state.Boot.Uptime = up
 			s.seq++
 			s.dirty = true
@@ -772,12 +772,17 @@ func (v *Saver) prepare(now time.Time) (State, uint64, bool) {
 	}
 
 	if s.state.Boot != nil {
-		if up, ok := ReadUptime(v.proc); ok {
+		if up, ok := v.currentUptime(s.state.Boot); ok {
 			s.state.Boot.Uptime = up
 		}
 	}
 
 	return copyState(s.state), s.seq, true
+}
+
+// currentUptime returns the uptime of proc when boot is the boot of proc.
+func (v *Saver) currentUptime(_ *Boot) (time.Duration, bool) {
+	return ReadUptime(v.proc)
 }
 
 // ReadUptime reads the uptime from proc's uptime file.

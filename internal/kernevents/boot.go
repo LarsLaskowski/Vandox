@@ -7,6 +7,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 )
 
 const (
@@ -51,6 +52,11 @@ func (k *Kernel) bootCheck(start time.Time) *model.Record {
 		Meta: model.Meta{Source: Name, CapturedAt: captured},
 		Data: &model.KernelEvent{Type: model.KernelEventBoot, Boot: event},
 	}
+}
+
+// Kept saves the boot of the boot event when the scheduler reports the run that last returned it kept; any other
+// report changes nothing.
+func (k *Kernel) Kept(_ scheduler.Run, _ bool) {
 }
 
 // saveBoot makes the current boot the saved one.
