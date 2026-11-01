@@ -136,4 +136,4 @@ lowest and `mixed_uids`; the rules are in [Agent](../areas/agent.md) (*Connectio
   "UID unknown", never as root.
 - The connection collector reads `/etc/passwd` once per run, so the run's live data grows by the names of that bounded file; a table
   line whose `uid` field is not 1 to 10 digits within 32 bits is unreadable like a bad inode, which also makes `connstats.TCPListeners`
-  (the MariaDB collector's exposed-listener count) refuse that table. Showing the UID in the report and the web UI is a follow-up.
+  (the MariaDB collector's exposed-listener count) refuse that table. The forensics report and its page show the UID and user of each new listener as "socket UID" (#304, [0116](0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)).

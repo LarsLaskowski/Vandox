@@ -222,6 +222,62 @@ public partial class LogTextTests
         Assert.AreEqual("[cut: 2 more characters]", pairRuns[1].Text, "the pair has two UTF-16 characters");
     }
 
+    /// <summary>
+    /// A user name of the report cut to 32 bytes costs at most 3,072 bytes of retained heap with its runs even when plain and escaped characters alternate, which bounds the names of the new listeners on the report page at about 7.9 MB per circuit; a plain name of the same length costs less.
+    /// </summary>
+    [TestMethod]
+    public void LogTextRunsOfAlternatingShortNameRetainBoundedHeap()
+    {
+        // Arrange
+        const int count = 2560;
+        const int bytes = 32;
+        const long limit = 3072;
+
+        _ = RetainedPerText(1, bytes, true);
+
+        // Act
+        var alternating = RetainedPerText(count, bytes, true);
+        var plain = RetainedPerText(count, bytes, false);
+
+        // Assert
+        Assert.IsLessThanOrEqualTo(limit, alternating, "the retained heap of one alternating name of 32 bytes with its runs");
+        Assert.IsLessThan(alternating, plain, "a plain name costs less than an alternating one, so the measurement sees the runs");
+        Assert.IsGreaterThan(0, plain, "the measurement sees the plain texts");
+    }
+
+    /// <summary>
+    /// Measures the heap that texts of the given length retain together with their runs.
+    /// </summary>
+    /// <param name="count">The number of texts</param>
+    /// <param name="length">The length of each text in characters, all of one byte in UTF-8</param>
+    /// <param name="alternating">Whether plain and escaped characters alternate, or the text is plain</param>
+    /// <returns>The retained bytes of one text</returns>
+    private static long RetainedPerText(int count, int length, bool alternating)
+    {
+        var before = HeapSampler.RetainedBytes();
+        var kept = new List<(string Text, IReadOnlyList<TextRun> Runs)>(count);
+
+        for (var index = 0; index < count; index++)
+        {
+            var characters = new char[length];
+
+            for (var position = 0; position < length; position++)
+            {
+                characters[position] = alternating && position % 2 == 1 ? (char)1 : 'a';
+            }
+
+            var text = new string(characters);
+
+            kept.Add((text, LogText.Runs(text, LogText.MaxShortChars)));
+        }
+
+        var after = HeapSampler.RetainedBytes();
+
+        GC.KeepAlive(kept);
+
+        return (after - before) / count;
+    }
+
     #endregion // Methods
 
     #region Patterns

@@ -130,7 +130,7 @@ public class ReportContentTests
     /// The pieces of the listener section on the page, in order, are those of the Markdown for the same data and language: the head, the findings with their listeners and the notes of the caps.
     /// </summary>
     /// <param name="language">The language</param>
-    /// <param name="sample">The sample: the rich one, one in which every cap was hit, and one with a start that was not compared</param>
+    /// <param name="sample">The sample: the rich one, one in which every cap was hit, one with a start that was not compared, and one with hostile and long user names of sockets</param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
     [DataRow("en", "rich")]
@@ -139,6 +139,8 @@ public class ReportContentTests
     [DataRow("de", "capped")]
     [DataRow("en", "uncompared")]
     [DataRow("de", "uncompared")]
+    [DataRow("en", "hostile")]
+    [DataRow("de", "hostile")]
     public async Task ReportContentShowsListenerSectionLikeTheMarkdown(string language, string sample)
     {
         // Arrange
@@ -151,6 +153,19 @@ public class ReportContentTests
                       {
                           "rich" => RichSummary(),
                           "capped" => ListenerSummary(CappedListeners()),
+                          "hostile" => ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 1, 0, 0),
+                                                               [
+                                                                   StartFinding("web-1",
+                                                                                9,
+                                                                                at,
+                                                                                ListenerOutcome.AllPorts,
+                                                                                0,
+                                                                                Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 0, "a`b <b>x</b> " + (char)0x202E, true),
+                                                                                Entry(Proto.Tcp6, "::", 8443, uid: 33, user: new string('u', 40)),
+                                                                                Entry(Proto.Tcp, "0.0.0.0", 24, uid: 7),
+                                                                                Entry(Proto.Tcp, "0.0.0.0", 25))
+                                                               ],
+                                                               [])),
                           _ => ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 0, 0, 1), [StartFinding("web-1", 9, at, ListenerOutcome.NotComparable, 0)], []))
                       };
         var markdown = new StringWriter();
@@ -217,8 +232,48 @@ public class ReportContentTests
         Assert.IsGreaterThan(start, end, "the outages heading follows the listener section");
         Assert.AreEqual(5, Count(html[start..end], code), "the agent ID in the head and in both findings, and the two commands, are code in the listener section");
         Assert.AreEqual(Count(html, code), Count(html, "class=\"external\""), "external text is only ever inside a code element");
-        Assert.Contains($"tcp 0.0.0.0:23, PID 7 <b>x</b> ``` {Backslash}u202e", pieces, "the command is text on the page");
+        Assert.Contains($"tcp 0.0.0.0:23, PID 7 <b>x</b> ``` {Backslash}u202e , socket UID unknown", pieces, "the command is text on the page (its line feed is white space there), followed by the unknown socket UID");
         Assert.Contains($"2026-10-01 14:00 UTC, agent {agent}, found by the agent, all ports: 1 new", pieces, "the agent ID is text on the page");
+        Assert.AreEqual(2, Count(html, ", socket UID unknown"), "both listeners without a UID say so on the page");
+    }
+
+    /// <summary>
+    /// The user of a socket appears on the page only as text inside a code element: markup is encoded, a backtick run and the right-to-left override stay text or a visible escape, and no element comes from the name.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ReportContentShowsSocketUserAsText()
+    {
+        // Arrange
+        const string agent = "web1";
+
+        var user = "<b>x</b> ``` " + (char)0x202E + "\n";
+        var at = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        var summary = ListenerSummary(Section(Tally(agent, 3, at.AddDays(-1), at.AddDays(1), 1, 1, 0, 0),
+                                              [StartFinding(agent, 2, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 5, user))],
+                                              []));
+        var builder = new ReportViewBuilder(ReportText.English, 0, ReportsView.PageOutages);
+
+        Assert.IsTrue(user.Contains((char)0x202E), "the user still holds the right-to-left override");
+
+        await WriteAsync(builder, summary, []);
+
+        // Act
+        var html = await RenderAsync(builder.Document);
+
+        // Assert
+        var pieces = ReportPieces.FromHtml(html);
+        var start = html.IndexOf(">New listeners</h2>", StringComparison.Ordinal);
+        var end = start < 0 ? -1 : html.IndexOf(">Outages</h2>", start, StringComparison.Ordinal);
+
+        Assert.IsGreaterThan(-1, start, "the rendered page has the heading of the listener section");
+        Assert.IsGreaterThan(start, end, "the outages heading follows the listener section");
+        Assert.DoesNotContain("<b>", html, "no element from the user");
+        Assert.DoesNotContain("</b>", html, "no end tag from the user");
+        Assert.Contains(HtmlEncoder.Default.Encode("<b>x</b>"), html, "the markup of the user is encoded");
+        Assert.Contains($"<span class=\"escape\">{Backslash}u202e</span>", html, "the right-to-left override is a visible escape");
+        Assert.AreEqual(4, Count(html[start..end], "<code><span class=\"external\">"), "the agent ID in the head and in the finding, the command and the user are code in the listener section");
+        Assert.Contains(piece => piece.StartsWith($"tcp 0.0.0.0:23, PID 7 telnetd, socket UID 5 <b>x</b> ``` {Backslash}u202e", StringComparison.Ordinal), pieces, "the user is text on the page, after the socket UID");
     }
 
     /// <summary>

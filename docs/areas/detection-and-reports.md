@@ -553,7 +553,7 @@ the agent's own findings, in the section **New listeners**.
   equality, the agent's key: `0.0.0.0` and `::ffff:0.0.0.0` are different addresses). A change of the owner is not new, an unconnected UDP socket on a
   port from 32768 to 60999 is not listed (the agent's rule), and a listener without a local endpoint is ignored. A compared start without a new
   listener writes no finding. A finding lists at most 64 new listeners in inventory order, each with protocol, local address and port and, when
-  known, the owner's PID and command, then `and <n> more`.
+  known, the owner's PID and command and the socket UID with its user, then `and <n> more`.
 - **The agent's own findings.** Every stored usable snapshot whose `listener_check` is `all` or `privileged` and that reports at least one new
   listener is a finding **found by the agent**, with the agent's own list (the first 64 stored) and its omitted count; a `none` or `start`
   snapshot reports none.
@@ -616,7 +616,7 @@ The report has these sections, in this order. Headings and fixed words:
     `inventories not comparable` (`nicht verglichen: kein früheres Inventar`, `Ports 1 bis 1023 unvollständig`, `Inventare nicht vergleichbar`);
   - `<time>, agent <id>, found by the agent, all ports: <n> new` (`vom Agenten gefunden`);
   - a listener: `<proto> <address>:<port>, PID <pid> <command>` or `<proto> <address>:<port>, no owner` (`kein Besitzer`), the address in the
-    backend's numeric form (an IPv4-mapped address is written as .NET writes it); `and <n> more` (`und <n> weitere`) for the listeners left out.
+    backend's numeric form (an IPv4-mapped address is written as .NET writes it), followed by the socket's UID: `, socket UID <uid> <user>` (`Socket-UID`), the user as a code span, or `, socket UID <uid>` when no user name is known, or `, socket UID unknown` (`Socket-UID unbekannt`) when the entry has no UID; a user name longer than 32 UTF-8 bytes is shown cut with ` (cut)` (` (gekürzt)`) after it, and ` (lowest of several)` (` (niedrigste von mehreren)`) ends the line when the endpoint's sockets have several UIDs (the UID shown is then the lowest of them). The socket UID is the UID of the socket's creator, not of the user of the PID shown (a daemon that binds as root and runs as `www-data` reads `socket UID 0 root`), see [Agent](agent.md), *Socket UIDs*; `and <n> more` (`und <n> weitere`) for the listeners left out.
   When no finding holds a new listener the section ends with `No new listener found.` (`Kein neuer Listener gefunden.`), or, when a start was not
   compared, `No new listener found among the compared inventories.` (`Kein neuer Listener unter den verglichenen Inventaren gefunden.`).
 - **Outages**: one section per stored incident, in the order of its window, with its number and first kill: the window; the kill
@@ -644,8 +644,8 @@ separator, never the rules, the numbers or the external text.
 
 ### External text in the report
 
-Victim commands and program names (also of backup and panel programs), and the owner commands of the listeners and the agent IDs of the new
-listeners section, are external text (security area 12 of `.squad/project.md`).
+Victim commands and program names (also of backup and panel programs), and the owner commands of the listeners, the user names of the listeners' sockets and the agent IDs of the new
+listeners section, are external text (security area 12 of `.squad/project.md`). A user name is shown cut to its first 32 UTF-8 bytes on a character boundary (`ReportLimits.MaxShownUserBytes`) before it is escaped, so the Markdown, the download and the page show the same prefix.
 The report writes them **only as Markdown code spans**, so no character of them is read as Markdown, HTML, an entity, a link or an
 autolink:
 
@@ -675,8 +675,8 @@ distinguishable from the escape of a real U+202E (`\u202e`).
   **10,000 boots** (80 KB), **100,000 runs** of consecutive observed hours (about 1.6 MB), **4,096 programs** (their names, short
   texts of at most 1,024 bytes, about 8 MiB at most, plus about 80 bytes of counters each), and 24 hour counts.
   The incidents add only counters. The listener section keeps the head of at most 64 agent IDs (under 64 KB) and at most 20 findings after an agent
-  start and 20 found by the agent, each with at most 64 listeners of a command of up to 1,024 UTF-8 bytes: a finding is at most about 140 KB, so the
-  section is at most about 5.5 MB in the run (on the page, where every command also carries its runs, up to about 16 MB per circuit, [Web UI](web-ui.md), *Limits and errors*). With all caps full the report keeps about 60 MB across the run, plus the 5.5 MB of the listener section, plus the one log page, process snapshot or incident it is reading.
+  start and 20 found by the agent, each with at most 64 listeners of a command of up to 1,024 UTF-8 bytes and a user name of up to 1,024 bytes: a finding is at most about 280 KB, so the
+  section is at most about 11 MB in the run (on the page, where every text also carries its runs, up to about 68 MB per circuit, [Web UI](web-ui.md), *Limits and errors*). With all caps full the report keeps about 60 MB across the run, plus the 11 MB of the listener section, plus the one log page, process snapshot or incident it is reading.
 - **Over a cap** the statements that need the data are unknown: more snapshots make backup and panel unknown, more boots the boot,
   more runs of observed hours backup, boot and panel (their base rate). The time of day counts every observed hour and has no cap.
   The notes name the cap that was hit. An outage's own activity follows the same rule: past a cap of the data it needs, a yes stays

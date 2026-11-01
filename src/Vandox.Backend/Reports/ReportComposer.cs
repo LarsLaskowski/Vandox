@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Vandox.Core.Incidents;
+using Vandox.Core.LogParsing;
 using Vandox.Core.Model;
 using Vandox.Core.Reports;
 using Vandox.Storage;
@@ -886,9 +887,52 @@ internal sealed class ReportComposer
     {
         var endpoint = $"{listener.Proto} {listener.Local}";
 
-        return listener.Pid == 0
-                   ? WithCode(_text.ListenerEntryNoOwner, string.Empty, endpoint)
-                   : WithCode(_text.ListenerEntry, listener.Command, endpoint, Number(listener.Pid));
+        var pieces = listener.Pid == 0
+                         ? WithCode(_text.ListenerEntryNoOwner, string.Empty, endpoint)
+                         : WithCode(_text.ListenerEntry, listener.Command, endpoint, Number(listener.Pid));
+
+        pieces.AddRange(UidPieces(listener));
+
+        return pieces;
+    }
+
+    /// <summary>
+    /// Writes the socket's UID and user of a listener.
+    /// </summary>
+    /// <param name="listener">The listener</param>
+    /// <returns>The pieces</returns>
+    private List<ReportPiece> UidPieces(Listener listener)
+    {
+        if (listener.Uid is not uint uid)
+        {
+            return [ReportPiece.Plain(_text.ListenerUidUnknown)];
+        }
+
+        List<ReportPiece> pieces;
+        var cut = false;
+
+        if (string.IsNullOrEmpty(listener.User))
+        {
+            pieces = WithCode(_text.ListenerUidNoUser, string.Empty, Number(uid));
+        }
+        else
+        {
+            var shown = Utf8Text.Cut(listener.User, ReportLimits.MaxShownUserBytes, out cut);
+
+            pieces = WithCode(_text.ListenerUid, shown, Number(uid));
+        }
+
+        if (cut)
+        {
+            pieces.Add(ReportPiece.Plain(_text.ListenerUserCut));
+        }
+
+        if (listener.MixedUids)
+        {
+            pieces.Add(ReportPiece.Plain(_text.ListenerMixedUids));
+        }
+
+        return pieces;
     }
 
     /// <summary>

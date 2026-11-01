@@ -5,7 +5,7 @@ namespace Vandox.Core.LogParsing;
 /// <summary>
 /// Decodes and cuts text to limits counted in UTF-8 bytes.
 /// </summary>
-internal static class Utf8Text
+public static class Utf8Text
 {
     #region Constants
 
@@ -22,25 +22,13 @@ internal static class Utf8Text
     #region Methods
 
     /// <summary>
-    /// Decodes bytes with U+FFFD for invalid ones, then cuts the text to the limit.
-    /// </summary>
-    /// <param name="bytes">The bytes</param>
-    /// <param name="limit">The most UTF-8 bytes the result may take</param>
-    /// <param name="truncated">Set to <c>true</c> when the text was cut</param>
-    /// <returns>The text</returns>
-    internal static string Decode(ReadOnlySpan<byte> bytes, int limit, out bool truncated)
-    {
-        return Cut(_utf8.GetString(bytes), limit, out truncated);
-    }
-
-    /// <summary>
     /// Cuts a text at a character boundary to at most the limit in UTF-8 bytes.
     /// </summary>
     /// <param name="text">The text</param>
     /// <param name="limit">The most UTF-8 bytes the result may take</param>
     /// <param name="truncated">Set to <c>true</c> when the text was cut</param>
     /// <returns>The text</returns>
-    internal static string Cut(string text, int limit, out bool truncated)
+    public static string Cut(string text, int limit, out bool truncated)
     {
         truncated = false;
 
@@ -68,6 +56,18 @@ internal static class Utf8Text
         }
 
         return text[..end];
+    }
+
+    /// <summary>
+    /// Decodes bytes with U+FFFD for invalid ones, then cuts the text to the limit.
+    /// </summary>
+    /// <param name="bytes">The bytes</param>
+    /// <param name="limit">The most UTF-8 bytes the result may take</param>
+    /// <param name="truncated">Set to <c>true</c> when the text was cut</param>
+    /// <returns>The text</returns>
+    internal static string Decode(ReadOnlySpan<byte> bytes, int limit, out bool truncated)
+    {
+        return Cut(_utf8.GetString(bytes), limit, out truncated);
     }
 
     #endregion // Methods

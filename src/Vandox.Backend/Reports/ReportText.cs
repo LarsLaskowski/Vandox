@@ -100,6 +100,11 @@ public sealed class ReportText
                                                     ListenerAgentFinding = "{1}, agent {0}, found by the agent, {2}: {3} new",
                                                     ListenerEntry = "{1}, PID {2} {0}",
                                                     ListenerEntryNoOwner = "{1}, no owner",
+                                                    ListenerUid = ", socket UID {1} {0}",
+                                                    ListenerUidNoUser = ", socket UID {1}",
+                                                    ListenerUidUnknown = ", socket UID unknown",
+                                                    ListenerUserCut = " (cut)",
+                                                    ListenerMixedUids = " (lowest of several)",
                                                     CapStartFindingsNote = "Only the latest {0} findings after an agent start are listed; {1} earlier ones are left out.",
                                                     CapAgentFindingsNote = "Only the latest {0} findings of the agent are listed; {1} earlier ones are left out.",
                                                     CapAgentsNote = "Only the first {0} agent IDs are listed; {1} more are left out.",
@@ -198,6 +203,11 @@ public sealed class ReportText
                                                    ListenerAgentFinding = "{1}, Agent {0}, vom Agenten gefunden, {2}: {3} neu",
                                                    ListenerEntry = "{1}, PID {2} {0}",
                                                    ListenerEntryNoOwner = "{1}, kein Besitzer",
+                                                   ListenerUid = ", Socket-UID {1} {0}",
+                                                   ListenerUidNoUser = ", Socket-UID {1}",
+                                                   ListenerUidUnknown = ", Socket-UID unbekannt",
+                                                   ListenerUserCut = " (gekürzt)",
+                                                   ListenerMixedUids = " (niedrigste von mehreren)",
                                                    CapStartFindingsNote = "Nur die letzten {0} Funde nach einem Agentenstart sind aufgeführt; {1} frühere fehlen.",
                                                    CapAgentFindingsNote = "Nur die letzten {0} Funde des Agenten sind aufgeführt; {1} frühere fehlen.",
                                                    CapAgentsNote = "Nur die ersten {0} Agenten-IDs sind aufgeführt; {1} weitere fehlen.",
@@ -647,6 +657,31 @@ public sealed class ReportText
     /// Gets the text: the template of one listener without an owner.
     /// </summary>
     public string ListenerEntryNoOwner { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of the socket's UID with its user name.
+    /// </summary>
+    public string ListenerUid { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of the socket's UID without a user name.
+    /// </summary>
+    public string ListenerUidNoUser { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the socket's UID is unknown.
+    /// </summary>
+    public string ListenerUidUnknown { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the marker: the shown user name is cut.
+    /// </summary>
+    public string ListenerUserCut { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the marker: the UID is the lowest of several.
+    /// </summary>
+    public string ListenerMixedUids { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the text: the note: only the latest findings after an agent start are listed.

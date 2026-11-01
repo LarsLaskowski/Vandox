@@ -628,31 +628,31 @@ public class MarkdownReportWriterTests
                                       "- Agent ` web-1 `: 1440 connection snapshots from 2026-09-29 00:05 UTC to 2026-10-06 05:55 UTC; 4 agent starts: 2 compared on all ports, 1 on ports 1 to 1023 only, 1 not compared",
                                       "- Agent ` web-2 `: 12 connection snapshots from 2026-10-03 08:00 UTC to 2026-10-03 09:50 UTC; 0 agent starts: 0 compared on all ports, 0 on ports 1 to 1023 only, 0 not compared",
                                       "- 2026-10-02 06:40 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-02 06:10 UTC), all ports: 2 new",
-                                      "  - tcp 0.0.0.0:23, PID 200 ` telnetd `",
-                                      "  - tcp6 [::]:8443, no owner",
+                                      "  - tcp 0.0.0.0:23, PID 200 ` telnetd `, socket UID 0 ` root `",
+                                      "  - tcp6 [::]:8443, no owner, socket UID 33 ` www-data `",
                                       "- 2026-10-04 03:12 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-04 02:42 UTC), ports 1 to 1023 only: 7 new",
-                                      "  - tcp 0.0.0.0:25, PID 311 ` exim4 `",
+                                      "  - tcp 0.0.0.0:25, PID 311 ` exim4 `, socket UID 0 ` root ` (lowest of several)",
                                       "  - and 6 more",
                                       "- 2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: ports 1 to 1023 not complete",
                                       "- 2026-10-05 12:00 UTC, agent ` web-1 `, found by the agent, all ports: 1 new",
-                                      "  - tcp 0.0.0.0:2121, no owner",
+                                      "  - tcp 0.0.0.0:2121, no owner, socket UID 1000",
                                       "- 2026-10-06 04:00 UTC, agent ` web-2 `, found by the agent, ports 1 to 1023 only: 1 new",
-                                      "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``"
+                                      "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``, socket UID unknown"
                                   ]
                                 : [
                                       "- Agent ` web-1 `: 1440 Verbindungs-Snapshots von 2026-09-29 00:05 UTC bis 2026-10-06 05:55 UTC; 4 Agentenstarts: 2 auf allen Ports verglichen, 1 nur auf Ports 1 bis 1023, 1 nicht verglichen",
                                       "- Agent ` web-2 `: 12 Verbindungs-Snapshots von 2026-10-03 08:00 UTC bis 2026-10-03 09:50 UTC; 0 Agentenstarts: 0 auf allen Ports verglichen, 0 nur auf Ports 1 bis 1023, 0 nicht verglichen",
                                       "- 2026-10-02 06:40 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-02 06:10 UTC), alle Ports: 2 neu",
-                                      "  - tcp 0.0.0.0:23, PID 200 ` telnetd `",
-                                      "  - tcp6 [::]:8443, kein Besitzer",
+                                      "  - tcp 0.0.0.0:23, PID 200 ` telnetd `, Socket-UID 0 ` root `",
+                                      "  - tcp6 [::]:8443, kein Besitzer, Socket-UID 33 ` www-data `",
                                       "- 2026-10-04 03:12 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-04 02:42 UTC), nur Ports 1 bis 1023: 7 neu",
-                                      "  - tcp 0.0.0.0:25, PID 311 ` exim4 `",
+                                      "  - tcp 0.0.0.0:25, PID 311 ` exim4 `, Socket-UID 0 ` root ` (niedrigste von mehreren)",
                                       "  - und 6 weitere",
                                       "- 2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: Ports 1 bis 1023 unvollständig",
                                       "- 2026-10-05 12:00 UTC, Agent ` web-1 `, vom Agenten gefunden, alle Ports: 1 neu",
-                                      "  - tcp 0.0.0.0:2121, kein Besitzer",
+                                      "  - tcp 0.0.0.0:2121, kein Besitzer, Socket-UID 1000",
                                       "- 2026-10-06 04:00 UTC, Agent ` web-2 `, vom Agenten gefunden, nur Ports 1 bis 1023: 1 neu",
-                                      "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``"
+                                      "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``, Socket-UID unbekannt"
                                   ];
 
         // Act
@@ -776,7 +776,7 @@ public class MarkdownReportWriterTests
 
         for (var index = 0; index < 64; index++)
         {
-            Assert.AreEqual($"  - tcp 0.0.0.0:{1000 + index}, {(english ? "no owner" : "kein Besitzer")}", section[head + 1 + index], $"listener {index} in inventory order");
+            Assert.AreEqual($"  - tcp 0.0.0.0:{1000 + index}, {(english ? "no owner, socket UID unknown" : "kein Besitzer, Socket-UID unbekannt")}", section[head + 1 + index], $"listener {index} in inventory order");
         }
 
         Assert.AreEqual(rest, section[head + 65], "the rest follows the 64 listed");
@@ -814,10 +814,10 @@ public class MarkdownReportWriterTests
         string[] expected = [
                                 $"- Agent {agentSpan}: 3 connection snapshots from 2026-09-30 12:00 UTC to 2026-10-02 12:00 UTC; 2 agent starts: 1 compared on all ports, 0 on ports 1 to 1023 only, 1 not compared",
                                 $"- 2026-10-01 12:00 UTC, agent {agentSpan}, after an agent start (compared with 2026-10-01 11:30 UTC), all ports: 1 new",
-                                $"  - tcp 0.0.0.0:23, PID 7 {commandSpan}",
+                                $"  - tcp 0.0.0.0:23, PID 7 {commandSpan}, socket UID unknown",
                                 $"- 2026-10-01 13:00 UTC, agent {agentSpan}, after an agent start, not compared: no earlier inventory",
                                 $"- 2026-10-01 14:00 UTC, agent {agentSpan}, found by the agent, all ports: 1 new",
-                                $"  - tcp 0.0.0.0:24, PID 8 {commandSpan}"
+                                $"  - tcp 0.0.0.0:24, PID 8 {commandSpan}, socket UID unknown"
                             ];
 
         // Assert
@@ -904,6 +904,257 @@ public class MarkdownReportWriterTests
         Assert.DoesNotContain(line => line.Contains(english ? "findings" : "Funde", StringComparison.Ordinal), agentsOnlyNotes, "no note of findings when only the agent IDs were capped");
         Assert.DoesNotContain(line => line.Contains(english ? "agent IDs" : "Agenten-IDs", StringComparison.Ordinal), plainNotes, "no note of agent IDs when none was left out");
         Assert.DoesNotContain(line => line.Contains(english ? "findings" : "Funde", StringComparison.Ordinal), plainNotes, "no note of findings when exactly the cap is listed and nothing is left out");
+    }
+
+    /// <summary>
+    /// A listener with an owner and a socket UID ends with the UID and the user as a code span of external text, in the words of the language.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWritesListenerWithOwnerAndSocketUid(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var expected = $"  - tcp 0.0.0.0:23, PID 200 ` telnetd `, {(english ? "socket UID" : "Socket-UID")} 0 ` root `";
+
+        // Act
+        var lines = await ListenerLinesAsync(text, Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd", 0, "root"));
+
+        // Assert
+        Assert.AreSequenceEqual([expected], lines, "the owner, then the socket UID and its user");
+    }
+
+    /// <summary>
+    /// A listener without an owner but with a socket UID names the UID and the user after the words for no owner.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWritesListenerWithoutOwnerAndSocketUid(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var expected = $"  - tcp6 [::]:8443, {(english ? "no owner" : "kein Besitzer")}, {(english ? "socket UID" : "Socket-UID")} 33 ` www-data `";
+
+        // Act
+        var lines = await ListenerLinesAsync(text, Entry(Proto.Tcp6, "::", 8443, uid: 33, user: "www-data"));
+
+        // Assert
+        Assert.AreSequenceEqual([expected], lines, "no owner, then the socket UID and its user");
+    }
+
+    /// <summary>
+    /// A listener whose endpoint has sockets of several UIDs ends with the words for the lowest of several: after the user, after the number when there is no user, and after the cut marker of a long user.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterWritesLowestOfSeveralUids()
+    {
+        foreach (var english in new[] { true, false })
+        {
+            // Arrange
+            var text = english ? ReportText.English : ReportText.German;
+            var label = english ? "socket UID" : "Socket-UID";
+            var lowest = english ? " (lowest of several)" : " (niedrigste von mehreren)";
+            var cut = english ? " (cut)" : " (gekürzt)";
+            var longUser = new string('a', 33);
+            var shortUser = new string('a', 32);
+
+            // Act
+            var lines = await ListenerLinesAsync(text,
+                                                 Entry(Proto.Tcp, "0.0.0.0", 21, 5, "ftpd", 0, "root", true),
+                                                 Entry(Proto.Tcp, "0.0.0.0", 22, 6, "sshd", 7, string.Empty, true),
+                                                 Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 8, longUser, true),
+                                                 Entry(Proto.Tcp, "0.0.0.0", 24, 8, "smtpd", 9, shortUser, true));
+
+            string[] expected = [
+                                    $"  - tcp 0.0.0.0:21, PID 5 ` ftpd `, {label} 0 ` root `{lowest}",
+                                    $"  - tcp 0.0.0.0:22, PID 6 ` sshd `, {label} 7{lowest}",
+                                    $"  - tcp 0.0.0.0:23, PID 7 ` telnetd `, {label} 8 ` {shortUser} `{cut}{lowest}",
+                                    $"  - tcp 0.0.0.0:24, PID 8 ` smtpd `, {label} 9 ` {shortUser} `{lowest}"
+                                ];
+
+            // Assert
+            Assert.AreSequenceEqual(expected, lines, $"the marker follows the user, the number or the cut marker in {(english ? "English" : "German")}");
+        }
+    }
+
+    /// <summary>
+    /// A listener with a UID and no user name ends with the UID alone: no code span and no dash for the user, with and without an owner.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterWritesSocketUidWithoutUser()
+    {
+        // Arrange
+        // Act
+        var lines = await ListenerLinesAsync(ReportText.English,
+                                             Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 33),
+                                             Entry(Proto.Tcp6, "::", 8443, uid: 33));
+
+        // Assert
+        Assert.AreSequenceEqual([
+                                    "  - tcp 0.0.0.0:23, PID 7 ` telnetd `, socket UID 33",
+                                    "  - tcp6 [::]:8443, no owner, socket UID 33"
+                                ],
+                                lines,
+                                "the line ends with the number: no second code span, no dash");
+    }
+
+    /// <summary>
+    /// A listener without a UID says that the socket UID is unknown, with and without an owner, in both languages, and never names the UID 0 or root.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWritesSocketUidUnknownWithoutUid(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var unknown = english ? "socket UID unknown" : "Socket-UID unbekannt";
+
+        // Act
+        var lines = await ListenerLinesAsync(text, Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd"), Entry(Proto.Tcp6, "::", 8443));
+
+        string[] expected = [
+                                $"  - tcp 0.0.0.0:23, PID 7 ` telnetd `, {unknown}",
+                                $"  - tcp6 [::]:8443, {(english ? "no owner" : "kein Besitzer")}, {unknown}"
+                            ];
+
+        // Assert
+        Assert.AreSequenceEqual(expected, lines, "an absent UID reads as unknown");
+        Assert.DoesNotContain("UID 0", string.Join('\n', lines), "an absent UID is never the UID 0");
+        Assert.DoesNotContain("root", string.Join('\n', lines), "an absent UID is never root");
+    }
+
+    /// <summary>
+    /// A UID of 0 and the largest UID are written as numbers: a present 0 is not treated as absent.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterWritesSocketUidZeroAndLargest()
+    {
+        // Arrange
+        // Act
+        var lines = await ListenerLinesAsync(ReportText.English,
+                                             Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 0, "root"),
+                                             Entry(Proto.Tcp, "0.0.0.0", 24, 8, "smtpd", uint.MaxValue));
+
+        // Assert
+        Assert.AreSequenceEqual([
+                                    "  - tcp 0.0.0.0:23, PID 7 ` telnetd `, socket UID 0 ` root `",
+                                    "  - tcp 0.0.0.0:24, PID 8 ` smtpd `, socket UID 4294967295"
+                                ],
+                                lines,
+                                "0 and 4294967295 are numbers");
+    }
+
+    /// <summary>
+    /// The user of a socket goes through the escaping and fencing of a command: a backtick run, markup, the right-to-left override, a control character, a backslash sequence, spaces only and a decimal name give the code span that a command of the same text gets.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterEscapesSocketUserLikeCommand()
+    {
+        // Arrange
+        var rows = new (string User, string? Literal)[]
+                   {
+                       ("a``b", "``` a``b ```"),
+                       ("<b>x</b>", "` <b>x</b> `"),
+                       ($"x{(char)0x202E}y", $"` x{Backslash}u202ey `"),
+                       ($"x{(char)1}", $"` x{Backslash}u0001 `"),
+                       ($"{Backslash}u202e", null),
+                       ("   ", $"` {Backslash}u0020{Backslash}u0020{Backslash}u0020 `"),
+                       ("1234", "` 1234 `")
+                   };
+
+        Assert.IsTrue(rows[2].User.Contains((char)0x202E), "the input holds the right-to-left override");
+        Assert.IsTrue(rows[3].User.Contains((char)1), "the input holds the control character");
+        Assert.AreEqual(6, rows[4].User.Length, "the input is the backslash and five characters");
+        Assert.StartsWith(Backslash, rows[4].User, "the input keeps its backslash");
+
+        foreach (var (user, literal) in rows)
+        {
+            // Act
+            var lines = await ListenerLinesAsync(ReportText.English, Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 5, user));
+
+            // Assert
+            Assert.AreSequenceEqual([$"  - tcp 0.0.0.0:23, PID 7 ` telnetd `, socket UID 5 {MarkdownText.Code(user)}"], lines, $"the user {literal ?? user} is written as a command of the same text");
+
+            if (literal is not null)
+            {
+                Assert.AreSequenceEqual([$"  - tcp 0.0.0.0:23, PID 7 ` telnetd `, socket UID 5 {literal}"], lines, $"the user {literal} is written literally as expected");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A user of more than 32 bytes is shown as its longest prefix of at most 32 bytes on a character boundary, cut before it is escaped, followed by the cut marker; a name of exactly 32 bytes is shown whole, in both languages.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterCutsLongSocketUser()
+    {
+        // Arrange
+        var twoBytes = char.ConvertFromUtf32(0xE9);
+        var fourBytes = char.ConvertFromUtf32(0x1F600);
+        var rows = new (string User, string Shown, bool Cut)[]
+                   {
+                       (new string('a', 32), new string('a', 32), false),
+                       (new string('a', 33), new string('a', 32), true),
+                       (new string('a', 31) + twoBytes, new string('a', 31), true),
+                       (new string('a', 30) + fourBytes, new string('a', 30), true),
+                       (new string((char)1, 1024), new string((char)1, 32), true),
+                       (new string('a', 30) + twoBytes, new string('a', 30) + twoBytes, false)
+                   };
+
+        foreach (var english in new[] { true, false })
+        {
+            var text = english ? ReportText.English : ReportText.German;
+            var label = english ? "socket UID" : "Socket-UID";
+            var marker = english ? " (cut)" : " (gekürzt)";
+
+            foreach (var (user, shown, cut) in rows)
+            {
+                // Act
+                var lines = await ListenerLinesAsync(text, Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 5, user));
+
+                // Assert
+                Assert.AreSequenceEqual([$"  - tcp 0.0.0.0:23, PID 7 ` telnetd `, {label} 5 {MarkdownText.Code(shown)}{(cut ? marker : string.Empty)}"],
+                                        lines,
+                                        $"a user of {Encoding.UTF8.GetByteCount(user)} bytes in {(english ? "English" : "German")}");
+            }
+        }
+
+        var escapes = string.Concat(Enumerable.Repeat($"{Backslash}u0001", 32));
+        var controlLines = await ListenerLinesAsync(ReportText.English, Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 5, new string((char)1, 1024)));
+
+        Assert.AreSequenceEqual([$"  - tcp 0.0.0.0:23, PID 7 ` telnetd `, socket UID 5 ` {escapes} ` (cut)"], controlLines, "1,024 control characters show 32 escapes: the cut is made before the escaping");
+    }
+
+    /// <summary>
+    /// Writes the summary with a start finding that lists the given listeners and returns the listener lines of the section.
+    /// </summary>
+    /// <param name="text">The table</param>
+    /// <param name="listeners">The new listeners</param>
+    /// <returns>The lines of the listeners</returns>
+    private static async Task<string[]> ListenerLinesAsync(ReportText text, params Listener[] listeners)
+    {
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var summary = ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 1, 0, 0), [StartFinding("web-1", 9, at, ListenerOutcome.AllPorts, 0, listeners)], []));
+        var section = await SectionAsync(text, summary, text == ReportText.English ? "## New listeners" : "## Neue Listener", text == ReportText.English ? "## Outages" : "## Ausfälle");
+
+        return [.. section.Where(line => line.StartsWith("  - ", StringComparison.Ordinal))];
     }
 
     /// <summary>

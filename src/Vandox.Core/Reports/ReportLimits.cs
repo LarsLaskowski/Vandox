@@ -57,5 +57,10 @@ public static class ReportLimits
     /// </summary>
     public const double PanelPercentile = 0.9;
 
+    /// <summary>
+    /// The most UTF-8 bytes of a socket's user name the report shows.
+    /// </summary>
+    public const int MaxShownUserBytes = 32;
+
     #endregion // Constants
 }
