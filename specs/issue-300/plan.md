@@ -247,3 +247,11 @@ does only in-memory work plus one `/proc/uptime` read (kernel, as before inside 
 
 - The kernel's journal-position commit stays on `Run.PreviousLost` (option 5).
 - How the backend treats a repeated `boot` event or backup start after a `kill -9` (fact 14) is unchanged.
+
+## Challenge notes
+
+Devil's Advocate, plan round 1 (0 major, 3 minor), appended verbatim:
+
+1. minor — The boot can only be lost through one invariant, so state it and test it. Dev: `k.boot` and `k.pendingBoot` must always be set and cleared together. `commit` (kernevents.go:126-133) clears `k.boot`; if it ever ran while `pendingBoot` was still set, the boot would never be saved and the event never emitted again. Make `commit` clear `pendingBoot` only together with a save, never on its own; better, have `Kept` be the only place that clears either one. Tester: add a case to `TestBoot_UnkeptRunLeavesTheSavedBoot` that runs the next run with `PreviousLost` false after a `Kept(false)`. It must still return the event.
+2. minor — AC6 only tests `currentUptime` in isolation, not the start-up race the plan describes. Tester: add one case to `TestSaverRefreshesOnlyTheUptimeOfTheCurrentBoot`, or a kernel test in `boot_test.go`, that runs the Saver's first heartbeat save on a store holding the previous boot before the kernel's first run in a new boot. The resulting `boot` event must carry the previous boot's saved uptime as `previous_uptime_ns`, and the file must still hold that uptime.
+3. minor — For a check whose `Collect` fails, the plan says it "sets no pending", but it does not say whether an earlier `pending` (from an abandoned check) survives. Dev: clear `b.pending` at the start of every `Collect`, so a later `Kept` can never apply a stale change. The `run.Start` match makes this safe either way, but this way it is explicit.
