@@ -649,6 +649,31 @@ public sealed class ReportText
     public string ListenerEntryNoOwner { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets the text: the template of the socket's UID with its user name.
+    /// </summary>
+    public string ListenerUid { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of the socket's UID without a user name.
+    /// </summary>
+    public string ListenerUidNoUser { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the socket's UID is unknown.
+    /// </summary>
+    public string ListenerUidUnknown { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the marker: the shown user name is cut.
+    /// </summary>
+    public string ListenerUserCut { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the marker: the UID is the lowest of several.
+    /// </summary>
+    public string ListenerMixedUids { get; init; } = string.Empty;
+
+    /// <summary>
     /// Gets the text: the note: only the latest findings after an agent start are listed.
     /// </summary>
     public string CapStartFindingsNote { get; init; } = string.Empty;

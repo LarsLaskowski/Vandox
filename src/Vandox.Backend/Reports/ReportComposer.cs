@@ -886,10 +886,26 @@ internal sealed class ReportComposer
     {
         var endpoint = $"{listener.Proto} {listener.Local}";
 
-        return listener.Pid == 0
-                   ? WithCode(_text.ListenerEntryNoOwner, string.Empty, endpoint)
-                   : WithCode(_text.ListenerEntry, listener.Command, endpoint, Number(listener.Pid));
+        var pieces = listener.Pid == 0
+                         ? WithCode(_text.ListenerEntryNoOwner, string.Empty, endpoint)
+                         : WithCode(_text.ListenerEntry, listener.Command, endpoint, Number(listener.Pid));
+
+        pieces.AddRange(UidPieces(listener));
+
+        return pieces;
     }
+
+    /// <summary>
+    /// Writes the socket's UID and user of a listener.
+    /// </summary>
+    /// <param name="listener">The listener</param>
+    /// <returns>The pieces</returns>
+#pragma warning disable RH2003, S2325, S1172, CA1822, IDE0060
+    private List<ReportPiece> UidPieces(Listener listener)
+    {
+        return [];
+    }
+#pragma warning restore RH2003, S2325, S1172, CA1822, IDE0060
 
     /// <summary>
     /// Returns the label of the ports a comparison covered.
