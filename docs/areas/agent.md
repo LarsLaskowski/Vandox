@@ -103,8 +103,8 @@ rules below for the parts not implemented are the target the implementation is h
 - A collector may ask to be **told whether a run was kept** (an observer): after the delivery of a run that finished in time the
   scheduler calls it with the run and whether its records were kept — true when the run returned no error and did not panic, no
   record was refused and the sink accepted the records, false otherwise. An abandoned or skipped run calls nothing; its loss shows
-  only in the next run's `Run.PreviousLost`. The `logs`, `kernel` (the boot, *Boots*) and `backups` (the check's change, *Backup runs*)
-  collectors are observers (*Log shipping*).
+  only in the next run's `Run.PreviousLost`. The `logs` (*Log shipping*), `kernel` (the boot, *Boots*) and `backups` (the check's change, *Backup runs*)
+  collectors are observers.
 - An **extra run** of a collector is requested through the scheduler (the `kernel` collector does so for `processes` and
   `connections`, *Kernel events*). A runner waiting for its next due time starts it at once; a runner in a run starts it when that
   run ends. Requests made before the extra run starts merge into one, which names at most 64 kills and counts the rest. The extra run
@@ -1532,8 +1532,8 @@ time, so it is never before the real end.
 the first-check flag) takes effect only when the scheduler reports the check kept (*Scheduling*, the observer), right after its records
 reached the spool, so a state save never holds a start, sighting or end whose record the spool has not taken. A check that was
 dropped, abandoned or not reported changes nothing and the next check decides again: the start is written again while a match runs,
-the end again with the gone-by time of the last kept check. After a restart the first check ends a stored run with `gone_by` that
-check. The scheduler's gap covers the lost check.
+the end again with the gone-by time of the last kept check. After a restart a stored run whose end was dropped ends with `gone_by` the
+first check without a match (*Restarts and reboots*). The scheduler's gap covers the lost check.
 
 **Errors.** A boot ID that cannot be read or is not a lower-case UUID (the rule of *Boots*), a boot time that cannot be read, a `/proc` that cannot be listed or the run's deadline fail the run (a gap,
 *Scheduling*); the error texts name the file and a fixed reason, never a command or command line.
