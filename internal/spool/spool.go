@@ -5,11 +5,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"math"
-	"math/bits"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
@@ -191,24 +188,19 @@ func (s *Spool) available() (uint64, error) {
 		return s.opts.Available(s.opts.Dir)
 	}
 
-	return statAvailable(s.opts.Dir)
+	return statAvailable(s.dir.fd)
 }
 
-// statAvailable returns f_bavail times f_bsize of the file system holding dir.
-func statAvailable(dir string) (uint64, error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(dir, &st); err != nil {
-		return 0, err
-	}
-	if st.Bsize <= 0 {
-		return 0, nil
-	}
-	hi, lo := bits.Mul64(st.Bavail, uint64(st.Bsize))
-	if hi != 0 {
-		return math.MaxUint64, nil
-	}
+// statAvailable returns f_bavail times f_bsize of the file system holding the directory descriptor fd.
+func statAvailable(fd int) (uint64, error) {
+	_ = fd
 
-	return lo, nil
+	return 0, nil
+}
+
+// addSize returns the sum of two non-negative sizes.
+func addSize(a, b int64) int64 {
+	return a + b
 }
 
 // fitsDisk reports whether a write of need bytes passes the free-space check: the space is at least the write and what

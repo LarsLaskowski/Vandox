@@ -16,12 +16,15 @@ import (
 
 func TestStatAvailable(t *testing.T) {
 	t.Run("a real directory has space", func(t *testing.T) {
-		got, err := statAvailable(t.TempDir())
+		fd, openErr := syscall.Open(t.TempDir(), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+		needNoErr(t, "open", openErr)
+		defer func() { _ = syscall.Close(fd) }()
+		got, err := statAvailable(fd)
 		needNoErr(t, "statAvailable", err)
 		expect(t, got > 0, "statAvailable(temp dir) = %d, want a positive number of bytes", got)
 	})
 	t.Run("a missing directory is an error", func(t *testing.T) {
-		got, err := statAvailable(filepath.Join(t.TempDir(), "missing"))
+		got, err := statAvailable(-1)
 		expect(t, err != nil, "statAvailable(missing) error = nil, want an error")
 		expect(t, got == 0, "statAvailable(missing) = %d, want 0", got)
 	})
