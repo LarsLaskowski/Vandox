@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Vandox.Core.Incidents;
+using Vandox.Core.LogParsing;
 using Vandox.Core.Model;
 using Vandox.Core.Reports;
 using Vandox.Storage;
@@ -900,12 +901,39 @@ internal sealed class ReportComposer
     /// </summary>
     /// <param name="listener">The listener</param>
     /// <returns>The pieces</returns>
-#pragma warning disable RH2003, S2325, S1172, CA1822, IDE0060
     private List<ReportPiece> UidPieces(Listener listener)
     {
-        return [];
+        if (listener.Uid is not uint uid)
+        {
+            return [ReportPiece.Plain(_text.ListenerUidUnknown)];
+        }
+
+        List<ReportPiece> pieces;
+        var cut = false;
+
+        if (string.IsNullOrEmpty(listener.User))
+        {
+            pieces = WithCode(_text.ListenerUidNoUser, string.Empty, Number(uid));
+        }
+        else
+        {
+            var shown = Utf8Text.Cut(listener.User, ReportLimits.MaxShownUserBytes, out cut);
+
+            pieces = WithCode(_text.ListenerUid, shown, Number(uid));
+        }
+
+        if (cut)
+        {
+            pieces.Add(ReportPiece.Plain(_text.ListenerUserCut));
+        }
+
+        if (listener.MixedUids)
+        {
+            pieces.Add(ReportPiece.Plain(_text.ListenerMixedUids));
+        }
+
+        return pieces;
     }
-#pragma warning restore RH2003, S2325, S1172, CA1822, IDE0060
 
     /// <summary>
     /// Returns the label of the ports a comparison covered.
