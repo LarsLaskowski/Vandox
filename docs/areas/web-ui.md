@@ -277,7 +277,7 @@ service, the gate is held per store call (a window read of many snapshots takes 
   *First outages* (a new run from the first). A later page whose run finds fewer outages than its start (the stored outages shrank since the
   previous page) shows no range and no outages but still offers *First outages*. The position is not in the address. A new run reads the store again, so the outages of a
   page are those `vandoxd incidents` stored at that time.
-- **External text** (victim commands, program names, the owner commands of the new listeners and the agent IDs of that section) is shown only as the text of an `ExternalText` inside a `code` element, capped at
+- **External text** (victim commands, program names, the owner commands and the socket user names of the new listeners and the agent IDs of that section) is shown only as the text of an `ExternalText` inside a `code` element, capped at
   2,048 displayed characters per text with the marker of the logs view, with invisible characters as visible escapes; an empty text is the dash `—` as
   in the Markdown. No external text is in a heading or a table cell, and the page uses no `MarkupString`.
 - **Failures.** A run that reaches its deadline shows `Making the report took longer than 2 minutes and was stopped.`; a store failure shows `The report could
@@ -392,9 +392,8 @@ The ingest listener serves none of this: every UI path, static file and the live
 - **Memory per circuit (report page).** The page keeps the document of one run: the summary, at most 50 outages and the notes, as text. External text
   is at most 22 texts per outage (16 victims, 3 growth candidates, 3 consumers), each a stored text of at most 1,024 bytes (at most 2 KiB as
   UTF-16) plus its runs for the page (at most 2,048 displayed characters, 4 KiB), so up to about 6 KiB each, about 130 KiB per outage and
-  **about 6.6 MB** for 50 outages, 60 KB more for the 10 consumers of the summary, and **up to about 16 MB** for the new listeners section (at most 20 findings after an agent start and
-  20 found by the agent, each with at most 64 listeners whose command, like every external text of the page, takes up to about 6 KiB with its runs, about 390 KB a finding, and the head of at most 64 agent IDs
-  of at most 64 bytes each; the agent ID and each command are code spans of an `ExternalText`), plus the markup and the render tree (a typical outage holds a few hundred bytes of
+  **about 6.6 MB** for 50 outages, 60 KB more for the 10 consumers of the summary, and **up to about 68 MB** for the new listeners section (at most 20 findings after an agent start and
+  20 found by the agent, each with at most 64 listeners, and the head of at most 64 agent IDs of at most 64 bytes each; the agent ID, each command and each user name are code spans of an `ExternalText`. A text's cost is set by its runs and is worst when plain and escaped characters alternate: a command of 1,024 bytes takes up to about 22.9 KiB with its runs (measured), about 1.5 MB a finding and **about 60 MB** for the commands; each user name, cut to 32 bytes, takes up to about 3 KiB (the bound pinned by `LogTextRunsOfAlternatingShortNameRetainBoundedHeap`), about 7.9 MB. The earlier figure of about 16 MB for this section understated the commands and is corrected here; bounding their share is the follow-up [#356](https://github.com/LarsLaskowski/Vandox/issues/356)), plus the markup and the render tree (a typical outage holds a few hundred bytes of
   external text); the render batch holds the text once more for a moment. This is **per circuit**. The run itself keeps up to about 60 MB once across the whole
   service, because only one run goes at a time ([Detection, alerts and reports](detection-and-reports.md), *Limits of the report*). The number of
   circuits is not bounded ([Pages and render mode](#pages-and-render-mode)) and the container has 512 MB; only a signed-in client can open a circuit.
