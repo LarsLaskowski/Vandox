@@ -653,6 +653,9 @@ func TestAddSize(t *testing.T) {
 		{"the maximum and the maximum", math.MaxInt64, math.MaxInt64, math.MaxInt64},
 		{"one below the maximum and one", math.MaxInt64 - 1, 1, math.MaxInt64},
 		{"one and the maximum", 1, math.MaxInt64, math.MaxInt64},
+		{"two below the maximum and one", math.MaxInt64 - 2, 1, math.MaxInt64 - 1},
+		{"one below the maximum and zero", math.MaxInt64 - 1, 0, math.MaxInt64 - 1},
+		{"two halves of 2^63", 1 << 62, 1 << 62, math.MaxInt64},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -673,8 +676,14 @@ func TestSpool_DiskUsedSaturates(t *testing.T) {
 	}
 	got := sum(math.MaxInt64, math.MaxInt64, 1)
 	expect(t, got == math.MaxInt64, "diskUsed() of sizes MaxInt64, MaxInt64, 1 = %d, want %d", got, int64(math.MaxInt64))
+	got = sum(1<<62, 1<<62)
+	expect(t, got == math.MaxInt64, "diskUsed() of sizes 2^62, 2^62 = %d, want %d", got, int64(math.MaxInt64))
+	got = sum(math.MaxInt64-3, 1, 1)
+	expect(t, got == math.MaxInt64-1, "diskUsed() of sizes MaxInt64-3, 1, 1 = %d, want %d", got, int64(math.MaxInt64-1))
 	got = sum(1, 2)
 	expect(t, got == 3, "diskUsed() of sizes 1, 2 = %d, want 3", got)
+	got = sum()
+	expect(t, got == 0, "diskUsed() of no files = %d, want 0", got)
 }
 
 func TestSpoolBytes_Saturates(t *testing.T) {
@@ -683,17 +692,34 @@ func TestSpoolBytes_Saturates(t *testing.T) {
 	mustPut(t, sp, batchOf(epoch, "one", 1, 100))
 
 	sp.mu.Lock()
-	need(t, len(sp.files) > 0, "no data file after a hand-over")
+	need(t, len(sp.files) == 1, "%d data files after one hand-over, want 1", len(sp.files))
+	meta := sp.metaSize
 	old := sp.files[0].size
-	sp.files[0].size = math.MaxInt64
 	sp.mu.Unlock()
+	need(t, meta > 0, "meta file size = %d after a hand-over, want a positive size so the sum with it is tested", meta)
 	t.Cleanup(func() {
 		sp.mu.Lock()
 		sp.files[0].size = old
 		sp.mu.Unlock()
 	})
 
-	got, err := sp.SpoolBytes(context.Background())
-	needNoErr(t, "SpoolBytes", err)
-	expect(t, got == math.MaxInt64, "SpoolBytes() = %d with a data file of MaxInt64 and a meta file, want %d", got, int64(math.MaxInt64))
+	tests := []struct {
+		name string
+		data int64
+		want int64
+	}{
+		{"a data file of the largest size", math.MaxInt64, math.MaxInt64},
+		{"a data file that reaches the largest size with the meta file", math.MaxInt64 - meta, math.MaxInt64},
+		{"a data file one byte below that", math.MaxInt64 - meta - 1, math.MaxInt64 - 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sp.mu.Lock()
+			sp.files[0].size = tc.data
+			sp.mu.Unlock()
+			got, err := sp.SpoolBytes(context.Background())
+			needNoErr(t, "SpoolBytes", err)
+			expect(t, got == tc.want, "SpoolBytes() = %d with a data file of %d and a meta file of %d, want %d", got, tc.data, meta, tc.want)
+		})
+	}
 }

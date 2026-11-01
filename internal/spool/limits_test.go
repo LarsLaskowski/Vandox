@@ -277,30 +277,60 @@ func acknowledgeAll(t *testing.T, sp *Spool) {
 }
 
 func TestPut_SizeBoundCountsAnUnrepresentableSumAsFull(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxBytes int64
+		sizes    []int64
+	}{
+		{"two files of the largest size", 0, []int64{math.MaxInt64, math.MaxInt64}},
+		{"two files whose sum is 2^63", 0, []int64{1 << 62, 1 << 62}},
+		{"one file the slack and the write carry past the largest size", 0, []int64{math.MaxInt64 - metaSlack}},
+		{"a sum that reaches the largest size under a cap of the largest size", math.MaxInt64, []int64{math.MaxInt64, math.MaxInt64}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			requireOversizedDropped(t, tc.maxBytes, tc.sizes)
+		})
+	}
+}
+
+// requireOversizedDropped fills a spool at a 64 MiB cap with at least three data files, gives the oldest sealed files
+// the sizes in sizes (and the spool the cap maxBytes unless it is 0), hands over one more batch and checks that exactly
+// those files were dropped for the size bound, with spool_dropped gaps for their numbers, and that SpoolBytes matches
+// the files on disk afterwards.
+func requireOversizedDropped(t *testing.T, maxBytes int64, sizes []int64) {
+	t.Helper()
+
 	r := newRig(t)
 	sp := r.open()
 	f := newFeeder(t, sp, 20, 1000)
-
-	f.putUntil(1000, func() bool { return len(segmentNumbers(t, r.dir())) >= 3 })
+	f.putUntil(1000, func() bool { return len(segmentNumbers(t, r.dir())) >= len(sizes)+1 })
+	before := segmentNumbers(t, r.dir())
 
 	type span struct{ first, last uint64 }
 	var planted []span
 	var names []uint64
 	sp.mu.Lock()
-	need(t, len(sp.files) >= 3, "%d data files, want at least 3", len(sp.files))
-	for _, seg := range sp.files[:2] {
-		need(t, seg.sealed, "file %d is not sealed, want the two oldest sealed", seg.num)
+	need(t, len(sp.files) > len(sizes), "%d data files, want more than %d", len(sp.files), len(sizes))
+	for i, size := range sizes {
+		seg := sp.files[i]
+		need(t, seg.sealed, "file %d is not sealed, want the %d oldest sealed", seg.num, len(sizes))
 		planted = append(planted, span{seg.first, seg.last})
 		names = append(names, seg.num)
-		seg.size = math.MaxInt64
+		seg.size = size
+	}
+	if maxBytes > 0 {
+		sp.opts.MaxBytes = maxBytes
 	}
 	sp.mu.Unlock()
 
 	f.put()
 
 	left := segmentNumbers(t, r.dir())
-	for _, n := range names {
-		expect(t, !slices.Contains(left, n), "file %d is still in the directory, want the oversized file dropped", n)
+	for _, n := range before {
+		gone := slices.Contains(left, n) == false
+		want := slices.Contains(names, n)
+		expect(t, gone == want, "file %d dropped = %v, want %v (only the oversized files dropped)", n, gone, want)
 	}
 	lines := dropLines(r.logs)
 	need(t, len(lines) > 0, "no line %q was logged", msgDropped)
