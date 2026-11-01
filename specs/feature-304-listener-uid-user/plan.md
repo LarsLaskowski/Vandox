@@ -145,3 +145,14 @@ No guarantee of `.squad/project.md` is weakened: external text still reaches the
 ## Out of scope / follow-ups
 
 As in [spec.md](spec.md), *Out of scope*. No follow-up issue.
+
+## Challenge notes
+
+Minor objection of the plan challenge (Devil's Advocate), appended verbatim:
+
+1. minor: the plan's list of tests to adapt is incomplete, and two tests it says stay unchanged will fail. Every listener line without a `uid` now gains `, socket UID unknown` (`kein Besitzer, Socket-UID unbekannt` in German), so tests that compare such a line exactly will fail. Instruction for the Tester: besides the tests the plan names, also adapt these:
+   - `MarkdownReportWriterWritesRestOfNewListeners` (`/home/user/Vandox/tests/Vandox.Backend.Tests/MarkdownReportWriterTests.cs:779`): the expected value becomes `"  - tcp 0.0.0.0:{port}, no owner, socket UID unknown"` (German `kein Besitzer, Socket-UID unbekannt`).
+   - `MarkdownReportWriterWritesCommandAndAgentIdAsCodeSpans` (same file, lines 817 and 820, checked with `AreSequenceEqual`): both listener lines gain `, socket UID unknown`.
+   - `ReportContentShowsListenerCommandAsText` (`/home/user/Vandox/tests/Vandox.Backend.Tests/ReportContentTests.cs:220`): `Assert.Contains` matches a whole piece from `ReportPieces.FromHtml`. Update the expected piece to include the suffix, and keep the code-element count of 5 (no user is added there).
+
+   Then run the whole Backend test project once, before handing to the Dev, to catch any other exact listener line. Why minor: the Tester finds these the first time the tests run, and the plan's design does not change.
