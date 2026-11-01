@@ -37,7 +37,7 @@ Security areas touched: 9 (agent file access: `internal/spool`)
 | 10 | `metaSize` is written by the spool itself and is at most `maxMetaBytes` | `meta.go:74`, `meta.go:275` | confirmed |
 | 11 | A sum that wraps today makes `shortage` return `""` (fits) | `put.go:192`: a negative left side is never `> MaxBytes` | confirmed |
 | 12 | A planted file is dropped by `dropOldest` through its identity, not its size | `removeFile` via `removeTrusted` with `want` (`fsys.go:200-213`) | confirmed |
-| 13 | Renaming the spool directory away after `Open` makes `Statfs(path)` fail with `ENOENT` while `Fstatfs(fd)` succeeds | to verify: (Linux semantics of a path lookup against an open descriptor) the Tester's AC1 case fails against the unchanged code (step 5) and passes after the Dev's change (step 6) | unverified |
+| 13 | Renaming the spool directory away after `Open` makes `Statfs(path)` fail with `ENOENT` while `Fstatfs(fd)` succeeds | Security's measurement (rename: `Statfs(path)` fails with ENOENT, `Fstatfs(fd)` succeeds; a symlink planted at the old path makes `Statfs` report another file system, `Fstatfs` the held one); `TestStatAvailable` cases "the default check reads the opened directory after its path moved" and "the default check ignores a full file system planted at the old path" | confirmed |
 
 ## Acceptance criteria
 
