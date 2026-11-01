@@ -193,7 +193,7 @@ internal static class ReportSamples
 
     /// <summary>
     /// Creates the listener section of the rich sample: two agents, three findings after an agent start given latest first (a comparison on all ports with a listener without an
-    /// owner, one on ports 1 to 1023 only with six more listeners than listed, and one start that was not compared) and two findings of the agents given latest first, one with
+    /// owner and with the socket's user, one on ports 1 to 1023 only with six more listeners than listed, and one start that was not compared) and two findings of the agents given latest first, one with
     /// a command that holds a backtick; no cap is hit.
     /// </summary>
     /// <returns>The section</returns>
@@ -207,13 +207,13 @@ internal static class ReportSamples
                             ],
                    StartFindings = [
                                        StartFinding("web-1", 500, new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedIncomplete, 0),
-                                       StartFinding("web-1", 300, new DateTimeOffset(2026, 10, 4, 3, 12, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedOnly, 6, Entry(Proto.Tcp, "0.0.0.0", 25, 311, "exim4")),
-                                       StartFinding("web-1", 120, new DateTimeOffset(2026, 10, 2, 6, 40, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd"), Entry(Proto.Tcp6, "::", 8443))
+                                       StartFinding("web-1", 300, new DateTimeOffset(2026, 10, 4, 3, 12, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedOnly, 6, Entry(Proto.Tcp, "0.0.0.0", 25, 311, "exim4", 0, "root", true)),
+                                       StartFinding("web-1", 120, new DateTimeOffset(2026, 10, 2, 6, 40, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd", 0, "root"), Entry(Proto.Tcp6, "::", 8443, uid: 33, user: "www-data"))
                                    ],
                    StartFindingsTotal = 3,
                    AgentFindings = [
                                        AgentFinding("web-2", 77, new DateTimeOffset(2026, 10, 6, 4, 0, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedOnly, 0, Entry(Proto.Udp, "0.0.0.0", 69, 12, "tftp`d")),
-                                       AgentFinding("web-1", 410, new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 2121))
+                                       AgentFinding("web-1", 410, new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 2121, uid: 1000))
                                    ],
                    AgentFindingsTotal = 2
                };
@@ -260,15 +260,21 @@ internal static class ReportSamples
     /// <param name="port">The local port</param>
     /// <param name="pid">The PID of the owner, or 0 for no owner</param>
     /// <param name="command">The command of the owner</param>
+    /// <param name="uid">The UID of the socket, or <c>null</c> for none</param>
+    /// <param name="user">The name of the socket's user</param>
+    /// <param name="mixedUids">Whether the endpoint's sockets have several UIDs</param>
     /// <returns>The listener</returns>
-    internal static Listener Entry(string proto, string address, int port, int pid = 0, string command = "")
+    internal static Listener Entry(string proto, string address, int port, int pid = 0, string command = "", uint? uid = null, string user = "", bool mixedUids = false)
     {
         return new Listener
                {
                    Proto = proto,
                    Local = new IPEndPoint(IPAddress.Parse(address), port),
                    Pid = pid,
-                   Command = command
+                   Command = command,
+                   Uid = uid,
+                   User = user,
+                   MixedUids = mixedUids
                };
     }
 

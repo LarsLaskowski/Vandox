@@ -295,7 +295,7 @@ public class ForensicsReporterTests
         var written = await store.WriteBatchAsync(AgentBatch("web-1",
                                                              IncidentSamples.Base.AddDays(1),
                                                              ConnectionRecord(1, IncidentSamples.Base, "none", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd")),
-                                                             ConnectionRecord(2, IncidentSamples.Base.AddHours(1), "start", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd"), Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd"))),
+                                                             ConnectionRecord(2, IncidentSamples.Base.AddHours(1), "start", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd"), Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd", 0, "root"))),
                                                   TestContext.CancellationToken);
 
         Assert.AreEqual(2, written.Stored, "both snapshots are stored");
@@ -315,10 +315,10 @@ public class ForensicsReporterTests
         Assert.AreSequenceEqual([
                                     "- Agent ` web-1 `: 2 connection snapshots from 2026-10-02 04:59 UTC to 2026-10-02 05:59 UTC; 1 agent starts: 1 compared on all ports, 0 on ports 1 to 1023 only, 0 not compared",
                                     "- 2026-10-02 05:59 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-02 04:59 UTC), all ports: 1 new",
-                                    "  - tcp 0.0.0.0:23, PID 200 ` telnetd `"
+                                    "  - tcp 0.0.0.0:23, PID 200 ` telnetd `, socket UID 0 ` root `"
                                 ],
                                 section,
-                                "the head, the finding of the start and the new listener with its owner");
+                                "the head, the finding of the start and the new listener with its owner and the socket UID with its user");
     }
 
     /// <summary>
