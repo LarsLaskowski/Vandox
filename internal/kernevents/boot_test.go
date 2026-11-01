@@ -266,43 +266,55 @@ func requireOneBootEvent(t *testing.T, recs []model.Record, when string) *model.
 }
 
 func TestBoot_SaveBeforeTheHandOverKeepsThePreviousBoot(t *testing.T) {
-	for _, previous := range []bool{true, false} {
-		name := "no boot saved, first start"
-		if previous {
-			name = "a previous boot saved"
+	t.Run("a previous boot saved", func(t *testing.T) {
+		checkSaveBeforeHandOver(t, true)
+	})
+	t.Run("no boot saved, first start", func(t *testing.T) {
+		checkSaveBeforeHandOver(t, false)
+	})
+}
+
+// checkSaveBeforeHandOver runs the collector with a previous boot saved (previous) or with no boot saved, saves the state
+// between the run and the hand-over of its records, and checks the boot event of a collector restarted on the saved file.
+func checkSaveBeforeHandOver(t *testing.T, previous bool) {
+	t.Helper()
+	e := newEnv(t)
+	healthyJournal(e)
+	if previous {
+		e.seed(dashed(bootA), before())
+	} else {
+		e.seed("", before())
+	}
+
+	first := requireOneBootEvent(t, e.run(false), "the first run")
+
+	// A state save between the run and the hand-over of its records.
+	if previous {
+		requireSavedBoot(t, e, dashed(bootA), time.Hour, "before the run was kept")
+	} else if e.store.State().Boot != nil {
+		t.Errorf("state boot before the run was kept = %+v, want none", e.store.State().Boot)
+	}
+	e.restartOnSavedFile()
+
+	again := requireOneBootEvent(t, e.run(false), "a collector started on the saved file in the same boot")
+	if again.PreviousBootID != first.PreviousBootID || again.BootID != first.BootID {
+		t.Errorf("repeated boot event boot_id = %q, previous_boot_id = %q, want %q and %q", again.BootID, again.PreviousBootID, first.BootID, first.PreviousBootID)
+	}
+	requireRepeatedBootPrevious(t, again, previous)
+}
+
+// requireRepeatedBootPrevious checks the previous-boot fields of a repeated boot event: the saved uptime of the previous
+// boot when previous is true, and no previous fields at all for a first start.
+func requireRepeatedBootPrevious(t *testing.T, again *model.Boot, previous bool) {
+	t.Helper()
+	if previous {
+		if again.PreviousUptime == nil || *again.PreviousUptime != time.Hour {
+			t.Errorf("repeated boot event previous_uptime_ns = %v, want %v (the saved uptime of the previous boot)", again.PreviousUptime, time.Hour)
 		}
-		t.Run(name, func(t *testing.T) {
-			e := newEnv(t)
-			healthyJournal(e)
-			if previous {
-				e.seed(dashed(bootA), before())
-			} else {
-				e.seed("", before())
-			}
-
-			first := requireOneBootEvent(t, e.run(false), "the first run")
-
-			// A state save between the run and the hand-over of its records.
-			if previous {
-				requireSavedBoot(t, e, dashed(bootA), time.Hour, "before the run was kept")
-			} else if e.store.State().Boot != nil {
-				t.Errorf("state boot before the run was kept = %+v, want none", e.store.State().Boot)
-			}
-			e.restartOnSavedFile()
-
-			again := requireOneBootEvent(t, e.run(false), "a collector started on the saved file in the same boot")
-			if again.PreviousBootID != first.PreviousBootID || again.BootID != first.BootID {
-				t.Errorf("repeated boot event boot_id = %q, previous_boot_id = %q, want %q and %q", again.BootID, again.PreviousBootID, first.BootID, first.PreviousBootID)
-			}
-			switch {
-			case previous:
-				if again.PreviousUptime == nil || *again.PreviousUptime != time.Hour {
-					t.Errorf("repeated boot event previous_uptime_ns = %v, want %v (the saved uptime of the previous boot)", again.PreviousUptime, time.Hour)
-				}
-			case again.PreviousBootID != "" || again.PreviousUptime != nil:
-				t.Errorf("repeated first boot event = %+v, want no previous fields", again)
-			}
-		})
+		return
+	}
+	if again.PreviousBootID != "" || again.PreviousUptime != nil {
+		t.Errorf("repeated first boot event = %+v, want no previous fields", again)
 	}
 }
 

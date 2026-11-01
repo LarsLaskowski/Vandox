@@ -1522,28 +1522,29 @@ func TestRun_SavesTheStateWhenItStops(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("Run() = %d after the cancel, want 0", code)
 		}
-		var shipped []string
-		for _, r := range sink.all() {
-			if l, ok := r.Data.(*model.LogLine); ok && l.Log == "journal" {
-				shipped = append(shipped, l.Message)
-			}
-		}
-		if !slices.Equal(shipped, []string{"third", "fourth"}) {
+		if shipped := journalMessages(sink); !slices.Equal(shipped, []string{"third", "fourth"}) {
 			t.Fatalf("log lines shipped = %v, want [third fourth] (nothing older than the start)", shipped)
 		}
 		// the state job saved the state at the start and would save again after 10 s: only the save at the stop holds the last position
-		store, status := agentstate.Open(opts.StateDir, slog.New(slog.DiscardHandler))
-		if status != agentstate.StatusLoaded {
-			t.Fatalf("state file status = %v, want StatusLoaded after the stop", status)
-		}
-		logs := store.State().Logs
+		state := savedStateAfterStop(t, opts.StateDir)
+		logs := state.Logs
 		if logs == nil || len(logs.Journal) != 1 || logs.Journal[0].Seqnum != 4 {
 			t.Errorf("saved log positions = %+v, want the one journal position at the sequence number 4: the agent saves the state when it stops", logs)
 		}
-		if boot := store.State().Boot; boot == nil || boot.ID != kernelBootRaw {
+		if boot := state.Boot; boot == nil || boot.ID != kernelBootRaw {
 			t.Errorf("saved boot = %+v, want the boot %s of the kept boot event", boot, kernelBootRaw)
 		}
 	})
+}
+
+// savedStateAfterStop opens the state file in dir, which the agent saved when it stopped, and returns its state.
+func savedStateAfterStop(t *testing.T, dir string) agentstate.State {
+	t.Helper()
+	store, status := agentstate.Open(dir, slog.New(slog.DiscardHandler))
+	if status != agentstate.StatusLoaded {
+		t.Fatalf("state file status = %v, want StatusLoaded after the stop", status)
+	}
+	return store.State()
 }
 
 // journalMessages returns the messages of the journal log lines the sink received.

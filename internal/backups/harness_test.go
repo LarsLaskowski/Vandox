@@ -157,12 +157,6 @@ func (e *env) run(sec int) []*model.BackupRun {
 	return e.runWith(scheduler.Run{Start: at(sec)})
 }
 
-// runLost collects at sec seconds after t0 as the run after one whose result was dropped (Run.PreviousLost).
-func (e *env) runLost(sec int) []*model.BackupRun {
-	e.t.Helper()
-	return e.runWith(scheduler.Run{Start: at(sec), PreviousLost: true})
-}
-
 // runDropped collects at sec seconds after t0 and reports the run's records as dropped (Observer.Kept with false), as the
 // scheduler does when the spool did not take them.
 func (e *env) runDropped(sec int) []*model.BackupRun {

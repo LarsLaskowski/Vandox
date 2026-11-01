@@ -1787,47 +1787,52 @@ func TestSaverRefreshesOnlyTheUptimeOfTheCurrentBoot(t *testing.T) {
 		{"boot ID empty", strPtr(""), false},
 	}
 	for _, tc := range cases {
-		for _, urgent := range []bool{false, true} {
-			name := tc.name + " heartbeat"
-			if urgent {
-				name = tc.name + " urgent save"
-			}
-			t.Run(name, func(t *testing.T) {
-				dir := t.TempDir()
-				s, _ := Open(dir, slog.New(slog.DiscardHandler))
-				update(t, s, true, fullState(1))
-				collect(t, NewSaver(s, procFS("1000.00")), t0)
+		t.Run(tc.name+" heartbeat", func(t *testing.T) {
+			checkUptimeRefreshOnBoot(t, tc.bootRaw, tc.current, false)
+		})
+		t.Run(tc.name+" urgent save", func(t *testing.T) {
+			checkUptimeRefreshOnBoot(t, tc.bootRaw, tc.current, true)
+		})
+	}
+}
 
-				proc := procFS("1049.50")
-				if tc.bootRaw == nil {
-					delete(proc, "sys/kernel/random/boot_id")
-				} else {
-					proc["sys/kernel/random/boot_id"] = &fstest.MapFile{Data: []byte(*tc.bootRaw)}
-				}
-				at := t0.Add(50 * time.Second)
-				if urgent {
-					update(t, s, true, func(st *State) { st.Journal.Seqnum = 2 })
-					at = t0.Add(6 * time.Second)
-				}
-				collect(t, NewSaver(s, proc), at)
+// checkUptimeRefreshOnBoot saves the state of the boot bootID, then saves again with proc reporting bootRaw as its boot ID
+// (nil removes the file) and checks the saved uptime: refreshed only when current is true. An urgent save also changes the
+// journal position, which must be saved either way.
+func checkUptimeRefreshOnBoot(t *testing.T, bootRaw *string, current, urgent bool) {
+	t.Helper()
+	dir := t.TempDir()
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	update(t, s, true, fullState(1))
+	collect(t, NewSaver(s, procFS("1000.00")), t0)
 
-				got, _ := Open(dir, slog.New(slog.DiscardHandler))
-				boot := got.State().Boot
-				if boot == nil || boot.ID != bootID {
-					t.Fatalf("saved boot = %+v, want the boot %s", boot, bootID)
-				}
-				want := 1000 * time.Second
-				if tc.current {
-					want = 1049*time.Second + 500*time.Millisecond
-				}
-				if boot.Uptime != want {
-					t.Errorf("saved uptime = %v, want %v (refreshed only when the stored boot is the boot of proc: %v)", boot.Uptime, want, tc.current)
-				}
-				if urgent && got.State().Journal.Seqnum != 2 {
-					t.Errorf("saved journal seqnum = %d, want 2 (the urgent change is saved either way)", got.State().Journal.Seqnum)
-				}
-			})
-		}
+	proc := procFS("1049.50")
+	if bootRaw == nil {
+		delete(proc, "sys/kernel/random/boot_id")
+	} else {
+		proc["sys/kernel/random/boot_id"] = &fstest.MapFile{Data: []byte(*bootRaw)}
+	}
+	at := t0.Add(50 * time.Second)
+	if urgent {
+		update(t, s, true, func(st *State) { st.Journal.Seqnum = 2 })
+		at = t0.Add(6 * time.Second)
+	}
+	collect(t, NewSaver(s, proc), at)
+
+	got, _ := Open(dir, slog.New(slog.DiscardHandler))
+	boot := got.State().Boot
+	if boot == nil || boot.ID != bootID {
+		t.Fatalf("saved boot = %+v, want the boot %s", boot, bootID)
+	}
+	want := 1000 * time.Second
+	if current {
+		want = 1049*time.Second + 500*time.Millisecond
+	}
+	if boot.Uptime != want {
+		t.Errorf("saved uptime = %v, want %v (refreshed only when the stored boot is the boot of proc: %v)", boot.Uptime, want, current)
+	}
+	if urgent && got.State().Journal.Seqnum != 2 {
+		t.Errorf("saved journal seqnum = %d, want 2 (the urgent change is saved either way)", got.State().Journal.Seqnum)
 	}
 }
 
