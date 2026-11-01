@@ -6,3 +6,4 @@ are quoted in full.
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-11-01 11:36 | 1 Intake | Orchestrator | Issue 292 read: test-only verification (bug path), real journal copy verified locally by the Orchestrator; branch claude/trusting-gauss-776dzy off origin/main |
+| 2026-11-01 11:37 | 2 Plan | squad-lead | Tier docs proposed (edits to docs/areas/agent.md); returned to Lead: docs/areas is excluded from tier docs (routing.md Tiers), needs trivial with plan.md (opus/medium · 29,693 tokens · 5 tool uses · 52 s) |
