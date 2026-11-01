@@ -18,8 +18,8 @@ repository (record 0074): keep it true when the build changes.
   `reihitsu-format` (local tool, `dotnet-tools.json`). Tests: MSTest 4 with coverlet (`coverlet.runsettings`).
 - The SessionStart hook `.claude/hooks/session-start.sh` runs the hook of each profile in remote
   sessions: `session-start-go.sh` (`go mod download`, the pinned golangci-lint) and `session-start-dotnet.sh`
-  (installs `reihitsu-format` globally if missing, unpinned, and restores the solution). Run `dotnet tool restore`
-  to get the formatter version pinned in `dotnet-tools.json`.
+  (`dotnet tool restore` for the formatter and `dotnet-sonarscanner` pinned in `dotnet-tools.json`, and restores the
+  solution).
 
 Cloud session notes (found when a cloud image lacked the .NET SDK):
 
@@ -27,12 +27,9 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
   `/opt/dotnet`) and put it on the `PATH`.
 - If clean builds fail with RZ1021 or CS8802 because the Razor build server is flaky, build with
   `UseRazorBuildServer=false UseSharedCompilation=false` (as MSBuild properties).
-- If `reihitsu-format` is not on the `PATH`, run it as a local tool:
-  `dotnet tool run reihitsu-format --check --force src tests tools`.
-- The *Sonar gate* needs a SonarQube credential (a network secret of the cloud environment, or `SONAR_TOKEN`; *Sonar
-  gate* below), which a cloud session does not have unless the environment provides it. Without it the gate reports
-  NOT CHECKED, the orchestrator logs that in step 7, and step 11 checks the draft pull request's CI
-  analysis with `python3 .squad/tools/sonar-check.py pr <number>` (*Sonar gate* below).
+
+- The *Sonar gate* reads the draft pull request's CI analysis in step 11 and needs a SonarQube credential (a network
+  secret of the cloud environment, or `SONAR_TOKEN`; *Sonar gate* below); without one it reports NOT CHECKED.
 
 ## Layout
 
@@ -50,8 +47,8 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 | Name | Command |
 | ---- | ------- |
 | *Restore* | `go mod download && dotnet tool restore && dotnet restore Vandox.slnx` |
-| *Format* (in the squad: by the member that changed the files, `.squad/team.md`) | `gofmt -w . && reihitsu-format src tests tools --force` (or `dotnet tool run reihitsu-format src tests tools --force`) |
-| *Format check* | `test -z "$(gofmt -l .)" && reihitsu-format --check src tests tools` |
+| *Format* (in the squad: by the member that changed the files, `.squad/team.md`) | `gofmt -w . && dotnet tool run reihitsu-format src tests tools --force` |
+| *Format check* | `test -z "$(gofmt -l .)" && dotnet tool run reihitsu-format --check src tests tools` |
 | *Build* | `go build ./... && dotnet build Vandox.slnx` |
 | *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
 | *Single test* | Go: `go test ./<package> -run '^TestName$'`; .NET: `dotnet test tests/<Project>.Tests --filter <ClassOrMethodName>` |
@@ -59,10 +56,10 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 | *Test with coverage* | `rm -rf TestResults coverage.out && go test ./... -race -coverprofile=coverage.out && python3 .squad/tools/go-coverage-to-cobertura.py && dotnet test Vandox.slnx --settings coverlet.runsettings --results-directory TestResults` (clears the results first) |
 | *Coverage gate* | `python3 .squad/tools/coverage-check.py` |
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |
-| *Sonar gate* | `python3 .squad/tools/sonar-check.py branch -- bash -c 'dotnet tool run dotnet-sonarscanner begin /k:networlddev_vandox /o:networlddev ${SONAR_TOKEN:+/d:sonar.token="$SONAR_TOKEN"} /d:sonar.host.url=https://sonarcloud.io /d:sonar.branch.name="$(git branch --show-current)" /d:sonar.projectBaseDir="$PWD" /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" /d:sonar.go.coverage.reportPaths=coverage.out /d:sonar.test.inclusions="**/*_test.go,tests/**" /d:sonar.exclusions="**/*_test.go,tests/**,bin/**,dist/**,**/obj/**,**/bin/**,TestResults/**,src/Vandox.Backend/wwwroot/lib/**" /d:sonar.coverage.exclusions=".squad/**,.claude/**,src/Vandox.Backend/wwwroot/js/**" && dotnet build Vandox.slnx -c Release --no-incremental && dotnet tool run dotnet-sonarscanner end ${SONAR_TOKEN:+/d:sonar.token="$SONAR_TOKEN"}'` (after *Test with coverage*, so the analysis carries the coverage of both languages; needs a SonarQube credential, see *Sonar gate* below; the token is passed only when `SONAR_TOKEN` is set) |
+| *Sonar gate* | `python3 .squad/tools/sonar-check.py pr <number>` (step 11, on the draft pull request once its CI has finished; see *Sonar gate* below) |
 | *Image build check* | .NET: `docker build -f deploy/backend/Dockerfile .` where Docker runs, otherwise the restore-order reproduction under *Image build check* below (`.squad/routing.md`, *Criteria verified only in CI*); Go: none, the agent builds no image |
 
-`reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
+`reihitsu-format` needs `DOTNET_ROOT` when dotnet is not installed in a default location (for example
 `DOTNET_ROOT=/usr/lib/dotnet`), for *Format* and *Format check* alike. Without `--force` it asks for confirmation
 when a run covers more than 25 files (the count is every `.cs` file under the given paths outside `bin/` and `obj/`,
 not only those that need formatting, so the prompt also fires on a clean tree); in a non-interactive session it
@@ -125,8 +122,7 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
 Other SonarQube Cloud findings (further rules, hotspots, duplication) have no local equivalent: the *Sonar gate*
-below is the first to report their issues and hotspots, and squad step 11 reads the quality gate, duplication
-included.
+below reports their issues and hotspots and the quality gate, duplication included, on the draft pull request.
 For Go, `go:S1192` (a string literal repeated three or more times in one file) is one of them, and golangci-lint's
 `goconst` is deliberately not enabled as a stand-in: measured with golangci-lint 2.14.0 (`min-occurrences: 3`) on
 the head of PR #272 before its S1192 fix, it counts occurrences across the whole package instead of per file,
@@ -140,7 +136,7 @@ not enabled. Avoid the first by merging the branches under one condition, and th
 parameter to the methods that need it.
 
 Own browser scripts (`src/Vandox.Backend/wwwroot/js/*.js`, no Node build) have no local analyzer: SonarQube
-Cloud's JavaScript rules report on them first in the *Sonar gate* below, so write them to those rules from the start. The
+Cloud's JavaScript rules report on them only in the *Sonar gate* below, so write them to those rules from the start. The
 one that bit (`javascript:S2486`): a `catch` block that ignores the exception holds exactly one whole-line
 comment and nothing else — a comment before a `return` inside the block is still flagged.
 
@@ -154,24 +150,19 @@ reported by the *Sonar gate* below.
 
 `shell:S5332` (clear-text `http://` URL, a vulnerability that fails the security rating) follows a URL through variables and command output and exempts loopback; in scripts, use `https://` or pass address and port, and don't suppress it (record 0131).
 
-*Sonar gate* runs SonarQube Cloud's own analysis on the work branch before the pull request (squad step 7):
-`sonar-check.py` runs the scanner with the branch name, waits for the analysis and fails on every open issue or
-security hotspot on a line the branch changed, so the rules no local analyzer has stop surfacing only after the
-pull request. It runs on the committed change (the scanner uploads the working tree, so it refuses uncommitted or
-untracked files other than the coverage reports) and needs a SonarQube credential: a network secret of the cloud environment for `sonarcloud.io` and
-`*.sonarcloud.io` (the agent proxy attaches the token to those requests, so no session or member sees it), or
-else `SONAR_TOKEN` in the environment, which every process of the session can read. The scanner also needs
-network access to its download hosts (`api.sonarcloud.io` and `scanner.sonarcloud.io`, which the secret's
-hosts cover, and the NuGet registry); without them it reports NOT CHECKED, and step 11 reads the draft pull request with `python3 .squad/tools/sonar-check.py pr <number>`
-instead. A finding of a rule no local analyzer reports is noted in this section, in the same change, instead of a
+*Sonar gate* reads the CI code analysis of the draft pull request (squad step 11, *Draft until green* in
+`.squad/orchestration.md`): `sonar-check.py pr <number>` checks that the analysis belongs to the pushed head and
+fails on a failed quality gate, on every open issue and on every security hotspot to review. The work branch is
+not scanned before the pull request: SonarQube Cloud does not let every organization read the data of non-main
+branches through its API. A private project needs a SonarQube credential: a network secret of the cloud
+environment for `sonarcloud.io` and `*.sonarcloud.io` (the agent proxy attaches the token to those requests, so no
+session or member sees it), or else `SONAR_TOKEN` in the environment, which every process of the session can
+read. A finding of a rule no local analyzer reports is noted in this section, in the same change, instead of a
 squad lesson.
-One analysis covers both languages, as in CI: the scanner for .NET (`dotnet-sonarscanner` from the tool manifest, which
-`dotnet tool restore` must have restored before the gate in a fresh cloud session: the SessionStart hook does it,
-run it by hand where the hook did not) wraps the full, non-incremental C# build between `begin` and `end`, and its bundled scanner analyses the Go agent
-in the same run. Its `begin` arguments mirror the `sonarqube` job of `.github/workflows/ci.yml`, plus the branch
-name and the repository root as base directory: a change to the CI step changes this row too. It reads the
-OpenCover reports coverlet writes next to the Cobertura ones (`coverlet.runsettings`) and Go's `coverage.out`, so
-the branch analysis carries a coverage figure; the *Coverage gate* stays the gate for it.
+In CI one analysis covers both languages: the `sonarqube` job of `.github/workflows/ci.yml` runs the scanner for .NET
+(`dotnet-sonarscanner` from the tool manifest) around the full C# build, its bundled scanner analyses the Go agent in
+the same run, and it reads the OpenCover reports coverlet writes next to the Cobertura ones (`coverlet.runsettings`) and
+Go's `coverage.out`; the *Coverage gate* stays the gate for coverage.
 
 ### Not checkable in a cloud session
 
