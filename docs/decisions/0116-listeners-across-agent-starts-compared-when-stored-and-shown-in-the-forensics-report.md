@@ -44,10 +44,12 @@ tables in [Storage](../areas/storage.md).
 7. **One cap for all findings** (100, then the latest) — simpler, but agent findings of passive FTP would push the restart findings out
    within hours (spec challenge). Rejected for separate caps per kind; the caps are 20 each, because a finding can hold 64 commands of up to
    1,024 bytes and the page keeps the report's document per circuit: about 5.5 MB of stored text in the run and, with the runs every
-   external text carries on the page, up to about 16 MB per circuit. Since #304 each listener also carries its socket's user name (up to
-   1,024 bytes on the wire): the run holds it as stored, about 11 MB once per service, and the page shows it cut to 64 UTF-8 bytes, up to
-   about 19 MB per circuit; showing it whole would double the page's bound for a length no real `passwd` name needs, and lower caps of
-   findings were rejected below for the forensic window they cost. Lower caps (7 to 10 per kind, to stay near 5.5 MB on the page) were
+   external text carries on the page, up to about 16 MB per circuit. Measured in the plan review of #304, the page's cost of a text is set by its `LogText`
+   runs, worst when plain and escaped characters alternate: about 22.9 KiB for a command of 1,024 bytes, so the commands take up to about
+   60 MB per circuit, not 16 MB (the first figure counted characters, not runs); bounding that share is a follow-up. Since #304 each listener
+   also carries its socket's user name (up to 1,024 bytes on the wire): the run holds it as stored, about 11 MB once per service, and the
+   page shows it cut to 32 UTF-8 bytes, the longest name `useradd` makes, at most about 3 KiB with its runs, about 7.9 MB per circuit;
+   64 bytes would add about 12.4 MB, and lower caps of findings were rejected below for the forensic window they cost. Lower caps (7 to 10 per kind, to stay near 5.5 MB on the page) were
    weighed after review and rejected: they shorten the forensic window of restart findings, the main value of the section, to defend a
    worst case that needs 2,560 commands of 1,024 bytes; the bound stays fixed, only a signed-in client opens a circuit, and the
    incident page already holds about 10 MB per circuit while it reads an incident's window.
