@@ -122,7 +122,9 @@ log_shipping:
   journal: true
   # The least severe priority that is shipped: emerg, alert, crit, err, warning, notice, info or debug. A
   # line with a known priority less severe than this is not shipped; a line without a priority (the lines of
-  # a traditional syslog file) is never dropped by it. Default: info
+  # a traditional syslog file) is never dropped by it. Default: info. The filter runs before the agent joins
+  # MariaDB entries and classifies mail lines. The journal's MariaDB lines carry priority 6, so notice or
+  # stricter drops them and no MariaDB event comes from the journal.
   min_priority: info
   # Log files shipped besides the journal: a list of at most 16 mappings with `path` (an absolute, clean path
   # of at most 1024 bytes, each listed once; it must not be, or lie behind, a symbolic link) and `format`

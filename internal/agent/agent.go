@@ -31,6 +31,9 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/version"
 )
 
+// flushTimeout is how long the stop waits for the collectors to put the records they still hold.
+const flushTimeout = 5 * time.Second
+
 // Schedule of the self-metrics collector.
 const (
 	SelfInterval = 60 * time.Second
@@ -181,6 +184,10 @@ func Run(ctx context.Context, opts Options) int {
 		log.Warn("service manager notification failed", "state", sdnotify.Stopping, "err", err)
 	}
 	wg.Wait()
+	// the collectors with open groups put them now, before the last save; the flush gives up at its deadline
+	flushCtx, cancelFlush := context.WithTimeout(context.WithoutCancel(ctx), flushTimeout)
+	sched.Flush(flushCtx)
+	cancelFlush()
 	// the last positions of the collectors are saved once the scheduler has stopped; Flush logs a failed save itself
 	_ = store.Flush(time.Now())
 	closeSpool(sp, log)

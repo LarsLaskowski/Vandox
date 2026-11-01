@@ -38,14 +38,7 @@ type Backups struct {
 	reader  *procstats.CommandReader
 	checked bool      // whether the stored run was compared with the processes yet
 	goneBy  time.Time // the first check that saw no matching process since the last match, zero while one is seen
-	before  *memory   // what the previous run started with, restored when its result was lost
-}
-
-// memory is the state of the collector before a run: the stored open run, goneBy and the first-check flag.
-type memory struct {
-	open    *agentstate.OpenRun
-	goneBy  time.Time
-	checked bool
+	pending *change   // what the latest check decided, applied when the scheduler reports its records kept
 }
 
 // New returns the collector that reads the processes below proc, matches them against rules and keeps the open
@@ -59,6 +52,35 @@ func (b *Backups) Name() string {
 	return Name
 }
 
+// Kept applies the change of the check run when the scheduler reports its records kept and forgets it otherwise.
+func (b *Backups) Kept(run scheduler.Run, kept bool) {
+	pending := b.pending
+	b.pending = nil
+	if kept && pending != nil && pending.start.Equal(run.Start.UTC()) {
+		b.apply(pending)
+	}
+}
+
+// change is what one check decided for the collector's state.
+type change struct {
+	start  time.Time           // the check's run start, matched by Kept
+	open   *agentstate.OpenRun // the open run after the check, nil for none
+	write  bool                // whether the state's open run changes
+	urgent bool                // a start, an end or a higher process count
+	goneBy time.Time           // the gone-by time after the check
+}
+
+// apply writes the change into the state and the collector.
+func (b *Backups) apply(c *change) {
+	if c.write {
+		open := copyRun(c.open)
+		b.store.Update(c.urgent, func(st *agentstate.State) {
+			st.Backup = open
+		})
+	}
+	b.goneBy, b.checked = c.goneBy, true
+}
+
 // sighting is what one check found: the number of matching processes and the earliest of them.
 type sighting struct {
 	count    uint32
@@ -70,7 +92,7 @@ func (b *Backups) Collect(ctx context.Context, run scheduler.Run) ([]model.Recor
 	if len(b.rules) == 0 {
 		return nil, nil
 	}
-	b.remember(run.PreviousLost)
+	b.pending = nil
 	bootID, err := procstats.ReadBootID(b.proc)
 	if err != nil {
 		return nil, fmt.Errorf("backups: %w", err)
@@ -84,22 +106,11 @@ func (b *Backups) Collect(ctx context.Context, run scheduler.Run) ([]model.Recor
 		return nil, err
 	}
 
-	return b.advance(run.Start.UTC(), bootID, found), nil
-}
+	records, c := b.advance(run.Start.UTC(), bootID, found)
+	c.start = run.Start.UTC()
+	b.pending = &c
 
-// remember takes the copy of the state this run starts with; when the previous run's result was lost, it first
-// restores the copy that run took, so the lost check is decided again.
-func (b *Backups) remember(previousLost bool) {
-	if previousLost && b.before != nil {
-		b.goneBy, b.checked = b.before.goneBy, b.before.checked
-		if stored := b.store.State().Backup; !sameRun(stored, b.before.open) {
-			restored := copyRun(b.before.open)
-			b.store.Update(true, func(st *agentstate.State) {
-				st.Backup = restored
-			})
-		}
-	}
-	b.before = &memory{open: copyRun(b.store.State().Backup), goneBy: b.goneBy, checked: b.checked}
+	return records, nil
 }
 
 // copyRun returns a copy of run, or nil.
@@ -110,15 +121,6 @@ func copyRun(run *agentstate.OpenRun) *agentstate.OpenRun {
 	c := *run
 
 	return &c
-}
-
-// sameRun reports whether a and b are the same open run, or both none.
-func sameRun(a, b *agentstate.OpenRun) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-
-	return a.BootID == b.BootID && a.StartedAt.Equal(b.StartedAt) && a.LastSeen.Equal(b.LastSeen) && a.MaxProcesses == b.MaxProcesses
 }
 
 // scan lists the processes and counts those a rule matches.
@@ -160,63 +162,43 @@ func (b *Backups) matches(info *procstats.ProcessInfo) bool {
 	return false
 }
 
-// advance moves the open run on by the check at now and returns the records of the phases it passed.
-func (b *Backups) advance(now time.Time, bootID string, found sighting) []model.Record {
+// advance decides the check at now from the committed state and returns the records of the phases it passed and the
+// change to the state; nothing is written.
+func (b *Backups) advance(now time.Time, bootID string, found sighting) ([]model.Record, change) {
 	var records []model.Record
-	open := b.store.State().Backup
+	stored := b.store.State().Backup
+	open := copyRun(stored)
+	c := change{goneBy: b.goneBy}
 	if open != nil && !b.checked && (open.BootID != bootID || found.count == 0) {
 		records = append(records, endRecord(open, now))
-		b.clear()
+		c.goneBy, c.write, c.urgent = time.Time{}, true, true
 		open = nil
 	}
-	b.checked = true
 
 	switch {
 	case open == nil && found.count > 0:
 		records = append(records, startRecord(bootID, &found))
-		b.begin(bootID, now, &found)
+		started := found.earliest.StartedAt.UTC()
+		open = &agentstate.OpenRun{BootID: bootID, StartedAt: started, LastSeen: laterOf(now, started), MaxProcesses: found.count}
+		c.goneBy, c.write, c.urgent = time.Time{}, true, true
 	case open != nil && found.count > 0:
-		b.goneBy = time.Time{}
-		b.see(now, found.count, open.MaxProcesses)
+		c.goneBy, c.write = time.Time{}, true
+		c.urgent = c.urgent || found.count > open.MaxProcesses
+		open.LastSeen = laterOf(now, open.StartedAt)
+		open.MaxProcesses = maxOf(open.MaxProcesses, found.count)
 	case open != nil:
-		if b.goneBy.IsZero() {
-			b.goneBy = now
+		if c.goneBy.IsZero() {
+			c.goneBy = now
 		}
 		if now.Sub(open.LastSeen) >= endAfter {
-			records = append(records, endRecord(open, b.goneBy))
-			b.clear()
+			records = append(records, endRecord(open, c.goneBy))
+			c.goneBy, c.write, c.urgent = time.Time{}, true, true
+			open = nil
 		}
 	}
+	c.open = open
 
-	return records
-}
-
-// begin stores the run that starts with found.
-func (b *Backups) begin(bootID string, now time.Time, found *sighting) {
-	started := found.earliest.StartedAt.UTC()
-	b.goneBy = time.Time{}
-	b.store.Update(true, func(st *agentstate.State) {
-		st.Backup = &agentstate.OpenRun{BootID: bootID, StartedAt: started, LastSeen: laterOf(now, started), MaxProcesses: found.count}
-	})
-}
-
-// see stores a check that saw count matching processes.
-func (b *Backups) see(now time.Time, count, peak uint32) {
-	b.store.Update(count > peak, func(st *agentstate.State) {
-		if st.Backup == nil {
-			return
-		}
-		st.Backup.LastSeen = laterOf(now, st.Backup.StartedAt)
-		st.Backup.MaxProcesses = maxOf(st.Backup.MaxProcesses, count)
-	})
-}
-
-// clear removes the open run from the state.
-func (b *Backups) clear() {
-	b.goneBy = time.Time{}
-	b.store.Update(true, func(st *agentstate.State) {
-		st.Backup = nil
-	})
+	return records, c
 }
 
 // startRecord returns the record of the start of the run found.

@@ -7,6 +7,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 )
 
 const (
@@ -14,7 +15,7 @@ const (
 )
 
 // bootCheck reads the current boot ID once and returns the boot event when the boot differs from the saved one. The saved boot is
-// then replaced by the current one; with an unreadable boot ID it is left alone.
+// then replaced by the current one once the scheduler reports the run kept (Kept); with an unreadable boot ID it is left alone.
 func (k *Kernel) bootCheck(start time.Time) *model.Record {
 	raw, ok := readBootID(k.src.Proc)
 	if !ok {
@@ -41,7 +42,7 @@ func (k *Kernel) bootCheck(start time.Time) *model.Record {
 		uptime := saved.Uptime
 		event.PreviousBootID, event.PreviousUptime = saved.ID, &uptime
 	}
-	k.saveBoot(raw, bootedAt)
+	k.pendingBoot = &agentstate.Boot{ID: raw, BootedAt: bootedAt}
 
 	captured := bootedAt
 	if captured.IsZero() {
@@ -50,6 +51,15 @@ func (k *Kernel) bootCheck(start time.Time) *model.Record {
 	return &model.Record{
 		Meta: model.Meta{Source: Name, CapturedAt: captured},
 		Data: &model.KernelEvent{Type: model.KernelEventBoot, Boot: event},
+	}
+}
+
+// Kept saves the boot of the boot event when the scheduler reports the run that last returned it kept; any other
+// report changes nothing.
+func (k *Kernel) Kept(run scheduler.Run, kept bool) {
+	if kept && k.pendingBoot != nil && run.Start.Equal(k.bootStart) {
+		k.saveBoot(k.pendingBoot.ID, k.pendingBoot.BootedAt)
+		k.pendingBoot, k.boot = nil, nil
 	}
 }
 

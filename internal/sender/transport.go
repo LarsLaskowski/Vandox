@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"time"
 
@@ -131,10 +132,13 @@ func (t *HTTPTransport) GoString() string { return t.String() }
 // Send sends body and returns what came back. The deadline is the caller's context's; no error text, URL or host
 // leaves Send, and at most MaxAnswerBody bytes of the answer's body are read.
 func (t *HTTPTransport) Send(ctx context.Context, body []byte) Result {
-	// The request's own context lets Send end a connection whose body it will not read to the end: after the body is
-	// closed, net/http would otherwise read on for up to 256 KiB of a chunked body to keep the connection.
+	// Send ends a connection whose body it will not read to the end by closing it itself: after the body is closed,
+	// net/http would otherwise read on for up to 256 KiB of a chunked body to keep the connection, and cancelling the
+	// request's context alone does not stop that reliably (the transport's read loop may see the closed body first).
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var conn net.Conn
+	reqCtx = httptrace.WithClientTrace(reqCtx, &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { conn = info.Conn }})
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
 		return Result{Reason: reasonConnection}
@@ -148,6 +152,9 @@ func (t *HTTPTransport) Send(ctx context.Context, body []byte) Result {
 	}
 	read, _ := io.Copy(io.Discard, io.LimitReader(resp.Body, MaxAnswerBody))
 	if read >= MaxAnswerBody {
+		if conn != nil {
+			_ = conn.Close()
+		}
 		cancel()
 	}
 	_ = resp.Body.Close()

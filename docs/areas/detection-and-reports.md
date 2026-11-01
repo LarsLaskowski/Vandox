@@ -167,7 +167,9 @@ bounded by those limits and not by the input.
 - An event is a **classification, not proof of origin**. Any local process can log as `kernel`, `systemd`, `mariadbd`, `postfix/*` or
   `dovecot` (the journal's `_TRANSPORT` is not kept), and a client of MariaDB can forge a whole MariaDB error log entry through a
   failed login's user name (see *Log import*, *MariaDB error log*), which reaches `disk_full` and the `mariadb_*` signatures. The
-  events list their record IDs so a consumer can weigh them.
+  events list their record IDs so a consumer can weigh them. Live lines are classified by the agent now ([Agent](agent.md),
+  *Classification*), so forged `postfix/*`, `dovecot`, and `mariadbd` and `kernel` lines of the system files make live events too, which
+  the alert rules (#56, #61) must weigh. A line of a user journal file gets the mail classification only and never joins a server entry.
 - `postfix_fatal` and `dovecot_fatal` cover both the fatal and the panic event and have no field, so a fatal error and a panic of one
   daemon within 60 seconds are **one event**; nothing in the event tells which of the two it was, the linked lines and their `event`
   do.

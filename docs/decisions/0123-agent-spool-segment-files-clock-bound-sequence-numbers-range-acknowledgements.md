@@ -65,8 +65,8 @@ Order of state and records:
 1. **An fsync per hand-over** — the I/O cost every 2 seconds per collector.
 2. **Positions stored inside the spool** (0121's exact delivery) — a larger change to three collectors.
 3. **The state file syncs the spool before every save** (chosen) — a periodic sync every second, and the barrier makes the records
-   durable before any position that covers them. It does not cover the boot and backup state the `kernel` and `backups` collectors
-   write inside their run, before the hand-over; moving those behind the scheduler's `Kept` was left to a follow-up issue.
+   durable before any position that covers them. The boot and the open backup run reach the state only once the scheduler reports
+   the run's records kept (record 0120, options 10 and 11), so the barrier covers them as well.
 
 ## Decision
 
@@ -82,8 +82,4 @@ damage, never a number. Its size bound and free-space reserve drop the oldest se
   `sequence_missing`; numbers below an agent's first are never reported.
 - A clock set back before a reinstall can make new numbers collide with stored ones (stated residual).
 - Without a sender the running agent fills its spool to the cap and then drops the oldest with gaps; it is not released before #39.
-- A power loss right after a state save that fell between a run's boot or backup change and its hand-over can lose that `boot` or
-  `backup_run` record. The Product Manager accepted this as a stated residual for this change, with the guarantee *No data gaps unless
-  explicitly recorded* left as it is, on the condition that the follow-up issue ("[Agent] Save boot and backup state only after the
-  run's records are kept") is merged before the agent's first release.
 - `spool.max_size` is at most 64 GiB.
