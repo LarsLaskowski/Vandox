@@ -30,7 +30,7 @@ dotnet run --project src/Vandox.Backend -- --version
 
 The agent runs with a configuration file and the agent token, collects only its own metrics and sends nothing yet (`go run ./cmd/vandox-agent --version` prints its version); the backend loads its configuration, opens its database, imports logs,
 rebuilds incidents and writes the report, and serves the web UI (login, logs, incidents, report) and `/healthz`. Format before building:
-`gofmt -w . && reihitsu-format src tests tools`.
+`gofmt -w . && dotnet tool run reihitsu-format src tests tools --force`.
 
 ### Running tests
 

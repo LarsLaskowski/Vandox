@@ -18,8 +18,8 @@ repository (record 0074): keep it true when the build changes.
   `reihitsu-format` (local tool, `dotnet-tools.json`). Tests: MSTest 4 with coverlet (`coverlet.runsettings`).
 - The SessionStart hook `.claude/hooks/session-start.sh` runs the hook of each profile in remote
   sessions: `session-start-go.sh` (`go mod download`, the pinned golangci-lint) and `session-start-dotnet.sh`
-  (installs `reihitsu-format` globally if missing, unpinned, and restores the solution). Run `dotnet tool restore`
-  to get the formatter version pinned in `dotnet-tools.json`.
+  (`dotnet tool restore` for the formatter and `dotnet-sonarscanner` pinned in `dotnet-tools.json`, and restores the
+  solution).
 
 Cloud session notes (found when a cloud image lacked the .NET SDK):
 
@@ -27,8 +27,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
   `/opt/dotnet`) and put it on the `PATH`.
 - If clean builds fail with RZ1021 or CS8802 because the Razor build server is flaky, build with
   `UseRazorBuildServer=false UseSharedCompilation=false` (as MSBuild properties).
-- If `reihitsu-format` is not on the `PATH`, run it as a local tool:
-  `dotnet tool run reihitsu-format --check --force src tests tools`.
+
 - The *Sonar gate* reads the draft pull request's CI analysis in step 11 and needs a SonarQube credential (a network
   secret of the cloud environment, or `SONAR_TOKEN`; *Sonar gate* below); without one it reports NOT CHECKED.
 
@@ -48,8 +47,8 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 | Name | Command |
 | ---- | ------- |
 | *Restore* | `go mod download && dotnet tool restore && dotnet restore Vandox.slnx` |
-| *Format* (in the squad: by the member that changed the files, `.squad/team.md`) | `gofmt -w . && reihitsu-format src tests tools --force` (or `dotnet tool run reihitsu-format src tests tools --force`) |
-| *Format check* | `test -z "$(gofmt -l .)" && reihitsu-format --check src tests tools` |
+| *Format* (in the squad: by the member that changed the files, `.squad/team.md`) | `gofmt -w . && dotnet tool run reihitsu-format src tests tools --force` |
+| *Format check* | `test -z "$(gofmt -l .)" && dotnet tool run reihitsu-format --check src tests tools` |
 | *Build* | `go build ./... && dotnet build Vandox.slnx` |
 | *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
 | *Single test* | Go: `go test ./<package> -run '^TestName$'`; .NET: `dotnet test tests/<Project>.Tests --filter <ClassOrMethodName>` |
@@ -60,7 +59,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 | *Sonar gate* | `python3 .squad/tools/sonar-check.py pr <number>` (step 11, on the draft pull request once its CI has finished; see *Sonar gate* below) |
 | *Image build check* | .NET: `docker build -f deploy/backend/Dockerfile .` where Docker runs, otherwise the restore-order reproduction under *Image build check* below (`.squad/routing.md`, *Criteria verified only in CI*); Go: none, the agent builds no image |
 
-`reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
+`reihitsu-format` needs `DOTNET_ROOT` when dotnet is not installed in a default location (for example
 `DOTNET_ROOT=/usr/lib/dotnet`), for *Format* and *Format check* alike. Without `--force` it asks for confirmation
 when a run covers more than 25 files (the count is every `.cs` file under the given paths outside `bin/` and `obj/`,
 not only those that need formatting, so the prompt also fires on a clean tree); in a non-interactive session it
