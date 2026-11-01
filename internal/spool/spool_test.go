@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"strconv"
 	"strings"
@@ -637,4 +638,62 @@ func TestAck_MaxRangesSurviveRestart(t *testing.T) {
 	requireSame(t, "after the restart (acknowledged records are not handed out again)", readAll(t, sp), want)
 	mustPut(t, sp, batchOf(epoch.Add(time.Hour), "next", 1, 60))
 	expect(t, sp.LastSeq() == all[len(all)-1].Seq+1, "the number after the restart is %d, want %d (no jump)", sp.LastSeq(), all[len(all)-1].Seq+1)
+}
+
+func TestAddSize(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b int64
+		want int64
+	}{
+		{"zero and zero", 0, 0, 0},
+		{"one and two", 1, 2, 3},
+		{"the maximum and zero", math.MaxInt64, 0, math.MaxInt64},
+		{"the maximum and one", math.MaxInt64, 1, math.MaxInt64},
+		{"the maximum and the maximum", math.MaxInt64, math.MaxInt64, math.MaxInt64},
+		{"one below the maximum and one", math.MaxInt64 - 1, 1, math.MaxInt64},
+		{"one and the maximum", 1, math.MaxInt64, math.MaxInt64},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := addSize(tc.a, tc.b)
+			expect(t, got == tc.want, "addSize(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		})
+	}
+}
+
+func TestSpool_DiskUsedSaturates(t *testing.T) {
+	sum := func(sizes ...int64) int64 {
+		s := &Spool{}
+		for _, n := range sizes {
+			s.files = append(s.files, &segFile{size: n})
+		}
+
+		return s.diskUsed()
+	}
+	got := sum(math.MaxInt64, math.MaxInt64, 1)
+	expect(t, got == math.MaxInt64, "diskUsed() of sizes MaxInt64, MaxInt64, 1 = %d, want %d", got, int64(math.MaxInt64))
+	got = sum(1, 2)
+	expect(t, got == 3, "diskUsed() of sizes 1, 2 = %d, want 3", got)
+}
+
+func TestSpoolBytes_Saturates(t *testing.T) {
+	r := newRig(t)
+	sp := r.open()
+	mustPut(t, sp, batchOf(epoch, "one", 1, 100))
+
+	sp.mu.Lock()
+	need(t, len(sp.files) > 0, "no data file after a hand-over")
+	old := sp.files[0].size
+	sp.files[0].size = math.MaxInt64
+	sp.mu.Unlock()
+	t.Cleanup(func() {
+		sp.mu.Lock()
+		sp.files[0].size = old
+		sp.mu.Unlock()
+	})
+
+	got, err := sp.SpoolBytes(context.Background())
+	needNoErr(t, "SpoolBytes", err)
+	expect(t, got == math.MaxInt64, "SpoolBytes() = %d with a data file of MaxInt64 and a meta file, want %d", got, int64(math.MaxInt64))
 }

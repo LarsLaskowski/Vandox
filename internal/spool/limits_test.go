@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"slices"
 	"strings"
@@ -273,6 +274,51 @@ func acknowledgeAll(t *testing.T, sp *Spool) {
 	t.Helper()
 
 	mustAck(t, sp, lowestSeq(readAll(t, sp)), sp.LastSeq())
+}
+
+func TestPut_SizeBoundCountsAnUnrepresentableSumAsFull(t *testing.T) {
+	r := newRig(t)
+	sp := r.open()
+	f := newFeeder(t, sp, 20, 1000)
+
+	f.putUntil(1000, func() bool { return len(segmentNumbers(t, r.dir())) >= 3 })
+
+	type span struct{ first, last uint64 }
+	var planted []span
+	var names []uint64
+	sp.mu.Lock()
+	need(t, len(sp.files) >= 3, "%d data files, want at least 3", len(sp.files))
+	for _, seg := range sp.files[:2] {
+		need(t, seg.sealed, "file %d is not sealed, want the two oldest sealed", seg.num)
+		planted = append(planted, span{seg.first, seg.last})
+		names = append(names, seg.num)
+		seg.size = math.MaxInt64
+	}
+	sp.mu.Unlock()
+
+	f.put()
+
+	left := segmentNumbers(t, r.dir())
+	for _, n := range names {
+		expect(t, !slices.Contains(left, n), "file %d is still in the directory, want the oversized file dropped", n)
+	}
+	lines := dropLines(r.logs)
+	need(t, len(lines) > 0, "no line %q was logged", msgDropped)
+	expect(t, lines[0].msg == msgDropped && lines[0].str("reason") == "size_bound", "first drop line is %q with reason %q, want %q with reason size_bound", lines[0].msg, lines[0].str("reason"), msgDropped)
+
+	recs := readAll(t, sp)
+	gaps := gapsOf(recs, model.GapSpoolDropped)
+	for _, p := range planted {
+		covered := false
+		for _, g := range gaps {
+			gp := gapOf(g)
+			covered = covered || gp.FirstSeq <= p.first && gp.LastSeq >= p.last
+		}
+		expect(t, covered, "no spool_dropped gap covers the numbers %d to %d of a dropped file", p.first, p.last)
+	}
+	disk := diskBytes(t, r.dir())
+	got, err := sp.SpoolBytes(context.Background())
+	expect(t, err == nil && got == disk, "SpoolBytes() = %d, %v, want the size of the files on disk, %d", got, err, disk)
 }
 
 func TestPut_SizeBoundDropsOldest(t *testing.T) {

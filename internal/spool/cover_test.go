@@ -15,18 +15,24 @@ import (
 )
 
 func TestStatAvailable(t *testing.T) {
-	t.Run("a real directory has space", func(t *testing.T) {
+	t.Run("an open directory has space", func(t *testing.T) {
 		fd, openErr := syscall.Open(t.TempDir(), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
-		needNoErr(t, "open", openErr)
-		defer func() { _ = syscall.Close(fd) }()
+		if openErr != nil {
+			t.Fatalf("Open(temp dir) = %v, want a descriptor", openErr)
+		}
+		t.Cleanup(func() {
+			if closeErr := syscall.Close(fd); closeErr != nil {
+				t.Errorf("Close(descriptor) = %v, want nil", closeErr)
+			}
+		})
 		got, err := statAvailable(fd)
 		needNoErr(t, "statAvailable", err)
-		expect(t, got > 0, "statAvailable(temp dir) = %d, want a positive number of bytes", got)
+		expect(t, got > 0, "statAvailable(open directory) = %d, want a positive number of bytes", got)
 	})
-	t.Run("a missing directory is an error", func(t *testing.T) {
+	t.Run("an invalid descriptor is an error", func(t *testing.T) {
 		got, err := statAvailable(-1)
-		expect(t, err != nil, "statAvailable(missing) error = nil, want an error")
-		expect(t, got == 0, "statAvailable(missing) = %d, want 0", got)
+		expect(t, err != nil, "statAvailable(-1) error = nil, want an error")
+		expect(t, got == 0, "statAvailable(-1) = %d, want 0", got)
 	})
 	t.Run("the default check is used without an injected one", func(t *testing.T) {
 		r := newRig(t)
@@ -35,6 +41,24 @@ func TestStatAvailable(t *testing.T) {
 		got, err := sp.available()
 		needNoErr(t, "available", err)
 		expect(t, got > 0, "available() = %d, want a positive number of bytes", got)
+	})
+	t.Run("the default check reads the opened directory after its path moved", func(t *testing.T) {
+		r := newRig(t)
+		r.opts.Available = nil
+		r.opts.MinFreeBytes = 1
+		sp := r.open()
+		moved := r.dir() + "-moved"
+		needNoErr(t, "rename away", os.Rename(r.dir(), moved))
+		t.Cleanup(func() {
+			if renameErr := os.Rename(moved, r.dir()); renameErr != nil {
+				t.Errorf("Rename(back) = %v, want nil", renameErr)
+			}
+		})
+		t.Cleanup(func() { r.closeSpool(sp) })
+		got, err := sp.available()
+		needNoErr(t, "available after the move", err)
+		expect(t, got > 0, "available() after the path moved = %d, want a positive number of bytes", got)
+		mustPut(t, sp, batchOf(epoch, "moved", 1, 100))
 	})
 }
 
