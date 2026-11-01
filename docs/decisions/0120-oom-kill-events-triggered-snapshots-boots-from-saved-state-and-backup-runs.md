@@ -45,11 +45,21 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
    `sw-tar` would also count a restore, so the prefixes name the modes `--pack` and `--create`; **`pzstd` only** (the Product
    Manager's default until the capture) — the one backup program seen in real data before #287, misses the database dumps;
    **Plesk's documented tool names** — never captured, a wrong rule fails silently.
-10. **A backup run whose records were dropped is decided again: the collector restores its copy of the open run on
-    `Run.PreviousLost`** (chosen) — a lost start or end is written again by the next check, and the state stays current for a
-    restart; **commit the open run only at the next kept run**, as for the journal position — the stored run then lags one more
-    check, so a restart gives a second start within a wider window (S11); **accept the loss** — a dropped end leaves a run without
-    an end for ever.
+10. **A check's change to the open run is applied when the scheduler reports the check's records kept (`Kept`)** (chosen, #300)
+    — the change reaches the state only after the hand-over, so the spool sync before every state save (record 0123) makes the start
+    or end durable before any saved state holds it, and a dropped or abandoned check changes nothing, so the next check decides it
+    again; **written inside the check and restored on `Run.PreviousLost`** (the first form, #36) — a save between the check and its
+    hand-over followed by a power loss lost the record while the state already held the change, and a save between a dropped check and
+    the next one survived a restart; **commit the open run only at the next kept run**, as for the journal position — the stored run
+    then lags one more check, so a restart gives a second start within a wider window (S11); **accept the loss** — a dropped end
+    leaves a run without an end for ever.
+11. **The boot is written to the state when the scheduler reports a run that returned its event kept (`Kept`)** (chosen, #300) —
+    the same order as option 10; **at the first run, inside it** (the first form, #36) — a save before the hand-over followed by a
+    power loss lost the event for ever while the state held the new boot; **at the commit of the next run, with the journal
+    position** — no new method, but a stop between the kept run and the next one leaves the boot unsaved, and the restart records the
+    event again. Because the state now holds the previous boot until the event is kept (and at every start before the first run), the
+    `state` job refreshes the saved uptime only of the boot that is the current one; refreshing any saved boot wrote the new boot's
+    uptime into the previous boot and so into `previous_uptime_ns`.
 
 ## Decision
 
@@ -73,6 +83,7 @@ events*, *Boots*, *Backup runs*) and the [wire format](../areas/wire-format.md).
   it). After a suspend every kill reads as late and gets no snapshots: the error is towards fewer snapshots, never more.
 - The state file is the agent's first file write; the spool (#38) must leave it out of what it counts and deletes.
 - Without a usable state every start records a `boot` event of the current boot (same boot ID), and the journal is read from its end.
-- A backup run's state that the `state` job saved between a dropped run and the next one survives a restart before that next run:
-  the dropped start or end is then not written again. An unreadable process is skipped like an ended one, without a log line, so a
-  backup process the agent cannot read is not recognized.
+- Between a run's hand-over and the save of its boot or backup change (at most one state interval) a stop without the last save
+  (`kill -9`) gives the boot event or the backup start or end once more at the restart; nothing is lost.
+- An unreadable process is skipped like an ended one, without a log line, so a backup process the agent cannot read is not
+  recognized.
