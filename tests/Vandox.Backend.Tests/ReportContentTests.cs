@@ -232,7 +232,7 @@ public class ReportContentTests
         Assert.IsGreaterThan(start, end, "the outages heading follows the listener section");
         Assert.AreEqual(5, Count(html[start..end], code), "the agent ID in the head and in both findings, and the two commands, are code in the listener section");
         Assert.AreEqual(Count(html, code), Count(html, "class=\"external\""), "external text is only ever inside a code element");
-        Assert.Contains($"tcp 0.0.0.0:23, PID 7 <b>x</b> ``` {Backslash}u202e", pieces, "the command is text on the page");
+        Assert.Contains($"tcp 0.0.0.0:23, PID 7 <b>x</b> ``` {Backslash}u202e , socket UID unknown", pieces, "the command is text on the page (its line feed is white space there), followed by the unknown socket UID");
         Assert.Contains($"2026-10-01 14:00 UTC, agent {agent}, found by the agent, all ports: 1 new", pieces, "the agent ID is text on the page");
         Assert.AreEqual(2, Count(html, ", socket UID unknown"), "both listeners without a UID say so on the page");
     }
