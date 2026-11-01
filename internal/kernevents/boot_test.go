@@ -1,6 +1,7 @@
 package kernevents
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 )
 
 // healthyJournal gives the environment a journal with a few plain lines before a kill, and a saved position before them.
@@ -33,6 +35,7 @@ func TestBoot_NewBootRecordsPreviousBootAndUptime(t *testing.T) {
 	})
 
 	recs := e.run(false)
+	e.keep()
 
 	boots := bootsOf(recs)
 	if len(boots) != 1 {
@@ -233,6 +236,7 @@ func TestBoot_UptimeIsZeroWhenProcUptimeIsUnreadable(t *testing.T) {
 	delete(e.proc, "uptime")
 
 	recs := e.run(false)
+	e.keep()
 
 	if len(bootsOf(recs)) != 1 {
 		t.Fatalf("boot events = %d, want 1", len(bootsOf(recs)))
@@ -240,4 +244,183 @@ func TestBoot_UptimeIsZeroWhenProcUptimeIsUnreadable(t *testing.T) {
 	if st := e.store.State(); st.Boot == nil || st.Boot.ID != dashed(bootB) || st.Boot.Uptime != 0 {
 		t.Errorf("state after the boot event = %+v, want the current boot with uptime 0", st.Boot)
 	}
+}
+
+// requireSavedBoot checks the boot of the state.
+func requireSavedBoot(t *testing.T, e *env, id string, uptime time.Duration, when string) {
+	t.Helper()
+	st := e.store.State()
+	if st.Boot == nil || st.Boot.ID != id || st.Boot.Uptime != uptime {
+		t.Errorf("state boot %s = %+v, want boot %s with uptime %v", when, st.Boot, id, uptime)
+	}
+}
+
+// requireOneBootEvent checks that recs hold one boot event of bootB and returns it.
+func requireOneBootEvent(t *testing.T, recs []model.Record, when string) *model.Boot {
+	t.Helper()
+	boots := bootsOf(recs)
+	if len(boots) != 1 || boots[0].ev.Boot.BootID != dashed(bootB) {
+		t.Fatalf("%s made %d boot events, want one of boot %s", when, len(boots), dashed(bootB))
+	}
+	return boots[0].ev.Boot
+}
+
+func TestBoot_SaveBeforeTheHandOverKeepsThePreviousBoot(t *testing.T) {
+	t.Run("a previous boot saved", func(t *testing.T) {
+		checkSaveBeforeHandOver(t, true)
+	})
+	t.Run("no boot saved, first start", func(t *testing.T) {
+		checkSaveBeforeHandOver(t, false)
+	})
+}
+
+// checkSaveBeforeHandOver runs the collector with a previous boot saved (previous) or with no boot saved, saves the state
+// between the run and the hand-over of its records, and checks the boot event of a collector restarted on the saved file.
+func checkSaveBeforeHandOver(t *testing.T, previous bool) {
+	t.Helper()
+	e := newEnv(t)
+	healthyJournal(e)
+	if previous {
+		e.seed(dashed(bootA), before())
+	} else {
+		e.seed("", before())
+	}
+
+	first := requireOneBootEvent(t, e.run(false), "the first run")
+
+	// A state save between the run and the hand-over of its records.
+	if previous {
+		requireSavedBoot(t, e, dashed(bootA), time.Hour, "before the run was kept")
+	} else if e.store.State().Boot != nil {
+		t.Errorf("state boot before the run was kept = %+v, want none", e.store.State().Boot)
+	}
+	e.restartOnSavedFile()
+
+	again := requireOneBootEvent(t, e.run(false), "a collector started on the saved file in the same boot")
+	if again.PreviousBootID != first.PreviousBootID || again.BootID != first.BootID {
+		t.Errorf("repeated boot event boot_id = %q, previous_boot_id = %q, want %q and %q", again.BootID, again.PreviousBootID, first.BootID, first.PreviousBootID)
+	}
+	requireRepeatedBootPrevious(t, again, previous)
+}
+
+// requireRepeatedBootPrevious checks the previous-boot fields of a repeated boot event: the saved uptime of the previous
+// boot when previous is true, and no previous fields at all for a first start.
+func requireRepeatedBootPrevious(t *testing.T, again *model.Boot, previous bool) {
+	t.Helper()
+	if previous {
+		if again.PreviousUptime == nil || *again.PreviousUptime != time.Hour {
+			t.Errorf("repeated boot event previous_uptime_ns = %v, want %v (the saved uptime of the previous boot)", again.PreviousUptime, time.Hour)
+		}
+		return
+	}
+	if again.PreviousBootID != "" || again.PreviousUptime != nil {
+		t.Errorf("repeated first boot event = %+v, want no previous fields", again)
+	}
+}
+
+func TestBoot_StartUpHeartbeatBeforeTheFirstRunKeepsThePreviousUptime(t *testing.T) {
+	e := newEnv(t)
+	healthyJournal(e)
+	e.seed(dashed(bootA), before())
+
+	// The state job's first run is a heartbeat and may come before the kernel's first run.
+	if _, err := agentstate.NewSaver(e.store, e.proc).Collect(context.Background(), scheduler.Run{Start: e.start}); err != nil {
+		t.Fatalf("Saver.Collect() error = %v, want nil", err)
+	}
+	saved, _ := agentstate.Open(e.dir, slog.New(e.logs))
+	if b := saved.State().Boot; b == nil || b.ID != dashed(bootA) || b.Uptime != time.Hour {
+		t.Fatalf("file after the first heartbeat = %+v, want the previous boot %s with its uptime %v", b, dashed(bootA), time.Hour)
+	}
+
+	b := requireOneBootEvent(t, e.run(false), "the first run")
+
+	if b.PreviousBootID != dashed(bootA) || b.PreviousUptime == nil || *b.PreviousUptime != time.Hour {
+		t.Errorf("boot event previous_boot_id = %q, previous_uptime_ns = %v, want %q and %v (the uptime the previous boot saved)", b.PreviousBootID, b.PreviousUptime, dashed(bootA), time.Hour)
+	}
+}
+
+func TestBoot_KeptRunSavesTheCurrentBoot(t *testing.T) {
+	cases := []struct {
+		name   string
+		setup  func(e *env)
+		uptime time.Duration
+	}{
+		{"uptime readable", func(e *env) { e.setUptime(5_000_100) }, 5_000_100 * time.Second},
+		{"proc uptime missing", func(e *env) { delete(e.proc, "uptime") }, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			healthyJournal(e)
+			e.seed(dashed(bootA), before())
+			requireOneBootEvent(t, e.run(false), "the first run")
+			tc.setup(e) // the uptime is read when the run is reported kept
+
+			e.keep()
+
+			st := e.store.State()
+			if st.Boot == nil || st.Boot.ID != dashed(bootB) || !st.Boot.BootedAt.Equal(bootTime) || st.Boot.Uptime != tc.uptime {
+				t.Fatalf("state boot after the report = %+v, want boot %s booted at %s with uptime %v", st.Boot, dashed(bootB), bootTime, tc.uptime)
+			}
+			if again := bootsOf(e.run(false)); len(again) != 0 {
+				t.Errorf("the next run made %d boot events, want none", len(again))
+			}
+			e.restartOnSavedFile()
+			if again := bootsOf(e.run(false)); len(again) != 0 {
+				t.Errorf("a collector started on the saved file in the same boot made %d boot events, want none", len(again))
+			}
+		})
+	}
+}
+
+func TestBoot_UnkeptRunLeavesTheSavedBoot(t *testing.T) {
+	cases := []struct {
+		name string
+		stop func(e *env)
+	}{
+		{"reported not kept", func(e *env) { e.drop() }},
+		{"never reported", func(e *env) { e.abandon() }},
+		{"report for another start", func(e *env) {
+			e.k.Kept(scheduler.Run{Start: e.last.Start.Add(time.Second)}, true)
+			e.abandon()
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			healthyJournal(e)
+			e.seed(dashed(bootA), before())
+			requireOneBootEvent(t, e.run(false), "the first run")
+
+			tc.stop(e)
+
+			requireSavedBoot(t, e, dashed(bootA), time.Hour, "after the unkept run")
+			// Whatever the next run's PreviousLost says, the event comes again.
+			b := requireOneBootEvent(t, e.run(false), "the run after the unkept one")
+			if b.PreviousBootID != dashed(bootA) || b.PreviousUptime == nil || *b.PreviousUptime != time.Hour {
+				t.Errorf("repeated boot event previous_boot_id = %q, previous_uptime_ns = %v, want %q and %v", b.PreviousBootID, b.PreviousUptime, dashed(bootA), time.Hour)
+			}
+			e.keep()
+			requireSavedBoot(t, e, dashed(bootB), 5_000_000*time.Second, "after a later run was kept")
+			if again := bootsOf(e.run(false)); len(again) != 0 {
+				t.Errorf("the run after the kept one made %d boot events, want none", len(again))
+			}
+		})
+	}
+}
+
+func TestBoot_ReportForAnEarlierRunThatReturnedTheEventIsIgnored(t *testing.T) {
+	e := newEnv(t)
+	healthyJournal(e)
+	e.seed(dashed(bootA), before())
+	requireOneBootEvent(t, e.run(false), "the first run")
+	first := *e.last
+	e.abandon()
+	requireOneBootEvent(t, e.run(false), "the second run")
+
+	e.k.Kept(first, true)
+
+	requireSavedBoot(t, e, dashed(bootA), time.Hour, "after the report for the first run")
+	e.keep()
+	requireSavedBoot(t, e, dashed(bootB), 5_000_000*time.Second, "after the report for the second run")
 }

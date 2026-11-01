@@ -55,19 +55,21 @@ type Kernel struct {
 	log     *slog.Logger
 	trigger TriggerFunc
 
-	inited    bool
-	committed readState
-	mem       readState
-	memKills  bool
-	rereads   int
-	span      *readState
-	boot      *model.Record
-	curBoot   [16]byte
-	curBootOK bool
-	trig      triggerState
-	fail      failure
-	unread    bool
-	cache     cursorCache
+	inited      bool
+	committed   readState
+	mem         readState
+	memKills    bool
+	rereads     int
+	span        *readState
+	boot        *model.Record
+	pendingBoot *agentstate.Boot
+	bootStart   time.Time
+	curBoot     [16]byte
+	curBootOK   bool
+	trig        triggerState
+	fail        failure
+	unread      bool
+	cache       cursorCache
 }
 
 // New returns a Kernel reading src and keeping its position in store.
@@ -101,6 +103,7 @@ func (k *Kernel) Collect(ctx context.Context, sr scheduler.Run) ([]model.Record,
 	p := &pass{k: k, start: sr.Start, begin: time.Now(), cur: st, startPos: st.pos}
 	if k.boot != nil {
 		p.emit(*k.boot, time.Time{})
+		k.bootStart = sr.Start
 	}
 	if giveUp {
 		p.giveUpSpan()
@@ -144,7 +147,7 @@ func (k *Kernel) commit() {
 		k.store.Update(k.memKills, func(s *agentstate.State) { s.Journal = pos.journalPosition() })
 	}
 	k.committed = k.mem
-	k.rereads, k.span, k.boot = 0, nil, nil
+	k.rereads, k.span = 0, nil
 }
 
 // dropped counts a run whose result was dropped. A run that read nothing is not counted. After maxRereads re-reads the span from
