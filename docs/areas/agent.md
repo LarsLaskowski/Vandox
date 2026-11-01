@@ -98,13 +98,13 @@ rules below for the parts not implemented are the target the implementation is h
 - A run learns whether the previous sample of its collector was lost (`Run.PreviousLost`): its result was not kept, because the run
   timed out, was skipped, returned an error or panicked, had a record refused, or the sink refused its records. A run that starts
   late does not set it. A run whose records were all kept and accepted clears it. A collector that records only changes uses it to
-  record its full state again after a lost sample; the `kernel` collector reads the lost run's entries again and the `backups`
-  collector decides the lost check again (*Kernel events*, *Backup runs*); the `logs` collector counts a lost run it was not told
+  record its full state again after a lost sample; the `kernel` collector reads the lost run's entries again (*Kernel events*); the `logs` collector counts a lost run it was not told
   about (below) as dropped (*Log shipping*); the other collectors ignore it.
 - A collector may ask to be **told whether a run was kept** (an observer): after the delivery of a run that finished in time the
   scheduler calls it with the run and whether its records were kept — true when the run returned no error and did not panic, no
   record was refused and the sink accepted the records, false otherwise. An abandoned or skipped run calls nothing; its loss shows
-  only in the next run's `Run.PreviousLost`. The `logs` collector is the observer (*Log shipping*).
+  only in the next run's `Run.PreviousLost`. The `logs`, `kernel` (the boot, *Boots*) and `backups` (the check's change, *Backup runs*)
+  collectors are observers (*Log shipping*).
 - An **extra run** of a collector is requested through the scheduler (the `kernel` collector does so for `processes` and
   `connections`, *Kernel events*). A runner waiting for its next due time starts it at once; a runner in a run starts it when that
   run ends. Requests made before the extra run starts merge into one, which names at most 64 kills and counts the rest. The extra run
@@ -1079,11 +1079,6 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
 - The listing skips symbolic links, but a journal file is then opened by its name in the journal directory, so a file replaced by a
   symbolic link between the listing and the read is followed. The directory belongs to root, so only root or journald can place one,
   and they can change the journal anyway.
-- The boot change of *Boots* is written to the state inside the run, before the run's records reach the spool (record 0123). A state
-  save that falls between the two, followed by a power loss or kernel crash within the spool's next sync (one second), can lose the
-  `boot` event while the saved state already holds the new boot, so it is never recorded again and no gap says so; the backend still
-  sees the new boot in the batch headers' `boot_id`. Accepted for #38 as a stated residual; #300 moves the update behind the
-  scheduler's report that the run was kept and must be merged before the agent's first release.
 
 ## Boots
 
@@ -1098,9 +1093,12 @@ UUID and at most one line feed) and compares it with the boot in the agent's sta
   start for as long as no state is usable (each with the same `boot_id`).
 
 The capture time is `booted_at`; when the boot time cannot be read, `booted_at` is left out and the capture time is the run's start.
-With the event the state's boot becomes the current one, with the first field of `/proc/uptime` as its uptime (0 when unreadable)
-and its boot time; the `state` job keeps that uptime current. The boot event is returned again by every run until a run's result is kept; the boot is
-in the state from the first run on, so a restart after that state was saved and before a run was kept records no boot event. A boot ID that
+The state's boot becomes the current one, with the first field of `/proc/uptime` as its uptime (0 when unreadable, read then) and its
+boot time, only when the scheduler reports kept the latest run that returned the event (*Scheduling*, the observer); until then the
+state holds the previous boot, so a restart before that records the event again with the same `boot_id`, `previous_boot_id` and
+`previous_uptime_ns`. The boot event is returned again by every run until such a report; a run reported not kept, or not reported at
+all, changes nothing. The `state` job keeps the stored boot's uptime current only while that boot is the current one (the boot ID
+of `/proc` equals the stored `id`), so a start-up save never overwrites the previous boot's uptime with the new boot's. A boot ID that
 cannot be read or is not a lower-case UUID gives no boot event, leaves the state's boot alone, makes no kill live and logs one
 warning `boot ID not readable`; the other features run. The agent does not start without a readable boot ID (the spool needs it,
 *Spool and sending*), so this warning comes only from a read that fails after a successful start.
@@ -1530,9 +1528,12 @@ with the stored `last_seen_at` (at most a minute before the stop) and `gone_by` 
 is a new run with its own start. The gone-by time is not stored: after a restart the first check without a match is the gone-by
 time, so it is never before the real end.
 
-**Lost runs.** After a check whose result was dropped (`Run.PreviousLost`), the collector first restores the open run, the gone-by
-time and the first-check flag as they were before that check, so the dropped start or end is decided again: the start is written
-again while a match runs, the end again with the gone-by time of the last kept check. The scheduler's gap covers the lost check.
+**Lost runs.** A check decides from the committed state and writes nothing itself: its change (the open run, the gone-by time and
+the first-check flag) takes effect only when the scheduler reports the check kept (*Scheduling*, the observer), right after its records
+reached the spool, so a state save never holds a start, sighting or end whose record the spool has not taken. A check that was
+dropped, abandoned or not reported changes nothing and the next check decides again: the start is written again while a match runs,
+the end again with the gone-by time of the last kept check. After a restart the first check ends a stored run with `gone_by` that
+check. The scheduler's gap covers the lost check.
 
 **Errors.** A boot ID that cannot be read or is not a lower-case UUID (the rule of *Boots*), a boot time that cannot be read, a `/proc` that cannot be listed or the run's deadline fail the run (a gap,
 *Scheduling*); the error texts name the file and a fixed reason, never a command or command line.
@@ -1547,13 +1548,6 @@ again while a match runs, the end again with the gone-by time of the last kept c
   needs its own rule.
 - Any local user can start a process named `pzstd`, or one whose command line starts with one of the default prefixes (whoever starts a process chooses its command line); it counts as a backup run.
 - A backup process the agent cannot read is not recognized; one that becomes unreadable during a run can end the run early.
-- A state the `state` job saved between a dropped check and the next one survives a restart before that next check: the dropped start
-  or end is then not written again.
-- A backup start, sighting or end is written to the state inside the check, before the check's records reach the spool (record
-  0123). A state save that falls between the two, followed by a power loss or kernel crash within the spool's next sync (one second),
-  can lose the `backup_run` record while the saved state already holds the change, so it is never written again and no gap says so.
-  Accepted for #38 as a stated residual; #300 moves the update behind the scheduler's report that the check was kept and must be
-  merged before the agent's first release.
 
 ## Agent state
 
@@ -1592,12 +1586,11 @@ by a run that read kills) or a log position the `logs` collector committed — a
 else once 50 seconds have passed, the uptime heartbeat (a kernel position that moved over other kernel lines waits for this). The job
 runs on a 10-second grid and a run starts a little after its tick, so the 5 seconds (half the interval) let an urgent change be saved
 at the next run, within one state interval, however the start times jitter. Every save first refreshes the stored uptime from
-`/proc/uptime`, so the saved uptime is never more than a minute old. A save removes a left-over `agent-state.json.tmp`, creates it anew
+`/proc/uptime` when the stored boot is the current boot (its `id` equals the boot ID of `/proc`; another boot keeps its saved uptime), so the current boot's saved uptime is never more than a minute old. A save removes a left-over `agent-state.json.tmp`, creates it anew
 (exclusively, without following a link, mode 0600), writes and syncs it, renames it over `agent-state.json` and syncs the directory.
 One write lock of the store covers the encoding, the write and the bookkeeping of a save, so a save of the job and the save at the
 stop never run at once. **Every save first makes the spool durable** (the spool's `Sync`, within the save's deadline: the job's
-timeout, or 5 seconds at the stop), so no saved position or state covers a record a crash can still lose (the exception is the boot
-and backup change of record 0123, *Kernel events* and *Backup runs*). When that sync fails or does not finish in time, the save is
+timeout, or 5 seconds at the stop), so no saved position or state, the boot and the open backup run included, covers a record a crash can still lose. When that sync fails or does not finish in time, the save is
 not written. A failure, also a missing directory, is logged once as warning `agent state not saved` with `err`
 `agentstate: save: <system error text>` (never a path), or `agentstate: save: spool not durable` when the spool's sync failed, until
 a save succeeds, whether the job or the stop saved, and the agent goes on;
@@ -1839,8 +1832,8 @@ while the agent stops are kept; the context only accompanies the spool's log lin
 directory; at most one sync is in flight, outside the spool's lock, so a slow sync never holds up a hand-over, and a caller that finds
 one running waits for its result. An OS crash or power loss therefore loses at most the records of about the last second, never a
 damaged record handed out and never a number issued twice; the backend sees the loss as a sequence gap ([Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*), and the `kernel` and
-`logs` collectors read their entries again because every state save first makes the spool durable (*Agent state*). The exception is
-the boot and backup change written before the hand-over (*Kernel events* and *Backup runs*, residuals; #300). At the stop, after the
+`logs` collectors read their entries again because every state save first makes the spool durable (*Agent state*). The boot and the open backup run are
+written to the state only after the run's records are kept, so that sync covers them too. At the stop, after the
 scheduler has stopped and the state file's last save, the spool is closed: synced, the meta file written with `clean` true and
 synced. A close that fails or does not end within 5 seconds is given up with the warning `spool not closed`, and the agent exits as
 usual. A disk whose writes hang is not covered: a hand-over that blocks holds up its collector, the watchdog is withheld and systemd
@@ -2315,7 +2308,7 @@ denies the six calls of record 0122, `LoadCredential=agent-token:/etc/vandox/age
   timed by its receipt corrected for the kernel clock's drift.
 - [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why a live kill requests
   extra snapshots through the scheduler and names them by its identity, why boots come from a saved state file, why the journal
-  position is committed only after a kept run with at most three re-reads, and why backup runs are a record kind of their own with
+  position is committed only after a kept run with at most three re-reads, why boots and backup runs reach the state only once a run is kept, and why backup runs are a record kind of their own with
   `pzstd` and Plesk's two creating processes as the default rules.
 - [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why the log
   collector reads every system and user journal file with a position per sequence-number ID, decodes zstd items with a library under

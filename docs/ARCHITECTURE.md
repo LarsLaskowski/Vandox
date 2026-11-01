@@ -65,7 +65,7 @@ way, and agents of the hosting provider are never disabled or changed
   the journal position, the last boot, the open backup run and the log positions survive restarts in one state file in the spool
   directory, saved by a `state` job and once more when the agent stops (`internal/agentstate`); the kernel
   collector's journal position is committed only after a run whose result was
-  kept ([0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md));
+  kept, and the boot and the open backup run are written to the state only once the scheduler reports the run's records kept ([0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md));
   the scheduler hands every run's records to the on-disk spool (`internal/spool`), which numbers them, keeps them in checksummed
   segment files in the same directory within `spool.max_size` and `spool.min_free`, drops its oldest records with a recorded gap when
   full, offers reading from any number and acknowledgement of ranges for the sender, and takes a fresh spool's numbers from the clock
