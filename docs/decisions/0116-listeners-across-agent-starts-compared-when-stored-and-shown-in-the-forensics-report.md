@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-18
 - **Area:** Detection, alerts and reports
-- **Source:** Issue #278
+- **Source:** Issue #278, Issue #304 (the socket UID and user of each listener)
 - **Supersedes:** —
 
 ## Context
@@ -44,7 +44,10 @@ tables in [Storage](../areas/storage.md).
 7. **One cap for all findings** (100, then the latest) — simpler, but agent findings of passive FTP would push the restart findings out
    within hours (spec challenge). Rejected for separate caps per kind; the caps are 20 each, because a finding can hold 64 commands of up to
    1,024 bytes and the page keeps the report's document per circuit: about 5.5 MB of stored text in the run and, with the runs every
-   external text carries on the page, up to about 16 MB per circuit. Lower caps (7 to 10 per kind, to stay near 5.5 MB on the page) were
+   external text carries on the page, up to about 16 MB per circuit. Since #304 each listener also carries its socket's user name (up to
+   1,024 bytes on the wire): the run holds it as stored, about 11 MB once per service, and the page shows it cut to 64 UTF-8 bytes, up to
+   about 19 MB per circuit; showing it whole would double the page's bound for a length no real `passwd` name needs, and lower caps of
+   findings were rejected below for the forensic window they cost. Lower caps (7 to 10 per kind, to stay near 5.5 MB on the page) were
    weighed after review and rejected: they shorten the forensic window of restart findings, the main value of the section, to defend a
    worst case that needs 2,560 commands of 1,024 bytes; the bound stays fixed, only a signed-in client opens a circuit, and the
    incident page already holds about 10 MB per circuit while it reads an incident's window.

@@ -1,7 +1,7 @@
 # Spec: Show the socket's UID and user in the new-listener findings
 
 Source: Issue #304
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -61,15 +61,15 @@ All lines are list items under a finding of the section *New listeners* ([Detect
 - Security (area 12 of `.squad/project.md`): the `user` is external text a forged or compromised agent chooses (the wire allows a short text of
   1,024 bytes); it is written only through the report's code-span path and on the page only as an `ExternalText`, never in a heading, a table
   cell or a `MarkupString`. The `uid` is a number the backend formats itself.
-- Memory: each listener of a finding gains one external text, capped at 64 UTF-8 bytes (E8), so the section's bounds grow only a little,
-  with the caps of record 0116 (option 7: 20 findings per kind, 64 listeners each) unchanged. In the run: 2,560 names of at most 64 bytes
-  (about 128 bytes each as .NET text), under 0.4 MB more, so **about 6 MB** instead of about 5.5 MB
-  ([Detection, alerts and reports](../../docs/areas/detection-and-reports.md), *Limits of the report*). On the page: a name escapes to at most
-  384 displayed characters (64 control characters of 6 each), about 1.2 KiB with its runs at the rate the area document uses for a command
-  (about 6 KiB for 2,048 characters), so about 3 MB more: **up to about 19 MB per circuit** instead of about 16 MB
-  ([Web UI](../../docs/areas/web-ui.md), *Limits and errors*). These are estimates by the documents' own method; the plan names who checks
-  them. Without the cap a name would add up to 1,024 bytes and about 6 KiB per listener, doubling both bounds (about 11 MB and 31 MB) for a
-  value no real `passwd` name needs.
+- Memory: each listener of a finding gains one external text, so the section's bounds grow, with the caps of record 0116 (option 7: 20
+  findings per kind, 64 listeners each) unchanged. **In the run** the decoded findings hold each `user` as stored, before any cut: up to
+  1,024 bytes (about 2 KiB as .NET text) beside the command, so the section grows from about 5.5 MB to **about 11 MB**, kept once across the
+  service (one report runs at a time) ([Detection, alerts and reports](../../docs/areas/detection-and-reports.md), *Limits of the report*).
+  **On the page**, which keeps the composed document per circuit, the shown name is cut to 64 UTF-8 bytes (E8): it escapes to at most 384
+  displayed characters (64 control characters of 6 each), so the section grows from about 16 MB to **about 19 MB per circuit** by the
+  documents' own rate for a command (about 6 KiB for 2,048 characters with its runs); the plan has the number measured before the area
+  document states it ([Web UI](../../docs/areas/web-ui.md), *Limits and errors*). Without the cap the page would double too (about 31 MB per
+  circuit) for a length no real `passwd` name needs.
 - Time: no new read; the fields come from the listener lists the section already decodes.
 - Compatibility: no wire, storage or schema change; stored lists without the fields read as E3. Page and download stay byte-identical to
   `vandoxd report` for the same data and language.
@@ -111,7 +111,7 @@ All lines are list items under a finding of the section *New listeners* ([Detect
   "UID unknown", never as root; the line says so (E3).
 - How is the memory of the section kept bounded? Answered: by the 64-byte cap of the shown name (E8), not by lower caps of findings, which
   record 0116 (option 7) rejected for the forensic window they cost. The record's numbers (about 5.5 MB in the run, up to about 16 MB per
-  circuit) become about 6 MB and about 19 MB; record 0116 is unreleased (no tag contains it) and is edited in place by the Lead, and
+  circuit) become about 11 MB (the run, once per service, holding the names uncut) and about 19 MB (per circuit); record 0116 is unreleased (no tag contains it) and is edited in place by the Lead, and
   `.squad/project.md` (security area 3, "up to about 16 MB for the new listeners section") is a project file a product PR may change
   (`AGENTS.md`), updated by the Dev.
 - Does the storage need a change? Answered: no; the stored lists are serialized `Listener` entries and already carry the fields
@@ -123,7 +123,7 @@ All lines are list items under a finding of the section *New listeners* ([Detect
   UID), *Content and format* (the listener line forms of AC1 to AC5, AC8 and AC10 in both languages, and one sentence: the socket UID is the
   UID of the socket's creator, not the user of the PID shown, so `PID 200 apache2, socket UID 0 root` is expected for a daemon that binds as
   root and runs its workers as another user; [Agent](../../docs/areas/agent.md), *Socket UIDs*, and record 0115, *Consequences*), *External
-  text in the report* (the user names of the new listeners are external text, shown cut to 64 bytes), *Limits of the report* (about 6 MB).
+  text in the report* (the user names of the new listeners are external text, shown cut to 64 bytes), *Limits of the report* (about 11 MB in the run).
 - [Web UI](../../docs/areas/web-ui.md): *Report page* (the user names of the new listeners are external text in an `ExternalText`) and
   *Limits and errors* (up to about 19 MB per circuit for the section).
 - Outside `docs/areas/`: record 0116, option 7 (the new numbers, Lead) and `.squad/project.md`, security area 3 (the per-circuit number, Dev).
@@ -131,8 +131,8 @@ All lines are list items under a finding of the section *New listeners* ([Detect
 ## Challenge
 
 - MAJOR 1 (the memory NFR misstated record 0116 and gave no numbers): accepted. The shown name is cut to 64 UTF-8 bytes before escaping (E8,
-  AC10), which keeps the growth to about 0.4 MB in the run and about 3 MB per circuit instead of doubling both; the NFR states the numbers and
-  how they were estimated, and record 0116 option 7 and `.squad/project.md` are in scope (*Area documents*), the latter allowed in a product PR.
+  AC10), which keeps the growth to about 3 MB per circuit instead of doubling it; the NFR states the numbers and how they were estimated
+  (corrected while planning: the run holds the decoded names uncut, about 11 MB once per service), and record 0116 option 7 and `.squad/project.md` are in scope (*Area documents*), the latter allowed in a product PR.
 - MINOR 2 (spaces-only rendering): accepted; E6 now says each space is written as the escape `\u0020`, exactly as for a command of spaces
   only (the first version lost the escape when the file was written).
 - MINOR 3 (golden lines): accepted; E7 and AC9 say every listener line gains exactly its suffix, every other line stays byte-identical, and an
