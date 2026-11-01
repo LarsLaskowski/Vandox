@@ -97,8 +97,8 @@ Run from the repository root, where the solution file lives, in this order: *Res
 *Test*, *Analyzer gate*, and after *Test with coverage* the *Coverage gate*. Use the commands of those names
 in `.squad/stack.md` as they stand, never a copy from memory: they carry the solution name, the build
 configuration the project tests in, and the formatter's `--force` (`reihitsu-format` asks for confirmation
-for more than 25 files and, without a terminal, formats nothing). The formatter is installed with
-`dotnet tool install -g Reihitsu.Cli`.
+for more than 25 files and, without a terminal, formats nothing). The formatter is restored from the repository's tool
+manifest (`.config/dotnet-tools.json`) with `dotnet tool restore` and run as `dotnet tool run reihitsu-format`.
 <!-- stack:end commands -->
 
 All commands, with what each one checks, are listed in [`.squad/stack.md`](/.squad/stack.md).
@@ -209,7 +209,7 @@ and the round semantics. The squad's members (`.squad/team.md`) run as subagents
 commits, pushes and posts. The pipeline, its limits and escalations are in [`.squad/routing.md`](/.squad/routing.md),
 the project's guarantees, security areas and integration surface in [`.squad/project.md`](/.squad/project.md).
 Working records stay under `specs/` on the work branch. A product PR never changes the squad or these
-instructions (`.squad/stack.md`, `.squad/project.md` and the project blocks of this file excepted); squad lessons become `squad` issues where they can be fixed (`.squad/orchestration.md`, *Squad
+instructions (`.squad/stack.md`, `.squad/project.md`, `.squad/tools/squad_settings.py` and the project blocks of this file excepted); squad lessons become `squad` issues where they can be fixed (`.squad/orchestration.md`, *Squad
 lessons*). The user acts as Product Manager and is asked only when the Lead escalates.
 
 The reasoning behind code decisions — why something was built the way it was — is recorded by the Lead

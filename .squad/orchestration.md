@@ -57,6 +57,14 @@ template — is filed in the template repository, which the session attaches fir
 to create the issue, e.g. `add_repo`); only if attaching is refused it is filed here with the label
 `squad-upstream`, the user is told to move it, and it is never worked here.
 
+## Launch model
+
+Every member is launched with the model and effort of its agent file, except: every `squad-tester` launch of a run
+whose `plan.md` names tier `security` gets `model: opus` (effort unchanged); a continued agent keeps the model it
+was launched with. Log such a launch with `--launch opus/<effort>` instead of `--agent squad-tester`, on the
+pending row and on its amend; `squad-log.py` refuses `--agent` alone there, so the summary shows the model the
+launch really ran on.
+
 ## Continuing a member
 
 A fix round or a delta round of the same member within the same run continues that member's last launch
@@ -82,7 +90,8 @@ detached HEAD is switched back to it first (`git switch <branch>`, then `git mer
 commits made on the detached HEAD) and logged with the launch that left it. Push without `-q` and check after
 every push that `git rev-parse origin/<branch>` equals `git rev-parse HEAD`: a push that did not move the branch
 is a failure, not a success. After the PR every push re-triggers CI and the code analysis, so edits are
-batched and committed once per round.
+batched and committed once per round, and a tests-first commit that fails on purpose is pushed only together
+with the implementation that makes it pass: the head of an open PR never fails by design.
 
 ## The stop hook
 
@@ -167,6 +176,14 @@ again only by a delta round due for another change. An edit beyond the proposed 
 state verbatim, is an ordinary fix for its owner with a delta round. One exception: a fix that changes a behavior
 statement an acceptance criterion or a guarantee in `.squad/project.md` relies on is not applied; the reviewer says
 so, and the Lead decides (mode `decide`).
+
+## A denied measurement
+
+When `squad-security` in mode `plan` reports a required measurement as not run because a download or tool was
+denied (e.g. a vendor release binary refused by the permission classifier), the orchestrator asks the Product
+Manager once for exactly that download, runs the measurement itself once it is allowed, and passes the measured
+result with the plan to the Lead (mode `revise`). Security re-runs the review in round 2 against the revised
+plan and the measurement. Not run is never approved, and the denial alone is no reason to skip the measurement.
 
 ## Unlisted security areas
 
