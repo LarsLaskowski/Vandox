@@ -2781,3 +2781,106 @@ func longNamesCutConnections(t *testing.T) {
 	}
 	wantInventory(t, snap, model.InventoryAll, allTableProtos...)
 }
+
+const mariadbEndpoint = "0.0.0.0:3306"
+
+// takeOver lets another UID bind the last TCP listener of the world, which another process holds from then on.
+func takeOver(t *testing.T, w *world, uid uint32, inode uint64, pid int32, comm string) {
+	t.Helper()
+
+	i := len(w.lines["tcp"]) - 1
+	w.replaceLine("tcp", i, socketLine(t, w.tmpl["tcp"], addrPort(mariadbEndpoint), zeroRemote("tcp"), stateListen, uid, inode))
+	w.process(pid, comm, "/usr/sbin/"+comm+"\x00")
+	w.holdAll(pid, inode)
+}
+
+// mariadbWorld returns the owned world with a listener of UID 110 on the MariaDB endpoint that process 710 holds.
+func mariadbWorld(t *testing.T) *world {
+	t.Helper()
+
+	w := ownedWorld(t)
+	w.addListenerUID("tcp", mariadbEndpoint, 110, 99000010)
+	w.process(710, "mariadbd", "/usr/sbin/mariadbd\x00")
+	w.holdAll(710, 99000010)
+	return w
+}
+
+func TestConnections_ChangedListenerMakesFullSnapshot(t *testing.T) {
+	w := mariadbWorld(t)
+	c := newCollector(w)
+	snapshotOf(t, c, runAt(0, false))
+	takeOver(t, w, 1001, 99000011, 711, "evil")
+
+	_, snap := snapshotOf(t, c, runAt(1, false))
+
+	wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
+	wantNewListeners(t, snap, 0)
+	if len(snap.ChangedListeners) != 1 || snap.ChangedListenersOmitted != 0 {
+		t.Fatalf("changed_listeners = %+v, omitted %d, want exactly one entry and 0", snap.ChangedListeners, snap.ChangedListenersOmitted)
+	}
+	got := snap.ChangedListeners[0]
+	want := model.Listener{Proto: model.ProtoTCP, Local: addrPort(mariadbEndpoint), PID: 711, Command: "evil", UID: uidOf(1001), User: "1001"}
+	if !sameListener(got.Listener, want) || got.MixedUIDs {
+		t.Errorf("changed_listeners[0] = %s, want %s without mixed_uids", listenerText(got.Listener), listenerText(want))
+	}
+	if got.PreviousUID == nil || *got.PreviousUID != 110 || got.PreviousMixedUIDs {
+		t.Errorf("changed_listeners[0] previous = %v mixed %v, want 110 and false", got.PreviousUID, got.PreviousMixedUIDs)
+	}
+	wantConnections(t, "connections of the full snapshot", snap.Connections, ownedConnections)
+}
+
+func TestConnections_ChangedListenerOfMixedEndpointCarriesBothFlags(t *testing.T) {
+	w := mariadbWorld(t)
+	c := newCollector(w)
+	snapshotOf(t, c, runAt(0, false))
+	w.addListenerUID("tcp", mariadbEndpoint, 0, 99000012)
+
+	_, snap := snapshotOf(t, c, runAt(1, false))
+
+	wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
+	if len(snap.ChangedListeners) != 1 {
+		t.Fatalf("changed_listeners = %+v, want exactly one entry", snap.ChangedListeners)
+	}
+	got := snap.ChangedListeners[0]
+	if got.UID == nil || *got.UID != 0 || got.User != "root" || !got.MixedUIDs {
+		t.Errorf("changed_listeners[0] = %s mixed %v, want UID 0 root mixed", listenerText(got.Listener), got.MixedUIDs)
+	}
+	if got.PreviousUID == nil || *got.PreviousUID != 110 || got.PreviousMixedUIDs {
+		t.Errorf("changed_listeners[0] previous = %v mixed %v, want 110 and false", got.PreviousUID, got.PreviousMixedUIDs)
+	}
+}
+
+func TestConnections_ChangedListenerWithoutPasswdUsesDecimalUser(t *testing.T) {
+	w := mariadbWorld(t)
+	c := newCollectorWith(w, fstest.MapFS{})
+	snapshotOf(t, c, runAt(0, false))
+	takeOver(t, w, 0, 99000011, 711, "evil")
+
+	_, snap := snapshotOf(t, c, runAt(1, false))
+
+	wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
+	if len(snap.ChangedListeners) != 1 {
+		t.Fatalf("changed_listeners = %+v, want exactly one entry", snap.ChangedListeners)
+	}
+	if got := snap.ChangedListeners[0]; got.UID == nil || *got.UID != 0 || got.User != "0" {
+		t.Errorf("changed_listeners[0] uid/user = %v/%q, want 0 and the decimal 0", got.UID, got.User)
+	}
+}
+
+func TestConnections_UnchangedUIDStaysRegular(t *testing.T) {
+	w := mariadbWorld(t)
+	c := newCollector(w)
+	snapshotOf(t, c, runAt(0, false))
+
+	_, same := snapshotOf(t, c, runAt(1, false))
+	takeOver(t, w, 1001, 99000011, 711, "evil")
+	snapshotOf(t, c, runAt(2, false))
+	_, again := snapshotOf(t, c, runAt(3, false))
+
+	for name, snap := range map[string]*model.ConnectionSnapshot{"unchanged": same, "after the change was reported": again} {
+		wantFlags(t, snap, true, false, false, model.ListenerCheckAll)
+		if len(snap.ChangedListeners) != 0 || snap.ChangedListenersOmitted != 0 {
+			t.Errorf("%s: changed_listeners = %+v, omitted %d, want none", name, snap.ChangedListeners, snap.ChangedListenersOmitted)
+		}
+	}
+}
