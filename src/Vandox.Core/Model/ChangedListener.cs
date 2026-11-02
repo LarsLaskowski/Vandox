@@ -2,8 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace Vandox.Core.Model;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// A known listener endpoint whose socket UID changed since the producer's previous run.
 /// </summary>
@@ -34,7 +32,9 @@ public sealed class ChangedListener : Listener
     /// <inheritdoc />
     internal override FieldError? Validate(string path)
     {
-        throw new NotImplementedException();
+        return base.Validate(path)
+                   ?? (Uid is null ? Check.Invalid($"{path}.uid", "required") : null)
+                   ?? (PreviousUid is null ? Check.Invalid($"{path}.previous_uid", "required") : null);
     }
 
     #endregion // Listener

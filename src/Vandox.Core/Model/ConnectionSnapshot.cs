@@ -330,10 +330,20 @@ public sealed class ConnectionSnapshot : IPayload
             }
         }
 
-        var reported = (NewListeners?.Count ?? 0) > 0 || NewListenersOmitted > 0;
+        var comparesListeners = ListenerCheck is "all" or "privileged";
 
-        return reported && ListenerCheck != "all" && ListenerCheck != "privileged"
-                   ? Check.Invalid("listener_check", "must be all or privileged when new listeners are reported")
+        if (comparesListeners)
+        {
+            return null;
+        }
+
+        if ((NewListeners?.Count ?? 0) > 0 || NewListenersOmitted > 0)
+        {
+            return Check.Invalid("listener_check", "must be all or privileged when new listeners are reported");
+        }
+
+        return (ChangedListeners?.Count ?? 0) > 0 || ChangedListenersOmitted > 0
+                   ? Check.Invalid("listener_check", "must be all or privileged when changed listeners are reported")
                    : null;
     }
 
@@ -354,6 +364,7 @@ public sealed class ConnectionSnapshot : IPayload
                         ?? Check.Count("listeners", Listeners?.Count ?? 0)
                         ?? Check.Count("connections", Connections?.Count ?? 0)
                         ?? Check.Count("new_listeners", NewListeners?.Count ?? 0)
+                        ?? Check.Count("changed_listeners", ChangedListeners?.Count ?? 0)
                         ?? ValidateFlags()
                         ?? ValidateInventory();
 
@@ -364,6 +375,7 @@ public sealed class ConnectionSnapshot : IPayload
                    ?? ValidateList("listeners", Listeners, (item, path) => item.Validate(path))
                    ?? ValidateList("connections", Connections, (item, path) => item.Validate(path))
                    ?? ValidateList("new_listeners", NewListeners, (item, path) => item.Validate(path))
+                   ?? ValidateList("changed_listeners", ChangedListeners, (item, path) => item.Validate(path))
                    ?? Trigger?.Validate("trigger");
     }
 

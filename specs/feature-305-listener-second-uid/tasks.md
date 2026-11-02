@@ -5,8 +5,8 @@ Plan: [plan.md](plan.md) — Status: Draft
 | # | Group | Task | Files | Criteria | Depends on | Owner | Done |
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
 | 1 | G1 | Skeleton: `ChangedListener`, the two snapshot fields, `checkChangedListeners` (Go); `Listener` unsealed with virtual `Validate`, `ChangedListener`, the two properties (C#) | `internal/model/connection.go`, `src/Vandox.Core/Model/Listener.cs`, `src/Vandox.Core/Model/ChangedListener.cs`, `src/Vandox.Core/Model/ConnectionSnapshot.cs` | AC6 | — | Dev | [x] |
-| 2 | G1 | Tests first: validation tables, decoder cases, golden batch entry | `internal/model/connection_test.go`, `tests/Vandox.Core.Tests/ConnectionSnapshotTests.cs`, `testdata/wire/decoder-cases.json`, `testdata/wire/all-kinds.jsonl` and its `.gz` forms | AC6 | 1 | Tester | [ ] |
-| 3 | G1 | Implement the wire rules in both languages | files of 1 | AC6 | 2 | Dev | [ ] |
+| 2 | G1 | Tests first: validation tables, decoder cases, golden batch entry | `internal/model/connection_test.go`, `tests/Vandox.Core.Tests/ConnectionSnapshotTests.cs`, `testdata/wire/decoder-cases.json`, `testdata/wire/all-kinds.jsonl` and its `.gz` forms | AC6 | 1 | Tester | [x] |
+| 3 | G1 | Implement the wire rules in both languages | files of 1 | AC6 | 2 | Dev | [x] |
 | 4 | G2 | Skeleton: `socketUIDs`, `uidChange`, `inventory.uids`, three-value `compare`, `MaxChangedListeners`, `lists` fields, `buildSnapshot` parameter | `internal/connstats/inventory.go`, `internal/connstats/connstats.go`, `internal/connstats/snapshot.go` | AC1, AC2, AC3, AC4, AC5 | 3 | Dev | [ ] |
 | 5 | G2 | Tests first: `compare` cases, two-run collector cases, cap and fill order; adapt the two `compare` call sites | `internal/connstats/inventory_test.go`, `internal/connstats/connstats_test.go`, `internal/connstats/snapshot_test.go` | AC1, AC2, AC3, AC4, AC5 | 4 | Tester | [ ] |
 | 6 | G2 | Implement the agent rule, the full snapshot, the list and its place in `fill` | files of 4 | AC1, AC2, AC3, AC4, AC5 | 5 | Dev | [ ] |

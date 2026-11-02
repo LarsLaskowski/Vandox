@@ -1,9 +1,6 @@
 package model
 
-import (
-	"errors"
-	"net/netip"
-)
+import "net/netip"
 
 // Proto is a socket protocol.
 type Proto string
@@ -149,6 +146,9 @@ func (s *ConnectionSnapshot) Validate() error {
 	if err := checkListeners("new_listeners", s.NewListeners); err != nil {
 		return err
 	}
+	if err := checkChangedListeners(s.ChangedListeners); err != nil {
+		return err
+	}
 	return validateTrigger(s.Trigger)
 }
 
@@ -160,6 +160,7 @@ func (s *ConnectionSnapshot) validateCounts() error {
 	}{
 		{"states", len(s.States)}, {"processes", len(s.Processes)}, {"remotes", len(s.Remotes)},
 		{"listeners", len(s.Listeners)}, {"connections", len(s.Connections)}, {"new_listeners", len(s.NewListeners)},
+		{"changed_listeners", len(s.ChangedListeners)},
 	} {
 		if err := checkCount(c.name, c.n); err != nil {
 			return err
@@ -259,6 +260,9 @@ func (s *ConnectionSnapshot) validateFlags() error {
 	if (len(s.NewListeners) > 0 || s.NewListenersOmitted > 0) && s.ListenerCheck != ListenerCheckAll && s.ListenerCheck != ListenerCheckPrivileged {
 		return invalid("listener_check", "must be all or privileged when new listeners are reported")
 	}
+	if (len(s.ChangedListeners) > 0 || s.ChangedListenersOmitted > 0) && s.ListenerCheck != ListenerCheckAll && s.ListenerCheck != ListenerCheckPrivileged {
+		return invalid("listener_check", "must be all or privileged when changed listeners are reported")
+	}
 	return nil
 }
 
@@ -294,8 +298,18 @@ type ChangedListener struct {
 
 // checkChangedListeners checks the entries of the list changed_listeners.
 func checkChangedListeners(listeners []ChangedListener) error {
-	if len(listeners) > 0 {
-		return errors.New("not implemented")
+	for i := range listeners {
+		e := &listeners[i]
+		path := indexed("changed_listeners", i)
+		if err := checkListener(path, &e.Listener); err != nil {
+			return err
+		}
+		if e.UID == nil {
+			return invalid(path+".uid", "required")
+		}
+		if e.PreviousUID == nil {
+			return invalid(path+".previous_uid", "required")
+		}
 	}
 	return nil
 }
@@ -303,22 +317,25 @@ func checkChangedListeners(listeners []ChangedListener) error {
 // checkListeners checks the entries of the list name.
 func checkListeners(name string, listeners []Listener) error {
 	for i := range listeners {
-		e := &listeners[i]
-		path := indexed(name, i)
-		if err := checkProtoOnly(path, e.Proto); err != nil {
-			return err
-		}
-		if err := checkAddrPort(path+".local", e.Local); err != nil {
-			return err
-		}
-		if err := checkProcess(path, e.PID, e.Command); err != nil {
-			return err
-		}
-		if err := checkSocketUser(path, e.UID, e.User, e.MixedUIDs); err != nil {
+		if err := checkListener(indexed(name, i), &listeners[i]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// checkListener checks one listener entry at path.
+func checkListener(path string, e *Listener) error {
+	if err := checkProtoOnly(path, e.Proto); err != nil {
+		return err
+	}
+	if err := checkAddrPort(path+".local", e.Local); err != nil {
+		return err
+	}
+	if err := checkProcess(path, e.PID, e.Command); err != nil {
+		return err
+	}
+	return checkSocketUser(path, e.UID, e.User, e.MixedUIDs)
 }
 
 func checkProtoOnly(path string, p Proto) error {
