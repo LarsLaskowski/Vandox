@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"net/netip"
 )
 
@@ -50,8 +51,12 @@ type ConnectionSnapshot struct {
 	Connections          []Connection         `json:"connections,omitempty"`
 	NewListeners         []Listener           `json:"new_listeners,omitempty"`
 	NewListenersOmitted  uint32               `json:"new_listeners_omitted,omitempty"`
-	Inventory            InventoryState       `json:"inventory,omitempty"`
-	Tables               []Proto              `json:"tables,omitempty"`
+	// ChangedListeners are known listener endpoints whose socket UID changed since the previous run.
+	ChangedListeners []ChangedListener `json:"changed_listeners,omitempty"`
+	// ChangedListenersOmitted is the number of changed listeners that were left out of the list.
+	ChangedListenersOmitted uint32         `json:"changed_listeners_omitted,omitempty"`
+	Inventory               InventoryState `json:"inventory,omitempty"`
+	Tables                  []Proto        `json:"tables,omitempty"`
 	// Trigger names the kills that caused this snapshot; nil for a scheduled one.
 	Trigger *SnapshotTrigger `json:"trigger,omitempty"`
 }
@@ -274,6 +279,23 @@ func (s *ConnectionSnapshot) validateInventory() error {
 			return invalid(path, "duplicate protocol")
 		}
 		seen[p] = struct{}{}
+	}
+	return nil
+}
+
+// ChangedListener is a known listener endpoint whose socket UID changed since the producer's previous run.
+type ChangedListener struct {
+	Listener
+	// PreviousUID is the endpoint's lowest socket UID in the previous run.
+	PreviousUID *uint32 `json:"previous_uid,omitempty"`
+	// PreviousMixedUIDs is true when the endpoint's sockets had several UIDs in the previous run.
+	PreviousMixedUIDs bool `json:"previous_mixed_uids,omitempty"`
+}
+
+// checkChangedListeners checks the entries of the list changed_listeners.
+func checkChangedListeners(listeners []ChangedListener) error {
+	if len(listeners) > 0 {
+		return errors.New("not implemented")
 	}
 	return nil
 }

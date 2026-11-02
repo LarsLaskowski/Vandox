@@ -109,6 +109,20 @@ public sealed class ConnectionSnapshot : IPayload
     public uint NewListenersOmitted { get; set; }
 
     /// <summary>
+    /// Gets or sets the known listener endpoints whose socket UID changed since the previous run.
+    /// </summary>
+    [JsonPropertyName("changed_listeners")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ChangedListener>? ChangedListeners { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of changed listeners that were left out of the list.
+    /// </summary>
+    [JsonPropertyName("changed_listeners_omitted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public uint ChangedListenersOmitted { get; set; }
+
+    /// <summary>
     /// Gets or sets how much of the listener inventory the snapshot holds.
     /// </summary>
     [JsonPropertyName("inventory")]
