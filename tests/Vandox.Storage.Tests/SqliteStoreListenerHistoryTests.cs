@@ -491,6 +491,114 @@ public class SqliteStoreListenerHistoryTests
     }
 
     /// <summary>
+    /// A snapshot with changes only is listed as its own kind, a snapshot with both is an agent finding that carries its changes, and the entries are read back without a command.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerFindingsReadsAgentChangesAsTheirOwnKind()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var only = ListenerSamples.FoundChanges("all", [ListenerSamples.Changed("0.0.0.0", 3306, 1001, 110, "alice", 42, "evil"), ListenerSamples.Changed("0.0.0.0", 8443, 0, 1001, "root")], 3);
+        var both = ListenerSamples.Found("privileged", [ListenerSamples.Tcp("0.0.0.0", 23, 7, "telnetd")], 0);
+
+        both.ChangedListeners = [ListenerSamples.Changed("0.0.0.0", 22, 33, 0)];
+
+        // Act
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, ListenerSamples.Record(1, 0, only), ListenerSamples.Record(2, 60, both), ListenerSamples.Record(3, 120, ListenerSamples.Found("all", [], 0))), TestContext.CancellationToken);
+
+        var changes = await ReadAsync(store, ListenerFindingKind.AgentUidChanges);
+        var agents = await ReadAsync(store, ListenerFindingKind.Agent);
+
+        // Assert
+        Assert.AreEqual(1L, changes.Total, "one change-only finding");
+
+        var changeOnly = changes.Findings[0];
+
+        Assert.AreEqual(ListenerFindingKind.AgentUidChanges, changeOnly.Kind, "kind");
+        Assert.AreEqual(1UL, changeOnly.Seq, "sequence number");
+        Assert.AreEqual(ListenerOutcome.AllPorts, changeOnly.Outcome, "the ports the agent compared");
+        Assert.IsNull(changeOnly.BaseCapturedAt, "no base");
+        Assert.IsEmpty(changeOnly.Listeners, "no new listener");
+        Assert.AreEqual(0L, changeOnly.Omitted, "no new listener is omitted");
+        Assert.HasCount(2, changeOnly.ChangedListeners, "changes");
+        Assert.AreEqual(3L, changeOnly.ChangedOmitted, "omitted changes");
+        Assert.AreEqual((uint?)1001, changeOnly.ChangedListeners[0].Uid, "uid");
+        Assert.AreEqual("alice", changeOnly.ChangedListeners[0].User, "user");
+        Assert.AreEqual((uint?)110, changeOnly.ChangedListeners[0].PreviousUid, "previous uid");
+        Assert.AreEqual(string.Empty, changeOnly.ChangedListeners[0].Command, "the command is not stored");
+        Assert.AreEqual("root", changeOnly.ChangedListeners[1].User, "second user");
+
+        Assert.AreEqual(1L, agents.Total, "the snapshot with a new listener is the only agent finding");
+        Assert.AreEqual(2UL, agents.Findings[0].Seq, "its sequence number");
+        Assert.HasCount(1, agents.Findings[0].Listeners, "its new listener");
+        Assert.HasCount(1, agents.Findings[0].ChangedListeners, "its change");
+        Assert.AreEqual(0L, agents.Findings[0].ChangedOmitted, "no change is omitted");
+    }
+
+    /// <summary>
+    /// A start whose only difference is a changed socket UID is a start finding that carries the change, and the stored change count minus the list gives the omitted count.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerFindingsStartWithChangesOnlyIsAFinding()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var baseline = ListenerSamples.Snapshot("none", "all", [.. Enumerable.Range(0, 70).Select(index => ListenerSamples.Owned("10.0.0.1", 1000 + index, 110, "mysql"))]);
+        var start = ListenerSamples.Snapshot("start", "all", [.. Enumerable.Range(0, 70).Select(index => ListenerSamples.Owned("10.0.0.1", 1000 + index, 1001, "alice", pid: 42, command: "evil"))]);
+
+        // Act
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, ListenerSamples.Record(1, 0, baseline), ListenerSamples.Record(2, 60, start)), TestContext.CancellationToken);
+
+        var starts = await ReadAsync(store, ListenerFindingKind.AgentStart);
+        var tallies = await store.ListenerTalliesAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1L, starts.Total, "the change makes the start a finding");
+
+        var finding = starts.Findings[0];
+
+        Assert.IsEmpty(finding.Listeners, "no new listener");
+        Assert.HasCount(ListenerComparer.MaxChangedListeners, finding.ChangedListeners, "the first 64 changes");
+        Assert.AreEqual(6L, finding.ChangedOmitted, "the rest is counted");
+        Assert.AreEqual(1000, finding.ChangedListeners[0].Local?.Port, "inventory order");
+        Assert.AreEqual((uint?)110, finding.ChangedListeners[0].PreviousUid, "previous uid");
+        Assert.AreEqual(string.Empty, finding.ChangedListeners[0].Command, "the command is not stored");
+        Assert.AreEqual(1L, tallies.Agents[0].ComparedAll, "the start counts as compared on all ports");
+    }
+
+    /// <summary>
+    /// Change-only agent findings have their own total and their own page of the latest 20.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerFindingsCapsAgentChangeFindingsApartFromAgentFindings()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var records = Enumerable.Range(0, 25)
+                                .Select(index => ListenerSamples.Record((ulong)(2 + index), 100 + index, ListenerSamples.FoundChanges("all", [ListenerSamples.Changed("0.0.0.0", 5353, 1001, 107)], 0)))
+                                .ToArray();
+
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, [ListenerSamples.Record(1, 0, ListenerSamples.Found("all", [ListenerSamples.Tcp("0.0.0.0", 23)], 0)), .. records]), TestContext.CancellationToken);
+
+        // Act
+        var changes = await ReadAsync(store, ListenerFindingKind.AgentUidChanges);
+        var agents = await ReadAsync(store, ListenerFindingKind.Agent);
+
+        // Assert
+        Assert.AreEqual(25L, changes.Total, "change-only findings");
+        Assert.HasCount(ListenerReport.MaxFindings, changes.Findings, "the latest 20");
+        Assert.AreEqual(26UL, changes.Findings[0].Seq, "the latest first");
+        Assert.AreEqual(7UL, changes.Findings[19].Seq, "the 20th latest last");
+        Assert.AreEqual(1L, agents.Total, "the change-only findings are no agent findings");
+    }
+
+    /// <summary>
     /// A finding query with a defined kind and a limit from 1 to the maximum is accepted.
     /// </summary>
     /// <param name="kind">The kind</param>
@@ -498,6 +606,7 @@ public class SqliteStoreListenerHistoryTests
     [TestMethod]
     [DataRow(ListenerFindingKind.Agent, 1)]
     [DataRow(ListenerFindingKind.AgentStart, ListenerReport.MaxFindings)]
+    [DataRow(ListenerFindingKind.AgentUidChanges, ListenerReport.MaxFindings)]
     public void ListenerQueriesValidateAcceptsTheLimitBounds(ListenerFindingKind kind, int limit)
     {
         // Arrange

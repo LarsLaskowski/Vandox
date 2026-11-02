@@ -228,6 +228,216 @@ public class ListenerComparerTests
         Assert.AreEqual("cmd63", result.NewListeners[63].Command, "command of the later snapshot");
     }
 
+    /// <summary>
+    /// A known endpoint whose lowest socket UID differs is reported as changed with the owner of the later snapshot and the UID and flag of the earlier one, and is not new.
+    /// </summary>
+    [TestMethod]
+    public void ListenerComparerCompareReportsChangedUid()
+    {
+        // Arrange
+        var earlier = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 10, "mariadbd", 110, "mysql", false));
+        var later = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 42, "evil", 1001, "alice", false));
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.AreEqual(ListenerOutcome.AllPorts, result.Outcome, "outcome");
+        Assert.IsEmpty(result.NewListeners, "the endpoint is not new");
+        Assert.HasCount(1, result.ChangedListeners, "changed");
+        Assert.AreEqual(0L, result.ChangedOmitted, "omitted");
+
+        var changed = result.ChangedListeners[0];
+
+        Assert.AreEqual("tcp", changed.Proto, "proto");
+        Assert.AreEqual(IPEndPoint.Parse("0.0.0.0:3306"), changed.Local, "local");
+        Assert.AreEqual(42, changed.Pid, "the owner of the later snapshot");
+        Assert.AreEqual("evil", changed.Command, "the command of the later snapshot");
+        Assert.AreEqual((uint?)1001, changed.Uid, "uid now");
+        Assert.AreEqual("alice", changed.User, "user now");
+        Assert.IsFalse(changed.MixedUids, "mixed now");
+        Assert.AreEqual((uint?)110, changed.PreviousUid, "uid before");
+        Assert.IsFalse(changed.PreviousMixedUids, "mixed before");
+    }
+
+    /// <summary>
+    /// A second UID on the endpoint with the lowest UID unchanged, a lower UID joining, and the lower socket leaving are reported with the flags of both sides.
+    /// </summary>
+    /// <param name="earlierUid">The lowest UID before</param>
+    /// <param name="earlierMixed">Whether the endpoint was mixed before</param>
+    /// <param name="laterUid">The lowest UID now</param>
+    /// <param name="laterMixed">Whether the endpoint is mixed now</param>
+    [TestMethod]
+    [DataRow(107u, false, 107u, true)]
+    [DataRow(1001u, false, 0u, true)]
+    [DataRow(0u, true, 1001u, false)]
+    [DataRow(0u, true, 1001u, true)]
+    public void ListenerComparerCompareReportsTheMixedFlagsOfAChange(uint earlierUid, bool earlierMixed, uint laterUid, bool laterMixed)
+    {
+        // Arrange
+        var earlier = Snapshot("all", Owned("udp", "0.0.0.0:5353", 0, string.Empty, earlierUid, "x", earlierMixed));
+        var later = Snapshot("all", Owned("udp", "0.0.0.0:5353", 0, string.Empty, laterUid, "y", laterMixed));
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.HasCount(1, result.ChangedListeners, "changed");
+        Assert.AreEqual((uint?)laterUid, result.ChangedListeners[0].Uid, "uid now");
+        Assert.AreEqual(laterMixed, result.ChangedListeners[0].MixedUids, "mixed now");
+        Assert.AreEqual((uint?)earlierUid, result.ChangedListeners[0].PreviousUid, "uid before");
+        Assert.AreEqual(earlierMixed, result.ChangedListeners[0].PreviousMixedUids, "mixed before");
+    }
+
+    /// <summary>
+    /// The same UID and flag, a flag that only turns false, and a UID that is absent on either side report no change.
+    /// </summary>
+    /// <param name="earlierUid">The lowest UID before, or -1 when absent</param>
+    /// <param name="earlierMixed">Whether the endpoint was mixed before</param>
+    /// <param name="laterUid">The lowest UID now, or -1 when absent</param>
+    /// <param name="laterMixed">Whether the endpoint is mixed now</param>
+    [TestMethod]
+    [DataRow(110L, false, 110L, false)]
+    [DataRow(0L, true, 0L, true)]
+    [DataRow(107L, true, 107L, false)]
+    [DataRow(-1L, false, 1001L, false)]
+    [DataRow(110L, false, -1L, false)]
+    [DataRow(-1L, false, -1L, false)]
+    public void ListenerComparerCompareUnchangedOrUnknownUidIsNotReported(long earlierUid, bool earlierMixed, long laterUid, bool laterMixed)
+    {
+        // Arrange
+        var earlier = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 1, "a", earlierUid < 0 ? null : (uint)earlierUid, "x", earlierMixed));
+        var later = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 1, "a", laterUid < 0 ? null : (uint)laterUid, "y", laterMixed));
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.AreEqual(ListenerOutcome.AllPorts, result.Outcome, "outcome");
+        Assert.IsEmpty(result.ChangedListeners, "no change");
+        Assert.AreEqual(0L, result.ChangedOmitted, "omitted");
+    }
+
+    /// <summary>
+    /// An unconnected UDP socket in the kernel's local port range and a port above 1023 under a privileged comparison report no change, a port below 1024 does.
+    /// </summary>
+    [TestMethod]
+    public void ListenerComparerCompareChangeNotReportedOutsideComparedPorts()
+    {
+        // Arrange
+        var earlier = Snapshot("privileged",
+                               Owned("tcp", "0.0.0.0:22", 1, "sshd", 0, "root", false),
+                               Owned("tcp", "0.0.0.0:8443", 2, "plesk", 1001, "u", false),
+                               Owned("udp", "0.0.0.0:40000", 3, "x", 110, "u", false));
+        var later = Snapshot("privileged",
+                             Owned("tcp", "0.0.0.0:22", 1, "sshd", 33, "www-data", false),
+                             Owned("tcp", "0.0.0.0:8443", 2, "plesk", 0, "root", true),
+                             Owned("udp", "0.0.0.0:40000", 3, "x", 1001, "v", false));
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.AreEqual(ListenerOutcome.PrivilegedOnly, result.Outcome, "outcome");
+        Assert.AreSequenceEqual(["tcp 0.0.0.0:22"], Describe(result.ChangedListeners), "only the privileged port is reported");
+    }
+
+    /// <summary>
+    /// On a comparison of all ports an unconnected UDP socket in the local port range is not reported and a TCP socket on the same port is.
+    /// </summary>
+    [TestMethod]
+    public void ListenerComparerCompareEphemeralUdpChangeIsNotReported()
+    {
+        // Arrange
+        var earlier = Snapshot("all", Owned("tcp", "0.0.0.0:40000", 0, string.Empty, 110, "u", false), Owned("udp", "0.0.0.0:40000", 0, string.Empty, 110, "u", false), Owned("udp6", "[::]:50000", 0, string.Empty, 110, "u", false));
+        var later = Snapshot("all", Owned("tcp", "0.0.0.0:40000", 0, string.Empty, 1001, "v", false), Owned("udp", "0.0.0.0:40000", 0, string.Empty, 1001, "v", false), Owned("udp6", "[::]:50000", 0, string.Empty, 1001, "v", false));
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.AreSequenceEqual(["tcp 0.0.0.0:40000"], Describe(result.ChangedListeners), "changed");
+    }
+
+    /// <summary>
+    /// An endpoint that is new is reported as new only, never as changed, and a change next to a new listener is reported in its own list.
+    /// </summary>
+    [TestMethod]
+    public void ListenerComparerCompareNewEndpointIsNotChanged()
+    {
+        // Arrange
+        var earlier = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 1, "a", 110, "mysql", false));
+        var later = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 2, "b", 1001, "alice", false), Owned("tcp", "0.0.0.0:4444", 3, "c", 1001, "alice", true));
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.AreSequenceEqual(["tcp 0.0.0.0:4444"], Describe(result.NewListeners), "new");
+        Assert.AreSequenceEqual(["tcp 0.0.0.0:3306"], Describe(result.ChangedListeners), "changed");
+    }
+
+    /// <summary>
+    /// No change is reported when nothing is compared.
+    /// </summary>
+    [TestMethod]
+    public void ListenerComparerCompareNothingComparedReportsNoChange()
+    {
+        // Arrange
+        var earlier = Snapshot("skipped", Owned("tcp", "0.0.0.0:22", 1, "a", 0, "root", false));
+        var later = Snapshot("all", Owned("tcp", "0.0.0.0:22", 1, "a", 33, "www-data", false));
+
+        // Act
+        var skipped = ListenerComparer.Compare(earlier, later);
+        var noBase = ListenerComparer.Compare(null, later);
+        var cut = ListenerComparer.Compare(Snapshot("cut", Owned("tcp", "0.0.0.0:22", 1, "a", 0, "root", false)), later);
+
+        // Assert
+        Assert.IsEmpty(skipped.ChangedListeners, "not comparable");
+        Assert.IsEmpty(noBase.ChangedListeners, "no earlier inventory");
+        Assert.IsEmpty(cut.ChangedListeners, "privileged part cut");
+    }
+
+    /// <summary>
+    /// A duplicate endpoint in a list does not throw: the first entry of the earlier list decides the previous UID.
+    /// </summary>
+    [TestMethod]
+    public void ListenerComparerCompareDuplicateEndpointDoesNotThrow()
+    {
+        // Arrange
+        var earlier = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 1, "a", 110, "first", false), Owned("tcp", "0.0.0.0:3306", 1, "a", 5, "second", true));
+        var later = Snapshot("all", Owned("tcp", "0.0.0.0:3306", 2, "b", 1001, "alice", false), Owned("tcp", "0.0.0.0:3306", 2, "b", 1001, "alice", false));
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.IsNotEmpty(result.ChangedListeners, "the change is reported");
+        Assert.AreEqual((uint?)110, result.ChangedListeners[0].PreviousUid, "the first earlier entry wins");
+        Assert.IsFalse(result.ChangedListeners[0].PreviousMixedUids, "and its flag");
+    }
+
+    /// <summary>
+    /// At most 64 changes are listed in inventory order, the rest is counted, and the owner comes from the later snapshot.
+    /// </summary>
+    [TestMethod]
+    public void ListenerComparerCompareListsAtMost64ChangesInInventoryOrder()
+    {
+        // Arrange
+        var earlier = Snapshot("all", [.. Enumerable.Range(0, 70).Select(index => Owned("tcp", $"0.0.0.0:{1000 + index}", 1, "old", 110, "mysql", false))]);
+        var later = Snapshot("all", [.. Enumerable.Range(0, 70).Select(index => Owned("tcp", $"0.0.0.0:{1000 + index}", 100 + index, $"cmd{index}", 1001, "alice", false))]);
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later);
+
+        // Assert
+        Assert.HasCount(ListenerComparer.MaxChangedListeners, result.ChangedListeners, "listed");
+        Assert.AreEqual(6L, result.ChangedOmitted, "omitted");
+        Assert.AreSequenceEqual(Describe(later.Listeners!.Take(64)), Describe(result.ChangedListeners), "the first 64 in inventory order");
+        Assert.AreEqual(163, result.ChangedListeners[63].Pid, "PID of the later snapshot");
+        Assert.AreEqual("cmd63", result.ChangedListeners[63].Command, "command of the later snapshot");
+    }
+
     #endregion // Methods
 
     #region Helpers
@@ -259,6 +469,28 @@ public class ListenerComparerTests
                    Pid = pid,
                    Command = command
                };
+    }
+
+    /// <summary>
+    /// Creates a listener with its owner and socket UID.
+    /// </summary>
+    /// <param name="proto">The protocol</param>
+    /// <param name="local">The local endpoint</param>
+    /// <param name="pid">The owner's PID</param>
+    /// <param name="command">The owner's command</param>
+    /// <param name="uid">The lowest socket UID, or <c>null</c> when unknown</param>
+    /// <param name="user">The user name</param>
+    /// <param name="mixed">Whether sockets of several UIDs share the endpoint</param>
+    /// <returns>The listener</returns>
+    private static Listener Owned(string proto, string local, int pid, string command, uint? uid, string user, bool mixed)
+    {
+        var listener = Listen(proto, local, pid, command);
+
+        listener.Uid = uid;
+        listener.User = user;
+        listener.MixedUids = mixed;
+
+        return listener;
     }
 
     /// <summary>

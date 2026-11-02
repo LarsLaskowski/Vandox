@@ -28,13 +28,15 @@ const (
 
 // lists are the ordered lists of a run before they are cut to the payload budget.
 type lists struct {
-	states       []model.StateCount
-	newListeners []model.Listener
-	omitted      uint32
-	listeners    []model.Listener
-	processes    []model.ProcessConnections
-	remotes      []model.RemoteCount
-	connections  []model.Connection
+	states           []model.StateCount
+	newListeners     []model.Listener
+	omitted          uint32
+	changedListeners []model.ChangedListener
+	changedOmitted   uint32
+	listeners        []model.Listener
+	processes        []model.ProcessConnections
+	remotes          []model.RemoteCount
+	connections      []model.Connection
 }
 
 // filler is the progress of fill: the bytes left and whether a list has been cut.
@@ -47,13 +49,15 @@ type filler struct {
 
 // fill fills snap entry by entry within budget bytes and reports whether aggregates or any list were cut.
 //
-// The lists are filled in the order states, new listeners, listeners, processes, remotes, connections; at the first entry that
+// The lists are filled in the order states, new listeners, changed listeners, listeners, processes, remotes, connections; at the first entry that
 // does not fit, that list and every later one stop.
 func fill(snap *model.ConnectionSnapshot, lists *lists, budget int) (cutAggregates, cut bool) {
 	f := &filler{left: budget}
 	fillList(f, &snap.States, lists.states, true)
 	dropped := fillList(f, &snap.NewListeners, lists.newListeners, false)
 	snap.NewListenersOmitted = lists.omitted + uint32(min(max(dropped, 0), math.MaxUint32))
+	dropped = fillList(f, &snap.ChangedListeners, lists.changedListeners, false)
+	snap.ChangedListenersOmitted = lists.changedOmitted + uint32(min(max(dropped, 0), math.MaxUint32))
 	fillList(f, &snap.Listeners, lists.listeners, true)
 	fillList(f, &snap.Processes, lists.processes, true)
 	fillList(f, &snap.Remotes, lists.remotes, false)
@@ -472,7 +476,7 @@ func (c *collection) remoteList() []model.RemoteCount {
 }
 
 // buildSnapshot assembles the snapshot of a run and reports whether its aggregates (states, listeners, processes) are incomplete.
-func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, added []listenerKey, full bool) *model.ConnectionSnapshot {
+func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, added []listenerKey, changed []uidChange, full bool) *model.ConnectionSnapshot {
 	var l lists
 	l.states = col.stateList()
 	l.listeners = col.listenerList(res)
@@ -490,6 +494,13 @@ func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, a
 		}
 	}
 	l.omitted = uint32(min(max(len(added)-len(reported), 0), math.MaxUint32))
+	shown := changed[:min(MaxChangedListeners, len(changed))]
+	for _, c := range shown {
+		if id, ok := col.endpoints[c.key]; ok {
+			l.changedListeners = append(l.changedListeners, changedOf(&col.listeners.items[id], c.before, res))
+		}
+	}
+	l.changedOmitted = uint32(min(max(len(changed)-len(shown), 0), math.MaxUint32))
 
 	snap := &model.ConnectionSnapshot{AggregatesOnly: !full, ListenerCheck: check, Tables: tableList(col.read)}
 	cutAggregates, cut := fill(snap, &l, payloadBudget)
@@ -510,6 +521,12 @@ func listenerOf(e *listenerEntry, res *runResult) model.Listener {
 		l.UID, l.User, l.MixedUIDs = &uid, procstats.UserName(res.users, uid), e.mixedUIDs
 	}
 	return l
+}
+
+// changedOf returns the listener entry of e with the socket UIDs the endpoint had before.
+func changedOf(e *listenerEntry, before socketUIDs, res *runResult) model.ChangedListener {
+	previous := before.uid
+	return model.ChangedListener{Listener: listenerOf(e, res), PreviousUID: &previous, PreviousMixedUIDs: before.mixed}
 }
 
 // listenerList returns the inventory in inventory order.

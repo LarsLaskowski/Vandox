@@ -355,9 +355,10 @@ public class ForensicsReporterTests
         // Assert
         Assert.AreEqual(1, listeners.TallyCalls, "one read of the tallies");
         Assert.AreEqual(TestContext.CancellationToken, listeners.TallyTokens.Single(), "the token of the run reaches the read of the tallies");
-        Assert.HasCount(2, listeners.FindingQueries, "one read of the findings of each kind");
+        Assert.HasCount(3, listeners.FindingQueries, "one read of the findings of each kind");
         Assert.ContainsSingle(query => query.Kind == ListenerFindingKind.AgentStart, listeners.FindingQueries, "one read of the findings after an agent start");
         Assert.ContainsSingle(query => query.Kind == ListenerFindingKind.Agent, listeners.FindingQueries, "one read of the findings of the agents");
+        Assert.ContainsSingle(query => query.Kind == ListenerFindingKind.AgentUidChanges, listeners.FindingQueries, "one read of the findings of the agents with changed socket UIDs only");
         Assert.IsTrue(listeners.FindingQueries.All(query => query.Limit == ListenerReport.MaxFindings), "each read asks for the cap of 20 findings");
         Assert.IsTrue(listeners.FindingTokens.All(token => token == TestContext.CancellationToken), "the token of the run reaches the reads of the findings");
         Assert.Contains("2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-05 20:30 UTC), all ports: 1 new", output, "the finding after an agent start");
@@ -365,6 +366,46 @@ public class ForensicsReporterTests
         Assert.Contains("- Only the latest 20 findings after an agent start are listed; 24 earlier ones are left out.", output, "the note of the findings after an agent start");
         Assert.Contains("- Only the latest 20 findings of the agent are listed; 999 earlier ones are left out.", output, "the note of the findings of the agents");
         Assert.Contains("- Only the first 64 agent IDs are listed; 3 more are left out.", output, "the note of the agent IDs");
+    }
+
+    /// <summary>
+    /// The findings of the agents with changed socket UIDs only are read as their own kind with the cap of 20, listed apart from the findings with a new listener, and capped with their own note: 21 change-only and 20 other findings keep 20 of each kind.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ForensicsReporterReadsChangeOnlyAgentFindingsSeparately()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 10, 5, 20, 0, 0, TimeSpan.Zero);
+        var listeners = new ScriptedListenerHistoryReader
+                        {
+                            Tallies = new ListenerTallyPage
+                                      {
+                                          Agents = [Tally("web-1", 50, at.AddDays(-4), at, 0, 0, 0, 0)]
+                                      },
+                            AgentFindings = new ListenerFindingPage
+                                            {
+                                                Findings = [.. Enumerable.Range(1, 20).Select(index => AgentFinding("web-1", (ulong)index, at.AddMinutes(index), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 1000 + index)))],
+                                                Total = 20
+                                            },
+                            AgentChangeFindings = new ListenerFindingPage
+                                                  {
+                                                      Findings = [.. Enumerable.Range(1, 20).Select(index => AgentChangeFinding("web-1", (ulong)(100 + index), at.AddHours(1).AddMinutes(index), ListenerOutcome.AllPorts, 0, ChangedEntry(Proto.Tcp, "0.0.0.0", 3000 + index, 0, 1001, "alice", 110)))],
+                                                      Total = 21
+                                                  }
+                        };
+
+        // Act
+        var (output, _) = await RunAsync(new ScriptedRecordReader(), new ScriptedIncidentStore([], false), listeners: listeners);
+
+        // Assert
+        var lines = output.Split('\n');
+
+        Assert.ContainsSingle(query => query.Kind == ListenerFindingKind.AgentUidChanges && query.Limit == ListenerReport.MaxFindings, listeners.FindingQueries, "the change-only findings are read with the cap of 20");
+        Assert.AreEqual(20, lines.Count(line => line.Contains("found by the agent, all ports: 1 new", StringComparison.Ordinal)), "20 findings with a new listener");
+        Assert.AreEqual(20, lines.Count(line => line.Contains("found by the agent, all ports: 0 new, 1 with a changed socket UID", StringComparison.Ordinal)), "20 change-only findings");
+        Assert.Contains("- Only the latest 20 findings of the agent with changed socket UIDs only are listed; 1 earlier ones are left out.", output, "the cap note of the change-only findings");
+        Assert.DoesNotContain("- Only the latest 20 findings of the agent are listed;", output, "no note for the findings with a new listener, which fit");
     }
 
     /// <summary>

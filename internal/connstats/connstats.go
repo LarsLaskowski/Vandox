@@ -25,13 +25,14 @@ const (
 
 // Limits of one run.
 const (
-	TopRemotes      = 25    // remote addresses in a regular snapshot
-	MaxSockets      = 65536 // sockets with an inode tracked for owners per run
-	MaxRemotes      = 4096  // remote addresses counted per run
-	MaxNewListeners = 64    // new listeners reported per run
-	PrivilegedPorts = 1024  // ports below are privileged
-	EphemeralFirst  = 32768 // first port of the ephemeral range
-	EphemeralLast   = 60999 // last port of the ephemeral range
+	TopRemotes          = 25    // remote addresses in a regular snapshot
+	MaxSockets          = 65536 // sockets with an inode tracked for owners per run
+	MaxRemotes          = 4096  // remote addresses counted per run
+	MaxNewListeners     = 64    // new listeners reported per run
+	MaxChangedListeners = 64    // changed listeners reported per run
+	PrivilegedPorts     = 1024  // ports below are privileged
+	EphemeralFirst      = 32768 // first port of the ephemeral range
+	EphemeralLast       = 60999 // last port of the ephemeral range
 )
 
 // SocketMount is the mount of the kernel's sockets, learned at the agent's start; the zero value is not probed.
@@ -130,9 +131,9 @@ func (c *Connections) Collect(ctx context.Context, run scheduler.Run) ([]model.R
 	res.users, res.usersErr = procstats.ReadUsers(c.src.Etc)
 
 	cur := col.inventory()
-	check, added := compare(prev, cur)
-	full := run.Pressure || run.Trigger != nil || prev == nil || len(added) > 0
-	snap := buildSnapshot(col, res, check, added, full)
+	check, added, changed := compare(prev, cur)
+	full := run.Pressure || run.Trigger != nil || prev == nil || len(added) > 0 || len(changed) > 0
+	snap := buildSnapshot(col, res, check, added, changed, full)
 	snap.Trigger = snapshotTrigger(run.Trigger)
 
 	record, err := fitRecord(run.Start, snap, cur)
@@ -238,10 +239,12 @@ func tableList(mask uint8) []model.Proto {
 func (col *collection) inventory() *inventory {
 	entries := col.listeners.sorted()
 	keys := make([]listenerKey, len(entries))
+	uids := make([]socketUIDs, len(entries))
 	for i := range entries {
 		keys[i] = entries[i].key
+		uids[i] = socketUIDs{uid: entries[i].uid, known: entries[i].hasUID, mixed: entries[i].mixedUIDs}
 	}
-	return &inventory{keys: keys, cut: col.listeners.cut, skipped: col.badLines > 0, tables: col.read}
+	return &inventory{keys: keys, uids: uids, cut: col.listeners.cut, skipped: col.badLines > 0, tables: col.read}
 }
 
 // commit keeps the inventory and writes the log lines of a run, unless the run's context has ended: a run that is late keeps

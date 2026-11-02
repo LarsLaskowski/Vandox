@@ -407,7 +407,7 @@ found`), and a table that exists but cannot be read fails it too (a gap, [Schedu
 other than 0 (more sockets have no owner and make the aggregates incomplete); the listener inventory holds the 4,096 lowest **distinct**
 endpoints (the wire format's list limit), so `SO_REUSEPORT` sockets share one entry and never count toward the cut; the connections list the 4,096 lowest
 (protocol, local, remote); `remotes` counts at most 4,096 remote addresses; at most 4,096 processes are scanned for owners (the lowest PIDs,
-as the process collector keeps them); at most 64 new listeners are reported.
+as the process collector keeps them); at most 64 new listeners and, separately, at most 64 changed listeners are reported.
 
 **Regular and full snapshots.** A **regular** snapshot (`aggregates_only` true, no `connections`) holds `states` (per protocol and TCP state,
 by protocol then state, UDP without state), `processes` (one entry per process that owns at least one socket: PID, `command`, distinct
@@ -415,7 +415,7 @@ sockets it holds, by count descending then PID), `remotes` (the top 25 by count 
 inventory, ports below 1024 first, then protocol, address, port). A **full** snapshot adds every connection (by protocol, local, remote) and
 every counted remote address. The first run after the agent starts, every run under memory pressure (the mode at the run's start, *Scheduling*),
 every extra run requested for an OOM kill (*Kernel events*; its record names the kills in `trigger`) and every run that finds at least one
-new listener, reported or omitted, is full; every other run is regular. `complete` keeps its meaning of
+new listener or at least one changed listener, reported or omitted, is full; every other run is regular. `complete` keeps its meaning of
 the wire format and is true only for a full snapshot in which nothing was cut, skipped, left without an owner beyond a cap, unread or
 uncounted, so a regular snapshot is never complete. `aggregates_incomplete` is set when `states`, `listeners` or `processes` may not cover
 every socket the run saw: a list cut for size or at its cap, a skipped table line, a socket beyond the inode index, more processes than the
@@ -440,7 +440,7 @@ unreadable one) count in `states` and, as connections, in `remotes` and `connect
 `command` is the process collector's (*Processes*, **Names**, through `procstats.CommandReader`). It is text the process chooses; the
 PID is the kernel's.
 
-**Socket UIDs.** `listeners`, `new_listeners` and `connections` entries carry the socket's UID (`uid`) and its user name (`user`), taken
+**Socket UIDs.** `listeners`, `new_listeners`, `changed_listeners` and `connections` entries carry the socket's UID (`uid`) and its user name (`user`), taken
 from the table line when the line is filed as a listener or a connection, not from the descriptors or the inode index. So an entry
 without an owner still has them: when the start-up probe failed, `fdinfo` cannot be read, `hidepid=2` hides the holder, the holder lies
 beyond the PID cap, or the socket lies beyond the inode index or repeats an inode it already holds. A line with inode 0 (`TIME_WAIT`, a
@@ -451,13 +451,13 @@ one endpoint of possibly several sockets: it carries the **lowest** UID of its s
 two or more distinct UIDs (sockets bound to different devices with `SO_BINDTODEVICE`, which any user may set once and which lets sockets of
 different users share an endpoint, TCP and UDP alike; UDP sockets bound with `SO_REUSEADDR`; a `SO_REUSEPORT` group of which one socket was
 given to another user by an `fchown`); its `pid` stays the lowest owning PID and may belong to another of the sockets. A `new_listeners`
-entry is built from the same inventory entry, so it carries the same `uid`, `user` and `mixed_uids`. The `processes` aggregate carries no
+entry is built from the same inventory entry, so it carries the same `uid`, `user` and `mixed_uids`; so does a `changed_listeners` entry, which adds the previous run's values. The `processes` aggregate carries no
 UID (the sockets of one process can have several; its user is in the process snapshot). The `user` is `procstats.UserName` over the names
 `procstats.ReadUsers` reads from `/etc/passwd` once per run, after the owner scan: the process collector's rules (*Processes*, *Readers*:
 the first line of a UID wins, a name is made valid UTF-8 and cut to 256 bytes, control characters are kept and escaped by the encoder),
 else the UID in decimal, so one UID has one name in both snapshots of a run that read the same file. A `passwd` that cannot be read within
 its bounds (missing, an open or read error, over 1 MiB, a line over 4 KiB) makes every `user` the decimal UID; `uid` is unchanged and the
-sample succeeds. A change of the UID on a known protocol, address and port is not a new listener (*The listener check*).
+sample succeeds. A change of the UID on a known protocol, address and port is not a new listener but a **changed listener** (*The listener check*).
 
 **The socket mount.** An inode number alone does not tell a socket from a file with the same number, which any user can create on a mount
 of their own (a tmpfs in a user namespace, FUSE, a container). Every socket of every family, in any namespace, is allocated on one
@@ -473,7 +473,7 @@ socket has an owner, `processes` is empty, the aggregates are incomplete, the sa
 logged at the first run; the state lasts until the agent restarts.
 
 **The listener check.** The collector keeps the previous successful run's inventory in memory: its keys (at most 4,096, as the heap
-holds them, not as the record's size budget may cut the list), whether it was cut, which tables were read and whether a line was skipped.
+holds them, not as the record's size budget may cut the list) each with its lowest socket UID, whether the UID is known and whether the endpoint was mixed (no list of UIDs per endpoint), whether it was cut, which tables were read and whether a line was skipped.
 Each snapshot states the comparison its run made in `listener_check`:
 
 - `start`: the first run after the agent starts, which has no previous inventory in memory (nothing is reported by the agent; the backend
@@ -488,7 +488,11 @@ Each snapshot states the comparison its run made in `listener_check`:
 A key in the current inventory that the previous lacks is a **new listener**, except an unconnected UDP socket on a port from 32768 to 60999 (the kernel's
 default local port range, fixed, not read from the server; a resolver's or client's temporary socket). A TCP listener is reported on any
 port. At most 64 are reported, in inventory order, in `new_listeners`; the rest is the count `new_listeners_omitted`. A change of the owner on
-the same protocol, address and port is not new; a listener that disappears and returns is new again. The current inventory becomes the
+the same protocol, address and port is not new; a listener that disappears and returns is new again.
+
+A key that both inventories hold is a **changed listener** when it lies in the compared part (the same ports as for new listeners: all under `all`, ports 1 to 1023 under `privileged`, none under `none` and `start`), is not an unconnected UDP socket on a port from 32768 to 60999, has a `uid` in both runs, and its lowest UID differs or its `mixed_uids` turned from absent to true. The test uses the UID numbers only, so it holds when `/etc/passwd` cannot be read. A mixed state that persists with the same lowest UID is reported once, when it begins; a `mixed_uids` that only turns false reports nothing; an endpoint without a `uid` on either side reports nothing; a new key is a new listener only. A run with a changed listener is full. At most 64 are reported, in inventory order, in `changed_listeners` (the listener entry of the current run, plus `previous_uid` and `previous_mixed_uids` from the previous run); the rest, with the entries the size budget leaves out, is the count `changed_listeners_omitted`. An endpoint that leaves the list and qualifies again in a later run is reported again, once per run.
+
+The inventory comparison above is unchanged otherwise. The current inventory becomes the
 base, also after a `none` check, **only when the run's context has not ended**: the collector tests `ctx.Err()` immediately before it returns
 its record and, when the deadline has passed, returns that error and keeps no inventory and no log state, so a run that becomes a gap
 (the scheduler drops a result that arrives after the deadline) cannot make a listener known without a report. A size cut of `listeners` in the
@@ -499,11 +503,11 @@ in table order) and how much of the run's inventory its own `listeners` list hol
 snapshots of one agent: `skipped` when a table line was skipped; `cut` when the inventory was cut inside its privileged part or the list holds
 fewer entries than the inventory has on ports below 1024; `all` when the inventory was not cut and the list holds every key; `privileged`
 otherwise (every listener on ports 1 to 1023, not necessarily the rest). The state is set from the list as it finally stands, so a list the
-size budget or the safety net halves is described as it is sent. Neither field changes the agent's own comparison, the full snapshots or the
+size budget or the safety net halves is described as it is sent (`changed_listeners`, placed before `listeners`, can cut `listeners` only as `new_listeners` can; the safety net does not halve it). Neither field changes the agent's own comparison, the full snapshots or the
 caps.
 
 **The record always fits and is valid.** The record is filled entry by entry within a payload budget of 1 MiB less 8 KiB of JSON (each entry
-encoded alone to measure it), in the order `states`, `new_listeners`, `listeners`, `processes`, `remotes`, `connections`; at the first entry
+encoded alone to measure it), in the order `states`, `new_listeners`, `changed_listeners`, `listeners`, `processes`, `remotes`, `connections`; at the first entry
 that does not fit, that list and every later one stop (a cut in `states`, `listeners` or `processes` sets `aggregates_incomplete`). The
 record is checked with the producer contract of the [wire format](wire-format.md); as a safety net a record still too long is shortened by
 halving `connections`, then `remotes`, `processes` and `listeners`, and is marked not complete. Size never fails the sample. No text a
@@ -572,11 +576,22 @@ took 57.3 ms with 1.99 MB in 26,310 allocations, so the `passwd` read and the UI
   owns on the descriptors the agent can read, so the numbers of the two sources differ for #45. Mapped addresses split a peer in `remotes`.
 - The incident's connection peak is taken over every source in its window, so the agent's higher totals win it against imported snapshots
   ([Detection, alerts and reports](detection-and-reports.md)).
+- Two different UIDs that replace each other on an endpoint that is already mixed while the lowest UID stays the same (UIDs 0 and 1001, then
+  0 and 1002) are not detectable from the lowest UID and the flag; the agent keeps no set of UIDs per endpoint.
+- The residuals of the new-listener check hold for a takeover too: a local user who keeps more than 4,096 listeners open forces `privileged`,
+  so a takeover on a port from 1024 up is not reported while it lasts; a `none` run still becomes the base, so a takeover that happens before
+  it is never reported.
+- A local user who toggles the mixed state of a shared `SO_REUSEADDR` UDP endpoint (avahi on 5353, under `all`) causes a change-only finding
+  per run and can push an earlier takeover out of the report's 20 latest change-only findings ([Detection, alerts and reports](detection-and-reports.md),
+  *Caps*); the rows stay stored.
 - A skipped table line (it is counted, not parsed) makes the snapshot's aggregates incomplete and the run's comparison `none`.
 - The `uid` says whose socket it is, not whose process: a root-created socket held by another user's process reads root. A user who binds
   a second socket on a known endpoint (for example bound to a device) leaves the entry's `uid` at the lower UID with `mixed_uids` true, and
-  the endpoint is not reported as a new listener, as a change of owner is not; a listener whose UID changes between two runs is not
-  reported either. Names come only from `/etc/passwd` (no NSS, LDAP or `systemd-userdbd` dynamic users), so such a UID reads as a number.
+  the endpoint is not reported as a new listener, as a change of owner is not; a change of its lowest UID or a mixed state that begins is
+  reported as a changed listener (*The listener check*). A local user cannot add a socket to a known endpoint held by a socket that is not bound
+  to a device: two such sockets conflict (`inet_csk_bind_conflict`, `udp_lib_lport_inuse`), a reuse-port pair needs one UID, and ports below 1024
+  need `CAP_NET_BIND_SERVICE`; measured on kernel 6.18.44 as root and UID 65534, a device-bound socket on the port of an unbound root listener
+  fails with `EADDRINUSE`, while two device-bound sockets, or two UDP sockets with `SO_REUSEADDR`, share an endpoint. Names come only from `/etc/passwd` (no NSS, LDAP or `systemd-userdbd` dynamic users), so such a UID reads as a number.
 
 ## Services
 

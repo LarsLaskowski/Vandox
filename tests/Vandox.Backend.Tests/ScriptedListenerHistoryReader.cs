@@ -27,6 +27,11 @@ internal sealed class ScriptedListenerHistoryReader : IListenerHistoryReader
     internal ListenerFindingPage AgentFindings { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets the answer to the read of the findings of the agents with changed socket UIDs only.
+    /// </summary>
+    internal ListenerFindingPage AgentChangeFindings { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets the failure of every read; none when <c>null</c>.
     /// </summary>
     internal Exception? Failure { get; set; }
@@ -81,7 +86,12 @@ internal sealed class ScriptedListenerHistoryReader : IListenerHistoryReader
             return Task.FromException<ListenerFindingPage>(Failure);
         }
 
-        return Task.FromResult(query.Kind == ListenerFindingKind.AgentStart ? StartFindings : AgentFindings);
+        return Task.FromResult(query.Kind switch
+                               {
+                                   ListenerFindingKind.AgentStart => StartFindings,
+                                   ListenerFindingKind.AgentUidChanges => AgentChangeFindings,
+                                   _ => AgentFindings
+                               });
     }
 
     #endregion // IListenerHistoryReader

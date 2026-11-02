@@ -105,8 +105,12 @@ public sealed class ReportText
                                                     ListenerUidUnknown = ", socket UID unknown",
                                                     ListenerUserCut = " (cut)",
                                                     ListenerMixedUids = " (lowest of several)",
+                                                    ListenerChanged = ", {0} with a changed socket UID",
+                                                    ListenerChangedEntry = "{0}, PID {1}",
+                                                    ListenerBeforeUid = ", before: socket UID {0}",
                                                     CapStartFindingsNote = "Only the latest {0} findings after an agent start are listed; {1} earlier ones are left out.",
                                                     CapAgentFindingsNote = "Only the latest {0} findings of the agent are listed; {1} earlier ones are left out.",
+                                                    CapAgentChangeFindingsNote = "Only the latest {0} findings of the agent with changed socket UIDs only are listed; {1} earlier ones are left out.",
                                                     CapAgentsNote = "Only the first {0} agent IDs are listed; {1} more are left out.",
                                                 };
 
@@ -208,8 +212,12 @@ public sealed class ReportText
                                                    ListenerUidUnknown = ", Socket-UID unbekannt",
                                                    ListenerUserCut = " (gekürzt)",
                                                    ListenerMixedUids = " (niedrigste von mehreren)",
+                                                   ListenerChanged = ", {0} mit geänderter Socket-UID",
+                                                   ListenerChangedEntry = "{0}, PID {1}",
+                                                   ListenerBeforeUid = ", vorher: Socket-UID {0}",
                                                    CapStartFindingsNote = "Nur die letzten {0} Funde nach einem Agentenstart sind aufgeführt; {1} frühere fehlen.",
                                                    CapAgentFindingsNote = "Nur die letzten {0} Funde des Agenten sind aufgeführt; {1} frühere fehlen.",
+                                                   CapAgentChangeFindingsNote = "Nur die letzten {0} Funde des Agenten mit nur geänderten Socket-UIDs sind aufgeführt; {1} frühere fehlen.",
                                                    CapAgentsNote = "Nur die ersten {0} Agenten-IDs sind aufgeführt; {1} weitere fehlen.",
                                                };
 
@@ -692,6 +700,26 @@ public sealed class ReportText
     /// Gets the text: the note: only the latest findings of the agent are listed.
     /// </summary>
     public string CapAgentFindingsNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the finding head part: the number of listeners with a changed socket UID.
+    /// </summary>
+    public string ListenerChanged { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: a changed listener's endpoint and its owner's PID.
+    /// </summary>
+    public string ListenerChangedEntry { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the socket UID a changed listener had before.
+    /// </summary>
+    public string ListenerBeforeUid { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the note: only the latest findings of the agent with changed socket UIDs only are listed.
+    /// </summary>
+    public string CapAgentChangeFindingsNote { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the text: the note: only the first agent IDs are listed.

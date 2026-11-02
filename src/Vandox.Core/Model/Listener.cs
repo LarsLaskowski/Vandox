@@ -6,7 +6,7 @@ namespace Vandox.Core.Model;
 /// <summary>
 /// A socket without a remote endpoint.
 /// </summary>
-public sealed class Listener : SocketOwner
+public class Listener : SocketOwner
 {
     #region Properties
 
@@ -54,7 +54,7 @@ public sealed class Listener : SocketOwner
     /// </summary>
     /// <param name="path">Path of the entry</param>
     /// <returns>The first rule that is broken, or <c>null</c></returns>
-    internal FieldError? Validate(string path)
+    internal virtual FieldError? Validate(string path)
     {
         return ConnectionSnapshot.CheckProtoOnly(path, Proto)
                    ?? Check.AddressPort($"{path}.local", Local)

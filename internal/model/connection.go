@@ -1,8 +1,6 @@
 package model
 
-import (
-	"net/netip"
-)
+import "net/netip"
 
 // Proto is a socket protocol.
 type Proto string
@@ -50,8 +48,12 @@ type ConnectionSnapshot struct {
 	Connections          []Connection         `json:"connections,omitempty"`
 	NewListeners         []Listener           `json:"new_listeners,omitempty"`
 	NewListenersOmitted  uint32               `json:"new_listeners_omitted,omitempty"`
-	Inventory            InventoryState       `json:"inventory,omitempty"`
-	Tables               []Proto              `json:"tables,omitempty"`
+	// ChangedListeners are known listener endpoints whose socket UID changed since the previous run.
+	ChangedListeners []ChangedListener `json:"changed_listeners,omitempty"`
+	// ChangedListenersOmitted is the number of changed listeners that were left out of the list.
+	ChangedListenersOmitted uint32         `json:"changed_listeners_omitted,omitempty"`
+	Inventory               InventoryState `json:"inventory,omitempty"`
+	Tables                  []Proto        `json:"tables,omitempty"`
 	// Trigger names the kills that caused this snapshot; nil for a scheduled one.
 	Trigger *SnapshotTrigger `json:"trigger,omitempty"`
 }
@@ -144,6 +146,9 @@ func (s *ConnectionSnapshot) Validate() error {
 	if err := checkListeners("new_listeners", s.NewListeners); err != nil {
 		return err
 	}
+	if err := checkChangedListeners(s.ChangedListeners); err != nil {
+		return err
+	}
 	return validateTrigger(s.Trigger)
 }
 
@@ -155,6 +160,7 @@ func (s *ConnectionSnapshot) validateCounts() error {
 	}{
 		{"states", len(s.States)}, {"processes", len(s.Processes)}, {"remotes", len(s.Remotes)},
 		{"listeners", len(s.Listeners)}, {"connections", len(s.Connections)}, {"new_listeners", len(s.NewListeners)},
+		{"changed_listeners", len(s.ChangedListeners)},
 	} {
 		if err := checkCount(c.name, c.n); err != nil {
 			return err
@@ -254,6 +260,9 @@ func (s *ConnectionSnapshot) validateFlags() error {
 	if (len(s.NewListeners) > 0 || s.NewListenersOmitted > 0) && s.ListenerCheck != ListenerCheckAll && s.ListenerCheck != ListenerCheckPrivileged {
 		return invalid("listener_check", "must be all or privileged when new listeners are reported")
 	}
+	if (len(s.ChangedListeners) > 0 || s.ChangedListenersOmitted > 0) && s.ListenerCheck != ListenerCheckAll && s.ListenerCheck != ListenerCheckPrivileged {
+		return invalid("listener_check", "must be all or privileged when changed listeners are reported")
+	}
 	return nil
 }
 
@@ -278,25 +287,55 @@ func (s *ConnectionSnapshot) validateInventory() error {
 	return nil
 }
 
+// ChangedListener is a known listener endpoint whose socket UID changed since the producer's previous run.
+type ChangedListener struct {
+	Listener
+	// PreviousUID is the endpoint's lowest socket UID in the previous run.
+	PreviousUID *uint32 `json:"previous_uid,omitempty"`
+	// PreviousMixedUIDs is true when the endpoint's sockets had several UIDs in the previous run.
+	PreviousMixedUIDs bool `json:"previous_mixed_uids,omitempty"`
+}
+
+// checkChangedListeners checks the entries of the list changed_listeners.
+func checkChangedListeners(listeners []ChangedListener) error {
+	for i := range listeners {
+		e := &listeners[i]
+		path := indexed("changed_listeners", i)
+		if err := checkListener(path, &e.Listener); err != nil {
+			return err
+		}
+		if e.UID == nil {
+			return invalid(path+".uid", "required")
+		}
+		if e.PreviousUID == nil {
+			return invalid(path+".previous_uid", "required")
+		}
+	}
+	return nil
+}
+
 // checkListeners checks the entries of the list name.
 func checkListeners(name string, listeners []Listener) error {
 	for i := range listeners {
-		e := &listeners[i]
-		path := indexed(name, i)
-		if err := checkProtoOnly(path, e.Proto); err != nil {
-			return err
-		}
-		if err := checkAddrPort(path+".local", e.Local); err != nil {
-			return err
-		}
-		if err := checkProcess(path, e.PID, e.Command); err != nil {
-			return err
-		}
-		if err := checkSocketUser(path, e.UID, e.User, e.MixedUIDs); err != nil {
+		if err := checkListener(indexed(name, i), &listeners[i]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// checkListener checks one listener entry at path.
+func checkListener(path string, e *Listener) error {
+	if err := checkProtoOnly(path, e.Proto); err != nil {
+		return err
+	}
+	if err := checkAddrPort(path+".local", e.Local); err != nil {
+		return err
+	}
+	if err := checkProcess(path, e.PID, e.Command); err != nil {
+		return err
+	}
+	return checkSocketUser(path, e.UID, e.User, e.MixedUIDs)
 }
 
 func checkProtoOnly(path string, p Proto) error {

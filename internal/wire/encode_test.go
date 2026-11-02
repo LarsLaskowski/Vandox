@@ -117,6 +117,12 @@ func allKindRecords(loc *time.Location) []model.Record {
 			}},
 			NewListeners:        []model.Listener{{Proto: model.ProtoUDP, Local: netip.MustParseAddrPort("0.0.0.0:5353"), PID: 11, Command: "avahi", UID: ptr(uint32(105)), User: "avahi", MixedUIDs: true}},
 			NewListenersOmitted: 2,
+			ChangedListeners: []model.ChangedListener{{
+				Listener:          model.Listener{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:3306"), PID: 4242, Command: "mariadbd", UID: ptr(uint32(1001)), User: "alice", MixedUIDs: true},
+				PreviousUID:       ptr(uint32(110)),
+				PreviousMixedUIDs: true,
+			}},
+			ChangedListenersOmitted: 1,
 		}},
 		{Meta: agentMeta(4, "systemd", loc), Data: &model.ServiceState{
 			Unit: "nginx.service", LoadState: "loaded", ActiveState: "active", SubState: "running",

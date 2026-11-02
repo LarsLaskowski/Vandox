@@ -15,7 +15,12 @@ public enum ListenerFindingKind
     /// <summary>
     /// Found by the agent itself.
     /// </summary>
-    Agent
+    Agent,
+
+    /// <summary>
+    /// Found by the agent itself, with changed socket UIDs only and no new listener.
+    /// </summary>
+    AgentUidChanges
 
     #endregion // Values
 }

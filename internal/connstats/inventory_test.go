@@ -24,7 +24,7 @@ func inv(keys ...listenerKey) *inventory {
 func checkCompare(t *testing.T, prev, cur *inventory, wantCheck model.ListenerCheck, wantAdded []listenerKey) {
 	t.Helper()
 
-	check, added := compare(prev, cur)
+	check, added, _ := compare(prev, cur)
 	if check != wantCheck {
 		t.Errorf("compare() check = %q, want %q", check, wantCheck)
 	}
@@ -255,7 +255,7 @@ func TestCompare_SkippedLineOrChangedTablesComparesNothing(t *testing.T) {
 
 	control := inv(ssh, telnet, backdoor)
 	prev := inv(ssh)
-	if check, added := compare(prev, control); check != model.ListenerCheckAll || len(added) != 2 {
+	if check, added, _ := compare(prev, control); check != model.ListenerCheckAll || len(added) != 2 {
 		t.Fatalf("compare(control) = %q, %v, want %q and two new listeners (the cases below would prove nothing)", check, added, model.ListenerCheckAll)
 	}
 
@@ -351,4 +351,165 @@ func TestTableList(t *testing.T) {
 			}
 		})
 	}
+}
+
+// su builds the socket UIDs of an endpoint with a known lowest UID.
+func su(uid uint32, mixed bool) socketUIDs {
+	return socketUIDs{uid: uid, known: true, mixed: mixed}
+}
+
+// invUIDs builds an inventory over keys with the socket UIDs in the same order.
+func invUIDs(cut bool, keys []listenerKey, uids ...socketUIDs) *inventory {
+	return &inventory{keys: keys, uids: uids, cut: cut, tables: allTables}
+}
+
+func checkChanged(t *testing.T, prev, cur *inventory, wantCheck model.ListenerCheck, want []uidChange) {
+	t.Helper()
+
+	check, _, changed := compare(prev, cur)
+	if check != wantCheck {
+		t.Errorf("compare() check = %q, want %q", check, wantCheck)
+	}
+	if !slices.Equal(changed, want) {
+		t.Errorf("compare() changed = %+v, want %+v", changed, want)
+	}
+}
+
+func TestCompare_UIDChangeOfKnownEndpointReported(t *testing.T) {
+	mariadb := key(model.ProtoTCP, "0.0.0.0", 3306)
+	mdns := key(model.ProtoUDP, "0.0.0.0", 5353)
+	plesk := key(model.ProtoTCP, "0.0.0.0", 8443)
+	ssh := key(model.ProtoTCP, "0.0.0.0", 22)
+
+	tests := []struct {
+		name      string
+		cut       bool
+		keys      []listenerKey
+		before    []socketUIDs
+		after     []socketUIDs
+		wantCheck model.ListenerCheck
+		want      []uidChange
+	}{
+		{"S1 another user binds the endpoint", false, []listenerKey{mariadb}, []socketUIDs{su(110, false)}, []socketUIDs{su(1001, false)},
+			model.ListenerCheckAll, []uidChange{{mariadb, su(110, false)}}},
+		{"S2 the flag turns true", false, []listenerKey{mdns}, []socketUIDs{su(107, false)}, []socketUIDs{su(107, true)},
+			model.ListenerCheckAll, []uidChange{{mdns, su(107, false)}}},
+		{"S3 a lower UID joins", false, []listenerKey{plesk}, []socketUIDs{su(1001, false)}, []socketUIDs{su(0, true)},
+			model.ListenerCheckAll, []uidChange{{plesk, su(1001, false)}}},
+		{"E1 the lower socket leaves", false, []listenerKey{mariadb}, []socketUIDs{su(0, true)}, []socketUIDs{su(1001, false)},
+			model.ListenerCheckAll, []uidChange{{mariadb, su(0, true)}}},
+		{"the lowest UID rises while the endpoint stays mixed", false, []listenerKey{mariadb}, []socketUIDs{su(0, true)}, []socketUIDs{su(1001, true)},
+			model.ListenerCheckAll, []uidChange{{mariadb, su(0, true)}}},
+		{"UID 0 before is a value", false, []listenerKey{mariadb}, []socketUIDs{su(0, false)}, []socketUIDs{su(1001, false)},
+			model.ListenerCheckAll, []uidChange{{mariadb, su(0, false)}}},
+		{"several in inventory order", false, []listenerKey{ssh, mariadb, plesk},
+			[]socketUIDs{su(0, false), su(110, false), su(1001, false)}, []socketUIDs{su(33, false), su(110, false), su(0, true)},
+			model.ListenerCheckAll, []uidChange{{ssh, su(0, false)}, {plesk, su(1001, false)}}},
+		{"E5 privileged check on a port below 1024", true, []listenerKey{ssh, plesk},
+			[]socketUIDs{su(0, false), su(1001, false)}, []socketUIDs{su(33, false), su(0, false)},
+			model.ListenerCheckPrivileged, []uidChange{{ssh, su(0, false)}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checkChanged(t, invUIDs(tc.cut, tc.keys, tc.before...), invUIDs(tc.cut, tc.keys, tc.after...), tc.wantCheck, tc.want)
+		})
+	}
+}
+
+func TestCompare_NewEndpointIsNotChanged(t *testing.T) {
+	ssh := key(model.ProtoTCP, "0.0.0.0", 22)
+	mariadb := key(model.ProtoTCP, "0.0.0.0", 3306)
+	prev := invUIDs(false, []listenerKey{ssh}, su(0, false))
+	cur := invUIDs(false, []listenerKey{ssh, mariadb}, su(0, false), su(1001, true))
+
+	check, added, changed := compare(prev, cur)
+
+	if check != model.ListenerCheckAll || !slices.Equal(added, []listenerKey{mariadb}) {
+		t.Errorf("compare() = %q, added %v, want all and %v", check, added, mariadb)
+	}
+	if len(changed) != 0 {
+		t.Errorf("compare() changed = %+v, want none for an endpoint that is new", changed)
+	}
+}
+
+func TestCompare_UnchangedOrUnknownUIDNotReported(t *testing.T) {
+	mariadb := key(model.ProtoTCP, "0.0.0.0", 3306)
+	keys := []listenerKey{mariadb}
+	unknown := socketUIDs{}
+
+	tests := []struct {
+		name          string
+		before, after socketUIDs
+	}{
+		{"S4 same UID and flag", su(110, false), su(110, false)},
+		{"S4 same UID, mixed in both", su(0, true), su(0, true)},
+		{"E1 the flag turns false", su(107, true), su(107, false)},
+		{"E2 unknown before", unknown, su(1001, false)},
+		{"E2 unknown after", su(110, false), unknown},
+		{"E2 unknown in both", unknown, unknown},
+		{"E2 unknown UID 0 is not root", socketUIDs{uid: 0}, su(1001, false)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			checkChanged(t, invUIDs(false, keys, tc.before), invUIDs(false, keys, tc.after), model.ListenerCheckAll, nil)
+		})
+	}
+	t.Run("E2 an inventory without UIDs", func(t *testing.T) {
+		checkChanged(t, inv(mariadb), invUIDs(false, keys, su(1001, false)), model.ListenerCheckAll, nil)
+		checkChanged(t, invUIDs(false, keys, su(110, false)), inv(mariadb), model.ListenerCheckAll, nil)
+	})
+}
+
+func TestCompare_ChangeNotReportedOutsideComparedPorts(t *testing.T) {
+	ephemeral := key(model.ProtoUDP, "0.0.0.0", 40000)
+	ephemeral6 := key(model.ProtoUDP6, "::", 50000)
+	plesk := key(model.ProtoTCP, "0.0.0.0", 8443)
+	ssh := key(model.ProtoTCP, "0.0.0.0", 22)
+
+	t.Run("E4 unconnected UDP on an ephemeral port", func(t *testing.T) {
+		keys := []listenerKey{ephemeral, ephemeral6}
+		checkChanged(t, invUIDs(false, keys, su(110, false), su(110, false)), invUIDs(false, keys, su(1001, false), su(0, true)), model.ListenerCheckAll, nil)
+	})
+	t.Run("E4 TCP on an ephemeral port is compared", func(t *testing.T) {
+		tcp := key(model.ProtoTCP, "0.0.0.0", 40000)
+		keys := []listenerKey{tcp}
+		checkChanged(t, invUIDs(false, keys, su(110, false)), invUIDs(false, keys, su(1001, false)), model.ListenerCheckAll, []uidChange{{tcp, su(110, false)}})
+	})
+	t.Run("E5 check none after a skipped run", func(t *testing.T) {
+		prev, cur := invUIDs(false, []listenerKey{ssh}, su(0, false)), invUIDs(false, []listenerKey{ssh}, su(33, false))
+		prev.skipped = true
+		checkChanged(t, prev, cur, model.ListenerCheckNone, nil)
+	})
+	t.Run("E5 check none after a change of tables", func(t *testing.T) {
+		prev, cur := invUIDs(false, []listenerKey{ssh}, su(0, false)), invUIDs(false, []listenerKey{ssh}, su(33, false))
+		prev.tables = 0b0011
+		checkChanged(t, prev, cur, model.ListenerCheckNone, nil)
+	})
+	t.Run("E5 check start without a previous inventory", func(t *testing.T) {
+		checkChanged(t, nil, invUIDs(false, []listenerKey{ssh}, su(33, false)), model.ListenerCheckStart, nil)
+	})
+	t.Run("E5 port 8443 under privileged", func(t *testing.T) {
+		keys := []listenerKey{plesk, ephemeral}
+		checkChanged(t, invUIDs(true, keys, su(1001, false), su(0, false)), invUIDs(true, keys, su(0, true), su(0, false)), model.ListenerCheckPrivileged, nil)
+	})
+	t.Run("E5 port 1023 is compared and port 1024 is not under privileged", func(t *testing.T) {
+		p1023, p1024 := key(model.ProtoTCP, "0.0.0.0", 1023), key(model.ProtoTCP, "0.0.0.0", 1024)
+		keys := []listenerKey{p1023, p1024}
+		checkChanged(t, invUIDs(true, keys, su(0, false), su(0, false)), invUIDs(true, keys, su(33, false), su(33, false)),
+			model.ListenerCheckPrivileged, []uidChange{{p1023, su(0, false)}})
+	})
+}
+
+func TestCompare_ChangeReportedAgainAfterReturn(t *testing.T) {
+	mdns := key(model.ProtoUDP, "0.0.0.0", 5353)
+	keys := []listenerKey{mdns}
+	runA := invUIDs(false, keys, su(107, false))
+	runB := invUIDs(false, keys, su(107, true))
+	runC := invUIDs(false, keys, su(107, false))
+	runD := invUIDs(false, keys, su(107, true))
+
+	checkChanged(t, runA, runB, model.ListenerCheckAll, []uidChange{{mdns, su(107, false)}})
+	checkChanged(t, runB, runC, model.ListenerCheckAll, nil)
+	checkChanged(t, runC, runD, model.ListenerCheckAll, []uidChange{{mdns, su(107, false)}})
+	checkChanged(t, runD, runD, model.ListenerCheckAll, nil)
 }

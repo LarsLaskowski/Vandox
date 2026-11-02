@@ -58,6 +58,8 @@ Panel memory threshold: 68 MiB
 - 2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: ports 1 to 1023 not complete
 - 2026-10-05 12:00 UTC, agent ` web-1 `, found by the agent, all ports: 1 new
   - tcp 0.0.0.0:2121, no owner, socket UID 1000
+- 2026-10-05 15:00 UTC, agent ` web-1 `, found by the agent, all ports: 0 new, 1 with a changed socket UID
+  - tcp 0.0.0.0:3306, PID 4242, socket UID 1001 ` alice `, before: socket UID 110
 - 2026-10-06 04:00 UTC, agent ` web-2 `, found by the agent, ports 1 to 1023 only: 1 new
   - udp 0.0.0.0:69, PID 12 `` tftp`d ``, socket UID unknown
 

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-18
 - **Area:** Agent
-- **Source:** Issue #33, Issue #279 (the socket's UID)
+- **Source:** Issue #33, Issue #279 (the socket's UID), Issue #305 (a known endpoint whose socket UID changes)
 - **Supersedes:** —
 
 ## Context
@@ -23,6 +23,12 @@ kernel's `uid` column (field 8), which the reader counted and skipped. That numb
 process that created it, changed only by an `fchown` (which needs `CAP_CHOWN` to give it to another user); for a line with inode 0 it
 is 0 (time-wait), root or the former UID (orphaned, 5.15 and 6.x differ) or the listener's (pending), so it names no holder there
 (upstream `net/ipv4/tcp_ipv4.c`, `net/ipv4/udp.c`, `net/ipv6/*`, `include/net/sock.h`, `net/socket.c`, read at v5.15 and v6.18).
+
+Issue #305 asks to report a known endpoint whose socket UID changes, without flooding for endpoints that several users share by
+design. The comparison keys hold no UID (option 16), so a service on an unprivileged port that stops while another user binds its
+endpoint before the next run is never reported. The kernel lets sockets of two UIDs share an endpoint only when both are bound to
+different devices, both UDP sockets set `SO_REUSEADDR`, or a holder of `CAP_CHOWN` gives one away (`SO_REUSEPORT` needs one UID;
+measured on 6.18.44, squad record of #305).
 
 ## Options considered
 
@@ -95,6 +101,14 @@ is 0 (time-wait), root or the former UID (orphaned, 5.15 and 6.x differ) or the 
     for `uid` as an optional number, absent meaning unknown, with `user` beside it; wire format 1.1 is unreleased, so the fields
     extend it in place.
 
+20. **The UID in the inventory key** (option 16 again) — rejected for the reasons there.
+21. **A change list beside `new_listeners` (chosen, #305)**: the previous inventory keeps each key's lowest UID and flag, and a compared
+    endpoint whose lowest UID differs or whose `mixed_uids` turns true is listed once with its previous UID, makes the run full, under the
+    new-listener rules (ports compared, the UDP exclusion, 64 and a count). Reporting a flag that turns false was rejected: a user who
+    leaves an endpoint is no signal. Reporting every run while an endpoint is mixed was rejected as the flood the issue names.
+22. **The changed endpoints inside `new_listeners` with a marker** — no new list, but a reader counting new listeners (the backend's
+    marks, the report's "new") would count endpoints that are not new. Rejected.
+
 ## Decision
 
 Options 2, 3, 4, 6, 7, 8, 9 and 11: a collector `connections` in `internal/connstats` reads the four tables and the `fdinfo` files of at
@@ -105,6 +119,9 @@ fields in [Wire format](../areas/wire-format.md).
 For #279, options 13, 15, 16, 17, 18 and 19: listener and connection entries carry the table line's `uid` and its `user` from
 `/etc/passwd`, taken when the line is filed and left out for lines with inode 0, an inventory entry with several UIDs carries the
 lowest and `mixed_uids`; the rules are in [Agent](../areas/agent.md) (*Connections*) and [Wire format](../areas/wire-format.md).
+
+For #305, option 21: a compared endpoint whose socket UID changes is reported in `changed_listeners`; the rules are in
+[Agent](../areas/agent.md) (*The listener check*) and [Wire format](../areas/wire-format.md).
 
 ## Consequences
 
@@ -130,6 +147,9 @@ lowest and `mixed_uids`; the rules are in [Agent](../areas/agent.md) (*Connectio
 - IPv4-mapped addresses stay as the kernel reports them, so one peer can be two `remotes` entries.
 - The backend must be upgraded to read 1.1 before agents send it (wire format, *Versioning*); a 1.0 backend reads the new fields as
   absent.
+- Since #305 a takeover of a known endpoint is reported only through its lowest UID and flag: a third UID that replaces a second while the
+  lowest stays is not seen, and a shared endpoint whose second user comes and goes is reported each time the mixed state begins again,
+  at most once per run; the residuals of the new-listener check (`privileged` under a listener flood, a `none` run as the base) hold for it.
 - The `uid` says whose socket it is, not whose process: a root-created socket held by a `www-data` worker reads root, and a reader
   that wants the process's user takes the process snapshot. Only a holder of `CAP_CHOWN` (or of `CAP_SETUID` before it creates the
   socket) can make a socket show another user's UID. A snapshot without `uid` (a 1.0 agent, an imported `lsof` snapshot) reads as

@@ -51,5 +51,15 @@ public sealed class ListenerReport
     /// </summary>
     public long AgentFindingsTotal { get; init; }
 
+    /// <summary>
+    /// Gets the findings of the agents with changed socket UIDs only.
+    /// </summary>
+    public IReadOnlyList<ListenerFinding> AgentChangeFindings { get; init; } = [];
+
+    /// <summary>
+    /// Gets the total number of findings of the agents with changed socket UIDs only.
+    /// </summary>
+    public long AgentChangeFindingsTotal { get; init; }
+
     #endregion // Properties
 }

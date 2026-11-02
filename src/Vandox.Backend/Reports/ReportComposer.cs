@@ -783,7 +783,7 @@ internal sealed class ReportComposer
                                                                        Number(tally.NotCompared)).ToArray())));
 
         var starts = Ordered(listeners.StartFindings);
-        var found = Ordered(listeners.AgentFindings);
+        var found = Ordered(listeners.AgentFindings.Concat(listeners.AgentChangeFindings));
 
         foreach (var finding in starts)
         {
@@ -795,7 +795,7 @@ internal sealed class ReportComposer
             AddFinding(blocks, finding, WithCode(_text.ListenerAgentFinding, finding.AgentId, Time(finding.CapturedAt), PortsText(finding.Outcome), Number(finding.Listeners.Count + finding.Omitted)));
         }
 
-        var anyNew = starts.Concat(found).Any(finding => IsCompared(finding.Outcome));
+        var anyNew = starts.Concat(found).Any(finding => finding.Listeners.Count + finding.Omitted > 0);
 
         if (anyNew)
         {
@@ -824,6 +824,11 @@ internal sealed class ReportComposer
             blocks.Add(Item(Format(_text.CapAgentFindingsNote, Number(ListenerReport.MaxFindings), Number(listeners.AgentFindingsTotal - listeners.AgentFindings.Count))));
         }
 
+        if (listeners.AgentChangeFindingsTotal > listeners.AgentChangeFindings.Count)
+        {
+            blocks.Add(Item(Format(_text.CapAgentChangeFindingsNote, Number(ListenerReport.MaxFindings), Number(listeners.AgentChangeFindingsTotal - listeners.AgentChangeFindings.Count))));
+        }
+
         if (listeners.AgentsOmitted > 0)
         {
             blocks.Add(Item(Format(_text.CapAgentsNote, Number(ListenerReport.MaxAgents), Number(listeners.AgentsOmitted))));
@@ -838,6 +843,13 @@ internal sealed class ReportComposer
     /// <param name="pieces">The pieces of the finding's line</param>
     private void AddFinding(List<ReportBlock> blocks, ListenerFinding finding, List<ReportPiece> pieces)
     {
+        var changed = finding.ChangedListeners.Count + finding.ChangedOmitted;
+
+        if (changed > 0)
+        {
+            pieces.Add(ReportPiece.Plain(Format(_text.ListenerChanged, Number(changed))));
+        }
+
         blocks.Add(Item(0, pieces.ToArray()));
 
         if (IsCompared(finding.Outcome))
@@ -848,7 +860,36 @@ internal sealed class ReportComposer
             {
                 blocks.Add(Item(1, ReportPiece.Plain(Format(_text.ListenerRest, Number(finding.Omitted)))));
             }
+
+            blocks.AddRange(finding.ChangedListeners.Select(listener => Item(1, ChangedPieces(listener).ToArray())));
+
+            if (finding.ChangedOmitted > 0)
+            {
+                blocks.Add(Item(1, ReportPiece.Plain(Format(_text.ListenerRest, Number(finding.ChangedOmitted)))));
+            }
         }
+    }
+
+    /// <summary>
+    /// Writes the line of a changed listener: the endpoint and PID without the command, the socket UID now and the one before.
+    /// </summary>
+    /// <param name="listener">The changed listener</param>
+    /// <returns>The pieces</returns>
+    private List<ReportPiece> ChangedPieces(ChangedListener listener)
+    {
+        var endpoint = $"{listener.Proto} {listener.Local}";
+
+        var pieces = listener.Pid == 0
+                         ? WithCode(_text.ListenerEntryNoOwner, string.Empty, endpoint)
+                         : [ReportPiece.Plain(Format(_text.ListenerChangedEntry, endpoint, Number(listener.Pid)))];
+
+        pieces.AddRange(UidPieces(listener));
+
+        var before = Format(_text.ListenerBeforeUid, Number(listener.PreviousUid ?? 0));
+
+        pieces.Add(ReportPiece.Plain(listener.PreviousMixedUids ? before + _text.ListenerMixedUids : before));
+
+        return pieces;
     }
 
     /// <summary>
