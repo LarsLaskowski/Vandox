@@ -137,6 +137,9 @@ func (f *File) itemOffset(table []byte, i uint64) uint64 {
 // arraySlot reads the entry offset in item k of the entry array at arr.
 func (f *File) arraySlot(arr, k uint64) (uint64, error) {
 	at := arr + arrayFixed + f.slotWidth*k
+	if err := f.inArena(at, f.slotWidth); err != nil {
+		return 0, err
+	}
 	if f.slotWidth == slotSizeCompact {
 		b := f.scratch[:slotSizeCompact]
 		if err := f.readAt(at, b); err != nil {
@@ -236,8 +239,16 @@ func (f *File) short() error {
 
 // check tests that the length bytes at off are an aligned range inside the arena and the file.
 func (f *File) check(off, length uint64) error {
+	if off%alignment != 0 {
+		return ErrMalformed
+	}
+	return f.inArena(off, length)
+}
+
+// inArena tests that the length bytes at off lie inside the arena and the file.
+func (f *File) inArena(off, length uint64) error {
 	end := off + length
-	if off%alignment != 0 || off < f.hs || end < off || end > f.declEnd {
+	if off < f.hs || end < off || end > f.declEnd {
 		return ErrMalformed
 	}
 	if end > f.fileSize {

@@ -933,7 +933,8 @@ default) the payload starts at byte 72, so a data object is at least 72 bytes, a
 offsets of 4 bytes. The tail fields the compact layout adds to the header and to data objects are not read. Any other file — a
 journal without keyed hashes, one with an unknown incompatible flag, a file shorter than 256 bytes — is refused as `unsupported
 layout`; a file whose `COMPACT` flag differs when its header is read again is `malformed file`. Before anything is decoded, every
-offset must be 8-aligned and inside the header's arena and the file, and every object at least its fixed size and end there; hash
+offset must be 8-aligned and inside the header's arena and the file (every item of an entry array and every link to the next array is
+read only inside the arena and the file, also from the array a cursor kept across a re-read of the header), and every object at least its fixed size and end there; hash
 chains and entry-array chains are followed only to strictly larger offsets, a hash chain for at most 65,536 objects and an
 entry-array chain for at most 64 arrays; an entry has at most 512 items. A violation is `malformed file`. An object that lies beyond
 the end of an archived or set-aside file is a **torn tail**: the file ends there. The same in the online file is `malformed file`,
