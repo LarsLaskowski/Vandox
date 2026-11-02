@@ -23,4 +23,4 @@ are quoted in full.
 | 2026-11-02 12:42 | 4 Skeleton G2 | Dev | RESULT: DONE; Go builds, compare returns nil changed stub (sonnet/medium · 4,840 tokens · 4 tool uses · 27 s · continued from 4 Skeleton G1) |
 | 2026-11-02 12:44 | 5 Tests first G2 | Tester | RESULT: DONE; tests compile and fail on skeleton (one guard passes already) (sonnet/medium · 51,784 tokens · 11 tool uses · 146 s · continued from 5 Tests first G1) |
 | 2026-11-02 12:51 | 6 Implement G2 (fresh launch) | Dev | RESULT: DONE; AC1-AC5 in connstats, Go tests green, coverage 93/93 new lines; analyzer: gocognit 29 in snapshot_test.go:56 (Tester's test) (sonnet/medium · 87,301 tokens · 10 tool uses · 361 s) |
-| 2026-11-02 12:52 | 6 Implement G2 (analyzer fix of test) | Tester | RESULT: DONE; gocognit finding in snapshot_test.go fixed by splitting into four tests; analyzer gate Go clean (sonnet/medium · usage pending) |
+| 2026-11-02 12:52 | 6 Implement G2 (analyzer fix of test) | Tester | RESULT: DONE; gocognit finding in snapshot_test.go fixed by splitting into four tests; analyzer gate Go clean (sonnet/medium · 2,965 tokens · 2 tool uses · 80 s · continued from 5 Tests first G1) |
