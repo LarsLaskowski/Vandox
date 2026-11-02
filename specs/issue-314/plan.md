@@ -213,3 +213,19 @@ request anything the token check did not already grant.
 - Kestrel's server-wide keep-alive and header timeout stay as they are; a per-listener timeout is not needed by the chosen option.
 - A log line or metric for connections refused or evicted by the cap: none today, none added (a peer-controlled volume); no
   follow-up issue.
+
+## Challenge notes
+
+Devil's Advocate, plan round: no major objections; minor objections, verbatim:
+
+1. The new item key must not reuse the listener-label key. `src/Vandox.Backend/Hosting/ListenerRoutes.cs:18` already defines `ItemName = "vandox.listener"`, and `PortRoutingMiddleware.cs:63` routes on it. Give `ConnectionCap.ItemName` its own string; never write the `CappedConnection` under `ListenerRoutes.ItemName`. Tester: assert in the AC5 test, or a unit test, that both items are present on an ingest connection.
+2. The residual is worded too narrowly. A peer that keeps opening connections faster than 16 per agent round trip keeps an agent that has no trusted connection out until it stops. A connection the agent already holds is not affected. The cost to the peer is a constant connect rate instead of 16 idle connections. State the residual this way in record 0126 and the area text.
+3. Do not add any claim about how long an idle, never-requesting connection lives to the area text or record 0126 unless the AC5 test measures it.
+
+## Security notes
+
+Security, plan round: APPROVED, no blocking findings. Non-blocking, verbatim in substance:
+
+1. Fact 11 is confirmed by measurement (`ConnectionContext.Abort()` from another connection's middleware closed idle, partial-header and keep-alive connections within 0-16 ms; 2000 back-to-back connections left 16 live handlers). Keep the Tester's AC5 test as the regression pin.
+2. The residual undersells the loss rate (about 58% of fresh connections evicted before their token check under a local flood of about 11.8k conn/s). Suggested wording for record 0126 and `docs/areas/backend-host.md`: "a sustained connection flood can delay the agent's first connection (after a start or a lost connection) until one attempt wins the race; it cannot evict a connection the agent has used".
+3. Fact 4 is not load-bearing and may stay unverified.
