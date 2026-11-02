@@ -190,7 +190,7 @@ public class ListenerMarkWriterTests
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
         var few = ListenerSamples.FoundChanges("all", [ListenerSamples.Changed("0.0.0.0", 3306, 1001, 110), ListenerSamples.Changed("0.0.0.0", 8443, 0, 1001)], 2);
         var many = ListenerSamples.FoundChanges("privileged", [.. Enumerable.Range(0, 100).Select(index => ListenerSamples.Changed("10.0.0.1", 1000 + index, 1001, 110))], 5);
-        var none = ListenerSamples.FoundChanges("none", [ListenerSamples.Changed("0.0.0.0", 3306, 1001, 110)], 0);
+        var none = ListenerSamples.Snapshot("none", "all", ListenerSamples.Tcp("0.0.0.0", 22));
 
         // Act
         await store.WriteBatchAsync(ListenerSamples.Batch(Agent, ListenerSamples.Record(1, 0, few), ListenerSamples.Record(2, 60, many), ListenerSamples.Record(3, 120, none)), TestContext.CancellationToken);
@@ -220,10 +220,10 @@ public class ListenerMarkWriterTests
         var start = ListenerSamples.Snapshot("start", "all", ListenerSamples.Owned("0.0.0.0", 3306, 1001, "alice", pid: 42, command: "evil"));
 
         // Act
-        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, ListenerSamples.Record(1, 0, baseline), ListenerSamples.Record(2, 60, found), ListenerSamples.Record(3, 120, start)), TestContext.CancellationToken);
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, ListenerSamples.Record(1, 0, baseline), ListenerSamples.Record(2, 60, start), ListenerSamples.Record(3, 120, found)), TestContext.CancellationToken);
 
-        var mark = await ReadValueAsync(directory, "SELECT changed_listeners FROM connection_marks WHERE seq = 2");
-        var comparison = await ReadValueAsync(directory, "SELECT changed_listeners FROM listener_comparisons WHERE seq = 3");
+        var mark = await ReadValueAsync(directory, "SELECT changed_listeners FROM connection_marks WHERE seq = 3");
+        var comparison = await ReadValueAsync(directory, "SELECT changed_listeners FROM listener_comparisons WHERE seq = 2");
 
         // Assert
         foreach (var (name, text) in new[] { ("mark", mark), ("comparison", comparison) })
