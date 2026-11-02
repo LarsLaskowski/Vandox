@@ -3,7 +3,7 @@
 Source: Issue #305 | [spec.md](spec.md)
 Status: Revised (1)
 Tier: standard — a new detection signal from the agent through the wire format, storage and the forensics report; it creates, changes or removes no security control (no guard decides what anyone may reach, and the report text keeps the existing escaping).
-Security areas touched: 10. Parsing of external input (the new `connection_snapshot` fields and their validation in `internal/model` and `Vandox.Core.Model.ConnectionSnapshot`/`ChangedListener`; stored lists decoded by `ListenerQueries`); 12. Logging and display of external data (the changed-endpoint line of the *New listeners* section: the user name stays a code span cut to 32 bytes, no command is shown); 3. Web UI login (the report page's memory per circuit, a figure `.squad/project.md` states, grows by about 12 MB).
+Security areas touched: 10. Parsing of external input (the new `connection_snapshot` fields and their validation in `internal/model` and `Vandox.Core.Model.ConnectionSnapshot`/`ChangedListener`; stored lists decoded by `ListenerQueries`); 12. Logging and display of external data (the changed-endpoint line of the *New listeners* section: the user name stays a code span cut to 32 bytes, no command is shown); 3. Web UI login (the report page's memory per circuit, a figure `.squad/project.md` states, grows by about 14 MB).
 
 ## Problem / root cause
 
@@ -27,8 +27,8 @@ keys up in a set; `src/Vandox.Core/Reports/ListenerComparer.cs:87-88` does the s
 | 11 | Wire format 1.1 and records 0115/0116 are unreleased | `git ls-remote --tags origin`: only `v0.1.0`; `git ls-tree v0.1.0 docs/decisions/` holds neither record; wire-format.md line 402-409 | confirmed |
 | 12 | The payload JSON options are reflection-based (`DefaultJsonTypeInfoResolver`), case-insensitive, so a derived listener type needs no registration | `src/Vandox.Core/Model/PayloadRegistry.cs:34-47` | confirmed |
 | 13 | A user name on the page costs at most about 3 KiB with its runs, a command about 22.9 KiB | `docs/areas/web-ui.md:395-396`, `LogTextRunsOfAlternatingShortNameRetainBoundedHeap` | confirmed |
-| 14 | The new section bound is about 80 MB per circuit (68 MB today + 3,840 changed lines of at most about 3.2 KiB) | to verify: computed from fact 13, (20 + 20 + 20) findings x 64 changed lines x about 3.2 KiB = about 12 MB; the Dev recomputes it against the built line (PID, UID text, previous UID) in step 6 and writes the figure into `docs/areas/web-ui.md` and `.squad/project.md` | unverified |
-| 15 | The listener section kept by the run grows from about 11 MB to about 20 MB: a stored changed entry with an empty command is at most about 2.2 KB decoded (a user name of 1,024 bytes as UTF-16 plus fields), 64 per finding about 140 KB; 40 findings of about 420 KB and 20 change-only of about 140 KB | to verify: computed from `docs/areas/detection-and-reports.md:677-679` (about 280 KB per finding of 64 entries with command and user); the Dev recomputes it against the built types in step 6 and writes it into *Limits of the report* and `.squad/project.md` line 72 | unverified |
+| 14 | The new section bound is about 82 MB per circuit (68 MB today + 3,840 changed lines of at most about 3.6 KiB) | Recomputed by the Dev against the built line in step 6: the measured user-name bound of fact 13 (3 KiB) plus about 0.6 KiB computed for the endpoint, PID, UID and before texts, (20 + 20 + 20) findings x 64 lines = about 14 MB; stated as computed, not measured as a whole, in `docs/areas/web-ui.md` and `.squad/project.md` (computed from measured per-text bounds) | confirmed |
+| 15 | The listener section kept by the run grows from about 11 MB to about 20 MB: a stored changed entry with an empty command is at most about 2.2 KB decoded, 64 per finding about 140 KB; 40 findings of about 420 KB and 20 change-only of about 140 KB | Recomputed by the Dev against the built types in step 6 (`SerializeChangedListeners` empties the command, pinned by `ListenerMarkWriterStoresChangedListenersWithoutCommand`); stated as computed, not measured as a whole, in *Limits of the report*, `docs/areas/web-ui.md`, `README.md` and `.squad/project.md` (computed from the stored bounds) | confirmed |
 
 ## Acceptance criteria
 
@@ -238,7 +238,7 @@ Owner: Dev, after the code is green, against the code.
 ## Architecture check
 
 The agent adds no right, no read and no log line; the record stays within its budget; the decoders keep their limits. Two stated memory
-figures of the report grow and are restated in the same pull request: the page by about 12 MB per circuit (fact 14) and the run's listener
+figures of the report grow and are restated in the same pull request: the page by about 14 MB per circuit (fact 14) and the run's listener
 section from about 11 MB to about 20 MB (fact 15), both bounded by fixed caps (64 entries, 20 findings per kind); no guarantee of
 `.squad/project.md` changes in kind, only these figures. Records 0115 and 0116 are extended and linked from `docs/ARCHITECTURE.md` as today.
 
