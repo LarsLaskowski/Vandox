@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Connections;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Vandox.Backend.Ingest;
 
@@ -7,6 +9,15 @@ namespace Vandox.Backend.Ingest;
 /// </summary>
 internal sealed class ConnectionCap
 {
+    #region Constants
+
+    /// <summary>
+    /// The name of the connection item that holds the <see cref="CappedConnection"/>.
+    /// </summary>
+    internal const string ItemName = "vandox.ingest.connection";
+
+    #endregion // Constants
+
     #region Fields
 
     /// <summary>
@@ -35,6 +46,18 @@ internal sealed class ConnectionCap
     #endregion // Constructors
 
     #region Methods
+
+    /// <summary>
+    /// Marks the connection of a request as trusted: a request on it passed the token check.
+    /// </summary>
+    /// <param name="context">The request context</param>
+#pragma warning disable RH2003, S2325
+    internal static void Trust(HttpContext context)
+    {
+        throw new NotImplementedException();
+    }
+
+#pragma warning restore RH2003, S2325
 
     /// <summary>
     /// Wraps the rest of the connection pipeline with the count.
