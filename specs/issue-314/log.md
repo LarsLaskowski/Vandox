@@ -16,3 +16,4 @@ are quoted in full.
 | 2026-11-02 20:59 | 6 Implement (documentation) | Dev | Documentation written: backend-host, network model, project.md, ListenerRoutes summary, record 0126 residual wording (sonnet/medium · 7,628 tokens · 5 tool uses · 158 s · continued from 6 Implement) |
 | 2026-11-02 20:59 | 7 Code check | Orchestrator | main unmoved; Format 0 of 782 changed; analyzer gate (vet+golangci-lint) PASS; scope-check PASS on 13 files; build/tests green at head |
 | 2026-11-02 21:00 | 8 Review (diff) | Security | APPROVED at 2ecc961, no findings (opus/medium · 39,830 tokens · 5 tool uses · 49 s) |
+| 2026-11-02 21:07 | 8 Review round 1 | Reviewer | BLOCKING 1 (AC5 test ServeIngestFullListenerEvictsTheOldestUntrustedConnection flaky: connection 1 sends nothing, admission order not guaranteed; fix: connection 1 also does the GET /healthz exchange), NON-BLOCKING 0 (opus/medium · 63,982 tokens · 19 tool uses · 500 s) |
