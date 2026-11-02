@@ -66,19 +66,37 @@ func compare(prev, cur *inventory) (check model.ListenerCheck, added []listenerK
 	if prev.cut || cur.cut {
 		check = model.ListenerCheckPrivileged
 	}
-	known := make(map[listenerKey]struct{}, len(prev.keys))
-	for _, k := range prev.keys {
-		known[k] = struct{}{}
+	known := make(map[listenerKey]int, len(prev.keys))
+	for i, k := range prev.keys {
+		known[k] = i
 	}
-	for _, k := range cur.keys {
-		if check == model.ListenerCheckPrivileged && k.port >= PrivilegedPorts {
+	for i, k := range cur.keys {
+		if (check == model.ListenerCheckPrivileged && k.port >= PrivilegedPorts) || !reportable(k) {
 			continue
 		}
-		if _, ok := known[k]; !ok && reportable(k) {
+		j, ok := known[k]
+		switch {
+		case !ok:
 			added = append(added, k)
+		case uidChanged(uidAt(prev, j), uidAt(cur, i)):
+			changed = append(changed, uidChange{key: k, before: uidAt(prev, j)})
 		}
 	}
-	return check, added, nil
+	return check, added, changed
+}
+
+// uidAt returns the socket UIDs of entry i of inv, unknown when inv carries none.
+func uidAt(inv *inventory, i int) socketUIDs {
+	if i < len(inv.uids) {
+		return inv.uids[i]
+	}
+	return socketUIDs{}
+}
+
+// uidChanged reports whether an endpoint with the UIDs before in the previous run and now in this one changed: both are known and
+// the lowest UID differs or the endpoint turned mixed.
+func uidChanged(before, now socketUIDs) bool {
+	return before.known && now.known && (before.uid != now.uid || (now.mixed && !before.mixed))
 }
 
 // cutInPrivilegedPart reports whether a cut inventory keeps only privileged keys, so it was cut inside the privileged part.

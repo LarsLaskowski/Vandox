@@ -132,7 +132,7 @@ func (c *Connections) Collect(ctx context.Context, run scheduler.Run) ([]model.R
 
 	cur := col.inventory()
 	check, added, changed := compare(prev, cur)
-	full := run.Pressure || run.Trigger != nil || prev == nil || len(added) > 0
+	full := run.Pressure || run.Trigger != nil || prev == nil || len(added) > 0 || len(changed) > 0
 	snap := buildSnapshot(col, res, check, added, changed, full)
 	snap.Trigger = snapshotTrigger(run.Trigger)
 
@@ -239,10 +239,12 @@ func tableList(mask uint8) []model.Proto {
 func (col *collection) inventory() *inventory {
 	entries := col.listeners.sorted()
 	keys := make([]listenerKey, len(entries))
+	uids := make([]socketUIDs, len(entries))
 	for i := range entries {
 		keys[i] = entries[i].key
+		uids[i] = socketUIDs{uid: entries[i].uid, known: entries[i].hasUID, mixed: entries[i].mixedUIDs}
 	}
-	return &inventory{keys: keys, cut: col.listeners.cut, skipped: col.badLines > 0, tables: col.read}
+	return &inventory{keys: keys, uids: uids, cut: col.listeners.cut, skipped: col.badLines > 0, tables: col.read}
 }
 
 // commit keeps the inventory and writes the log lines of a run, unless the run's context has ended: a run that is late keeps
