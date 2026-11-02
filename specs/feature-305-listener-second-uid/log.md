@@ -18,3 +18,4 @@ are quoted in full.
 | 2026-11-02 12:09 | 3 Plan security review (round 2) | Security | APPROVED; non-blocking: empty Command is still serialized as "command":"" (plan claim wrong, test must agree) (opus/medium · 35,531 tokens · 10 tool uses · 81 s) |
 | 2026-11-02 12:10 | 3 Plan revise round (2) | Lead | RESULT: DONE; command emptied (not omitted) in stored changes, test and docs aligned (opus/medium · 2,763 tokens · 3 tool uses · 44 s · continued) |
 | 2026-11-02 12:13 | 4 Skeleton G1 | Dev | RESULT: DONE; Go and C# build, formatted (sonnet/medium · 72,945 tokens · 9 tool uses · 156 s) |
+| 2026-11-02 12:23 | 5 Tests first G1 | Tester | RESULT: DONE; Go and C# tests compile and fail on skeleton (25 C# failures, Go rejection cases); golden batch and decoder cases S58-S77 added (sonnet/medium · 134,975 tokens · 30 tool uses · 563 s) |

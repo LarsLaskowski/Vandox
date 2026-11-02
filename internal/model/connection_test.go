@@ -462,3 +462,98 @@ func TestConnectionSnapshot_Validate_SocketUser(t *testing.T) {
 		})
 	}
 }
+
+func validChangedListeners() []model.ChangedListener {
+	return []model.ChangedListener{{
+		Listener:    model.Listener{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:3306"), PID: 4242, Command: "mariadbd", UID: ptr(uint32(1001)), User: "alice"},
+		PreviousUID: ptr(uint32(110)),
+	}}
+}
+
+func TestConnectionSnapshot_ChangedListenersValidation(t *testing.T) {
+	const (
+		checkNeeded = "must be all or privileged when changed listeners are reported"
+		required    = "required"
+	)
+	withList := func(check model.ListenerCheck) func(p *model.ConnectionSnapshot) {
+		return func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.ChangedListeners = check, validChangedListeners()
+		}
+	}
+	withEntry := func(change func(e *model.ChangedListener)) func(p *model.ConnectionSnapshot) {
+		return func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.ChangedListeners = model.ListenerCheckAll, validChangedListeners()
+			change(&p.ChangedListeners[0])
+		}
+	}
+	rejected := []struct {
+		name   string
+		mutate func(p *model.ConnectionSnapshot)
+		field  string
+		reason string
+	}{
+		{"list with check none", withList(model.ListenerCheckNone), "listener_check", checkNeeded},
+		{"list with check start", withList(model.ListenerCheckStart), "listener_check", checkNeeded},
+		{"list without check", withList(""), "listener_check", checkNeeded},
+		{"omitted count with check none", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.ChangedListenersOmitted = model.ListenerCheckNone, 1
+		}, "listener_check", checkNeeded},
+		{"omitted count with check start", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.ChangedListenersOmitted = model.ListenerCheckStart, 1
+		}, "listener_check", checkNeeded},
+		{"omitted count without check", func(p *model.ConnectionSnapshot) { p.ChangedListenersOmitted = 1 }, "listener_check", checkNeeded},
+		{"entry without uid", withEntry(func(e *model.ChangedListener) { e.UID = nil; e.User = "" }), "changed_listeners[0].uid", required},
+		{"entry without previous uid", withEntry(func(e *model.ChangedListener) { e.PreviousUID = nil }), "changed_listeners[0].previous_uid", required},
+		{"previous mixed flag without previous uid", withEntry(func(e *model.ChangedListener) {
+			e.PreviousUID, e.PreviousMixedUIDs = nil, true
+		}), "changed_listeners[0].previous_uid", required},
+		{"second entry without previous uid", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck = model.ListenerCheckAll
+			p.ChangedListeners = append(validChangedListeners(), validChangedListeners()[0])
+			p.ChangedListeners[1].PreviousUID = nil
+		}, "changed_listeners[1].previous_uid", required},
+		{"entry proto unknown", withEntry(func(e *model.ChangedListener) { e.Proto = "sctp" }), "changed_listeners[0].proto", "unknown value"},
+		{"entry local invalid", withEntry(func(e *model.ChangedListener) { e.Local = netip.AddrPort{} }), "changed_listeners[0].local", "invalid address"},
+		{"entry pid negative", withEntry(func(e *model.ChangedListener) { e.PID = -1 }), "changed_listeners[0].pid", "must not be negative"},
+		{"entry command too long", withEntry(func(e *model.ChangedListener) {
+			e.Command = strings.Repeat("c", model.MaxShortTextBytes+1)
+		}), "changed_listeners[0].command", ""},
+		{"entry user too long", withEntry(func(e *model.ChangedListener) {
+			e.User = strings.Repeat("u", model.MaxShortTextBytes+1)
+		}), "changed_listeners[0].user", "too long"},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validConnectionSnapshot()
+			tc.mutate(p)
+			fe := fieldErrorOf(t, p.Validate(), tc.field)
+			if tc.reason != "" && fe.Reason != tc.reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, tc.reason)
+			}
+		})
+	}
+	accepted := []struct {
+		name   string
+		mutate func(p *model.ConnectionSnapshot)
+	}{
+		{"list with check all", withList(model.ListenerCheckAll)},
+		{"list with check privileged", withList(model.ListenerCheckPrivileged)},
+		{"omitted count with check privileged", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.ChangedListenersOmitted = model.ListenerCheckPrivileged, 5
+		}},
+		{"previous uid 0 and both mixed flags", withEntry(func(e *model.ChangedListener) {
+			e.PreviousUID, e.PreviousMixedUIDs, e.MixedUIDs = ptr(uint32(0)), true, true
+		})},
+		{"largest uids", withEntry(func(e *model.ChangedListener) {
+			e.UID, e.PreviousUID = ptr(uint32(4294967295)), ptr(uint32(4294967295))
+		})},
+		{"no owner and no command", withEntry(func(e *model.ChangedListener) { e.PID, e.Command = 0, "" })},
+	}
+	for _, tc := range accepted {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validConnectionSnapshot()
+			tc.mutate(p)
+			requireValid(t, p)
+		})
+	}
+}

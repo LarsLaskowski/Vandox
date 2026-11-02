@@ -508,7 +508,7 @@ public class BatchDecoderTests
         }
 
         // Assert
-        Assert.AreEqual(18, checkedLists, "lists in the golden batch");
+        Assert.AreEqual(19, checkedLists, "lists in the golden batch");
         Assert.IsEmpty(mismatches, string.Join("; ", mismatches));
     }
 

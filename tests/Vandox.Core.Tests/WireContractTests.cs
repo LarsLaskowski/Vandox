@@ -359,6 +359,17 @@ public class WireContractTests
         Assert.AreEqual((uint?)105, full.NewListeners[0].Uid, "full: new listener uid");
         Assert.AreEqual("avahi", full.NewListeners[0].User, "full: new listener user");
         Assert.IsTrue(full.NewListeners[0].MixedUids, "full: new listener mixed_uids");
+        Assert.IsNotNull(full.ChangedListeners, "full: changed_listeners");
+        Assert.HasCount(1, full.ChangedListeners, "full: changed listeners");
+        Assert.AreEqual("0.0.0.0:3306", full.ChangedListeners[0].Local?.ToString(), "full: changed listener local");
+        Assert.AreEqual(4242, full.ChangedListeners[0].Pid, "full: changed listener pid");
+        Assert.AreEqual((uint?)1001, full.ChangedListeners[0].Uid, "full: changed listener uid");
+        Assert.AreEqual("alice", full.ChangedListeners[0].User, "full: changed listener user");
+        Assert.IsTrue(full.ChangedListeners[0].MixedUids, "full: changed listener mixed_uids");
+        Assert.AreEqual((uint?)110, full.ChangedListeners[0].PreviousUid, "full: changed listener previous_uid");
+        Assert.IsTrue(full.ChangedListeners[0].PreviousMixedUids, "full: changed listener previous_mixed_uids");
+        Assert.AreEqual(1u, full.ChangedListenersOmitted, "full: changed_listeners_omitted");
+        Assert.IsNull(snapshots[1].ChangedListeners, "aggregates: no changed_listeners");
 
         var aggregatesListeners = snapshots[1].Listeners;
         var startListeners = snapshots[2].Listeners;

@@ -1805,6 +1805,268 @@
       }
     },
     {
+      "name": "S58 changed listener with previous uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":110}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S59 changed listener with both mixed flags and uid 0",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":0,\"user\":\"root\",\"previous_uid\":0,\"mixed_uids\":true,\"previous_mixed_uids\":true}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S60 changed listeners omitted 0 reads as absent",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"changed_listeners_omitted\":0}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S61 changed listeners and omitted count null read as absent",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"changed_listeners\":null,\"changed_listeners_omitted\":null}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S62 changed listeners omitted count with check privileged",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"privileged\",\"changed_listeners_omitted\":3}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S63 changed listeners omitted negative",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners_omitted\":-1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S64 changed listeners omitted above uint32",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners_omitted\":4294967296}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S65 changed listener previous uid minus one",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":-1}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S66 changed listener previous uid as string",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":\"110\"}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S67 changed listeners with check none",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"none\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":110}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listener_check",
+        "reason": "must be all or privileged when changed listeners are reported"
+      }
+    },
+    {
+      "name": "S68 changed listeners with check start",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"start\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":110}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listener_check",
+        "reason": "must be all or privileged when changed listeners are reported"
+      }
+    },
+    {
+      "name": "S69 changed listeners without check",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":110}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listener_check",
+        "reason": "must be all or privileged when changed listeners are reported"
+      }
+    },
+    {
+      "name": "S70 changed listeners omitted count with check none",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"none\",\"changed_listeners_omitted\":1}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listener_check",
+        "reason": "must be all or privileged when changed listeners are reported"
+      }
+    },
+    {
+      "name": "S71 changed listeners omitted count without check",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"changed_listeners_omitted\":1}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listener_check",
+        "reason": "must be all or privileged when changed listeners are reported"
+      }
+    },
+    {
+      "name": "S72 changed listener without uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"previous_uid\":110}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.changed_listeners[0].uid",
+        "reason": "required"
+      }
+    },
+    {
+      "name": "S73 changed listener without previous uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\"}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.changed_listeners[0].previous_uid",
+        "reason": "required"
+      }
+    },
+    {
+      "name": "S74 changed listener previous mixed flag without previous uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_mixed_uids\":true}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.changed_listeners[0].previous_uid",
+        "reason": "required"
+      }
+    },
+    {
+      "name": "S75 changed listener proto unknown",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"sctp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":110}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.changed_listeners[0].proto",
+        "reason": "unknown value"
+      }
+    },
+    {
+      "name": "S76 changed listener pid negative",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":-1,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":110}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.changed_listeners[0].pid",
+        "reason": "must not be negative"
+      }
+    },
+    {
+      "name": "S77 second changed listener without previous uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"changed_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\",\"previous_uid\":110},{\"proto\":\"tcp\",\"local\":\"0.0.0.0:3306\",\"pid\":4242,\"command\":\"mariadbd\",\"uid\":1001,\"user\":\"alice\"}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.changed_listeners[1].previous_uid",
+        "reason": "required"
+      }
+    },
+    {
       "name": "G1 twenty garbage bytes after the member",
       "lines": [
         "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",

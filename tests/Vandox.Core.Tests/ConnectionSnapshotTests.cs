@@ -19,6 +19,11 @@ public class ConnectionSnapshotTests
     /// </summary>
     private const string CheckNeeded = "must be all or privileged when new listeners are reported";
 
+    /// <summary>
+    /// The reason of a changed listener list or count without a listener check.
+    /// </summary>
+    private const string ChangedCheckNeeded = "must be all or privileged when changed listeners are reported";
+
     #endregion // Constants
 
     #region Methods
@@ -301,6 +306,131 @@ public class ConnectionSnapshotTests
 
         // Assert
         Assert.IsNotNull(exception, "the payload is refused");
+    }
+
+    /// <summary>
+    /// A changed listener list or count needs a listener check of all or privileged, and every entry needs its current and its previous UID.
+    /// </summary>
+    /// <param name="json">The payload</param>
+    /// <param name="field">The expected field</param>
+    /// <param name="reason">The expected reason</param>
+    [TestMethod]
+    [DataRow("""{"complete":true,"listener_check":"none","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","uid":1001,"previous_uid":110}]}""", "listener_check", ChangedCheckNeeded)]
+    [DataRow("""{"complete":true,"listener_check":"start","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","uid":1001,"previous_uid":110}]}""", "listener_check", ChangedCheckNeeded)]
+    [DataRow("""{"complete":true,"changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","uid":1001,"previous_uid":110}]}""", "listener_check", ChangedCheckNeeded)]
+    [DataRow("""{"complete":true,"listener_check":"none","changed_listeners_omitted":1}""", "listener_check", ChangedCheckNeeded)]
+    [DataRow("""{"complete":true,"listener_check":"start","changed_listeners_omitted":1}""", "listener_check", ChangedCheckNeeded)]
+    [DataRow("""{"complete":true,"changed_listeners_omitted":1}""", "listener_check", ChangedCheckNeeded)]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","previous_uid":110}]}""", "changed_listeners[0].uid", "required")]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","uid":1001}]}""", "changed_listeners[0].previous_uid", "required")]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","uid":1001,"previous_mixed_uids":true}]}""", "changed_listeners[0].previous_uid", "required")]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","uid":1001,"previous_uid":110},{"proto":"tcp","local":"0.0.0.0:8443","uid":1001}]}""", "changed_listeners[1].previous_uid", "required")]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"sctp","local":"0.0.0.0:3306","uid":1001,"previous_uid":110}]}""", "changed_listeners[0].proto", "unknown value")]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","uid":1001,"previous_uid":110}]}""", "changed_listeners[0].local", "invalid address")]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","pid":-1,"uid":1001,"previous_uid":110}]}""", "changed_listeners[0].pid", "must not be negative")]
+    public void ConnectionSnapshotValidateChangedListenersRejectsBrokenEntries(string json, string field, string reason)
+    {
+        // Arrange
+        var snapshot = Parse(json);
+
+        // Act
+        var error = snapshot.Validate();
+
+        // Assert
+        Assert.IsNotNull(error, "a broken changed listener rule is refused");
+        Assert.AreEqual(field, error.Field, "field");
+        Assert.AreEqual(reason, error.Reason, "reason");
+    }
+
+    /// <summary>
+    /// A changed listener user over the short-text limit is refused with the field of the entry.
+    /// </summary>
+    [TestMethod]
+    public void ConnectionSnapshotValidateChangedListenersRefusesATooLongUser()
+    {
+        // Arrange
+        var tooLong = new string('u', ModelLimits.MaxShortTextBytes + 1);
+        var snapshot = Parse($$"""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","uid":1001,"user":"{{tooLong}}","previous_uid":110}]}""");
+
+        // Act
+        var error = snapshot.Validate();
+
+        // Assert
+        Assert.IsNotNull(error, "a user over the limit is refused");
+        Assert.AreEqual("changed_listeners[0].user", error.Field, "field");
+        Assert.AreEqual("too long", error.Reason, "reason");
+    }
+
+    /// <summary>
+    /// A changed listener list with a valid check, current UID and previous UID is accepted, UID 0 and the largest UID included.
+    /// </summary>
+    /// <param name="json">The payload</param>
+    [TestMethod]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","pid":4242,"command":"mariadbd","uid":1001,"user":"alice","previous_uid":110}]}""")]
+    [DataRow("""{"complete":true,"listener_check":"privileged","changed_listeners":[{"proto":"udp","local":"0.0.0.0:5353","uid":107,"mixed_uids":true,"previous_uid":107}]}""")]
+    [DataRow("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":4294967295,"previous_uid":0,"previous_mixed_uids":true}]}""")]
+    [DataRow("""{"complete":true,"listener_check":"privileged","changed_listeners_omitted":5}""")]
+    [DataRow("""{"complete":true,"changed_listeners_omitted":0}""")]
+    [DataRow("""{"complete":true,"changed_listeners":null,"changed_listeners_omitted":null}""")]
+    public void ConnectionSnapshotValidateChangedListenersAcceptsValidEntries(string json)
+    {
+        // Arrange
+        var snapshot = Parse(json);
+
+        // Act
+        var error = snapshot.Validate();
+
+        // Assert
+        Assert.IsNull(error, $"the changed listener rules allow {json}, got {error?.Field}: {error?.Reason}");
+    }
+
+    /// <summary>
+    /// A snapshot without the changed listener fields reads as having no changes and writes none.
+    /// </summary>
+    /// <param name="json">The payload that was read</param>
+    [TestMethod]
+    [DataRow("""{"complete":true}""")]
+    [DataRow("""{"complete":true,"listener_check":"all","new_listeners":[{"proto":"tcp","local":"0.0.0.0:23"}]}""")]
+    [DataRow("""{"complete":true,"changed_listeners":null,"changed_listeners_omitted":0}""")]
+    public void ConnectionSnapshotDeserializeWithoutChangedListenersHasNone(string json)
+    {
+        // Arrange
+        var snapshot = Parse(json);
+
+        // Act
+        var written = JsonNode.Parse(PayloadRegistry.Serialize(snapshot))?.AsObject();
+
+        // Assert
+        Assert.IsTrue(snapshot.ChangedListeners is null or { Count: 0 }, "no changed listeners are read");
+        Assert.AreEqual(0u, snapshot.ChangedListenersOmitted, "no omitted count is read");
+        Assert.IsNotNull(written, "the payload is written as an object");
+        Assert.IsFalse(written.ContainsKey("changed_listeners"), "changed_listeners is not written");
+        Assert.IsFalse(written.ContainsKey("changed_listeners_omitted"), "changed_listeners_omitted is not written");
+    }
+
+    /// <summary>
+    /// A changed listener keeps its listener fields and its previous UID through a read and a write.
+    /// </summary>
+    [TestMethod]
+    public void ConnectionSnapshotSerializeKeepsTheChangedListenerFields()
+    {
+        // Arrange
+        var snapshot = Parse("""{"complete":true,"listener_check":"all","changed_listeners":[{"proto":"tcp","local":"0.0.0.0:3306","pid":4242,"command":"mariadbd","uid":1001,"user":"alice","mixed_uids":true,"previous_uid":0,"previous_mixed_uids":true}],"changed_listeners_omitted":2}""");
+
+        // Act
+        var written = JsonNode.Parse(PayloadRegistry.Serialize(snapshot))?.AsObject();
+
+        // Assert
+        Assert.IsNotNull(written, "the payload is written as an object");
+
+        var entry = written["changed_listeners"]![0]!.AsObject();
+
+        Assert.AreEqual(1001, (int)entry["uid"]!, "uid");
+        Assert.AreEqual("alice", (string)entry["user"]!, "user");
+        Assert.IsTrue((bool)entry["mixed_uids"]!, "mixed_uids");
+        Assert.AreEqual(0, (int)entry["previous_uid"]!, "previous_uid 0 is written");
+        Assert.IsTrue((bool)entry["previous_mixed_uids"]!, "previous_mixed_uids");
+        Assert.AreEqual(2, (int)written["changed_listeners_omitted"]!, "changed_listeners_omitted");
     }
 
     /// <summary>

@@ -1116,8 +1116,8 @@ func TestDecoder_NullReadsAsAbsentKey(t *testing.T) {
 func TestDecoder_NullListElementReadsAsEmptyObject(t *testing.T) {
 	lines := goldenLines(t)
 	_, elements := goldenVariants(t, lines)
-	if len(elements) != 18 {
-		t.Fatalf("golden batch has %d lists of objects, want 18", len(elements))
+	if len(elements) != 19 {
+		t.Fatalf("golden batch has %d lists of objects, want 19", len(elements))
 	}
 	for _, v := range elements {
 		requireSameOutcome(t, v, lines, "{}", ptr("null"), ptr("{}"))
