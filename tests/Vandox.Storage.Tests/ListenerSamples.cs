@@ -57,6 +57,70 @@ internal static class ListenerSamples
     }
 
     /// <summary>
+    /// Creates a TCP listener with its owner and socket UID.
+    /// </summary>
+    /// <param name="address">The local address</param>
+    /// <param name="port">The local port</param>
+    /// <param name="uid">The socket UID</param>
+    /// <param name="user">The user name of the UID</param>
+    /// <param name="mixed">Whether sockets of several UIDs share the endpoint</param>
+    /// <param name="pid">The PID of the owner, or 0</param>
+    /// <param name="command">The command of the owner</param>
+    /// <returns>The listener</returns>
+    internal static Listener Owned(string address, int port, uint uid, string user, bool mixed = false, int pid = 0, string command = "")
+    {
+        var listener = Tcp(address, port, pid, command);
+
+        listener.Uid = uid;
+        listener.User = user;
+        listener.MixedUids = mixed;
+
+        return listener;
+    }
+
+    /// <summary>
+    /// Creates a changed TCP listener.
+    /// </summary>
+    /// <param name="address">The local address</param>
+    /// <param name="port">The local port</param>
+    /// <param name="uid">The socket UID now</param>
+    /// <param name="previousUid">The socket UID before</param>
+    /// <param name="user">The user name of the UID now</param>
+    /// <param name="pid">The PID of the owner, or 0</param>
+    /// <param name="command">The command of the owner</param>
+    /// <returns>The changed listener</returns>
+    internal static ChangedListener Changed(string address, int port, uint uid, uint previousUid, string user = "", int pid = 0, string command = "")
+    {
+        return new ChangedListener
+               {
+                   Proto = Proto.Tcp,
+                   Local = new IPEndPoint(IPAddress.Parse(address), port),
+                   Pid = pid,
+                   Command = command,
+                   Uid = uid,
+                   User = user,
+                   PreviousUid = previousUid
+               };
+    }
+
+    /// <summary>
+    /// Creates a snapshot that carries changed listeners of the agent's own check.
+    /// </summary>
+    /// <param name="check">The listener check</param>
+    /// <param name="changed">The changed listeners the agent lists</param>
+    /// <param name="omitted">The number the agent left out</param>
+    /// <returns>The snapshot</returns>
+    internal static ConnectionSnapshot FoundChanges(string check, List<ChangedListener> changed, uint omitted)
+    {
+        var snapshot = Found(check, [], 0);
+
+        snapshot.ChangedListeners = changed;
+        snapshot.ChangedListenersOmitted = omitted;
+
+        return snapshot;
+    }
+
+    /// <summary>
     /// Creates a usable snapshot: all four tables and the given inventory state.
     /// </summary>
     /// <param name="check">The listener check</param>
