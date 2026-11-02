@@ -6,3 +6,4 @@ are quoted in full.
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-11-02 20:02 | 1 Intake | Orchestrator | Issue #314 read: bug (security hardening), area backend/security; branch fix-issue-314-ingest-idle-timeout off main db795f9 |
+| 2026-11-02 20:10 | 2 Plan | Lead | Plan done: tier security, areas 1+2, rejected 4 options, record 0126 extended in place (opus/medium · usage pending) |
