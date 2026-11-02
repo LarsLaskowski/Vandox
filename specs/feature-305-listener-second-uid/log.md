@@ -20,4 +20,4 @@ are quoted in full.
 | 2026-11-02 12:13 | 4 Skeleton G1 | Dev | RESULT: DONE; Go and C# build, formatted (sonnet/medium · 72,945 tokens · 9 tool uses · 156 s) |
 | 2026-11-02 12:23 | 5 Tests first G1 | Tester | RESULT: DONE; Go and C# tests compile and fail on skeleton (25 C# failures, Go rejection cases); golden batch and decoder cases S58-S77 added (sonnet/medium · 134,975 tokens · 30 tool uses · 563 s) |
 | 2026-11-02 12:41 | 6 Implement G1 | Dev | RESULT: DONE; AC6 wire rules in Go and C#; tests, coverage gate (46/46 new lines) and analyzer gate green (sonnet/medium · 91,679 tokens · 15 tool uses · 959 s) |
-| 2026-11-02 12:42 | 4 Skeleton G2 | Dev | RESULT: DONE; Go builds, compare returns nil changed stub (sonnet/medium · usage pending) |
+| 2026-11-02 12:42 | 4 Skeleton G2 | Dev | RESULT: DONE; Go builds, compare returns nil changed stub (sonnet/medium · 4,840 tokens · 4 tool uses · 27 s · continued from 4 Skeleton G1) |
