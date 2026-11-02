@@ -29,7 +29,11 @@ internal sealed class ListenerMarkWriter : IDisposable
 
     private const string ListenersParameter = "$listeners";
 
-    private const string InsertMark = "INSERT INTO connection_marks(record_id, agent_id, seq, captured_at, listener_check, new_count, new_listeners) VALUES ($id, $agent, $seq, $captured, $check, $count, $listeners)";
+    private const string ChangedCountParameter = "$changedCount";
+
+    private const string ChangedParameter = "$changed";
+
+    private const string InsertMark = "INSERT INTO connection_marks(record_id, agent_id, seq, captured_at, listener_check, new_count, new_listeners, changed_count, changed_listeners) VALUES ($id, $agent, $seq, $captured, $check, $count, $listeners, $changedCount, $changed)";
 
     private const string NextMark = "SELECT record_id, seq, captured_at, listener_check FROM connection_marks WHERE agent_id = $agent AND seq > $seq ORDER BY seq LIMIT 1";
 
@@ -37,8 +41,8 @@ internal sealed class ListenerMarkWriter : IDisposable
 
     private const string StartData = "SELECT data FROM records WHERE id = $id";
 
-    private const string ReplaceComparison = "INSERT OR REPLACE INTO listener_comparisons(record_id, agent_id, seq, captured_at, base_record_id, base_seq, base_captured_at, outcome, new_count, new_listeners, finding) "
-                                             + "VALUES ($id, $agent, $seq, $captured, $baseId, $baseSeq, $baseCaptured, $outcome, $count, $listeners, $finding)";
+    private const string ReplaceComparison = "INSERT OR REPLACE INTO listener_comparisons(record_id, agent_id, seq, captured_at, base_record_id, base_seq, base_captured_at, outcome, new_count, new_listeners, finding, changed_count, changed_listeners) "
+                                             + "VALUES ($id, $agent, $seq, $captured, $baseId, $baseSeq, $baseCaptured, $outcome, $count, $listeners, $finding, $changedCount, $changed)";
 
     #endregion // Constants
 
@@ -110,7 +114,9 @@ internal sealed class ListenerMarkWriter : IDisposable
         var reported = check is ListenerQueries.CheckAll or ListenerQueries.CheckPrivileged;
         var listed = reported ? snapshot.NewListeners ?? [] : [];
         var count = reported ? listed.Count + (long)snapshot.NewListenersOmitted : 0L;
-        var command = _insertMark ??= Create(InsertMark, IdParameter, AgentParameter, SeqParameter, CapturedParameter, "$check", CountParameter, ListenersParameter);
+        var changed = reported ? snapshot.ChangedListeners ?? [] : [];
+        var changedCount = reported ? changed.Count + (long)snapshot.ChangedListenersOmitted : 0L;
+        var command = _insertMark ??= Create(InsertMark, IdParameter, AgentParameter, SeqParameter, CapturedParameter, "$check", CountParameter, ListenersParameter, ChangedCountParameter, ChangedParameter);
 
         command.Parameters[IdParameter].Value = recordId;
         command.Parameters[AgentParameter].Value = agentId;
@@ -119,6 +125,8 @@ internal sealed class ListenerMarkWriter : IDisposable
         command.Parameters["$check"].Value = check;
         command.Parameters[CountParameter].Value = count;
         command.Parameters[ListenersParameter].Value = count > 0 ? ListenerQueries.SerializeListeners(listed.Take(ListenerComparer.MaxNewListeners)) : DBNull.Value;
+        command.Parameters[ChangedCountParameter].Value = changedCount;
+        command.Parameters[ChangedParameter].Value = changedCount > 0 ? ListenerQueries.SerializeChangedListeners(changed.Take(ListenerComparer.MaxChangedListeners)) : DBNull.Value;
         command.ExecuteNonQuery();
 
         if (check == ListenerQueries.CheckStart)
@@ -253,7 +261,8 @@ internal sealed class ListenerMarkWriter : IDisposable
     private void Store(long recordId, string agentId, long seq, long capturedAt, (long Id, long Seq, long CapturedAt)? baseMark, ListenerComparison comparison)
     {
         var count = comparison.NewListeners.Count + comparison.Omitted;
-        var command = _replaceComparison ??= Create(ReplaceComparison, IdParameter, AgentParameter, SeqParameter, CapturedParameter, "$baseId", "$baseSeq", "$baseCaptured", "$outcome", CountParameter, ListenersParameter, "$finding");
+        var changedCount = comparison.ChangedListeners.Count + comparison.ChangedOmitted;
+        var command = _replaceComparison ??= Create(ReplaceComparison, IdParameter, AgentParameter, SeqParameter, CapturedParameter, "$baseId", "$baseSeq", "$baseCaptured", "$outcome", CountParameter, ListenersParameter, "$finding", ChangedCountParameter, ChangedParameter);
 
         command.Parameters[IdParameter].Value = recordId;
         command.Parameters[AgentParameter].Value = agentId;
@@ -265,7 +274,9 @@ internal sealed class ListenerMarkWriter : IDisposable
         command.Parameters["$outcome"].Value = ListenerQueries.OutcomeText(comparison.Outcome);
         command.Parameters[CountParameter].Value = count;
         command.Parameters[ListenersParameter].Value = count > 0 ? ListenerQueries.SerializeListeners(comparison.NewListeners) : DBNull.Value;
-        command.Parameters["$finding"].Value = count > 0 || ListenerQueries.IsNotCompared(comparison.Outcome) ? 1L : 0L;
+        command.Parameters["$finding"].Value = count > 0 || changedCount > 0 || ListenerQueries.IsNotCompared(comparison.Outcome) ? 1L : 0L;
+        command.Parameters[ChangedCountParameter].Value = changedCount;
+        command.Parameters[ChangedParameter].Value = changedCount > 0 ? ListenerQueries.SerializeChangedListeners(comparison.ChangedListeners) : DBNull.Value;
         command.ExecuteNonQuery();
     }
 

@@ -47,15 +47,20 @@ internal static class ListenerQueries
 
     private const string StartCounts = "SELECT agent_id, outcome, count(*) FROM listener_comparisons WHERE agent_id <= $last GROUP BY agent_id, outcome";
 
-    private const string StartFindings = "SELECT agent_id, seq, captured_at, base_captured_at, outcome, new_count, new_listeners FROM listener_comparisons WHERE finding = 1 "
+    private const string StartFindings = "SELECT agent_id, seq, captured_at, base_captured_at, outcome, new_count, new_listeners, changed_count, changed_listeners FROM listener_comparisons WHERE finding = 1 "
                                          + "ORDER BY captured_at DESC, agent_id, seq DESC LIMIT $limit";
 
     private const string StartTotal = "SELECT count(*) FROM listener_comparisons WHERE finding = 1";
 
-    private const string AgentFindings = "SELECT agent_id, seq, captured_at, NULL, listener_check, new_count, new_listeners FROM connection_marks WHERE new_count > 0 "
+    private const string AgentFindings = "SELECT agent_id, seq, captured_at, NULL, listener_check, new_count, new_listeners, changed_count, changed_listeners FROM connection_marks WHERE new_count > 0 "
                                          + "ORDER BY captured_at DESC, agent_id, seq DESC LIMIT $limit";
 
     private const string AgentTotal = "SELECT count(*) FROM connection_marks WHERE new_count > 0";
+
+    private const string AgentChangeFindings = "SELECT agent_id, seq, captured_at, NULL, listener_check, new_count, new_listeners, changed_count, changed_listeners FROM connection_marks "
+                                               + "WHERE new_count = 0 AND changed_count > 0 ORDER BY captured_at DESC, agent_id, seq DESC LIMIT $limit";
+
+    private const string AgentChangeTotal = "SELECT count(*) FROM connection_marks WHERE new_count = 0 AND changed_count > 0";
 
     #endregion // Constants
 
@@ -90,9 +95,7 @@ internal static class ListenerQueries
     /// <returns>The JSON array</returns>
     internal static string SerializeChangedListeners(IEnumerable<ChangedListener> listeners)
     {
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return JsonSerializer.Serialize(listeners.Select(WithoutCommand).ToList(), PayloadRegistry.Options);
     }
 
     /// <summary>
@@ -171,18 +174,50 @@ internal static class ListenerQueries
     /// <returns>A task that returns the page</returns>
     internal static async Task<ListenerFindingPage> ReadFindingsAsync(SqliteConnection connection, ListenerFindingQuery query, CancellationToken cancellationToken)
     {
-        var agent = query.Kind == ListenerFindingKind.Agent;
+        var totalText = query.Kind switch
+                        {
+                            ListenerFindingKind.Agent => AgentTotal,
+                            ListenerFindingKind.AgentUidChanges => AgentChangeTotal,
+                            _ => StartTotal
+                        };
+        var findingsText = query.Kind switch
+                           {
+                               ListenerFindingKind.Agent => AgentFindings,
+                               ListenerFindingKind.AgentUidChanges => AgentChangeFindings,
+                               _ => StartFindings
+                           };
         var limit = new Dictionary<string, object>
                     {
                         ["$limit"] = (long)query.Limit
                     };
-        var total = await ReaderQuery.ReadAsync(connection, agent ? AgentTotal : StartTotal, new Dictionary<string, object>(), reader => reader.GetInt64(0), Context, cancellationToken).ConfigureAwait(false);
-        var findings = await ReaderQuery.ReadAsync(connection, agent ? AgentFindings : StartFindings, limit, row => ReadFinding(row, query.Kind), Context, cancellationToken).ConfigureAwait(false);
+        var total = await ReaderQuery.ReadAsync(connection, totalText, new Dictionary<string, object>(), reader => reader.GetInt64(0), Context, cancellationToken).ConfigureAwait(false);
+        var findings = await ReaderQuery.ReadAsync(connection, findingsText, limit, row => ReadFinding(row, query.Kind), Context, cancellationToken).ConfigureAwait(false);
 
         return new ListenerFindingPage
                {
                    Findings = findings,
                    Total = total[0]
+               };
+    }
+
+    /// <summary>
+    /// Copies a changed listener with the owner's command emptied.
+    /// </summary>
+    /// <param name="listener">The changed listener</param>
+    /// <returns>The copy</returns>
+    private static ChangedListener WithoutCommand(ChangedListener listener)
+    {
+        return new ChangedListener
+               {
+                   Proto = listener.Proto,
+                   Local = listener.Local,
+                   Pid = listener.Pid,
+                   Command = string.Empty,
+                   Uid = listener.Uid,
+                   User = listener.User,
+                   MixedUids = listener.MixedUids,
+                   PreviousUid = listener.PreviousUid,
+                   PreviousMixedUids = listener.PreviousMixedUids
                };
     }
 
@@ -244,7 +279,8 @@ internal static class ListenerQueries
     private static ListenerFinding ReadFinding(SqliteDataReader reader, ListenerFindingKind kind)
     {
         var count = reader.GetInt64(5);
-        var listeners = ReadListeners(reader);
+        var listeners = ReadListeners<Listener>(reader, 6);
+        var changed = ReadListeners<ChangedListener>(reader, 8);
 
         return new ListenerFinding
                {
@@ -253,28 +289,32 @@ internal static class ListenerQueries
                    Seq = (ulong)reader.GetInt64(1),
                    CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(2)),
                    BaseCapturedAt = reader.IsDBNull(3) ? null : StorageTime.FromNanoseconds(reader.GetInt64(3)),
-                   Outcome = kind == ListenerFindingKind.Agent ? AgentOutcome(reader.GetString(4)) : ParseOutcome(reader.GetString(4)),
+                   Outcome = kind != ListenerFindingKind.AgentStart ? AgentOutcome(reader.GetString(4)) : ParseOutcome(reader.GetString(4)),
                    Listeners = listeners,
-                   Omitted = count - listeners.Count
+                   Omitted = count - listeners.Count,
+                   ChangedListeners = changed,
+                   ChangedOmitted = reader.GetInt64(7) - changed.Count
                };
     }
 
     /// <summary>
-    /// Reads the stored listener list of a finding row.
+    /// Reads a stored listener list of a finding row.
     /// </summary>
+    /// <typeparam name="T">The type of the entries</typeparam>
     /// <param name="reader">The reader</param>
+    /// <param name="column">The column of the list text</param>
     /// <returns>The listeners</returns>
     /// <exception cref="StoreException">The stored text does not decode</exception>
-    private static List<Listener> ReadListeners(SqliteDataReader reader)
+    private static List<T> ReadListeners<T>(SqliteDataReader reader, int column)
     {
-        if (reader.IsDBNull(6))
+        if (reader.IsDBNull(column))
         {
             return [];
         }
 
         try
         {
-            return JsonSerializer.Deserialize<List<Listener>>(reader.GetString(6), PayloadRegistry.Options) ?? [];
+            return JsonSerializer.Deserialize<List<T>>(reader.GetString(column), PayloadRegistry.Options) ?? [];
         }
         catch (JsonException exception)
         {

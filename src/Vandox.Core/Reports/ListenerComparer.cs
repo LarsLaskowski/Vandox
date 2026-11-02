@@ -90,12 +90,102 @@ public static class ListenerComparer
         var privilegedOnly = earlier.Inventory != All || later.Inventory != All;
         var known = (earlier.Listeners ?? []).Select(Key).ToHashSet();
         var added = (later.Listeners ?? []).Where(listener => IsNew(listener, known, privilegedOnly)).ToList();
+        var changed = FindChanged(earlier, later, privilegedOnly);
 
         return new ListenerComparison
                {
                    Outcome = privilegedOnly ? ListenerOutcome.PrivilegedOnly : ListenerOutcome.AllPorts,
                    NewListeners = [.. added.Take(MaxNewListeners)],
-                   Omitted = Math.Max(0, added.Count - MaxNewListeners)
+                   Omitted = Math.Max(0, added.Count - MaxNewListeners),
+                   ChangedListeners = [.. changed.Take(MaxChangedListeners)],
+                   ChangedOmitted = Math.Max(0, changed.Count - MaxChangedListeners)
+               };
+    }
+
+    /// <summary>
+    /// Finds the known endpoints of the later snapshot whose socket UID changed, in inventory order and each endpoint once.
+    /// </summary>
+    /// <param name="earlier">The earlier snapshot</param>
+    /// <param name="later">The later snapshot</param>
+    /// <param name="privilegedOnly">Whether only ports below 1024 are compared</param>
+    /// <returns>The changed listeners</returns>
+    private static List<ChangedListener> FindChanged(ConnectionSnapshot earlier, ConnectionSnapshot later, bool privilegedOnly)
+    {
+        var before = new Dictionary<(string Proto, IPEndPoint? Local), Listener>();
+
+        foreach (var listener in earlier.Listeners ?? [])
+        {
+            before.TryAdd(Key(listener), listener);
+        }
+
+        var reported = new HashSet<(string Proto, IPEndPoint? Local)>();
+        var changed = new List<ChangedListener>();
+
+        foreach (var listener in later.Listeners ?? [])
+        {
+            var key = Key(listener);
+
+            if (IsChangeCandidate(listener, privilegedOnly) && before.TryGetValue(key, out var earlierListener) && HasChangedUid(earlierListener, listener) && reported.Add(key))
+            {
+                changed.Add(ChangedFrom(listener, earlierListener));
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Checks whether a listener of the later snapshot is compared for a changed socket UID: it has a local endpoint, is not an
+    /// ephemeral UDP socket and lies in the compared ports.
+    /// </summary>
+    /// <param name="listener">The listener</param>
+    /// <param name="privilegedOnly">Whether only ports below 1024 are compared</param>
+    /// <returns><c>true</c> when the listener is compared</returns>
+    private static bool IsChangeCandidate(Listener listener, bool privilegedOnly)
+    {
+        if (listener.Local is null || IsEphemeralUdp(listener))
+        {
+            return false;
+        }
+
+        if (privilegedOnly)
+        {
+            return listener.Local.Port < PrivilegedPorts;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks whether the socket UID of an endpoint changed: both are known and the lowest UID differs or the endpoint turned mixed.
+    /// </summary>
+    /// <param name="earlier">The listener of the earlier snapshot</param>
+    /// <param name="later">The listener of the later snapshot</param>
+    /// <returns><c>true</c> when the socket UID changed</returns>
+    private static bool HasChangedUid(Listener earlier, Listener later)
+    {
+        return earlier.Uid is not null && later.Uid is not null && (earlier.Uid != later.Uid || (later.MixedUids && earlier.MixedUids != later.MixedUids));
+    }
+
+    /// <summary>
+    /// Builds a changed listener from the later entry and the earlier entry of the same endpoint.
+    /// </summary>
+    /// <param name="later">The listener of the later snapshot</param>
+    /// <param name="earlier">The listener of the earlier snapshot</param>
+    /// <returns>The changed listener</returns>
+    private static ChangedListener ChangedFrom(Listener later, Listener earlier)
+    {
+        return new ChangedListener
+               {
+                   Proto = later.Proto,
+                   Local = later.Local,
+                   Pid = later.Pid,
+                   Command = later.Command,
+                   Uid = later.Uid,
+                   User = later.User,
+                   MixedUids = later.MixedUids,
+                   PreviousUid = earlier.Uid,
+                   PreviousMixedUids = earlier.MixedUids
                };
     }
 
