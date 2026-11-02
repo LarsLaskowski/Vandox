@@ -17,4 +17,4 @@ are quoted in full.
 | 2026-11-02 12:07 | 3 Plan revise round | Lead | RESULT: DONE; changed entries stored without command, run memory figure restated, minors accepted (opus/medium · 11,279 tokens · 7 tool uses · 83 s · continued) |
 | 2026-11-02 12:09 | 3 Plan security review (round 2) | Security | APPROVED; non-blocking: empty Command is still serialized as "command":"" (plan claim wrong, test must agree) (opus/medium · 35,531 tokens · 10 tool uses · 81 s) |
 | 2026-11-02 12:10 | 3 Plan revise round (2) | Lead | RESULT: DONE; command emptied (not omitted) in stored changes, test and docs aligned (opus/medium · 2,763 tokens · 3 tool uses · 44 s · continued) |
-| 2026-11-02 12:13 | 4 Skeleton G1 | Dev | RESULT: DONE; Go and C# build, formatted (sonnet/medium · usage pending) |
+| 2026-11-02 12:13 | 4 Skeleton G1 | Dev | RESULT: DONE; Go and C# build, formatted (sonnet/medium · 72,945 tokens · 9 tool uses · 156 s) |
