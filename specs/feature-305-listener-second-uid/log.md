@@ -16,3 +16,4 @@ are quoted in full.
 | 2026-11-02 12:06 | 3 Plan security review | Security | CHANGES_REQUIRED: 1 blocking (run memory figure of listener section, changed entries keep command), 2 non-blocking (opus/medium · 70,716 tokens · 24 tool uses · 206 s) |
 | 2026-11-02 12:07 | 3 Plan revise round | Lead | RESULT: DONE; changed entries stored without command, run memory figure restated, minors accepted (opus/medium · 11,279 tokens · 7 tool uses · 83 s · continued) |
 | 2026-11-02 12:09 | 3 Plan security review (round 2) | Security | APPROVED; non-blocking: empty Command is still serialized as "command":"" (plan claim wrong, test must agree) (opus/medium · 35,531 tokens · 10 tool uses · 81 s) |
+| 2026-11-02 12:10 | 3 Plan revise round (2) | Lead | RESULT: DONE; command emptied (not omitted) in stored changes, test and docs aligned (opus/medium · usage pending) |

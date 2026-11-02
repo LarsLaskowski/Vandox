@@ -66,7 +66,7 @@ reported once, when it begins, not every run.
   UIDs per endpoint (record 0115, option 16).
 - Wire format: the new fields are optional additions to `connection_snapshot` of format 1.1, which is unreleased (only v0.1.0 is
   tagged), so they extend 1.1 in place; a reader that does not know them ignores them.
-- Storage: the stored marks keep the first 64 reported changes, without the owner's command, and their count; a run with changes only must be selectable as a
+- Storage: the stored marks keep the first 64 reported changes, with the owner's command emptied, and their count; a run with changes only must be selectable as a
   finding, so the schema gains a step (today's finding index covers `new_count > 0` only). Snapshots stored before the step read as having
   no reported changes. A start compared before the step keeps its stored outcome without changes until it is compared again (a snapshot
   stored below it), as record 0116 states for any change of the comparison rules; no rebuild of stored comparisons.

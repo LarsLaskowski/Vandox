@@ -28,7 +28,7 @@ keys up in a set; `src/Vandox.Core/Reports/ListenerComparer.cs:87-88` does the s
 | 12 | The payload JSON options are reflection-based (`DefaultJsonTypeInfoResolver`), case-insensitive, so a derived listener type needs no registration | `src/Vandox.Core/Model/PayloadRegistry.cs:34-47` | confirmed |
 | 13 | A user name on the page costs at most about 3 KiB with its runs, a command about 22.9 KiB | `docs/areas/web-ui.md:395-396`, `LogTextRunsOfAlternatingShortNameRetainBoundedHeap` | confirmed |
 | 14 | The new section bound is about 80 MB per circuit (68 MB today + 3,840 changed lines of at most about 3.2 KiB) | to verify: computed from fact 13, (20 + 20 + 20) findings x 64 changed lines x about 3.2 KiB = about 12 MB; the Dev recomputes it against the built line (PID, UID text, previous UID) in step 6 and writes the figure into `docs/areas/web-ui.md` and `.squad/project.md` | unverified |
-| 15 | The listener section kept by the run grows from about 11 MB to about 20 MB: a stored changed entry without command is at most about 2.2 KB decoded (a user name of 1,024 bytes as UTF-16 plus fields), 64 per finding about 140 KB; 40 findings of about 420 KB and 20 change-only of about 140 KB | to verify: computed from `docs/areas/detection-and-reports.md:677-679` (about 280 KB per finding of 64 entries with command and user); the Dev recomputes it against the built types in step 6 and writes it into *Limits of the report* and `.squad/project.md` line 72 | unverified |
+| 15 | The listener section kept by the run grows from about 11 MB to about 20 MB: a stored changed entry with an empty command is at most about 2.2 KB decoded (a user name of 1,024 bytes as UTF-16 plus fields), 64 per finding about 140 KB; 40 findings of about 420 KB and 20 change-only of about 140 KB | to verify: computed from `docs/areas/detection-and-reports.md:677-679` (about 280 KB per finding of 64 entries with command and user); the Dev recomputes it against the built types in step 6 and writes it into *Limits of the report* and `.squad/project.md` line 72 | unverified |
 
 ## Acceptance criteria
 
@@ -47,7 +47,7 @@ The criteria are the spec's (AC1 to AC8).
 | AC6 | Go: `TestConnectionSnapshot_ChangedListenersValidation` (table: list or count with `none`/`start`/absent check → `data.listener_check` `must be all or privileged when changed listeners are reported`; entry without `uid` → `data.changed_listeners[0].uid` `required`; without `previous_uid` → `data.changed_listeners[0].previous_uid` `required`; the listener entry rules apply under the `changed_listeners` path; a valid entry passes). C#: `ConnectionSnapshotValidateChangedListenersRejectsBrokenEntries` (the same table) and `ConnectionSnapshotDeserializeWithoutChangedListenersHasNone`. Shared: new cases in `testdata/wire/decoder-cases.json` (negative omitted count `ErrMalformed`, `0` and `null` read as absent, the field errors above) and one `changed_listeners` entry in the golden batch `testdata/wire/all-kinds.jsonl` (and its `.gz` forms) | `internal/model/connection_test.go`, `tests/Vandox.Core.Tests/ConnectionSnapshotTests.cs`, existing `internal/wire/golden_test.go`, `internal/wire/decode_test.go`, `tests/Vandox.Core.Tests/WireContractTests.cs` read the fixtures |
 | AC7 | `MarkdownReportWriterWriteChangedListenersListsBeforeUid` (English and German: head with `, <m> with a changed socket UID`, the line of the *Approach*, ` (lowest of several)` now and before, no command); `MarkdownReportWriterWriteChangeOnlyFindingKeepsNoNewListenerSentence`; `MarkdownReportWriterWriteChangedListenersRestLine` (64 listed, `and 3 more` below the changes only); `ForensicsReporterReadsChangeOnlyAgentFindingsSeparately` (21 change-only and 20 new agent findings: 20 of each kind kept, the cap note for change-only findings); the golden `testdata/report/forensics-en.md` and `forensics-de.md` gain one finding with a change | `tests/Vandox.Backend.Tests/MarkdownReportWriterTests.cs`, `tests/Vandox.Backend.Tests/ForensicsReporterTests.cs` |
 | AC7 | `SqliteStoreListenerHistoryChangeOnlyAgentFindingIsReadAsItsOwnKind` (a mark with `new_count` 0 and changes is listed for kind `AgentUidChanges`, not for `Agent`; a mark with both is `Agent` and carries its changes); `SqliteStoreOpenMigratesListenerTablesToStepThirteen` (a database at step 12 with marks and comparisons: new columns 0/NULL, the old rows read as no changes, the partial index exists) | `tests/Vandox.Storage.Tests/SqliteStoreListenerHistoryTests.cs`, `tests/Vandox.Storage.Tests/SqliteStoreOpenTests.cs` |
-| AC8 | `ListenerComparerCompareReportsChangedUid` (asserts `Uid`, `User`, `MixedUids`, `Pid`, `Command`, `PreviousUid`, `PreviousMixedUids` of each entry; data rows: S6, flag turns true, flag turns false not reported, UID absent on either side, UDP 40000, port 8443 under `privileged`, a duplicate endpoint in a list does not throw, more than 64 → 64 and omitted); `ListenerMarkWriterStoresChangesOfAStart` (the comparison row keeps `changed_count` and the list, `finding` 1 with changes only; a not-comparable start stores `changed_count` 0); `ListenerMarkWriterStoresChangedListenersWithoutCommand` (the stored `changed_listeners` text of a mark and of a comparison has no `command` key, the user is kept); `ListenerMarkWriterChangesIndependentOfStoringOrder` (the pair stored in both orders gives the same row) | `tests/Vandox.Core.Tests/ListenerComparerTests.cs`, `tests/Vandox.Storage.Tests/ListenerMarkWriterTests.cs` |
+| AC8 | `ListenerComparerCompareReportsChangedUid` (asserts `Uid`, `User`, `MixedUids`, `Pid`, `Command`, `PreviousUid`, `PreviousMixedUids` of each entry; data rows: S6, flag turns true, flag turns false not reported, UID absent on either side, UDP 40000, port 8443 under `privileged`, a duplicate endpoint in a list does not throw, more than 64 → 64 and omitted); `ListenerMarkWriterStoresChangesOfAStart` (the comparison row keeps `changed_count` and the list, `finding` 1 with changes only; a not-comparable start stores `changed_count` 0); `ListenerMarkWriterStoresChangedListenersWithoutCommand` (the stored `changed_listeners` entries of a mark and of a comparison read back with an empty `Command`, the user is kept); `ListenerMarkWriterChangesIndependentOfStoringOrder` (the pair stored in both orders gives the same row) | `tests/Vandox.Core.Tests/ListenerComparerTests.cs`, `tests/Vandox.Storage.Tests/ListenerMarkWriterTests.cs` |
 
 ## Approach
 
@@ -73,8 +73,8 @@ agent_id, seq DESC) WHERE new_count = 0 AND changed_count > 0`. `ListenerMarkWri
 count (0 unless the check is `all`/`privileged`); `Store` writes the comparison's changes and sets `finding` from `count > 0 || changedCount > 0 || IsNotCompared(outcome)` (today
 `count > 0 || IsNotCompared(outcome)`, `ListenerMarkWriter.cs:268`); a not-compared start has no changes (`changed_count` 0).
 `ListenerQueries` reads the two columns for every finding and gains the query of kind `AgentUidChanges` (`new_count = 0 AND changed_count >
-0`); kind `Agent` keeps `new_count > 0`. The changed entries are stored **without the owner's `command`** (`SerializeChangedListeners` writes a copy with `Command` empty, which
-the encoder omits), because the report never shows it and the run keeps every finding it reads; the user name is stored as on the wire,
+0`); kind `Agent` keeps `new_count > 0`. The changed entries are stored **with the owner's `command` emptied** (`SerializeChangedListeners` writes a copy with `Command` empty; the
+key stays in the text as `"command":""`, because `Listener.Command` is ignored only when null (`Listener.cs:35-38`, `PayloadRegistry.cs:36`)), because the report never shows it and the run keeps every finding it reads; the user name is stored as on the wire,
 as for new listeners (the report cuts it to 32 bytes).
 
 **Report.** `ListenerFindingKind.AgentUidChanges`; `ListenerReport` gains `AgentChangeFindings` and `AgentChangeFindingsTotal`;
@@ -225,11 +225,11 @@ Owner: Dev, after the code is green, against the code.
 - `docs/areas/storage.md`: the `connection_marks` and `listener_comparisons` rows of the table (line 58 and the comparisons row) and the
   write path (line 118); step 13.
 - `docs/areas/detection-and-reports.md`, *Limits of the report* (lines 677-679): the listener section with the third kind and the changed
-  entries without command, about 20 MB in the run (fact 15), and the run's total (about 60 MB plus that section); *Caps* also gains the
+  entries with an empty command, about 20 MB in the run (fact 15), and the run's total (about 60 MB plus that section); *Caps* also gains the
   residual that a local user who toggles the mixed state of a shared `SO_REUSEADDR` UDP endpoint (avahi on 5353, under `all`) in about 40
   runs pushes an earlier takeover out of the 20 latest change-only findings; the cap note shows the number left out and the rows stay
   stored.
-- `docs/areas/storage.md`: also that stored changed entries carry no `command`.
+- `docs/areas/storage.md`: also that stored changed entries keep an empty `command`.
 - `docs/areas/web-ui.md` line 395-396 and `.squad/project.md` line 72: the page's bound (fact 14), the run's figure (fact 15, "the run
   keeps up to about 60 MB" restated with the listener section) and the third kind of findings.
 - `docs/ARCHITECTURE.md` line 44 and line 229 — the agent reports new and changed listeners; the report reads both. Sweep done: no other
@@ -264,7 +264,7 @@ See the spec's *Out of scope*. No follow-up issue.
 ## Challenge
 
 - MAJOR 1 (the run's memory for the listener section not restated): accepted, together with Security's blocking finding 1. Changed
-  entries are stored without `command` (*Approach*, *Storage*), pinned by `ListenerMarkWriterStoresChangedListenersWithoutCommand`; fact
+  entries are stored without `command` (*Approach*, *Storage*), pinned by `ListenerMarkWriterStoresChangedListenersWithoutCommand` (an empty command, Security round 2); fact
   15 gives the run figure, *Documentation updates* name *Limits of the report* and `.squad/project.md` line 72, and the *Architecture check*
   states both figures.
 - MINOR 1 (copy helper and asserts): accepted, `ChangedFrom` in *Approach* and the asserted members in the AC8 row.
@@ -276,3 +276,5 @@ See the spec's *Out of scope*. No follow-up issue.
 - NON-BLOCKING 1 (toggling a shared UDP endpoint pushes a takeover out of the 20 latest change-only findings): accepted as a stated
   residual in the agent area (*Residuals*) and the detection area (*Caps*), both in *Documentation updates*.
 - NON-BLOCKING 2 (item-limit wording): accepted, *Security considerations* reworded.
+- Round 2, NON-BLOCKING (an empty `Command` is still written, measured on .NET 10.0.403): accepted, the copy keeps the key with an empty
+  value; *Approach*, the test and the storage text say so; fact 15 is unchanged (an empty string adds a few bytes per entry).
