@@ -289,6 +289,14 @@ func (f *File) listItem(c *Cursor) (uint64, error) {
 	return f.arraySlot(c.arr, j-c.arrBase)
 }
 
+// arrayLink reads the link to the next entry array from the array at arr, inside the arena and the file.
+func (f *File) arrayLink(arr uint64) (uint64, error) {
+	if err := f.check(arr+16, 8); err != nil {
+		return 0, err
+	}
+	return f.readUint64(arr + 16)
+}
+
 // position moves c to the array that holds chain index j, from the head of the chain or onwards from the current array.
 func (f *File) position(c *Cursor, j uint64) error {
 	if c.arr == 0 || j < c.arrBase {
@@ -302,7 +310,7 @@ func (f *File) position(c *Cursor, j uint64) error {
 		c.arr, c.arrBase, c.arrCap, c.arrNo = c.head, 0, capacity, 1
 	}
 	for j >= c.arrBase+c.arrCap {
-		next, err := f.readUint64(c.arr + 16)
+		next, err := f.arrayLink(c.arr)
 		if err != nil {
 			return err
 		}
