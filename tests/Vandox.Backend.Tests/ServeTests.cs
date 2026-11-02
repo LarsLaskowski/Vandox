@@ -1232,7 +1232,7 @@ public class ServeTests
     }
 
     /// <summary>
-    /// With 16 connections held that never presented the token, a 17th connection that posts a batch with the token is served and the oldest held connection
+    /// With 16 connections held that never presented the token (each sent one request without it), a 17th connection that posts a batch with the token is served and the oldest held connection
     /// is closed; the web listener is not affected.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -1259,11 +1259,7 @@ public class ServeTests
                 held.Add(connection);
                 await connection.ConnectAsync(IPAddress.Loopback, service.Fixture.IngestPort, TestContext.CancellationToken);
 
-                if (index == 1)
-                {
-                    continue;
-                }
-
+                // The answer shows the connection was admitted before the next one connects, so admission order is connection order.
                 var (status, _) = await ExchangeAsync(connection);
 
                 if (status != 404)
