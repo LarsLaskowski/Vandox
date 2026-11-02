@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-22
 - **Area:** Agent
-- **Source:** Issue #36, issue #286
+- **Source:** Issue #36, issue #286, issue #307
 - **Supersedes:** —
 
 ## Context
@@ -62,6 +62,11 @@ compact files of the server are checked later on a developer's machine, like the
    would add input to bound for nothing.
 14. **Commit the journal-remote samples cut after their last object** — 7.6 MiB less each in the working tree, but the files would no
    longer be as systemd wrote them; Git stores the 8 MiB of mostly zeros in about 20 KB each.
+15. **Re-read an entry array's size before every slot a cursor reads from it** (#307) — it would also catch an array whose size was
+   rewritten smaller after the cursor reached it, but costs one more read per entry, and the slot behind such an array is no more
+   hostile than the slot itself, whose value is checked like any offset. A cursor's reads from its cached array (a slot, the link to
+   the next array) are instead checked against the header's arena and the file like every other read, so a header re-read with a
+   smaller arena ends in `malformed file`, never in a read beyond it.
 
 ## Decision
 
