@@ -24,7 +24,7 @@ func inv(keys ...listenerKey) *inventory {
 func checkCompare(t *testing.T, prev, cur *inventory, wantCheck model.ListenerCheck, wantAdded []listenerKey) {
 	t.Helper()
 
-	check, added := compare(prev, cur)
+	check, added, _ := compare(prev, cur)
 	if check != wantCheck {
 		t.Errorf("compare() check = %q, want %q", check, wantCheck)
 	}
@@ -255,7 +255,7 @@ func TestCompare_SkippedLineOrChangedTablesComparesNothing(t *testing.T) {
 
 	control := inv(ssh, telnet, backdoor)
 	prev := inv(ssh)
-	if check, added := compare(prev, control); check != model.ListenerCheckAll || len(added) != 2 {
+	if check, added, _ := compare(prev, control); check != model.ListenerCheckAll || len(added) != 2 {
 		t.Fatalf("compare(control) = %q, %v, want %q and two new listeners (the cases below would prove nothing)", check, added, model.ListenerCheckAll)
 	}
 

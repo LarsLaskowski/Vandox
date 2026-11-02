@@ -28,13 +28,15 @@ const (
 
 // lists are the ordered lists of a run before they are cut to the payload budget.
 type lists struct {
-	states       []model.StateCount
-	newListeners []model.Listener
-	omitted      uint32
-	listeners    []model.Listener
-	processes    []model.ProcessConnections
-	remotes      []model.RemoteCount
-	connections  []model.Connection
+	states           []model.StateCount
+	newListeners     []model.Listener
+	omitted          uint32
+	changedListeners []model.ChangedListener
+	changedOmitted   uint32
+	listeners        []model.Listener
+	processes        []model.ProcessConnections
+	remotes          []model.RemoteCount
+	connections      []model.Connection
 }
 
 // filler is the progress of fill: the bytes left and whether a list has been cut.
@@ -472,7 +474,7 @@ func (c *collection) remoteList() []model.RemoteCount {
 }
 
 // buildSnapshot assembles the snapshot of a run and reports whether its aggregates (states, listeners, processes) are incomplete.
-func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, added []listenerKey, full bool) *model.ConnectionSnapshot {
+func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, added []listenerKey, changed []uidChange, full bool) *model.ConnectionSnapshot {
 	var l lists
 	l.states = col.stateList()
 	l.listeners = col.listenerList(res)

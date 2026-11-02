@@ -16,10 +16,24 @@ type listenerKey struct {
 
 // inventory is the listener inventory of one run.
 type inventory struct {
-	keys    []listenerKey
+	keys []listenerKey
+	// uids is parallel to keys; nil means every UID is unknown.
+	uids    []socketUIDs
 	cut     bool
 	skipped bool
 	tables  uint8
+}
+
+// socketUIDs is the lowest socket UID of a listener endpoint and whether its sockets had several UIDs.
+type socketUIDs struct {
+	uid          uint32
+	known, mixed bool
+}
+
+// uidChange is a known listener endpoint whose socket UID changed, with its UID in the previous run.
+type uidChange struct {
+	key    listenerKey
+	before socketUIDs
 }
 
 // lessListener orders listener keys: ports 1 to 1023 first, then protocol, address, port.
@@ -37,16 +51,16 @@ func lessListener(a, b listenerKey) bool {
 }
 
 // compare returns how far the inventories were compared and the keys of cur that prev lacks, in inventory order and without the
-// ones reportable excludes.
-func compare(prev, cur *inventory) (check model.ListenerCheck, added []listenerKey) {
+// ones reportable excludes, and the known keys whose socket UID changed.
+func compare(prev, cur *inventory) (check model.ListenerCheck, added []listenerKey, changed []uidChange) {
 	if prev == nil {
-		return model.ListenerCheckStart, nil
+		return model.ListenerCheckStart, nil, nil
 	}
 	if prev.skipped || cur.skipped || prev.tables != cur.tables {
-		return model.ListenerCheckNone, nil
+		return model.ListenerCheckNone, nil, nil
 	}
 	if cutInPrivilegedPart(prev) || cutInPrivilegedPart(cur) {
-		return model.ListenerCheckNone, nil
+		return model.ListenerCheckNone, nil, nil
 	}
 	check = model.ListenerCheckAll
 	if prev.cut || cur.cut {
@@ -64,7 +78,7 @@ func compare(prev, cur *inventory) (check model.ListenerCheck, added []listenerK
 			added = append(added, k)
 		}
 	}
-	return check, added
+	return check, added, nil
 }
 
 // cutInPrivilegedPart reports whether a cut inventory keeps only privileged keys, so it was cut inside the privileged part.
