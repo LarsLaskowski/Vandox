@@ -25,4 +25,4 @@ are quoted in full.
 | 2026-11-02 12:51 | 6 Implement G2 (fresh launch) | Dev | RESULT: DONE; AC1-AC5 in connstats, Go tests green, coverage 93/93 new lines; analyzer: gocognit 29 in snapshot_test.go:56 (Tester's test) (sonnet/medium · 87,301 tokens · 10 tool uses · 361 s) |
 | 2026-11-02 12:52 | 6 Implement G2 (analyzer fix of test) | Tester | RESULT: DONE; gocognit finding in snapshot_test.go fixed by splitting into four tests; analyzer gate Go clean (sonnet/medium · 2,965 tokens · 2 tool uses · 80 s · continued from 5 Tests first G1) |
 | 2026-11-02 13:01 | 4 Skeleton G3 | Dev | RESULT: DONE; build ok; schema step 13 written as real DDL, other members stubs (sonnet/medium · usage pending) |
-| 2026-11-02 13:09 | 5 Tests first G3 | Tester | RESULT: DONE; 19 new tests fail on skeleton (Core 10, Storage 9); SqliteStoreOpenTests adapted to schema 13 (sonnet/medium · usage pending) |
+| 2026-11-02 13:09 | 5 Tests first G3 | Tester | RESULT: DONE; 19 new tests fail on skeleton (Core 10, Storage 9); SqliteStoreOpenTests adapted to schema 13 (sonnet/medium · 79,556 tokens · 23 tool uses · 502 s · continued from 5 Tests first G1) |
