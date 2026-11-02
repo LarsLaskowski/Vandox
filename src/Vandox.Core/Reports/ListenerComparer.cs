@@ -17,6 +17,11 @@ public static class ListenerComparer
     public const int MaxNewListeners = 64;
 
     /// <summary>
+    /// The largest number of changed listeners kept per comparison.
+    /// </summary>
+    public const int MaxChangedListeners = 64;
+
+    /// <summary>
     /// The first port that is not privileged.
     /// </summary>
     public const int PrivilegedPorts = 1024;

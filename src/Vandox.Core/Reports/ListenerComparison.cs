@@ -24,5 +24,15 @@ public sealed class ListenerComparison
     /// </summary>
     public long Omitted { get; init; }
 
+    /// <summary>
+    /// Gets the known listener endpoints whose socket UID changed, at most ListenerComparer.MaxChangedListeners.
+    /// </summary>
+    public IReadOnlyList<ChangedListener> ChangedListeners { get; init; } = [];
+
+    /// <summary>
+    /// Gets the number of changed listeners beyond the cap.
+    /// </summary>
+    public long ChangedOmitted { get; init; }
+
     #endregion // Properties
 }

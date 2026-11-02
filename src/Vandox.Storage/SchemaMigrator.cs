@@ -261,6 +261,14 @@ internal static class SchemaMigrator
                                                               "CREATE INDEX gaps_seq_open ON gaps(agent_id, first_seq) WHERE kind = 'sequence' AND state = 'open'",
                                                               "CREATE UNIQUE INDEX gaps_time ON gaps(agent_id, from_at) WHERE kind = 'time' AND state <> 'closed'",
                                                               "CREATE INDEX gaps_agent ON gaps(agent_id, id)"
+                                                          ]),
+                                                      new(13,
+                                                          [
+                                                              "ALTER TABLE connection_marks ADD COLUMN changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)",
+                                                              "ALTER TABLE connection_marks ADD COLUMN changed_listeners TEXT",
+                                                              "ALTER TABLE listener_comparisons ADD COLUMN changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)",
+                                                              "ALTER TABLE listener_comparisons ADD COLUMN changed_listeners TEXT",
+                                                              "CREATE INDEX connection_marks_changes ON connection_marks(captured_at DESC, agent_id, seq DESC) WHERE new_count = 0 AND changed_count > 0"
                                                           ])
                                                   ];
 

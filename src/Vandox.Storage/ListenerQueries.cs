@@ -84,6 +84,18 @@ internal static class ListenerQueries
     }
 
     /// <summary>
+    /// Writes the text a changed-listener list is stored as, with the owner's command emptied.
+    /// </summary>
+    /// <param name="listeners">The changed listeners</param>
+    /// <returns>The JSON array</returns>
+    internal static string SerializeChangedListeners(IEnumerable<ChangedListener> listeners)
+    {
+#pragma warning disable RH2003
+        throw new NotImplementedException();
+#pragma warning restore RH2003
+    }
+
+    /// <summary>
     /// Returns the text an outcome is stored as.
     /// </summary>
     /// <param name="outcome">The outcome</param>

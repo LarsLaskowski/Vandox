@@ -49,5 +49,15 @@ public sealed class ListenerFinding
     /// </summary>
     public long Omitted { get; init; }
 
+    /// <summary>
+    /// Gets the known listener endpoints whose socket UID changed.
+    /// </summary>
+    public IReadOnlyList<ChangedListener> ChangedListeners { get; init; } = [];
+
+    /// <summary>
+    /// Gets the number of changed listeners not listed.
+    /// </summary>
+    public long ChangedOmitted { get; init; }
+
     #endregion // Properties
 }

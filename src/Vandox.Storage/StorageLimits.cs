@@ -15,7 +15,7 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 12;
+    public const int SchemaVersion = 13;
 
     /// <summary>
     /// The largest size of the serialized data of one incident in UTF-8 bytes.
