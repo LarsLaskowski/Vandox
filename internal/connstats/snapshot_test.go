@@ -53,78 +53,97 @@ func TestBuildSnapshot_ChangedListenersAtTheCapAreNotOmitted(t *testing.T) {
 	}
 }
 
-func TestFill_ChangedListenersBetweenNewListenersAndListeners(t *testing.T) {
-	newOne := model.Listener{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:23")}
-	var changed []model.ChangedListener
+// fillFixture is the lists of the fill tests: one new listener, six changed ones and two inventory entries, each list with a count of
+// entries it already left out.
+type fillFixture struct {
+	newOne  model.Listener
+	changed []model.ChangedListener
+	listed  []model.Listener
+}
+
+func newFillFixture() fillFixture {
+	f := fillFixture{
+		newOne: model.Listener{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:23")},
+		listed: []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22")}, {Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:80")}},
+	}
 	for i := range 6 {
-		changed = append(changed, model.ChangedListener{
+		f.changed = append(f.changed, model.ChangedListener{
 			Listener:    model.Listener{Proto: model.ProtoTCP, Local: netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(3000+i)), UID: uidOf(1001), User: "1001"},
 			PreviousUID: uidOf(110),
 		})
 	}
-	listed := []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22")}, {Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:80")}}
-	build := func() *lists {
-		return &lists{newListeners: []model.Listener{newOne}, omitted: 2, changedListeners: slices.Clone(changed), changedOmitted: 3, listeners: slices.Clone(listed)}
+	return f
+}
+
+// fillWith fills a snapshot from the fixture's lists within budget.
+func (f fillFixture) fillWith(budget int) (snap *model.ConnectionSnapshot, cut bool) {
+	snap = &model.ConnectionSnapshot{}
+	l := &lists{newListeners: []model.Listener{f.newOne}, omitted: 2, changedListeners: slices.Clone(f.changed), changedOmitted: 3, listeners: slices.Clone(f.listed)}
+	_, cut = fill(snap, l, budget)
+	return snap, cut
+}
+
+// size returns the bytes an entry takes in the budget.
+func sizeOf(t *testing.T, e any) int {
+	t.Helper()
+
+	n, ok := entrySize(e)
+	if !ok {
+		t.Fatalf("entrySize(%v) failed", e)
 	}
-	sizeOf := func(e any) int {
-		n, ok := entrySize(e)
-		if !ok {
-			t.Fatalf("entrySize(%v) failed", e)
-		}
-		return n
+	return n
+}
+
+// wantFilled checks the lengths of the three lists and the two omitted counts of a filled snapshot.
+func wantFilled(t *testing.T, snap *model.ConnectionSnapshot, newListeners, changed, listeners int, newOmitted, changedOmitted uint32) {
+	t.Helper()
+
+	if len(snap.NewListeners) != newListeners || len(snap.ChangedListeners) != changed || len(snap.Listeners) != listeners {
+		t.Errorf("new_listeners=%d changed_listeners=%d listeners=%d entries, want %d %d %d",
+			len(snap.NewListeners), len(snap.ChangedListeners), len(snap.Listeners), newListeners, changed, listeners)
 	}
+	if snap.NewListenersOmitted != newOmitted || snap.ChangedListenersOmitted != changedOmitted {
+		t.Errorf("omitted new=%d changed=%d, want %d and %d", snap.NewListenersOmitted, snap.ChangedListenersOmitted, newOmitted, changedOmitted)
+	}
+}
 
-	t.Run("a budget that holds everything keeps the lists and their counts", func(t *testing.T) {
-		snap := &model.ConnectionSnapshot{}
-		_, cut := fill(snap, build(), 1<<20)
+func TestFill_ChangedListenersFitIntoALargeBudget(t *testing.T) {
+	snap, cut := newFillFixture().fillWith(1 << 20)
 
-		if cut || len(snap.NewListeners) != 1 || len(snap.ChangedListeners) != 6 || len(snap.Listeners) != 2 {
-			t.Errorf("fill() cut=%v new=%d changed=%d listeners=%d, want false 1 6 2", cut, len(snap.NewListeners), len(snap.ChangedListeners), len(snap.Listeners))
-		}
-		if snap.NewListenersOmitted != 2 || snap.ChangedListenersOmitted != 3 {
-			t.Errorf("omitted new=%d changed=%d, want 2 and 3", snap.NewListenersOmitted, snap.ChangedListenersOmitted)
-		}
-	})
-	t.Run("a budget that cuts inside the changed list", func(t *testing.T) {
-		budget := sizeOf(newOne) + sizeOf(changed[0]) + sizeOf(changed[1]) + sizeOf(changed[2]) - 1
-		snap := &model.ConnectionSnapshot{}
-		_, cut := fill(snap, build(), budget)
+	if cut {
+		t.Error("fill() cut = true, want false")
+	}
+	wantFilled(t, snap, 1, 6, 2, 2, 3)
+}
 
-		if !cut {
-			t.Error("fill() cut = false, want true")
-		}
-		if len(snap.NewListeners) != 1 {
-			t.Errorf("new_listeners = %d entries, want 1 (they come before the changed list)", len(snap.NewListeners))
-		}
-		if len(snap.ChangedListeners) != 2 || snap.ChangedListenersOmitted != 3+4 {
-			t.Errorf("changed_listeners = %d entries, omitted %d, want 2 and 7", len(snap.ChangedListeners), snap.ChangedListenersOmitted)
-		}
-		if len(snap.Listeners) != 0 {
-			t.Errorf("listeners = %d entries, want none after the cut", len(snap.Listeners))
-		}
-		inv := &inventory{keys: []listenerKey{key(model.ProtoTCP, "0.0.0.0", 22), key(model.ProtoTCP, "0.0.0.0", 80)}}
-		if got := inventoryState(inv, len(snap.Listeners)); got != model.InventoryCut {
-			t.Errorf("inventory from the list as sent = %q, want %q", got, model.InventoryCut)
-		}
-	})
-	t.Run("a budget that cuts the new listeners drops the changed list", func(t *testing.T) {
-		snap := &model.ConnectionSnapshot{}
-		fill(snap, build(), sizeOf(newOne)-1)
+func TestFill_ChangedListenersBetweenNewListenersAndListeners(t *testing.T) {
+	f := newFillFixture()
+	budget := sizeOf(t, f.newOne) + sizeOf(t, f.changed[0]) + sizeOf(t, f.changed[1]) + sizeOf(t, f.changed[2]) - 1
 
-		if len(snap.NewListeners) != 0 || snap.NewListenersOmitted != 3 {
-			t.Errorf("new_listeners = %d entries, omitted %d, want 0 and 3", len(snap.NewListeners), snap.NewListenersOmitted)
-		}
-		if len(snap.ChangedListeners) != 0 || snap.ChangedListenersOmitted != 3+6 {
-			t.Errorf("changed_listeners = %d entries, omitted %d, want 0 and 9", len(snap.ChangedListeners), snap.ChangedListenersOmitted)
-		}
-	})
-	t.Run("a budget that holds the changed list but not the listeners", func(t *testing.T) {
-		budget := sizeOf(newOne) + 6*sizeOf(changed[0])
-		snap := &model.ConnectionSnapshot{}
-		fill(snap, build(), budget)
+	snap, cut := f.fillWith(budget)
 
-		if len(snap.ChangedListeners) != 6 || snap.ChangedListenersOmitted != 3 || len(snap.Listeners) != 0 {
-			t.Errorf("changed=%d omitted=%d listeners=%d, want 6 3 0", len(snap.ChangedListeners), snap.ChangedListenersOmitted, len(snap.Listeners))
-		}
-	})
+	if !cut {
+		t.Error("fill() cut = false, want true")
+	}
+	wantFilled(t, snap, 1, 2, 0, 2, 3+4)
+	inv := &inventory{keys: []listenerKey{key(model.ProtoTCP, "0.0.0.0", 22), key(model.ProtoTCP, "0.0.0.0", 80)}}
+	if got := inventoryState(inv, len(snap.Listeners)); got != model.InventoryCut {
+		t.Errorf("inventory from the list as sent = %q, want %q", got, model.InventoryCut)
+	}
+}
+
+func TestFill_CutNewListenersDropTheChangedList(t *testing.T) {
+	f := newFillFixture()
+
+	snap, _ := f.fillWith(sizeOf(t, f.newOne) - 1)
+
+	wantFilled(t, snap, 0, 0, 0, 3, 3+6)
+}
+
+func TestFill_ChangedListThatFitsLeavesNoRoomForListeners(t *testing.T) {
+	f := newFillFixture()
+
+	snap, _ := f.fillWith(sizeOf(t, f.newOne) + 6*sizeOf(t, f.changed[0]))
+
+	wantFilled(t, snap, 1, 6, 0, 2, 3)
 }
