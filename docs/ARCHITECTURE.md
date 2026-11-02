@@ -41,7 +41,7 @@ way, and agents of the hosting provider are never disabled or changed
   instead of the top ones ([0113](decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md)),
   and the connection collector (`internal/connstats`) reads the socket tables of `/proc/net` with their owners from `/proc/<pid>/fdinfo`,
   records the counts and the listener inventory every run and every connection on its first run, under memory pressure and when a
-  new listener appears ([0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md)),
+  new listener appears or the socket UID of a known listener changes ([0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md)),
   and the systemd collector (`internal/svcstats`) asks systemd for the state of the configured services over the system bus with a minimal
   D-Bus client of its own (`internal/sdbus`) and records a unit's state on a change, after a start or a lost sample and hourly
   ([0117](decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md)),
@@ -226,7 +226,7 @@ duplicating them. The rules are in [Detection, alerts and reports](areas/detecti
 
 The forensics report works on the stored data as well and stores nothing. `vandoxd report` reads every stored log line (observed
 hours and boots), every process snapshot (backups, panel memory, memory consumers) and every stored incident (twice, one at a time),
-and reads the stored listener comparisons (the new listeners after an agent start and the agent's own), without decoding a snapshot,
+and reads the stored listener comparisons (the new and changed listeners after an agent start and the agent's own), without decoding a snapshot,
 keeps only capped series, compares the share of outages with a time of day, a backup, a boot or high panel memory against the share
 of observed hours with it, and writes the result in English or German as Markdown to standard output, all times in UTC; the web UI's
 report page runs the same passes and shows the same content. The rules

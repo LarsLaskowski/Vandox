@@ -199,7 +199,7 @@ empty snapshot is valid. `proto` is `tcp`, `tcp6`, `udp` or `udp6`; `state` is r
 `udp`/`udp6`, from `ESTABLISHED SYN_SENT SYN_RECV FIN_WAIT1 FIN_WAIT2 TIME_WAIT CLOSE CLOSE_WAIT LAST_ACK
 LISTEN CLOSING NEW_SYN_RECV`; `count` >= 1; `pid` >= 0.
 
-**Socket UID (since format 1.1, record 0115).** A listener entry (`listeners`, `new_listeners`) and a connection entry carry the optional
+**Socket UID (since format 1.1, record 0115).** A listener entry (`listeners`, `new_listeners`, `changed_listeners`) and a connection entry carry the optional
 `uid` (an integer from 0 to 4294967295: the socket's UID from the kernel's table, not the UID of a process that holds it) and `user`
 (short text: the name of that UID, or the UID in decimal when the producer knows no name); a listener entry also the optional `mixed_uids`
 (true: the endpoint's sockets have more than one UID, and `uid` is the lowest of them). An **absent `uid` means unknown**, never root: a
@@ -213,7 +213,7 @@ a fraction, above 4294967295, a string or `1e400` is `wire.ErrMalformed`, the ru
 entry is an unknown key and ignored. The agent's producer rules (which line gets a UID, the name lookup) are in [Agent](agent.md),
 *Connections*, *Socket UIDs*.
 
-Since format 1.1 seven optional fields say what kind of snapshot it is, what its producer compared and what its own list holds (all omitted
+Since format 1.1 nine optional fields say what kind of snapshot it is, what its producer compared and what its own list holds (all omitted
 when false, zero or absent):
 
 - `aggregates_only` (true): a **regular** snapshot of the connection collector: the aggregates (`states`, `processes`, `remotes`,
@@ -228,6 +228,13 @@ when false, zero or absent):
   when known and the socket UID fields as the endpoint's `listeners` entry has them. Requires `listener_check` `all` or `privileged`.
 - `new_listeners_omitted` (>= 1): how many more new listeners were found than `new_listeners` holds. Requires `listener_check` `all` or
   `privileged`.
+- `changed_listeners` (changed-listener entries, at most 4,096): the known listener endpoints whose socket UID changed since the producer's
+  previous run (record 0115, issue #305). An entry is a listener entry (`proto`, `local`, `pid`, `command`, `uid`, `user`, `mixed_uids`: the
+  endpoint as it is now) plus `previous_uid` (0 to 4294967295, required) and `previous_mixed_uids` (true when the endpoint's sockets had several
+  UIDs before; left out when false). Its `uid` is required too. Requires `listener_check` `all` or `privileged`. The list counts toward the item
+  limit as `new_listeners` does.
+- `changed_listeners_omitted` (>= 1): how many more changed listeners were found than `changed_listeners` holds. Requires `listener_check`
+  `all` or `privileged`.
 - `inventory` (`all`, `privileged`, `cut`, `skipped`): how much of the run's listener inventory this snapshot's `listeners` list holds: all of
   it; every listener on ports 1 to 1023 but not necessarily the rest; fewer than the ports 1 to 1023 hold (a cut inside the privileged part); or
   nothing reliable because a table line was skipped. A reader that compares two snapshots needs it, because `aggregates_incomplete` has other
@@ -235,10 +242,10 @@ when false, zero or absent):
 - `tables` (protocols, distinct, at most four): the tables the run read, in table order. Two snapshots read from different tables are not
   comparable.
 
-The absence of all seven reads as a **full** snapshot with complete aggregates and no listener check, which is what an imported legacy snapshot
+The absence of all nine reads as a **full** snapshot with complete aggregates and no listener check, which is what an imported legacy snapshot
 and a 1.0 agent's snapshot are. The rules are checked in Go and C#; their field errors are `data.complete`: `must be false for an
 aggregates-only snapshot` and `must be false when aggregates are incomplete`; `data.connections`: `must be empty in an aggregates-only
-snapshot`; `data.listener_check`: one of `all`, `privileged`, `none`, `start`, and `must be all or privileged when new listeners are reported`;
+snapshot`; `data.listener_check`: one of `all`, `privileged`, `none`, `start`, `must be all or privileged when new listeners are reported` and (checked after it) `must be all or privileged when changed listeners are reported`; `data.changed_listeners[<i>].uid` and `data.changed_listeners[<i>].previous_uid`: `required` (a `previous_mixed_uids` without a previous UID is refused the same way), after the listener entry rules of the entry; a `changed_listeners_omitted` of 0 or `null` reads as absent and a negative one is `wire.ErrMalformed`, as for `new_listeners_omitted`;
 `data.inventory`: one of `all`, `privileged`, `cut`, `skipped`; `data.tables[<i>]`: one of `tcp`, `tcp6`, `udp`, `udp6`, and `duplicate protocol`.
 A JSON `null` of `listener_check` or `inventory` reads as absent (0089), and a `null` element of `tables` reads as an empty protocol that fails
 the one-of rule; the Go encoder never writes an empty `listener_check`, `inventory` or `tables`.
@@ -401,7 +408,7 @@ if the rest of that header has an incompatible shape. A header that is not a JSO
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
 keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the optional fields of
 `connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check` with the value `start`, `new_listeners`,
-`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116; and `uid`, `user`, `mixed_uids` of its listener entries and `uid`,
+`new_listeners_omitted`, `changed_listeners`, `changed_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116; and `uid`, `user`, `mixed_uids` of its listener entries and `uid`,
 `user` of its connection entries, record 0115), the optional field `error_code` of `mariadb_status` (record
 0118), the optional fields `boot_id` and `kernel_time_ns` of `kernel_event`'s `oom_kill`, the optional `trigger` of `process_snapshot`
 and `connection_snapshot`, and the kind `backup_run` (record 0120); the format is unreleased, so the fields and the kind extend 1.1 in

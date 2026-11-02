@@ -32,3 +32,4 @@ are quoted in full.
 | 2026-11-02 13:31 | 4 Skeleton G4 | Dev | RESULT: DONE; only ReportText.cs texts added (reporter read and layout left to task 12); build ok (sonnet/medium · 38,787 tokens · 19 tool uses · 2292 s · continued from 4 Skeleton G1) |
 | 2026-11-02 13:46 | 5 Tests first G4 | Tester | RESULT: DONE; 17 report tests fail on current code; golden reports en/de extended (sonnet/medium · 62,662 tokens · 27 tool uses · 858 s · continued from 5 Tests first G1) |
 | 2026-11-02 13:58 | 6 Implement G4 | Dev | RESULT: DONE; AC7 report layout; Backend 1208/1208, coverage gate 239/239, analyzer clean (sonnet/medium · 48,669 tokens · 56 tool uses · 744 s · continued from 6 Implement G2 (fresh launch)) |
+| 2026-11-02 14:01 | 6 Implement G5 documentation | Dev | RESULT: DONE; area docs, ARCHITECTURE, project.md updated; page figure ~82 MB, run listener section ~20 MB; decision-check and config-check pass (sonnet/medium · usage pending) |

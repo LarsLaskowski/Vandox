@@ -554,15 +554,29 @@ the agent's own findings, in the section **New listeners**.
   port from 32768 to 60999 is not listed (the agent's rule), and a listener without a local endpoint is ignored. A compared start without a new
   listener writes no finding. A finding lists at most 64 new listeners in inventory order, each with protocol, local address and port and, when
   known, the owner's PID and command and the socket UID with its user, then `and <n> more`.
+- **A changed endpoint** is a listener that both snapshots hold (the same key) whose socket UID changed, decided with the agent's rule over the two
+  stored lists: the compared ports as for new listeners (`privileged`: ports 1 to 1023), not an unconnected UDP socket on a port from 32768 to 60999,
+  a `uid` on both sides, and the lowest UID differs or `mixed_uids` turned from false to true (a `mixed_uids` that turns false reports nothing). Of a key
+  that occurs twice in a list the first entry counts. The changed endpoint is the later snapshot's entry (owner, UID and user now) with the earlier
+  one's UID and `mixed_uids` as its previous values; a new key is a new listener only. A finding lists at most 64 in the later snapshot's order and
+  counts the rest. A start with changed endpoints is a finding even without a new listener; a start that is not compared has none. Starts compared
+  before the change keep their stored result without changes (record 0116).
 - **The agent's own findings.** Every stored usable snapshot whose `listener_check` is `all` or `privileged` and that reports at least one new
   listener is a finding **found by the agent**, with the agent's own list (the first 64 stored) and its omitted count; a `none` or `start`
-  snapshot reports none.
+  snapshot reports none. The changed listeners the agent reported (the first 64 stored and their count) are listed in the same finding; a snapshot
+  that reports changed listeners and no new listener is a finding of its own kind, **found by the agent with changes only**.
 - **Order independence.** The comparison of a start depends on the records only: it is computed again when a snapshot is stored below a stored start
   (backfill sends the current data first), so the same records give the same section whatever order or batches they were stored in, and a
   resent batch changes nothing. The findings are each listed once.
 - **Caps.** The head names at most the 64 lowest agent IDs; the findings after an agent start and the findings found by the agent are capped
   **separately** at the latest 20 each (by capture time, then agent ID, then `seq`), so a server whose passive FTP produces an agent finding every minute cannot
-  push a restart finding out. Within the section the listed findings stand by agent ID, then `seq`. Notes name each cap hit and the number left out.
+  push a restart finding out. The agent findings with changes only are a third kind, capped at the latest 20 apart from the other two, so a run of
+  them never removes a finding with a new listener (a finding with a new listener stays in its kind and lists its changes too). Within the section
+  the findings of both agent kinds stand together by agent ID, then `seq`. Notes name each cap hit and the number left out; the third note reads
+  `Only the latest 20 findings of the agent with changed socket UIDs only are listed; <n> earlier ones are left out.` (`Nur die letzten 20 Funde des Agenten mit nur
+  geänderten Socket-UIDs sind aufgeführt; <n> frühere fehlen.`). The omitted rows stay stored. A local user who toggles the mixed state of a shared
+  `SO_REUSEADDR` UDP endpoint (avahi on 5353, under `all`) in about 40 runs fills the 20 slots with change-only findings and pushes an earlier takeover
+  out of the 20 latest; the cap note shows the number left out.
 
 Residuals: a listener that opened and closed while the agent was stopped is never seen; a start whose first snapshot is lost (a gap, a record the
 scheduler dropped) is not seen as a start, and its successor was compared by the agent with the lost inventory; findings are "latest" by capture
@@ -615,9 +629,12 @@ The report has these sections, in this order. Headings and fixed words:
   - `<time>, agent <id>, after an agent start, not compared: <reason>` with the reason `no earlier inventory`, `ports 1 to 1023 not complete` or
     `inventories not comparable` (`nicht verglichen: kein früheres Inventar`, `Ports 1 bis 1023 unvollständig`, `Inventare nicht vergleichbar`);
   - `<time>, agent <id>, found by the agent, all ports: <n> new` (`vom Agenten gefunden`);
+  - when a finding has changed endpoints (listed and omitted together, `m` at least 1) its head ends with `, <m> with a changed socket UID` (`, <m> mit
+    geänderter Socket-UID`) after the new count; a finding with changes only reads `…: 0 new, 2 with a changed socket UID`;
   - a listener: `<proto> <address>:<port>, PID <pid> <command>` or `<proto> <address>:<port>, no owner` (`kein Besitzer`), the address in the
-    backend's numeric form (an IPv4-mapped address is written as .NET writes it), followed by the socket's UID: `, socket UID <uid> <user>` (`Socket-UID`), the user as a code span, or `, socket UID <uid>` when no user name is known, or `, socket UID unknown` (`Socket-UID unbekannt`) when the entry has no UID; a user name longer than 32 UTF-8 bytes is shown cut with ` (cut)` (` (gekürzt)`) after it, and ` (lowest of several)` (` (niedrigste von mehreren)`) ends the line when the endpoint's sockets have several UIDs (the UID shown is then the lowest of them). The socket UID is the UID of the socket's creator, not of the user of the PID shown (a daemon that binds as root and runs as `www-data` reads `socket UID 0 root`), see [Agent](agent.md), *Socket UIDs*; `and <n> more` (`und <n> weitere`) for the listeners left out.
-  When no finding holds a new listener the section ends with `No new listener found.` (`Kein neuer Listener gefunden.`), or, when a start was not
+    backend's numeric form (an IPv4-mapped address is written as .NET writes it), followed by the socket's UID: `, socket UID <uid> <user>` (`Socket-UID`), the user as a code span, or `, socket UID <uid>` when no user name is known, or `, socket UID unknown` (`Socket-UID unbekannt`) when the entry has no UID; a user name longer than 32 UTF-8 bytes is shown cut with ` (cut)` (` (gekürzt)`) after it, and ` (lowest of several)` (` (niedrigste von mehreren)`) ends the line when the endpoint's sockets have several UIDs (the UID shown is then the lowest of them). The socket UID is the UID of the socket's creator, not of the user of the PID shown (a daemon that binds as root and runs as `www-data` reads `socket UID 0 root`), see [Agent](agent.md), *Socket UIDs*; `and <n> more` (`und <n> weitere`) for the listeners left out. After the new listeners and their `and <n> more` come the changed endpoints, one item each, and their own `and <n> more`.
+  - a changed endpoint: `<proto> <address>:<port>, PID <pid>` (`, PID <pid>` in German too) or `<proto> <address>:<port>, no owner`, without the owner's command, then the socket UID text of a listener (current UID, user as a code span cut to 32 bytes with ` (cut)`, ` (lowest of several)` when mixed now), then `, before: socket UID <uid>` (`, vorher: Socket-UID <uid>`) and ` (lowest of several)` (` (niedrigste von mehreren)`) when it was mixed before; the previous user is not carried by the wire and not shown.
+  The findings of both agent kinds are listed together after the findings after an agent start. When no finding holds a new listener (listed or omitted; a finding with changes only does not count) the section ends with `No new listener found.` (`Kein neuer Listener gefunden.`), or, when a start was not
   compared, `No new listener found among the compared inventories.` (`Kein neuer Listener unter den verglichenen Inventaren gefunden.`).
 - **Outages**: one section per stored incident, in the order of its window, with its number and first kill: the window; the kill
   count and the **victims** (the distinct victim commands of the kept kills in first-seen order with their count; a kill without a
@@ -675,8 +692,8 @@ distinguishable from the escape of a real U+202E (`\u202e`).
   **10,000 boots** (80 KB), **100,000 runs** of consecutive observed hours (about 1.6 MB), **4,096 programs** (their names, short
   texts of at most 1,024 bytes, about 8 MiB at most, plus about 80 bytes of counters each), and 24 hour counts.
   The incidents add only counters. The listener section keeps the head of at most 64 agent IDs (under 64 KB) and at most 20 findings after an agent
-  start and 20 found by the agent, each with at most 64 listeners of a command of up to 1,024 UTF-8 bytes and a user name of up to 1,024 bytes: a finding is at most about 280 KB, so the
-  section is at most about 11 MB in the run (on the page, where every text also carries its runs, up to about 68 MB per circuit, [Web UI](web-ui.md), *Limits and errors*). With all caps full the report keeps about 60 MB across the run, plus the 11 MB of the listener section, plus the one log page, process snapshot or incident it is reading.
+  start, 20 found by the agent and 20 found by the agent with changes only, each with at most 64 listeners of a command of up to 1,024 UTF-8 bytes and a user name of up to 1,024 bytes: a finding is at most about 280 KB, and each of the three kinds may also hold up to 64 changed entries, which are stored and read with an empty command (a user name of 1,024 bytes as UTF-16 is 2 KiB, so an entry is at most about 2.2 KB and 64 of them about 140 KB). That is 40 findings of about 420 KB (16.8 MB) and 20 change-only findings of about 140 KB (2.8 MB), so the
+  section is at most about 20 MB in the run (computed from these bounds, not measured as a whole; on the page, where every text also carries its runs, up to about 82 MB per circuit, [Web UI](web-ui.md), *Limits and errors*). With all caps full the report keeps about 60 MB across the run, plus the 20 MB of the listener section, plus the one log page, process snapshot or incident it is reading.
 - **Over a cap** the statements that need the data are unknown: more snapshots make backup and panel unknown, more boots the boot,
   more runs of observed hours backup, boot and panel (their base rate). The time of day counts every observed hour and has no cap.
   The notes name the cap that was hit. An outage's own activity follows the same rule: past a cap of the data it needs, a yes stays
