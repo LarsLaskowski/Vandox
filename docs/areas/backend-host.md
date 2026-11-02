@@ -69,10 +69,13 @@ The options of the configuration file are in [Configuration and secrets](configu
   the endpoints of the web UI's live connection are web endpoints too, so they answer `404` there. The web pipeline (forwarded
   headers, security headers, login, antiforgery) never runs on an ingest connection, so no ingest answer carries the security headers.
   `POST /v1/batches` on the web listener goes down the web pipeline and never reaches the ingest endpoint.
-- The ingest listener speaks HTTP/1.1 only (one request at a time per connection) and keeps at most **16 connections** open; a further
-  connection is closed at once, before a request is read. The web listener has no such cap. The cap counts idle connections too: a host
-  that reaches the port can hold all 16 for the keep-alive time without sending the token, and the agent's connection is then closed
-  until one is free; the agent keeps its records and retries (record 0126).
+- The ingest listener speaks HTTP/1.1 only (one request at a time per connection) and keeps at most **16 connections** open. A connection
+  is trusted once one of its requests passed the token check (step 2 of the answers table). When 16 are held, a further connection
+  evicts the oldest connection that is not trusted (it is aborted at once) and takes its place; the further connection is closed, before a
+  request is read, only when all 16 held connections are trusted, and a place freed by a finished connection serves the next one. The web
+  listener has no such cap. A host without the token therefore cannot keep the agent out by holding connections. A sustained connection
+  flood can delay the agent's first connection (after a start or a lost connection) until one attempt wins the race; it cannot evict a
+  connection the agent has used. A token holder can hold all 16; the agent keeps its records and retries (record 0126).
 - The server sends no `Server` header and limits a request's header read to 5 seconds, its header size to 16 KiB and the idle keep-alive
   to 120 seconds.
 - The web UI is a Blazor Web App in the *Interactive Server* render mode: every open page holds one live connection to the server.
@@ -319,5 +322,5 @@ deadline and the health timeout are constants, not options.
 `Vandox.Backend` (`Cli/CommandLine`, `Hosting/BackendApp`, `ServeCommand`, `ListenerRoutes`, `PortRoutingMiddleware`, `SecurityHeadersMiddleware`, `HealthEndpoint`,
 `PingChecker`, `Cli/HealthCheckCommand`, `Cli/StoreCommand`, `Cli/TemplatesCommand`, `Logging/JsonLineLogger`; `Ingest/IngestEndpoint` with
 `IngestSettings`, `IngestToken`, `IngestLimits`, `IngestStatus`, `IngestRequest`, `IngestRefusalLog`, `IngestFieldPath`, `IngestWriteGate`,
-`FreeSpace` and `ConnectionCap`; the log lines in `Hosting/BackendLog`), `deploy/backend/` (Dockerfile, compose file, example
+`FreeSpace`, `ConnectionCap` and `CappedConnection`; the log lines in `Hosting/BackendLog`), `deploy/backend/` (Dockerfile, compose file, example
 configuration), `.github/scripts/smoke-test-backend.sh`.

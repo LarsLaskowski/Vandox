@@ -95,9 +95,9 @@ the token check, and is closed itself only when every held connection passed it.
   busy timeout and not the library's default of 30 seconds.
 - A token holder can still grow the database up to the floor; the web UI and the import keep working there, and ingest resumes when
   space is freed or retention (#46) removes data.
-- Accepted residuals, availability only (the agent keeps its spool and retries): a peer without the token that opens 16 connections
-  between the agent's connect and its token check (one round trip and the header read) evicts the agent's new connection, which
-  retries, while a connection the agent has used keeps its place; a token holder can hold all 16 connections; no log line reports a
+- Accepted residuals, availability only (the agent keeps its spool and retries): a sustained connection flood from a peer without the
+  token can delay the agent's first connection (after a start or a lost connection) until one attempt wins the race; it cannot evict a
+  connection the agent has used; a token holder can hold all 16 connections; no log line reports a
   connection the cap evicts or closes, since its volume would be the peer's to choose; the ingest warnings other than the token and agent
   refusals are not rate-limited, since only a token holder reaches them and the container's log cap bounds their volume.
 - Three tests rest on the real clock against `docs/UNIT_TESTS.md`, accepted for this change: `SqliteStoreWriteGivesUpAfterBusyTimeout`
