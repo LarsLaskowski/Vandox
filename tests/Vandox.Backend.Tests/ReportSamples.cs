@@ -194,7 +194,7 @@ internal static class ReportSamples
     /// <summary>
     /// Creates the listener section of the rich sample: two agents, three findings after an agent start given latest first (a comparison on all ports with a listener without an
     /// owner and with the socket's user, one on ports 1 to 1023 only with six more listeners than listed, and one start that was not compared) and two findings of the agents given latest first, one with
-    /// a command that holds a backtick; no cap is hit.
+    /// a command that holds a backtick, and one finding of an agent with a changed socket UID only; no cap is hit.
     /// </summary>
     /// <returns>The section</returns>
     internal static ListenerReport RichListeners()
@@ -215,7 +215,9 @@ internal static class ReportSamples
                                        AgentFinding("web-2", 77, new DateTimeOffset(2026, 10, 6, 4, 0, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedOnly, 0, Entry(Proto.Udp, "0.0.0.0", 69, 12, "tftp`d")),
                                        AgentFinding("web-1", 410, new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 2121, uid: 1000))
                                    ],
-                   AgentFindingsTotal = 2
+                   AgentFindingsTotal = 2,
+                   AgentChangeFindings = [AgentChangeFinding("web-1", 520, new DateTimeOffset(2026, 10, 5, 15, 0, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, ChangedEntry(Proto.Tcp, "0.0.0.0", 3306, 4242, 1001, "alice", 110, command: "evil"))],
+                   AgentChangeFindingsTotal = 1
                };
     }
 
@@ -355,13 +357,69 @@ internal static class ReportSamples
     }
 
     /// <summary>
+    /// Creates a changed listener.
+    /// </summary>
+    /// <param name="proto">The protocol</param>
+    /// <param name="address">The local address</param>
+    /// <param name="port">The local port</param>
+    /// <param name="pid">The PID of the owner, or 0 for no owner</param>
+    /// <param name="uid">The UID of the socket now</param>
+    /// <param name="user">The name of the socket's user now</param>
+    /// <param name="previousUid">The UID of the socket before</param>
+    /// <param name="mixedUids">Whether the endpoint's sockets have several UIDs now</param>
+    /// <param name="previousMixedUids">Whether the endpoint's sockets had several UIDs before</param>
+    /// <param name="command">The command of the owner, which the report never shows</param>
+    /// <returns>The changed listener</returns>
+    internal static ChangedListener ChangedEntry(string proto, string address, int port, int pid, uint uid, string user, uint previousUid, bool mixedUids = false, bool previousMixedUids = false, string command = "")
+    {
+        return new ChangedListener
+               {
+                   Proto = proto,
+                   Local = new IPEndPoint(IPAddress.Parse(address), port),
+                   Pid = pid,
+                   Command = command,
+                   Uid = uid,
+                   User = user,
+                   MixedUids = mixedUids,
+                   PreviousUid = previousUid,
+                   PreviousMixedUids = previousMixedUids
+               };
+    }
+
+    /// <summary>
+    /// Creates a finding of an agent with changed socket UIDs only.
+    /// </summary>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="seq">The sequence number of the snapshot</param>
+    /// <param name="at">The capture time of the snapshot</param>
+    /// <param name="outcome">The outcome, all ports or ports 1 to 1023 only</param>
+    /// <param name="changedOmitted">The number of changed listeners not listed</param>
+    /// <param name="changed">The changed listeners</param>
+    /// <returns>The finding</returns>
+    internal static ListenerFinding AgentChangeFinding(string agentId, ulong seq, DateTimeOffset at, ListenerOutcome outcome, long changedOmitted, params ChangedListener[] changed)
+    {
+        return new ListenerFinding
+               {
+                   Kind = ListenerFindingKind.AgentUidChanges,
+                   AgentId = agentId,
+                   Seq = seq,
+                   CapturedAt = at,
+                   Outcome = outcome,
+                   ChangedListeners = changed,
+                   ChangedOmitted = changedOmitted
+               };
+    }
+
+    /// <summary>
     /// Creates the section of one agent with the given findings: the counts of the agent and the findings as the store would page them.
     /// </summary>
     /// <param name="tally">The counts of the agent</param>
     /// <param name="starts">The findings after an agent start</param>
     /// <param name="found">The findings of the agent</param>
+    /// <param name="changes">The findings of the agent with changed socket UIDs only</param>
+    /// <param name="changesTotal">Their total, the number of findings when <c>null</c></param>
     /// <returns>The section</returns>
-    internal static ListenerReport Section(ListenerTally tally, IReadOnlyList<ListenerFinding> starts, IReadOnlyList<ListenerFinding> found)
+    internal static ListenerReport Section(ListenerTally tally, IReadOnlyList<ListenerFinding> starts, IReadOnlyList<ListenerFinding> found, IReadOnlyList<ListenerFinding>? changes = null, long? changesTotal = null)
     {
         return new ListenerReport
                {
@@ -369,7 +427,33 @@ internal static class ReportSamples
                    StartFindings = starts,
                    StartFindingsTotal = starts.Count,
                    AgentFindings = found,
-                   AgentFindingsTotal = found.Count
+                   AgentFindingsTotal = found.Count,
+                   AgentChangeFindings = changes ?? [],
+                   AgentChangeFindingsTotal = changesTotal ?? changes?.Count ?? 0
+               };
+    }
+
+    /// <summary>
+    /// Returns a copy of a finding that also carries changed listeners.
+    /// </summary>
+    /// <param name="finding">The finding</param>
+    /// <param name="changedOmitted">The number of changed listeners not listed</param>
+    /// <param name="changed">The changed listeners</param>
+    /// <returns>The finding</returns>
+    internal static ListenerFinding WithChanges(ListenerFinding finding, long changedOmitted, params ChangedListener[] changed)
+    {
+        return new ListenerFinding
+               {
+                   Kind = finding.Kind,
+                   AgentId = finding.AgentId,
+                   Seq = finding.Seq,
+                   CapturedAt = finding.CapturedAt,
+                   BaseCapturedAt = finding.BaseCapturedAt,
+                   Outcome = finding.Outcome,
+                   Listeners = finding.Listeners,
+                   Omitted = finding.Omitted,
+                   ChangedListeners = changed,
+                   ChangedOmitted = changedOmitted
                };
     }
 

@@ -636,6 +636,8 @@ public class MarkdownReportWriterTests
                                       "- 2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: ports 1 to 1023 not complete",
                                       "- 2026-10-05 12:00 UTC, agent ` web-1 `, found by the agent, all ports: 1 new",
                                       "  - tcp 0.0.0.0:2121, no owner, socket UID 1000",
+                                      "- 2026-10-05 15:00 UTC, agent ` web-1 `, found by the agent, all ports: 0 new, 1 with a changed socket UID",
+                                      "  - tcp 0.0.0.0:3306, PID 4242, socket UID 1001 ` alice `, before: socket UID 110",
                                       "- 2026-10-06 04:00 UTC, agent ` web-2 `, found by the agent, ports 1 to 1023 only: 1 new",
                                       "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``, socket UID unknown"
                                   ]
@@ -651,6 +653,8 @@ public class MarkdownReportWriterTests
                                       "- 2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: Ports 1 bis 1023 unvollständig",
                                       "- 2026-10-05 12:00 UTC, Agent ` web-1 `, vom Agenten gefunden, alle Ports: 1 neu",
                                       "  - tcp 0.0.0.0:2121, kein Besitzer, Socket-UID 1000",
+                                      "- 2026-10-05 15:00 UTC, Agent ` web-1 `, vom Agenten gefunden, alle Ports: 0 neu, 1 mit geänderter Socket-UID",
+                                      "  - tcp 0.0.0.0:3306, PID 4242, Socket-UID 1001 ` alice `, vorher: Socket-UID 110",
                                       "- 2026-10-06 04:00 UTC, Agent ` web-2 `, vom Agenten gefunden, nur Ports 1 bis 1023: 1 neu",
                                       "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``, Socket-UID unbekannt"
                                   ];
@@ -907,6 +911,210 @@ public class MarkdownReportWriterTests
     }
 
     /// <summary>
+    /// A finding with changed socket UIDs counts them after the new listeners in its head and lists the new listeners first, then one line per changed endpoint with its PID and no command, the UID and user now, the UID before and the flag of both, in the words of the language.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWriteChangedListenersListsBeforeUid(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var start = WithChanges(StartFinding("web-1", 9, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 0, "root")),
+                                0,
+                                ChangedEntry(Proto.Tcp, "0.0.0.0", 3306, 42, 1001, "alice", 110, command: "evil"),
+                                ChangedEntry(Proto.Udp, "0.0.0.0", 5353, 0, 107, "avahi", 107, mixedUids: true),
+                                ChangedEntry(Proto.Tcp6, "::", 22, 5, 1001, "bob", 0, previousMixedUids: true));
+
+        var summary = ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 1, 0, 0), [start], []));
+        string[] expected = english
+                                ? [
+                                      "- 2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-05 20:30 UTC), all ports: 1 new, 3 with a changed socket UID",
+                                      "  - tcp 0.0.0.0:23, PID 7 ` telnetd `, socket UID 0 ` root `",
+                                      "  - tcp 0.0.0.0:3306, PID 42, socket UID 1001 ` alice `, before: socket UID 110",
+                                      "  - udp 0.0.0.0:5353, no owner, socket UID 107 ` avahi ` (lowest of several), before: socket UID 107",
+                                      "  - tcp6 [::]:22, PID 5, socket UID 1001 ` bob `, before: socket UID 0 (lowest of several)"
+                                  ]
+                                : [
+                                      "- 2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-05 20:30 UTC), alle Ports: 1 neu, 3 mit geänderter Socket-UID",
+                                      "  - tcp 0.0.0.0:23, PID 7 ` telnetd `, Socket-UID 0 ` root `",
+                                      "  - tcp 0.0.0.0:3306, PID 42, Socket-UID 1001 ` alice `, vorher: Socket-UID 110",
+                                      "  - udp 0.0.0.0:5353, kein Besitzer, Socket-UID 107 ` avahi ` (niedrigste von mehreren), vorher: Socket-UID 107",
+                                      "  - tcp6 [::]:22, PID 5, Socket-UID 1001 ` bob `, vorher: Socket-UID 0 (niedrigste von mehreren)"
+                                  ];
+
+        // Act
+        var section = await SectionAsync(text, summary, english ? "## New listeners" : "## Neue Listener", english ? "## Outages" : "## Ausfälle");
+
+        // Assert
+        Assert.AreSequenceEqual(expected, section.Skip(1).ToArray(), "head with the count of changes, the new listener, then the changed endpoints");
+        Assert.DoesNotContain(line => line.Contains("evil", StringComparison.Ordinal), section, "the command of a changed endpoint is not shown");
+    }
+
+    /// <summary>
+    /// A finding with changed socket UIDs only reads "0 new" with its count of changes, and the section still ends with the sentence for no new listener, in both forms.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWriteChangeOnlyFindingKeepsNoNewListenerSentence(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var change = AgentChangeFinding("web-1", 12, at, ListenerOutcome.PrivilegedOnly, 1, ChangedEntry(Proto.Tcp, "0.0.0.0", 22, 0, 33, "www-data", 0));
+        var compared = Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 1, 0, 0), [], [], [change]);
+        var notCompared = Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 0, 0, 1), [], [], [change]);
+
+        var head = english
+                       ? "- 2026-10-05 21:00 UTC, agent ` web-1 `, found by the agent, ports 1 to 1023 only: 0 new, 2 with a changed socket UID"
+                       : "- 2026-10-05 21:00 UTC, Agent ` web-1 `, vom Agenten gefunden, nur Ports 1 bis 1023: 0 neu, 2 mit geänderter Socket-UID";
+        var entry = english ? "  - tcp 0.0.0.0:22, no owner, socket UID 33 ` www-data `, before: socket UID 0" : "  - tcp 0.0.0.0:22, kein Besitzer, Socket-UID 33 ` www-data `, vorher: Socket-UID 0";
+        var rest = english ? "  - and 1 more" : "  - und 1 weitere";
+        var none = english ? "- No new listener found." : "- Kein neuer Listener gefunden.";
+        var amongCompared = english ? "- No new listener found among the compared inventories." : "- Kein neuer Listener unter den verglichenen Inventaren gefunden.";
+
+        // Act
+        var comparedSection = await SectionAsync(text, ListenerSummary(compared), english ? "## New listeners" : "## Neue Listener", english ? "## Outages" : "## Ausfälle");
+        var notComparedSection = await SectionAsync(text, ListenerSummary(notCompared), english ? "## New listeners" : "## Neue Listener", english ? "## Outages" : "## Ausfälle");
+
+        // Assert
+        Assert.AreSequenceEqual([head, entry, rest, none], comparedSection.Skip(1).ToArray(), "a change is no new listener: the sentence stays");
+        Assert.AreSequenceEqual([head, entry, rest, amongCompared], notComparedSection.Skip(1).ToArray(), "the compared form when a start was not compared");
+    }
+
+    /// <summary>
+    /// A finding that omits changed endpoints ends its changes with the line for the rest, below the changes only, apart from the line for the rest of the new listeners.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriteChangedListenersRestLine(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var found = WithChanges(AgentFinding("web-1", 9, at, ListenerOutcome.AllPorts, 2, Entry(Proto.Tcp, "0.0.0.0", 23)), 3, [.. Enumerable.Range(0, 64).Select(index => ChangedEntry(Proto.Tcp, "0.0.0.0", 1000 + index, 0, 1001, "alice", 110))]);
+
+        var summary = ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 0, 0, 0, 0), [], [found]));
+
+        // Act
+        var section = await SectionAsync(text, summary, english ? "## New listeners" : "## Neue Listener", english ? "## Outages" : "## Ausfälle");
+
+        // Assert
+        var lines = section.Skip(1).ToArray();
+
+        Assert.HasCount(1 + 1 + 1 + 64 + 1, lines, "head, one new listener, its rest line, 64 changes and the rest line of the changes");
+        Assert.Contains(english ? ": 3 new, 67 with a changed socket UID" : ": 3 neu, 67 mit geänderter Socket-UID", lines[0], "the head counts the listed and the omitted ones of both lists");
+        Assert.AreEqual(english ? "  - and 2 more" : "  - und 2 weitere", lines[2], "the rest of the new listeners stands below the new listeners");
+        Assert.StartsWith(english ? "  - tcp 0.0.0.0:1000, no owner, socket UID 1001 ` alice `, before: socket UID 110" : "  - tcp 0.0.0.0:1000, kein Besitzer, Socket-UID 1001 ` alice `, vorher: Socket-UID 110", lines[3], "the changes follow in order");
+        Assert.AreEqual(english ? "  - and 3 more" : "  - und 3 weitere", lines[^1], "the rest of the changes ends the finding");
+    }
+
+    /// <summary>
+    /// The findings of the agents of both kinds are listed together, ordered by agent ID and sequence number, after the findings after an agent start.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriteOrdersAgentFindingsOfBothKindsTogether()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var section = Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 1, 0, 0),
+                              [StartFinding("web-1", 99, at, ListenerOutcome.NotComparable, 0)],
+                              [AgentFinding("web-2", 3, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23)), AgentFinding("web-1", 7, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 24))],
+                              [
+                                  AgentChangeFinding("web-2", 1, at, ListenerOutcome.AllPorts, 0, ChangedEntry(Proto.Tcp, "0.0.0.0", 25, 0, 1, "daemon", 0)),
+                                  AgentChangeFinding("web-1", 5, at, ListenerOutcome.AllPorts, 0, ChangedEntry(Proto.Tcp, "0.0.0.0", 26, 0, 1, "daemon", 0))
+                              ]);
+
+        // Act
+        var lines = await SectionAsync(ReportText.English, ListenerSummary(section), "## New listeners", "## Outages");
+
+        // Assert
+        var heads = lines.Where(line => line.StartsWith("- 2026", StringComparison.Ordinal)).Select(Kind).ToArray();
+
+        Assert.AreSequenceEqual(["web-1 start", "web-1 change", "web-1 new", "web-2 change", "web-2 new"], heads, "start findings first, then the agents' findings of both kinds by agent ID and sequence number");
+    }
+
+    /// <summary>
+    /// The user of a changed endpoint is cut to 32 bytes in the code span and marked, before the socket UID before.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriteChangedListenersCutsTheUser()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var change = AgentChangeFinding("web-1", 12, at, ListenerOutcome.AllPorts, 0, ChangedEntry(Proto.Tcp, "0.0.0.0", 3306, 42, 5, new string('u', 1024), 110));
+        var section = Section(Tally("web-1", 50, at.AddDays(-4), at, 0, 0, 0, 0), [], [], [change]);
+
+        // Act
+        var lines = await SectionAsync(ReportText.English, ListenerSummary(section), "## New listeners", "## Outages");
+
+        // Assert
+        Assert.Contains($"  - tcp 0.0.0.0:3306, PID 42, socket UID 5 ` {new string('u', 32)} ` (cut), before: socket UID 110", lines, "the user is cut before the part for the UID before");
+    }
+
+    /// <summary>
+    /// The note of the change-only findings names the cap and the number left out in both languages, after the note of the findings of the agents, and is absent when nothing was left out.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportNotesTheCapOfChangeOnlyFindings(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var at = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var changes = Enumerable.Range(1, 20).Select(index => AgentChangeFinding("web-1", (ulong)(100 + index), at.AddMinutes(index), ListenerOutcome.AllPorts, 0, ChangedEntry(Proto.Tcp, "0.0.0.0", 1000 + index, 0, 1001, "alice", 110))).ToArray();
+        var cappedBase = CappedListeners();
+        var capped = new ListenerReport
+                     {
+                         Agents = cappedBase.Agents,
+                         AgentsOmitted = cappedBase.AgentsOmitted,
+                         StartFindings = cappedBase.StartFindings,
+                         StartFindingsTotal = cappedBase.StartFindingsTotal,
+                         AgentFindings = cappedBase.AgentFindings,
+                         AgentFindingsTotal = cappedBase.AgentFindingsTotal,
+                         AgentChangeFindings = changes,
+                         AgentChangeFindingsTotal = 26
+                     };
+
+        var full = new ListenerReport
+                   {
+                       Agents = cappedBase.Agents,
+                       AgentChangeFindings = changes,
+                       AgentChangeFindingsTotal = 20
+                   };
+
+        var agentNote = english ? "Only the latest 20 findings of the agent are listed; 980 earlier ones are left out." : "Nur die letzten 20 Funde des Agenten sind aufgeführt; 980 frühere fehlen.";
+        var changeNote = english ? "Only the latest 20 findings of the agent with changed socket UIDs only are listed; 6 earlier ones are left out." : "Nur die letzten 20 Funde des Agenten mit nur geänderten Socket-UIDs sind aufgeführt; 6 frühere fehlen.";
+
+        // Act
+        var cappedNotes = (await WriteNotesAsync(text, ListenerSummary(capped), 13)).Split('\n');
+        var fullNotes = (await WriteNotesAsync(text, ListenerSummary(full), 13)).Split('\n');
+
+        // Assert
+        Assert.IsTrue(HasLine(cappedNotes, changeNote), "the cap of the change-only findings");
+        Assert.IsGreaterThan(Array.FindIndex(cappedNotes, line => line.Contains(agentNote, StringComparison.Ordinal)), Array.FindIndex(cappedNotes, line => line.Contains(changeNote, StringComparison.Ordinal)), "after the note of the findings of the agents");
+        Assert.DoesNotContain(line => line.Contains(english ? "changed socket UIDs only" : "geänderten Socket-UIDs", StringComparison.Ordinal), fullNotes, "no note when exactly the cap is listed");
+    }
+
+    /// <summary>
     /// A listener with an owner and a socket UID ends with the UID and the user as a code span of external text, in the words of the language.
     /// </summary>
     /// <param name="language">The language</param>
@@ -1140,6 +1348,29 @@ public class MarkdownReportWriterTests
         var controlLines = await ListenerLinesAsync(ReportText.English, Entry(Proto.Tcp, "0.0.0.0", 23, 7, "telnetd", 5, new string((char)1, 1024)));
 
         Assert.AreSequenceEqual([$"  - tcp 0.0.0.0:23, PID 7 ` telnetd `, socket UID 5 ` {escapes} ` (cut)"], controlLines, "1,024 control characters show 32 escapes: the cut is made before the escaping");
+    }
+
+    /// <summary>
+    /// Names the agent and the kind of a finding line.
+    /// </summary>
+    /// <param name="line">The line of the finding</param>
+    /// <returns>The agent ID and <c>start</c>, <c>change</c> or <c>new</c></returns>
+    private static string Kind(string line)
+    {
+        var begin = line.IndexOf("agent `", StringComparison.Ordinal) + 8;
+        var agent = line[begin..line.IndexOf(" `,", StringComparison.Ordinal)];
+        var kind = "new";
+
+        if (line.Contains("after an agent start", StringComparison.Ordinal))
+        {
+            kind = "start";
+        }
+        else if (line.Contains("0 new", StringComparison.Ordinal))
+        {
+            kind = "change";
+        }
+
+        return $"{agent} {kind}";
     }
 
     /// <summary>

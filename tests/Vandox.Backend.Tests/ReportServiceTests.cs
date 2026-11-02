@@ -176,7 +176,7 @@ public class ReportServiceTests
         var blocks = builder.Document.Summary;
 
         Assert.AreEqual(1, listeners.TallyCalls, "the tallies are read once");
-        Assert.HasCount(2, listeners.FindingQueries, "the findings of both kinds are read");
+        Assert.HasCount(3, listeners.FindingQueries, "the findings of all three kinds are read");
         Assert.Contains(block => block.Kind == ReportBlockKind.Heading && block.Pieces.Any(piece => piece.Text == "New listeners"), blocks, "the page has the section");
         Assert.Contains(block => block.Kind == ReportBlockKind.Item && block.Pieces.Any(piece => piece is { External: true, Text: "web-1" }) && block.Pieces.Any(piece => piece.Text.Contains("after an agent start", StringComparison.Ordinal)), blocks, "the finding names the agent as external text");
         Assert.Contains(block => block.Kind == ReportBlockKind.Item && block.Level == 1 && block.Pieces.Any(piece => piece is { External: true, Text: "telnetd" }), blocks, "the listener names the command as external text");

@@ -58,6 +58,8 @@ Schwelle für hohen Panel-Speicher: 68 MiB
 - 2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: Ports 1 bis 1023 unvollständig
 - 2026-10-05 12:00 UTC, Agent ` web-1 `, vom Agenten gefunden, alle Ports: 1 neu
   - tcp 0.0.0.0:2121, kein Besitzer, Socket-UID 1000
+- 2026-10-05 15:00 UTC, Agent ` web-1 `, vom Agenten gefunden, alle Ports: 0 neu, 1 mit geänderter Socket-UID
+  - tcp 0.0.0.0:3306, PID 4242, Socket-UID 1001 ` alice `, vorher: Socket-UID 110
 - 2026-10-06 04:00 UTC, Agent ` web-2 `, vom Agenten gefunden, nur Ports 1 bis 1023: 1 neu
   - udp 0.0.0.0:69, PID 12 `` tftp`d ``, Socket-UID unbekannt
 

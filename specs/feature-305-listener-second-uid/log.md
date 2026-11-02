@@ -30,3 +30,4 @@ are quoted in full.
 | 2026-11-02 13:22 | 6 Implement G3 (dispute) | Lead | decide: both disputed tests are wrong, production code stays; Tester fixes ListenerMarkWriterTests (none record without changes; swap seq of start and found) (opus/medium · 39,287 tokens · 8 tool uses · 46 s) |
 | 2026-11-02 13:26 | 6 Implement G3 (test fix per Lead) | Tester | RESULT: DONE; two storage tests corrected, Vandox.Storage.Tests 632 passed (sonnet/medium · 3,667 tokens · 4 tool uses · 213 s · continued from 5 Tests first G1) |
 | 2026-11-02 13:31 | 4 Skeleton G4 | Dev | RESULT: DONE; only ReportText.cs texts added (reporter read and layout left to task 12); build ok (sonnet/medium · 38,787 tokens · 19 tool uses · 2292 s · continued from 4 Skeleton G1) |
+| 2026-11-02 13:46 | 5 Tests first G4 | Tester | RESULT: DONE; 17 report tests fail on current code; golden reports en/de extended (sonnet/medium · usage pending) |
