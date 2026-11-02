@@ -552,7 +552,7 @@ the agent's own findings, in the section **New listeners**.
 - **A new listener** is a listener of the later snapshot whose protocol and local address and port are not in the earlier one (`IPEndPoint`
   equality, the agent's key: `0.0.0.0` and `::ffff:0.0.0.0` are different addresses). A change of the owner is not new, an unconnected UDP socket on a
   port from 32768 to 60999 is not listed (the agent's rule), and a listener without a local endpoint is ignored. A compared start without a new
-  listener writes no finding. A finding lists at most 64 new listeners in inventory order, each with protocol, local address and port and, when
+  listener or a changed endpoint writes no finding. A finding lists at most 64 new listeners in inventory order, each with protocol, local address and port and, when
   known, the owner's PID and command and the socket UID with its user, then `and <n> more`.
 - **A changed endpoint** is a listener that both snapshots hold (the same key) whose socket UID changed, decided with the agent's rule over the two
   stored lists: the compared ports as for new listeners (`privileged`: ports 1 to 1023), not an unconnected UDP socket on a port from 32768 to 60999,
@@ -699,11 +699,11 @@ distinguishable from the escape of a real U+202E (`\u202e`).
   The notes name the cap that was hit. An outage's own activity follows the same rule: past a cap of the data it needs, a yes stays
   a yes and a no becomes unknown.
 - **Time** grows with all stored lines, snapshots and incidents (the incidents are read twice, the base rate evaluates every observed
-  hour). The command runs off any request path. The listener section adds three reads of the narrow derived tables and decodes no payload: over
+  hour). The command runs off any request path. The listener section adds four reads of the narrow derived tables and decodes no payload: over
   a database with one more year of connection snapshots (one agent, 525,600 marks written through `SqliteStore.WriteBatchAsync` in batches of 1,440,
   100 agent starts, 10,000 snapshots with agent findings, 762 MiB) the counts take 101 to 155 ms, the findings after an agent start 9 ms
-  (first read, then 1 to 2 ms) and the findings of the agent 3 ms (then 1 to 2 ms), and all three together 136 ms on their first run, on the
-  development host in a Debug build, far below the 5 seconds the section may add ([BENCHMARKS.md](../BENCHMARKS.md), *Listener reads*).
+  (first read, then 1 to 2 ms) and the findings of the agent 3 ms (then 1 to 2 ms), and these three together 136 ms on their first run, on the
+  development host in a Debug build, far below the 5 seconds the section may add ([BENCHMARKS.md](../BENCHMARKS.md), *Listener reads*); the fourth read, the agent's findings with changes only, uses its own partial index `connection_marks_changes` and was not measured.
 - **Forged data shifts the result**: forged kills make forged outages (*Limits of incidents*), and forged boot lines, `pzstd` or
   `sw-engi*` processes shift the activities and their rates; forged process names can take the 4,096 program places first.
 - A cluster of outages that straddles an hour boundary is split between two hours of the day.

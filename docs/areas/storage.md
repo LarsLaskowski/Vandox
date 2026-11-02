@@ -241,10 +241,10 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   first and last capture time and the number of starts per outcome (`Starts`, compared on all ports, compared on ports 1 to 1023 only, not
   compared), and the number of further agent IDs (only counted when 64 were returned). `ListenerFindingsAsync` returns the latest `Limit` (1 to 20)
   findings of one kind with the total of that kind: kind `AgentStart` reads the `listener_comparisons` rows with `finding = 1`, kind `Agent` the
-  `connection_marks` rows with `new_count > 0` (its outcome is the ports the agent compared: `all_ports` for `all`, else `privileged_only`).
+  `connection_marks` rows with `new_count > 0` and kind `AgentUidChanges` those with `new_count = 0` and `changed_count > 0` (the outcome of both agent kinds is the ports the agent compared: `all_ports` for `all`, else `privileged_only`).
   Both order by capture time descending, then agent ID ascending, then `seq` descending, so the arrival order never matters (the capture time
   decides which findings are the latest, and a clock that stepped back can keep an older one). A finding holds at most 64 listeners
-  and the number left out (`new_count` minus the listed). Exact errors: `store: invalid query: kind must be a known finding kind` and `limit must be
+  and the number left out (`new_count` minus the listed), and at most 64 changed listeners and the number left out (`changed_count` minus the listed). Exact errors: `store: invalid query: kind must be a known finding kind` and `limit must be
   between 1 and 20`; a stored listener list that does not decode is `store: reading listener findings: decoding listeners`; an unknown stored
   outcome reads as not comparable.
 - **Classification, gaps and clock** (`IAgentTimelineReader`, on the reader connections): every stored record read carries `Live`. `GapsAsync` returns a page of 1 to 1,000 gaps of one agent in ID order (`AfterId`, `Limit`), optionally of one state, with kind, cause, state, number range or time span, `detected_at` and `changed_at`; the state of a time gap is the derived one, also for the filter. `ClockAsync` returns the measured offset and when it was measured (`NULL` fields for an agent without a measurement), or nothing for an agent the store has no stream of. Exact errors: `store: invalid query: agent id is invalid`, `unknown gap state`, `after id must not be negative`, `limit must be 1 to 1000`.
