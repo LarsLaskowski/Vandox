@@ -23,20 +23,20 @@ reported once, when it begins, not every run.
 
 ## Scenarios
 
-- S1 (takeover): Given the inventory of the last run holds `tcp 0.0.0.0:3306` with socket UID 110 (`mysql`), when MariaDB stops and a
+- S1: Given the inventory of the last run holds `tcp 0.0.0.0:3306` with socket UID 110 (`mysql`), when MariaDB stops and a
   process of UID 1001 binds `0.0.0.0:3306` before the next run, then that run's snapshot is full and reports `tcp 0.0.0.0:3306` as a
   listener whose socket UID changed, from 110 to 1001, with the current owner's PID and command when known; it is not a new listener.
-- S2 (second UID joins): Given `udp 0.0.0.0:5353` has socket UID 107 and no `mixed_uids`, when a process of UID 1001 opens a second
+- S2: Given `udp 0.0.0.0:5353` has socket UID 107 and no `mixed_uids`, when a process of UID 1001 opens a second
   socket on it with `SO_REUSEADDR`, then the next snapshot is full and reports the endpoint as changed: UID 107 before, UID 107 now,
   `mixed_uids` now true.
-- S3 (lower UID joins): Given `tcp 0.0.0.0:8443` bound to a device has socket UID 1001, when a root process binds the same endpoint on
+- S3: Given `tcp 0.0.0.0:8443` bound to a device has socket UID 1001, when a root process binds the same endpoint on
   another device, then the endpoint is reported as changed: UID 1001 before, UID 0 now with `mixed_uids` true.
-- S4 (steady state): Given an endpoint already reported as mixed or changed, when later runs see the same lowest UID and the same
+- S4: Given an endpoint already reported as mixed or changed, when later runs see the same lowest UID and the same
   `mixed_uids`, then nothing more is reported for it and those runs stay regular snapshots.
-- S5 (forensics report, agent finding): Given stored agent snapshots that report changed listeners, when the operator opens the
+- S5: Given stored agent snapshots that report changed listeners, when the operator opens the
   forensics report, then the section *New listeners* shows them as a finding found by the agent, each endpoint with its socket UID and
   user before and now, beside the new listeners of the same run.
-- S6 (across an agent start): Given the agent's last snapshot before a start holds `tcp 0.0.0.0:3306` with UID 110 and its first
+- S6: Given the agent's last snapshot before a start holds `tcp 0.0.0.0:3306` with UID 110 and its first
   snapshot after the start holds it with UID 1001, when the backend compares the start (record 0116), then the finding after the agent
   start lists the endpoint as changed, as in S1.
 
@@ -78,7 +78,9 @@ reported once, when it begins, not every run.
 
 - [ ] AC1: For a compared run (`all`, or `privileged` on ports 1 to 1023), an endpoint in both inventories, with a `uid` in both, whose
   lowest UID differs or whose `mixed_uids` turned from absent to true, is reported in the snapshot as changed with its previous `uid`
-  and `mixed_uids` and its current entry, and makes the snapshot full (S1, S2, S3, E1, E5).
+  and `mixed_uids` and its current entry, and makes the snapshot full; the change is decided on the UID numbers, so it is reported
+  with decimal user names when `/etc/passwd` cannot be read, and an endpoint new in the run is reported only as a new listener, never
+  as changed (S1, S2, S3, E1, E5, E7, E8).
 - [ ] AC2: An endpoint whose lowest UID and `mixed_uids` are the same as in the previous run, whose `mixed_uids` only turned false, or
   that lacks a `uid` in either run is not reported as changed and does not by itself make the snapshot full (S4, E1, E2).
 - [ ] AC3: An unconnected UDP endpoint on ports 32768 to 60999, a `none` or `start` comparison and an endpoint above 1023 under a
@@ -88,10 +90,12 @@ reported once, when it begins, not every run.
   run (E3).
 - [ ] AC6: Both decoders accept the new fields, apply their validation rules, and read a snapshot without them as having no changes
   (NFR wire format, E2).
-- [ ] AC7: The forensics report lists the agent's reported changes in its finding found by the agent and the changes of a compared
-  agent start in the finding after that start, each endpoint with protocol, address and port, owner, the current socket UID and user and
-  the previous UID, under the existing caps (S5, S6).
-- [ ] AC8: The backend's comparison of an agent start applies the rules of AC1 to AC3 to the two stored snapshots (S6).
+- [ ] AC7: The forensics report's section *New listeners* lists the changes the agent reported in its finding found by the agent, and
+  the changes the backend found for a compared agent start in the finding after that start, each endpoint with protocol, address and
+  port, owner, the current socket UID and user and the previous UID, under the existing caps (64 endpoints per finding, 20 findings per
+  kind); a run or start with changes but no new listener is a finding too (S5, S6).
+- [ ] AC8: When the backend stores the snapshots around an agent start (record 0116), it applies the rules of AC1 to AC3 to the two
+  stored snapshots and keeps the changed endpoints with the comparison, with the same result whatever the order of storing (S6).
 
 ## Out of scope
 
@@ -109,8 +113,9 @@ reported once, when it begins, not every run.
   endpoint therefore needs both sockets device-bound, two UDP sockets with `SO_REUSEADDR`, or `CAP_CHOWN`. The report is still useful
   for the takeover (S1) and the cases above. To be confirmed by measurement in the plan's *Verified facts*.
 - Q2: Where should the change be visible: in the agent's snapshot only, also in the forensics report's agent findings, or also in the
-  backend's comparison across an agent start? Answered: pending, escalated to the Product Manager; this draft assumes the
-  recommendation (all three: S5, S6, AC7, AC8).
+  backend's comparison across an agent start? Answered: by the Product Manager, option C: all three, the agent's snapshot,
+  the forensics report's findings and the backend's comparison across an agent start with the agent's rules (record 0116) (S5, S6, AC7,
+  AC8).
 - Q3: Is a persistent mixed state reported every run? Answered: no, only at the run where the endpoint's lowest UID or its flag
   changes (S4), the same flood bound as a returning listener (record 0115, *The listener check*).
 
@@ -121,6 +126,9 @@ reported once, when it begins, not every run.
   the residual E9 and the bind-conflict facts of Q1.
 - [Wire format](../../docs/areas/wire-format.md), *`connection_snapshot`*: the new optional fields, their validation errors and the
   version note of 1.1.
-- [Detection, alerts and reports](../../docs/areas/detection-and-reports.md), *New listeners* and *Content and format*: the changed
-  listeners in both kinds of findings and their lines.
-- [Storage](../../docs/areas/storage.md): what `connection_marks` and `listener_comparisons` keep of the changes.
+- [Detection, alerts and reports](../../docs/areas/detection-and-reports.md), *New listeners*: the backend's comparison of a start
+  also finds changed endpoints with the agent's rule, the agent's findings carry its reported changes, a finding with changes only;
+  *Content and format*: the finding head with the count of changed endpoints and the line of a changed endpoint (UID and user now,
+  UID before), and the section's closing sentences.
+- [Storage](../../docs/areas/storage.md): what `connection_marks` (the agent's reported changes, cut to 64, and their count) and
+  `listener_comparisons` (the changes of a start) keep, and that rows from before the change read as no changes.
