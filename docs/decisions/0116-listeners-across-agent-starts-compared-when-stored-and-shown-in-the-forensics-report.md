@@ -62,7 +62,7 @@ tables in [Storage](../areas/storage.md).
    lists its changes too.
 10. **The changed endpoint's line with the owner's command** — like a new listener's, but each command can take about 22.9 KiB on the page
     and the changes would add up to 3,840 lines, about 100 MB per circuit more. Rejected for the PID without the command (the command is in
-    the stored record and the process snapshot), about 12 MB more for the user names.
+    the stored record and the process snapshot), about 12 MB more for the user names; the stored changes leave the command out as well, so the run keeps about 9 MB more for them, not about 17 MB.
 11. **Recomputing every stored comparison in the schema step** — the outcome of old starts would show changes at once, but the step would
     decode two payloads per stored start inside the migration. Rejected: a start compared before the step keeps its outcome until a
     snapshot stored below it makes it compared again, as Consequences say for any rule change.
