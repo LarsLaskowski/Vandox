@@ -14,4 +14,4 @@ are quoted in full.
 | 2026-11-02 12:02 | 2b Plan | Lead | RESULT: DONE; tier standard; security areas 10, 12, 3; spec closed; records 0115/0116 extended (opus/medium · 83,318 tokens · 51 tool uses · 555 s · continued) |
 | 2026-11-02 12:05 | 2b Plan challenge | Devil's Advocate | OBJECTIONS 1 major (run memory bound of listener section not updated, changed entries keep command), 2 minor (opus/medium · 69,236 tokens · 20 tool uses · 174 s) |
 | 2026-11-02 12:06 | 3 Plan security review | Security | CHANGES_REQUIRED: 1 blocking (run memory figure of listener section, changed entries keep command), 2 non-blocking (opus/medium · 70,716 tokens · 24 tool uses · 206 s) |
-| 2026-11-02 12:07 | 3 Plan revise round | Lead | RESULT: DONE; changed entries stored without command, run memory figure restated, minors accepted (opus/medium · usage pending) |
+| 2026-11-02 12:07 | 3 Plan revise round | Lead | RESULT: DONE; changed entries stored without command, run memory figure restated, minors accepted (opus/medium · 11,279 tokens · 7 tool uses · 83 s · continued) |
