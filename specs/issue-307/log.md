@@ -10,4 +10,4 @@ are quoted in full.
 | 2026-11-02 18:45 | 3 Plan security review | squad-security | APPROVED: no findings (opus/medium · 48,242 tokens · 9 tool uses · 61 s) |
 | 2026-11-02 18:45 | 2 Plan challenge | squad-devils-advocate | 0 major, 1 minor (record 0119 option 15 wording); appended to plan.md as Challenge notes (opus/medium · 40,104 tokens · 8 tool uses · 69 s) |
 | 2026-11-02 18:46 | 4 Skeleton | Orchestrator | skipped: no signature change; tests use existing signatures (inArena is internal) |
-| 2026-11-02 18:49 | 5 Tests first | squad-tester | AC1-AC3 tests written; fail on current code (confirmed); nothing deferred (sonnet/medium · usage pending) |
+| 2026-11-02 18:49 | 5 Tests first | squad-tester | AC1-AC3 tests written; fail on current code (confirmed); nothing deferred (opus/medium · 101,150 tokens · 9 tool uses · 208 s) |
