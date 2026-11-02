@@ -63,8 +63,8 @@ compact files of the server are checked later on a developer's machine, like the
 14. **Commit the journal-remote samples cut after their last object** — 7.6 MiB less each in the working tree, but the files would no
    longer be as systemd wrote them; Git stores the 8 MiB of mostly zeros in about 20 KB each.
 15. **Re-read an entry array's size before every slot a cursor reads from it** (#307) — it would also catch an array whose size was
-   rewritten smaller after the cursor reached it, but costs one more read per entry, and the slot behind such an array is no more
-   hostile than the slot itself, whose value is checked like any offset. The cheaper version, re-checking the cursor's cached array
+   rewritten smaller after the cursor reached it, but costs one more read per entry, and the bytes behind such an array are no more
+   hostile than a slot itself, whose value is checked like any offset. The cheaper version, re-checking the cursor's cached array
    (`array(c.arr, c.arrNo)`) once after each `Refresh` through a header generation counter in `File` that the `Cursor` compares, costs
    one read per poll and would also catch an array shrunk in place, but is rejected as well: the extra state in `File` and `Cursor` buys
    nothing, because the bytes behind a shrunk array are validated by `object()` like any slot value and the arena bound already stops
