@@ -147,3 +147,9 @@ read). No `docs/ARCHITECTURE.md` change.
 
 - An entry array rewritten smaller in place with the arena unchanged is still read up to the size seen when the cursor reached it;
   accepted (record 0119, option 15).
+
+## Challenge notes
+
+Minor objection of the Devil's Advocate (appended verbatim):
+
+1. `minor` — The case for rejecting option 15 misses a cheaper version of it. This is wording in the record and does not change what gets built. Instruction: in record 0119, option 15, also name "re-check the cursor's cached array (`array(c.arr, c.arrNo)`) once after each `Refresh`, through a header generation counter in `File` that the `Cursor` compares." That version costs one read per poll, not one per entry, and it would also catch an array shrunk in place. Give the reason it is still rejected: the extra state in `File` and `Cursor` buys nothing, because the bytes behind a shrunk array are validated by `object()` like any slot value, and the arena bound already stops every read beyond `declEnd`. The current text only argues "one more read per entry" (record line 66; plan.md *Options considered*), which does not apply to that version.
