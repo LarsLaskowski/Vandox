@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-18
 - **Area:** Detection, alerts and reports
-- **Source:** Issue #278, Issue #304 (the socket UID and user of each listener)
+- **Source:** Issue #278, Issue #304 (the socket UID and user of each listener), Issue #305 (changed socket UIDs)
 - **Supersedes:** —
 
 ## Context
@@ -56,12 +56,27 @@ tables in [Storage](../areas/storage.md).
 8. **The pair picked by capture time** — what the reader sees, but the clock can step after a reboot (0046). Rejected for the agent's `seq`,
    which increases across restarts; capture time is shown only.
 
+9. **Changed socket UIDs (#305) in the findings under the existing two caps** — no new cap, but an endpoint shared by two users that keeps
+   toggling makes a change-only agent finding every few minutes and would push findings with a new listener out (spec challenge).
+   Rejected for a **third cap** of the latest 20 agent findings that hold changes only; a finding with a new listener keeps its kind and
+   lists its changes too.
+10. **The changed endpoint's line with the owner's command** — like a new listener's, but each command can take about 22.9 KiB on the page
+    and the changes would add up to 3,840 lines, about 100 MB per circuit more. Rejected for the PID without the command (the command is in
+    the stored record and the process snapshot), about 12 MB more for the user names.
+11. **Recomputing every stored comparison in the schema step** — the outcome of old starts would show changes at once, but the step would
+    decode two payloads per stored start inside the migration. Rejected: a start compared before the step keeps its outcome until a
+    snapshot stored below it makes it compared again, as Consequences say for any rule change.
+
 ## Decision
 
 Options 4, 6 and 8: the agent marks its first snapshot after a start with `listener_check` `start` and states in every snapshot what its
 listener list holds and which tables it read; the storage layer compares each start's snapshot with the agent's previous one by `seq` when
 either is stored, with the agent's own rules, and keeps the outcome; the forensics report lists these findings and the agent's own under
 separate caps (option 7) in a section *New listeners*.
+
+For #305, options 9, 10 and 11: the comparison of a start and the agent's marks also keep the changed socket UIDs, and the section lists
+them; the rules are in [Detection, alerts and reports](../areas/detection-and-reports.md) (*New listeners*) and the tables in
+[Storage](../areas/storage.md).
 
 ## Consequences
 

@@ -1,15 +1,14 @@
 # Spec: Report a known listener endpoint whose socket UID changes
 
 Source: Issue #305
-Status: Draft
+Status: Approved by Product Manager
 
 ## Problem
 
 Since #279 every listener entry of a `connection_snapshot` carries the socket's UID (`uid`, the lowest when the endpoint's sockets have
 several) and `mixed_uids` ([Agent](../../docs/areas/agent.md), *Socket UIDs*). The listener check compares inventories by protocol,
-address and port only (`internal/connstats/inventory.go`, `compare`, lines 41-69: the previous run keeps the keys and nothing else), so
-an endpoint that stays in the inventory while the user behind it changes is never reported: neither by the agent nor by the backend's
-comparison across an agent start (record 0116, *A new listener*). The operator reading the forensics report sees no trace of it.
+address and port only ([plan](plan.md), *Verified facts* 1 and 3), so an endpoint that stays in the inventory while the user behind it changes is never reported: neither by the agent nor by the backend's
+comparison across an agent start (record 0116, *A new listener*).
 
 The case that matters most is a **takeover**: a service on an unprivileged port (MariaDB on 3306, Plesk on 8443) stops or crashes and
 another local user binds the same endpoint before the next run; the endpoint is known, so nothing is reported, although the socket now
@@ -53,7 +52,7 @@ reported once, when it begins, not every run.
   inventory order are listed and the rest is a count, which also counts the entries the record's size budget left out; the run never
   fails, and the list stands after `new_listeners` and before `listeners` in the budget, so it can cut `listeners` only as
   `new_listeners` already can.
-- E7: `/etc/passwd` unreadable: the user names are decimal UIDs, the change is still detected on the numbers.
+- E7: `/etc/passwd` unreadable: decimal user names; the change is still detected.
 - E8: An entry whose UID changes and that is new in the same run cannot happen: a new endpoint has no previous UID and is reported as
   new only.
 - E9: Two different UIDs replace each other on an already mixed endpoint while the lowest stays the same (UIDs 0 and 1001, then 0 and
@@ -94,13 +93,13 @@ reported once, when it begins, not every run.
 - [ ] AC5: A changed endpoint that disappears from the change list and qualifies again in a later run is reported again, at most once per
   run (E3).
 - [ ] AC6: Both decoders accept the new fields and read a snapshot without them as having no changes; they refuse, with a field error, a
-  changed-endpoint list or its omitted count unless `listener_check` is `all` or `privileged` (the rule of `new_listeners`), an omitted
-  count below 1, a changed entry without a current `uid` or without a previous UID, and a previous mixed flag without a previous UID
-  (NFR wire format, E2).
+  changed-endpoint list or its omitted count unless `listener_check` is `all` or `privileged` (the rule of `new_listeners`) and a
+  changed entry without a current `uid` or without a previous UID (so also a previous mixed flag without a previous UID); an omitted
+  count of 0 reads as absent and a negative one is malformed, as for `new_listeners_omitted` (NFR wire format, E2).
 - [ ] AC7: The forensics report's section *New listeners* lists the changes the agent reported in its finding found by the agent, and
   the changes the backend found for a compared agent start in the finding after that start; a run or start with changes but no new
-  listener is a finding too. A changed endpoint's line is today's listener line (owner, current socket UID and user, ` (lowest of
-  several)` when it is mixed now), followed by `, before: socket UID <uid>` (`, vorher: Socket-UID <uid>`) and ` (lowest of several)`
+  listener is a finding too. A changed endpoint's line is `<proto> <address>:<port>, PID <pid>` (or `, no owner` as today), without the
+  owner's command, then today's socket UID text (current UID and user, ` (lowest of several)` when it is mixed now), followed by `, before: socket UID <uid>` (`, vorher: Socket-UID <uid>`) and ` (lowest of several)`
   when it was mixed before. A finding holds up to 64 new listeners and, separately, up to 64 changed endpoints, each list with its own
   `and <n> more`; the finding head gives both counts. Findings found by the agent that hold changes only are capped at the latest 20
   apart from the 20 that hold a new listener and the 20 after an agent start, so a run of change-only findings never removes a finding
@@ -120,8 +119,8 @@ reported once, when it begins, not every run.
 - Q1: Can a local user add a socket to a known endpoint such as `0.0.0.0:22`, as the issue says? Answered: no, for an endpoint held by
   a socket not bound to a device: upstream v5.15 `inet_csk_bind_conflict` and `udp_lib_lport_inuse` make two sockets conflict unless
   both are bound to different devices, a reuse-port pair needs one UID, and ports below 1024 need `CAP_NET_BIND_SERVICE`. A second UID
-  needs two device-bound sockets, two UDP sockets with `SO_REUSEADDR` (mDNS on 5353) or `CAP_CHOWN`. To be measured in the plan's
-  *Verified facts*.
+  needs two device-bound sockets, two UDP sockets with `SO_REUSEADDR` (mDNS on 5353) or `CAP_CHOWN`. Measured on kernel
+  6.18.44 ([plan](plan.md), *Verified facts*).
 - Q2: Where should the change be visible: in the agent's snapshot only, also in the forensics report's agent findings, or also in the
   backend's comparison across an agent start? Answered: by the Product Manager, option C: all three, the agent's snapshot,
   the forensics report's findings and the backend's comparison across an agent start with the agent's rules (record 0116) (S5, S6, AC7,
