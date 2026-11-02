@@ -10,4 +10,4 @@ are quoted in full.
 | 2026-11-02 11:48 | 2a Spec | Product Manager | Chose C: agent snapshot, forensics report and backend comparison across an agent start |
 | 2026-11-02 11:49 | 2a Spec (revise round) | Lead | RESULT: DONE; spec revised for option C, plan-check findings fixed (opus/medium · 4,246 tokens · 7 tool uses · 49 s · continued) |
 | 2026-11-02 11:53 | 2a Spec challenge | Devil's Advocate | OBJECTIONS 1 major (change-only findings share the 20-slot cap with new-listener findings), 7 minor (opus/medium · 58,608 tokens · 14 tool uses · 199 s) |
-| 2026-11-02 11:54 | 2a Spec challenge (revise round) | Lead | RESULT: DONE; all 8 objections accepted (third cap of 20 for change-only findings), spec revised (opus/medium · usage pending) |
+| 2026-11-02 11:54 | 2a Spec challenge (revise round) | Lead | RESULT: DONE; all 8 objections accepted (third cap of 20 for change-only findings), spec revised (opus/medium · 12,352 tokens · 6 tool uses · 74 s · continued) |
