@@ -15,7 +15,7 @@ Plan: [plan.md](plan.md) — Status: Draft
 | 9 | G3 | Implement the comparison, the storage step, writes and reads | files of 7 | AC7, AC8 | 8 | Dev | [x] |
 | 10 | G4 | Skeleton: `ForensicsReporter` third read, `ReportText` texts, `ReportComposer` entry points | `src/Vandox.Backend/Reports/ForensicsReporter.cs`, `src/Vandox.Backend/Reports/ReportText.cs`, `src/Vandox.Backend/Reports/ReportComposer.cs` | AC7 | 9 | Dev | [x] |
 | 11 | G4 | Tests first: report layout in both languages, cap of the third kind, golden reports | `tests/Vandox.Backend.Tests/MarkdownReportWriterTests.cs`, `tests/Vandox.Backend.Tests/ForensicsReporterTests.cs`, `testdata/report/forensics-en.md`, `testdata/report/forensics-de.md` | AC7 | 10 | Tester | [x] |
-| 12 | G4 | Implement the layout of the plan's *Approach* | files of 10 | AC7 | 11 | Dev | [ ] |
+| 12 | G4 | Implement the layout of the plan's *Approach* | files of 10 | AC7 | 11 | Dev | [x] |
 | 13 | G5 | Documentation updates of the plan (agent, wire format, detection and reports, storage, web UI, `.squad/project.md`, `docs/ARCHITECTURE.md`), the page figure of fact 14 and the run figure of fact 15 recomputed against the built code | `docs/areas/agent.md`, `docs/areas/wire-format.md`, `docs/areas/detection-and-reports.md`, `docs/areas/storage.md`, `docs/areas/web-ui.md`, `.squad/project.md`, `docs/ARCHITECTURE.md` | AC1, AC6, AC7, AC8 | 6, 12 | Dev | [ ] |
 
 ## Signatures

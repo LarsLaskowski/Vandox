@@ -133,6 +133,13 @@ public sealed class ForensicsReporter
                                                            },
                                                            cancellationToken)
                                     .ConfigureAwait(false);
+        var changes = await _listeners.ListenerFindingsAsync(new ListenerFindingQuery
+                                                             {
+                                                                 Kind = ListenerFindingKind.AgentUidChanges,
+                                                                 Limit = ListenerReport.MaxFindings
+                                                             },
+                                                             cancellationToken)
+                                      .ConfigureAwait(false);
 
         return new ListenerReport
                {
@@ -141,7 +148,9 @@ public sealed class ForensicsReporter
                    StartFindings = starts.Findings,
                    StartFindingsTotal = starts.Total,
                    AgentFindings = found.Findings,
-                   AgentFindingsTotal = found.Total
+                   AgentFindingsTotal = found.Total,
+                   AgentChangeFindings = changes.Findings,
+                   AgentChangeFindingsTotal = changes.Total
                };
     }
 
