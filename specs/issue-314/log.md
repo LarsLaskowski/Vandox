@@ -11,3 +11,4 @@ are quoted in full.
 | 2026-11-02 20:14 | 3 Plan security review | Security | APPROVED; fact 11 measured and confirmed; 3 non-blocking notes appended with the challenge notes (opus/medium · 45,153 tokens · 12 tool uses · 204 s) |
 | 2026-11-02 20:16 | 4 Skeleton | Dev | CappedConnection + ConnectionCap.ItemName/Trust stubs; build 0 warnings (sonnet/medium · 85,698 tokens · 7 tool uses · 88 s) |
 | 2026-11-02 20:28 | 5 Tests first | Tester | 12 tests fail on skeleton as expected (confirmed by orchestrator), 7 pass; none deferred. Launched on the agent file's sonnet instead of opus (Launch model, tier security): orchestrator omission, logged as run (sonnet/medium · 130,381 tokens · 23 tool uses · 721 s) |
+| 2026-11-02 20:43 | 6 Implement | Dev | ConnectionCap evicts oldest untrusted, IngestEndpoint trusts after token check; full suite green; docs pending (sonnet/medium · usage pending) |

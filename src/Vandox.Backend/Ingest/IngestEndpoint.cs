@@ -357,7 +357,14 @@ internal sealed class IngestEndpoint : IDisposable
             return;
         }
 
-        if (RefusesToken(context, _settings) || RefusesFormat(context) || RefusesLength(context))
+        if (RefusesToken(context, _settings))
+        {
+            return;
+        }
+
+        ConnectionCap.Trust(context);
+
+        if (RefusesFormat(context) || RefusesLength(context))
         {
             return;
         }

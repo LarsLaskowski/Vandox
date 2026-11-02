@@ -5,9 +5,17 @@ namespace Vandox.Backend.Ingest;
 /// <summary>
 /// One held connection of a <see cref="ConnectionCap"/>.
 /// </summary>
-#pragma warning disable RH2003, S2325
 internal sealed class CappedConnection
 {
+    #region Fields
+
+    /// <summary>
+    /// The trusted flag, 1 when trusted.
+    /// </summary>
+    private int _trusted;
+
+    #endregion // Fields
+
     #region Constructors
 
     /// <summary>
@@ -31,7 +39,7 @@ internal sealed class CappedConnection
     /// <summary>
     /// Gets a value indicating whether a request of the connection passed the token check.
     /// </summary>
-    internal bool Trusted => throw new NotImplementedException();
+    internal bool Trusted => Volatile.Read(ref _trusted) == 1;
 
     #endregion // Properties
 
@@ -42,7 +50,7 @@ internal sealed class CappedConnection
     /// </summary>
     internal void Trust()
     {
-        throw new NotImplementedException();
+        Volatile.Write(ref _trusted, 1);
     }
 
     #endregion // Methods
