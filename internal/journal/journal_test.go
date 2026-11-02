@@ -1635,3 +1635,51 @@ func kernelListEntries(t *testing.T, f *File) []uint64 {
 	}
 	return seen
 }
+
+// refreshWithArenaEnd rewrites the arena size in the header bytes b behind r so that the arena ends at end, and re-reads the header.
+func refreshWithArenaEnd(t *testing.T, f *File, r *refReader, b []byte, hs int, end uint64) {
+	t.Helper()
+	le.PutUint64(b[hdrArenaSize:], end-u64(hs))
+	if err := f.Refresh(r.size()); err != nil {
+		t.Fatalf("Refresh() with the arena ending at %d: error = %v, want nil", end, err)
+	}
+	if f.declEnd != end {
+		t.Fatalf("after Refresh the arena ends at %d, want %d", f.declEnd, end)
+	}
+}
+
+func TestFile_ArraySlotOutsideTheArenaIsMalformedInBothLayouts(t *testing.T) {
+	for _, compact := range []bool{false, true} {
+		t.Run("compact="+strconv.FormatBool(compact), func(t *testing.T) {
+			o := testOptions()
+			o.compact = compact
+			b, lay := buildFile(kernelEntries(10, true), o)
+			r := newRefReader(b)
+			f, err := r.openRef(false)
+			if err != nil {
+				t.Fatalf("Open() error = %v, want nil", err)
+			}
+			arr := lay.dataArrays[kernelPayload][0]
+			slot, w := lay.slotAt(arr, 1), lay.slotWidth()
+			want := lay.entries[2] // chain index 1 of the kernel list: the third kernel entry, before any syslog entry
+
+			refreshWithArenaEnd(t, f, r, b, lay.headerSize, slot+w-1)
+			reads := r.reads
+			got, err := f.arraySlot(arr, 1)
+
+			if !errors.Is(err, ErrMalformed) || got != 0 {
+				t.Errorf("arraySlot(first array, 1) with the arena ending 1 byte inside the slot = %d, %v, want 0 and %v", got, err, ErrMalformed)
+			}
+			if r.reads != reads {
+				t.Errorf("arraySlot() of a slot past the arena issued %d reads, want 0", r.reads-reads)
+			}
+
+			refreshWithArenaEnd(t, f, r, b, lay.headerSize, slot+w)
+			got, err = f.arraySlot(arr, 1)
+
+			if err != nil || got != want {
+				t.Errorf("arraySlot(first array, 1) with the arena ending at the slot's end = %d, %v, want %d and no error", got, err, want)
+			}
+		})
+	}
+}

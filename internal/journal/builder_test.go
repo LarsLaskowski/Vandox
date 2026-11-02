@@ -441,6 +441,7 @@ type refReader struct {
 	limit    int // visible bytes, 0 takes all
 	reads    int
 	maxRead  int
+	maxEnd   int64 // largest end (off+len(p)) of a read
 	violated string
 }
 
@@ -457,6 +458,7 @@ func (g *refReader) size() int64 {
 func (g *refReader) ReadAt(p []byte, off int64) (int, error) {
 	g.reads++
 	g.maxRead = max(g.maxRead, len(p))
+	g.maxEnd = max(g.maxEnd, off+int64(len(p)))
 	if len(p) > 64<<10 && g.violated == "" {
 		g.violated = "read of " + strconv.Itoa(len(p)) + " bytes at " + strconv.FormatInt(off, 10)
 	}
