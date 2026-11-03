@@ -37,6 +37,8 @@ internal sealed class IngestService : IAsyncDisposable
 
     private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private readonly TaskCompletionSource<Task> _draining = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private readonly HttpClient _client = new(new HttpClientHandler
                                               {
                                                   AllowAutoRedirect = false
@@ -86,6 +88,11 @@ internal sealed class IngestService : IAsyncDisposable
     /// Gets a task that completes when the host stopped.
     /// </summary>
     internal Task Stopped => _stopped.Task;
+
+    /// <summary>
+    /// Gets a task that completes with the drain of the ingest writes as soon as the service begins it, before the service waits for it.
+    /// </summary>
+    internal Task<Task> Draining => _draining.Task;
 
     /// <summary>
     /// Gets the base address of the ingest listener.
@@ -197,6 +204,7 @@ internal sealed class IngestService : IAsyncDisposable
                         Clock = clock,
                         IngestWriter = record ? inner => CreateWriter(inner, hold) : null,
                         FreeSpaceProbe = freeSpaceProbe,
+                        Draining = drain => _draining.TrySetResult(drain),
                         Built = provider => Prepare(provider, shutdownTimeout),
                         Started = _ =>
                                   {
