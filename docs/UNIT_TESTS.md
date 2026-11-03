@@ -105,9 +105,10 @@ and `uninstall.sh` and the files they ship (`vandox-agent.service`, `agent.yaml`
   Where no plain reference fits, the same rules bound the ratio of the code under test on a multiple of the base
   input (for example twice the base input) to the same code on the base input.
 - A second narrow exception, for a timeout that a library times itself on the real clock with no clock to inject
-  (SQLite's busy timeout and Microsoft.Data.Sqlite's own retry of `SQLITE_BUSY`; the shutdown timeout of the host,
-  `HostOptions.ShutdownTimeout`, which takes no `TimeProvider`): a test may let such a timer fire, set short and
-  injected, behind a bounded wait, and asserts no elapsed time. At most one test per timer may measure it, waiting at
+  (SQLite's busy timeout and Microsoft.Data.Sqlite's own retry of `SQLITE_BUSY`, fixed at the store's 5 seconds; the
+  shutdown timeout of the host, `HostOptions.ShutdownTimeout`, which takes no `TimeProvider`): a test may let such a
+  timer fire behind a bounded wait, set short and injected where the code under test takes it as a setting, and
+  asserts no elapsed time. At most one test per timer may measure it, waiting at
   most twice the configured value and bounding the ratio of the measured to the configured duration to 0.9 to 2. This
   is a timer the code under test needs to fire, not a wait for a result, which stays forbidden
   ([0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md)).
