@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Area:** Backend host
-- **Source:** Issue #40, Issue #314
+- **Source:** Issue #40, Issue #314, Issue #315
 - **Supersedes:** —
 
 ## Context
@@ -74,6 +74,18 @@ Shutdown:
 Token comparison: a plain `FixedTimeEquals` of the two strings returns early on a different length; comparing the SHA-256 digests
 of both (fixed length) does not, at the cost of one hash per request.
 
+Tests of the drain and the busy timeout (#315):
+
+1. **A real wait of 500 ms to show the service has not ended while a write runs** — rejected: it can only miss a regression on a slow
+   host, and it breaks the rule of no real clock.
+2. **A test-only `ServeHooks` callback with the drain task when the drain begins** (chosen) — the test sees the drain pending while
+   the write is held, with no wait; one internal property and one call in `ServeCommand`.
+3. **For the busy timeout, a check of the configured `DefaultTimeout` and `busy_timeout` instead of the measurement** — rejected: the
+   connections are private to the store, and only a measurement shows that the library's own retry of `SQLITE_BUSY` ends with the
+   configured value, which the documented 5-second busy timeout ([Storage](../areas/storage.md)) rests on.
+4. **For the busy timeout, a narrow exception in `docs/UNIT_TESTS.md` for timers a library runs on the real clock without a clock
+   to inject, bounded to 0.9 to 2 times the configured value** (chosen).
+
 ## Decision
 
 The endpoint accepts a batch only when the bearer token's SHA-256 digest equals the configured token's (`FixedTimeEquals`) and the
@@ -100,10 +112,8 @@ the token check, and is closed itself only when every held connection passed it.
   connection the agent has used; a token holder can hold all 16 connections; no log line reports a
   connection the cap evicts or closes, since its volume would be the peer's to choose; the ingest warnings other than the token and agent
   refusals are not rate-limited, since only a token holder reaches them and the container's log cap bounds their volume.
-- Three tests rest on the real clock against `docs/UNIT_TESTS.md`, accepted for this change: `SqliteStoreWriteGivesUpAfterBusyTimeout`
-  measures SQLite's busy handler, which runs on the real clock inside the native library and no `TimeProvider` drives, against the
-  configured 5 seconds; `ServeShutdownDrainsIngestWritesBeforeClosingStore` and `ServeFailureAfterStartStillDrains` wait 500 ms to
-  show that the service has not ended while a write runs, which can only miss a regression on a slow host, never fail correct code.
-  A follow-up issue replaces the wait by a drain signal and settles the convention for timers of native libraries.
+- The tests of the drain observe it through the internal `ServeHooks.Draining` callback, without a real wait;
+  `SqliteStoreWriteGivesUpAfterBusyTimeout` measures the busy timeout on the real clock under the exception for library timers in
+  `docs/UNIT_TESTS.md` and costs about 5 seconds of test time (#315).
 - Revisit the slot count when the measured memory of one request (Wire format area, *Duties of the ingest API*) or several agents
   (#89) change the budget.
