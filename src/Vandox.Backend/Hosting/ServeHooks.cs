@@ -54,5 +54,10 @@ public sealed class ServeHooks
     /// </summary>
     internal Func<string, long?>? FreeSpaceProbe { get; set; }
 
+    /// <summary>
+    /// Gets or sets an action that is called with the drain of the ingest writes as soon as it begins, before the service waits for it; tests only.
+    /// </summary>
+    internal Action<Task>? Draining { get; set; }
+
     #endregion // Properties
 }
