@@ -537,10 +537,11 @@ func requireRedacted(t *testing.T, tr *HTTPTransport) {
 	}
 }
 
-// countConn counts the bytes the client reads.
+// countConn counts the bytes the client reads and notes that the connection was closed.
 type countConn struct {
 	net.Conn
-	n *atomic.Int64
+	n      *atomic.Int64
+	closed *atomic.Bool
 }
 
 // Read reads and counts.
@@ -549,6 +550,56 @@ func (c *countConn) Read(p []byte) (int, error) {
 	c.n.Add(int64(n))
 
 	return n, err
+}
+
+// Close notes the close and closes the connection.
+func (c *countConn) Close() error {
+	c.closed.Store(true)
+
+	return c.Conn.Close()
+}
+
+// countBody counts the bytes read from an answer's body and notes whether the connection was already closed when the
+// body was closed.
+type countBody struct {
+	io.ReadCloser
+	n               *atomic.Int64
+	conn            *atomic.Bool
+	connClosedFirst *atomic.Bool
+}
+
+// Read reads and counts.
+func (b *countBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.n.Add(int64(n))
+
+	return n, err
+}
+
+// Close notes whether the connection is closed already and closes the body.
+func (b *countBody) Close() error {
+	b.connClosedFirst.Store(b.conn.Load())
+
+	return b.ReadCloser.Close()
+}
+
+// countBodyTransport wraps the body of every answer in a countBody.
+type countBodyTransport struct {
+	base            http.RoundTripper
+	n               *atomic.Int64
+	conn            *atomic.Bool
+	connClosedFirst *atomic.Bool
+}
+
+// RoundTrip calls the wrapped transport and counts the body of its answer.
+func (rt *countBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = &countBody{ReadCloser: resp.Body, n: rt.n, conn: rt.conn, connClosedFirst: rt.connClosedFirst}
+
+	return resp, nil
 }
 
 func TestHTTPTransport_ReadsAtMostFourKiBOfBody(t *testing.T) {
@@ -571,7 +622,8 @@ func TestHTTPTransport_ReadsAtMostFourKiBOfBody(t *testing.T) {
 				writeHostileBody(w, tc.status, tc.chunked, total)
 			}))
 			tr := newTransport(t, srv.URL)
-			var read atomic.Int64
+			var read, bodyRead atomic.Int64
+			var connClosed, connClosedFirst atomic.Bool
 			useDial(tr, func(ctx context.Context, network, addr string) (net.Conn, error) {
 				var d net.Dialer
 				c, err := d.DialContext(ctx, network, addr)
@@ -579,15 +631,22 @@ func TestHTTPTransport_ReadsAtMostFourKiBOfBody(t *testing.T) {
 					return nil, err
 				}
 
-				return &countConn{Conn: c, n: &read}, nil
+				return &countConn{Conn: c, n: &read, closed: &connClosed}, nil
 			})
+			tr.client.Transport = &countBodyTransport{base: tr.client.Transport, n: &bodyRead, conn: &connClosed, connClosedFirst: &connClosedFirst}
 
 			res := send(t, tr)
 
 			requireResult(t, "answer with a hostile body", res, Result{Status: tc.status, Reason: tc.reason})
 			requireOutcome(t, "answer with a hostile body", res, tc.outcome)
+			if got := bodyRead.Load(); got != MaxAnswerBody {
+				t.Errorf("Send read %d bytes of the body, want %d", got, MaxAnswerBody)
+			}
+			if !connClosedFirst.Load() {
+				t.Errorf("Send closed the body before the connection, want the connection closed first")
+			}
 			if got := read.Load(); got > MaxAnswerHeader {
-				t.Errorf("the transport read %d bytes of an answer of %d body bytes, want the body cut at %d bytes (at most %d read in all)", got, total, MaxAnswerBody, MaxAnswerHeader)
+				t.Errorf("the client read %d bytes from the connection (header and read buffer included) for an answer of %d body bytes, want at most %d", got, total, MaxAnswerHeader)
 			}
 		})
 	}
