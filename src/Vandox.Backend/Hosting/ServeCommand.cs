@@ -190,7 +190,7 @@ internal static class ServeCommand
     /// </summary>
     /// <param name="app">The started application</param>
     /// <param name="config">The configuration</param>
-    /// <param name="hooks">Tells the test when the service serves</param>
+    /// <param name="hooks">Tells the test when the service serves and when the drain of the ingest writes begins</param>
     /// <param name="logger">The logger</param>
     /// <param name="cancellationToken">Stops the service</param>
     /// <returns>A task that completes when the application stopped and the ingest writes ended</returns>
@@ -205,7 +205,16 @@ internal static class ServeCommand
         }
         finally
         {
-            await app.Services.GetRequiredService<IngestEndpoint>().DrainAsync().ConfigureAwait(false);
+            var drain = app.Services.GetRequiredService<IngestEndpoint>().DrainAsync();
+
+            try
+            {
+                hooks.Draining?.Invoke(drain);
+            }
+            finally
+            {
+                await drain.ConfigureAwait(false);
+            }
         }
     }
 

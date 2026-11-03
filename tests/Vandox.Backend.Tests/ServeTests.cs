@@ -1344,8 +1344,12 @@ public class ServeTests
         // Act
         service.Stop();
         await service.Stopped.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        await Task.WhenAny(service.Draining, service.Run).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
 
-        var finishedEarly = await Task.WhenAny(service.Run, Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.CancellationToken)) == service.Run;
+        var drainSignalled = service.Draining.IsCompletedSuccessfully;
+        var drain = drainSignalled ? service.Draining.Result : Task.CompletedTask;
+        var drainDoneEarly = drain.IsCompleted;
+        var runDoneEarly = service.Run.IsCompleted;
 
         service.Writer.ReleaseAll();
         await service.Run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
@@ -1354,7 +1358,10 @@ public class ServeTests
         var rows = await service.RowsAsync(TestContext.CancellationToken);
 
         // Assert
-        Assert.IsFalse(finishedEarly, "the service waits for the write that is still running after the host stopped");
+        Assert.IsTrue(drainSignalled, "the service starts the drain of the ingest writes after the host stopped");
+        Assert.IsFalse(drainDoneEarly, "the drain waits for the write that is still running after the host stopped");
+        Assert.IsFalse(runDoneEarly, "the service waits for the write that is still running after the host stopped");
+        Assert.IsTrue(drain.IsCompletedSuccessfully, "the drain completes after the write is released");
         Assert.AreEqual(1, service.Writer.Completed, "the write committed against an open store");
         Assert.HasCount(3, rows, "the committed records are stored");
     }
@@ -1482,7 +1489,12 @@ public class ServeTests
         }
 
         // Act
-        var finishedEarly = await Task.WhenAny(service.Run, Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.CancellationToken)) == service.Run;
+        await Task.WhenAny(service.Draining, service.Run).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        var drainSignalled = service.Draining.IsCompletedSuccessfully;
+        var drain = drainSignalled ? service.Draining.Result : Task.CompletedTask;
+        var drainDoneEarly = drain.IsCompleted;
+        var runDoneEarly = service.Run.IsCompleted;
 
         service.Writer.ReleaseAll();
 
@@ -1493,7 +1505,10 @@ public class ServeTests
         var rows = await service.RowsAsync(TestContext.CancellationToken);
 
         // Assert
-        Assert.IsFalse(finishedEarly, "the failed service waits for the write in flight");
+        Assert.IsTrue(drainSignalled, "the failed service starts the drain of the ingest writes");
+        Assert.IsFalse(drainDoneEarly, "the drain of the failed service waits for the write in flight");
+        Assert.IsFalse(runDoneEarly, "the failed service waits for the write in flight");
+        Assert.IsTrue(drain.IsCompletedSuccessfully, "the drain completes after the write is released");
         Assert.AreEqual(1, code, "exit code of the failed service");
         Assert.AreEqual(1, service.Writer.Completed, "the write committed against an open store");
         Assert.HasCount(3, rows, "the committed records are stored");
