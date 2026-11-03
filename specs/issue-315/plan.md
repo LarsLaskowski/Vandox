@@ -174,3 +174,20 @@ by tests).
   second run does not read while the first one holds the slot, against `docs/UNIT_TESTS.md` (no real delay). Replace it with a
   deterministic signal, for example a hook or observable state when the second run starts to wait for the slot. Found while planning
   #315."
+
+## Challenge notes
+
+Devil's Advocate, minor (verbatim):
+
+1. **minor**: The rewritten AC1 test still waits on the real clock, and the plan says nothing about it. Reason: the issue asks to remove the real-time waits, and this one stays without being named or covered by the docs.
+   - Evidence: `ServeShutdownDrainsIngestWritesBeforeClosingStore` starts the service with `shutdownTimeout: TimeSpan.FromMilliseconds(300)` (ServeTests.cs:1338). `IngestService.Prepare` writes that into `HostOptions.ShutdownTimeout` (tests/Vandox.Backend.Tests/IngestService.cs:255-257).
+   - Plan step 3 keeps the existing `Stopped` wait, and `Stopped` only fires after the host gives up on the held request. The host times that 300 ms on the real clock and takes no `TimeProvider`.
+   - The test needs this timer ("the host stopped before the write ended"), so it cannot just be removed.
+   - Instruction for the Tester: word the AC4 paragraph in `docs/UNIT_TESTS.md` so it also covers a host's shutdown timeout (`HostOptions.ShutdownTimeout`), set short and injected, that a test lets fire behind a bounded wait without asserting how long it took. Otherwise name this test explicitly as complying under that exception. Either way the test keeps the 300 ms setting and does not measure it.
+
+## Security notes
+
+Security, plan review APPROVED, non-blocking (verbatim):
+
+1. **A throwing hook would skip the drain wait.** If `hooks.Draining?.Invoke(drain)` throws, `await drain` is skipped. The exception leaves `RunStartedAsync`, and the store can close while a write is still running. The plan accepts this as a test fault (*Architecture check*), and since only tests can set the hook it cannot happen in production. If the Dev wants the guarantee to hold by construction anyway, wrap the call: `try { hooks.Draining?.Invoke(drain); } finally { await drain.ConfigureAwait(false); }`. This is optional.
+2. **Write the test helper's completion as `TrySetResult`.** The hook runs inside the `finally`, so a second invocation (not possible today) or an exception in the callback would land on the shutdown path. The plan's `TaskCompletionSource` with `RunContinuationsAsynchronously` already keeps the test's continuations off that path, which is fine.
