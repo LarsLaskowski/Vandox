@@ -73,7 +73,9 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 - The ingest endpoint checks the token before it reads or decodes a request's body, so a peer without the token costs the backend no
   decoding, and it marks a refused batch (`Vandox-Refused: batch`) only on an authenticated request. A token holder (the monitored
   server, or whoever has taken it over) can write batches of its own agent ID only, bounded per request in memory and time, and
-  only until the free space of the data volume falls to `ingest.min_free`.
+  only until the free space of the data volume falls to `ingest.min_free`. A peer without the token cannot keep the agent out of the
+  listener's 16 connections by holding them: a connection that has not passed the token check is evicted for a new one (see the
+  [backend host](backend-host.md) area).
 
 ## Web UI
 

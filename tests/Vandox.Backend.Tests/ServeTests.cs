@@ -1176,11 +1176,12 @@ public class ServeTests
     }
 
     /// <summary>
-    /// A 17th concurrent connection to the ingest listener is closed without a request being read, and the web listener is not affected.
+    /// A 17th concurrent connection to the ingest listener is closed without a request being read when each of the 16 held connections stored a batch with the
+    /// token, and the web listener is not affected.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task ServeIngestSeventeenthConnectionIsClosed()
+    public async Task ServeIngestSeventeenthConnectionIsClosedWhenAllHoldTheToken()
     {
         // Arrange
         await using var service = await IngestService.StartAsync(TestContext.CancellationToken);
@@ -1201,9 +1202,9 @@ public class ServeTests
                 held.Add(connection);
                 await connection.ConnectAsync(IPAddress.Loopback, service.Fixture.IngestPort, TestContext.CancellationToken);
 
-                var (status, _) = await ExchangeAsync(connection);
+                var status = await PostBatchAsync(connection);
 
-                if (status != 404)
+                if (status != 204)
                 {
                     problems.Add($"connection {index} answered {status}");
                 }
@@ -1228,6 +1229,66 @@ public class ServeTests
         // Assert
         Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
         Assert.IsTrue(closed, "the 17th connection is closed without an answer");
+    }
+
+    /// <summary>
+    /// With 16 connections held that never presented the token (each sent one request without it), a 17th connection that posts a batch with the token is served and the oldest held connection
+    /// is closed; the web listener is not affected.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeIngestFullListenerEvictsTheOldestUntrustedConnection()
+    {
+        // Arrange
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken);
+
+        using var client = CreateClient();
+
+        var held = new List<TcpClient>();
+        var problems = new List<string>();
+        var newcomerStatus = 0;
+        bool firstClosed;
+
+        try
+        {
+            // Act
+            for (var index = 1; index <= IngestLimits.MaxConnections; index++)
+            {
+                var connection = new TcpClient();
+
+                held.Add(connection);
+                await connection.ConnectAsync(IPAddress.Loopback, service.Fixture.IngestPort, TestContext.CancellationToken);
+
+                // The answer shows the connection was admitted before the next one connects, so admission order is connection order.
+                var (status, _) = await ExchangeAsync(connection);
+
+                if (status != 404)
+                {
+                    problems.Add($"connection {index} answered {status}");
+                }
+            }
+
+            var newcomer = new TcpClient();
+
+            held.Add(newcomer);
+            await newcomer.ConnectAsync(IPAddress.Loopback, service.Fixture.IngestPort, TestContext.CancellationToken);
+
+            newcomerStatus = await PostBatchAsync(newcomer);
+            firstClosed = await IsClosedAsync(held[0]);
+
+            using var web = await client.GetAsync($"http://127.0.0.1:{service.Fixture.WebPort}/healthz", TestContext.CancellationToken);
+
+            AddStatusProblem(problems, "GET web /healthz", HttpStatusCode.OK, web);
+        }
+        finally
+        {
+            held.ForEach(connection => connection.Dispose());
+        }
+
+        // Assert
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+        Assert.AreEqual(204, newcomerStatus, "the 17th connection posts a batch with the token and is served");
+        Assert.IsTrue(firstClosed, "the oldest connection without the token is closed");
     }
 
     /// <summary>
@@ -1689,6 +1750,31 @@ public class ServeTests
         await stream.WriteAsync(Latin1("GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n"), TestContext.CancellationToken);
 
         return await ReadHeadAsync(stream);
+    }
+
+    /// <summary>
+    /// Posts a valid batch with the token on a connection that stays open and reads the status of the answer.
+    /// </summary>
+    /// <param name="client">The connection</param>
+    /// <returns>The status, 0 when the connection ended without an answer</returns>
+    private async Task<int> PostBatchAsync(TcpClient client)
+    {
+        var body = IngestSamples.Valid(1, 3);
+        var head = Latin1($"POST /v1/batches HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {IngestService.Token}\r\nContent-Type: application/gzip\r\nContent-Length: {body.Length}\r\n\r\n");
+        var stream = client.GetStream();
+
+        try
+        {
+            await stream.WriteAsync((byte[])[.. head, .. body], TestContext.CancellationToken);
+        }
+        catch (IOException)
+        {
+            return 0;
+        }
+
+        var (status, _) = await ReadHeadAsync(stream);
+
+        return status;
     }
 
     /// <summary>

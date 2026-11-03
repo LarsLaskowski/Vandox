@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -426,6 +427,43 @@ public class IngestEndpointTests
 
         // Assert
         Assert.AreEqual(status, call.Status, "status");
+    }
+
+    /// <summary>
+    /// The endpoint trusts the connection of a request exactly when the token matches, whatever a later step answers, and never before.
+    /// </summary>
+    /// <param name="enabled">Whether ingest is switched on</param>
+    /// <param name="presented">The token of the request, <c>null</c> for none</param>
+    /// <param name="contentType">The content type of the request</param>
+    /// <param name="status">The expected status</param>
+    /// <param name="trusted">Whether the connection is trusted afterwards</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(true, null, GzipType, 401, false)]
+    [DataRow(true, "wrong", GzipType, 401, false)]
+    [DataRow(false, IngestRig.Token, GzipType, 503, false)]
+    [DataRow(true, IngestRig.Token, "text/plain", 415, true)]
+    [DataRow(true, IngestRig.Token, GzipType, 204, true)]
+    public async Task IngestEndpointTrustsTheConnectionOnlyWhenTheTokenMatches(bool enabled, string? presented, string contentType, int status, bool trusted)
+    {
+        // Arrange
+        await using var rig = IngestRig.Create(enabled);
+
+        using var call = IngestCall.Post(IngestSamples.Valid(), presented);
+        var held = new CappedConnection(new AbortRecordingConnection());
+
+        call.With(ContentType, contentType);
+        call.Context.Features.Set<IConnectionItemsFeature>(new ConnectionItems(new Dictionary<object, object?>
+                                                                               {
+                                                                                   [ConnectionCap.ItemName] = held
+                                                                               }));
+
+        // Act
+        await Finish(rig.RunAsync(call));
+
+        // Assert
+        Assert.AreEqual(status, call.Status, "status");
+        Assert.AreEqual(trusted, held.Trusted, "the connection is trusted");
     }
 
     /// <summary>

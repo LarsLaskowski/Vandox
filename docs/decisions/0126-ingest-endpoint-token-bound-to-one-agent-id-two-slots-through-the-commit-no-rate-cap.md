@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Area:** Backend host
-- **Source:** Issue #40
+- **Source:** Issue #40, Issue #314
 - **Supersedes:** —
 
 ## Context
@@ -39,6 +39,21 @@ Rate:
    and it does not bound disk growth, which retention (#46) does.
 2. **No cap; the two slots and the one writer bound the rate** (chosen).
 
+Connections (#314): the listener keeps at most 16 connections, counted from accept; Kestrel's keep-alive and header timeouts are
+server-wide, and an idle connection never reaches the token check.
+
+1. **An idle timeout in the connection middleware, before the first request and between requests** — a peer that reconnects fills
+   the 16 places again every timeout, so the agent is still kept out; the middleware sees bytes, not request boundaries; and a
+   timeout below the agent's idle reuse (30 seconds) closes the agent's own kept connections.
+2. **`Connection: close` on `401` and `404`** — does not touch a peer that never sends a request.
+3. **A second Kestrel server for ingest with shorter limits** — duplicates the host, its services and the shutdown drain, and is a
+   timeout too, with the weakness of option 1.
+4. **A limit per peer address** — the port is reachable from the monitored server, where every local process shares the agent's
+   address, and from LAN hosts that route to the tailnet address; the address does not tell the agent apart.
+5. **When the cap is full, the oldest held connection that has not passed the token check makes room** (chosen) — decides on the
+   one thing only the agent has; a connection the agent has used keeps its place for its lifetime, and the newest connection is the
+   one most likely to be the agent's.
+
 Disk:
 
 1. **Accept the residual until retention (#46)** — rejected: a compromised monitored server holds the token and could fill the data
@@ -64,7 +79,8 @@ of both (fixed length) does not, at the cost of one hash per request.
 The endpoint accepts a batch only when the bearer token's SHA-256 digest equals the configured token's (`FixedTimeEquals`) and the
 header's `agent_id` equals `ingest.agent_id` ordinally; it holds one of two slots from the body read through the commit or rollback,
 writes nothing while less than `ingest.min_free` is free, has no request-rate cap, and writes under a token that only the shutdown
-deadline cancels. The statuses, limits, timeouts and log lines are in the [Backend host](../areas/backend-host.md) area
+deadline cancels. When the listener's 16 connections are held, a new connection evicts the oldest held one on which no request passed
+the token check, and is closed itself only when every held connection passed it. The statuses, limits, timeouts and log lines are in the [Backend host](../areas/backend-host.md) area
 (*Ingest endpoint*).
 
 ## Consequences
@@ -79,9 +95,10 @@ deadline cancels. The statuses, limits, timeouts and log lines are in the [Backe
   busy timeout and not the library's default of 30 seconds.
 - A token holder can still grow the database up to the floor; the web UI and the import keep working there, and ingest resumes when
   space is freed or retention (#46) removes data.
-- Accepted residuals, availability only (the agent keeps its spool and retries): a host that reaches the ingest port can hold the
-  16 connections idle for the keep-alive time without the token, because Kestrel's keep-alive and header timeouts are server-wide
-  and an idle connection never reaches the token check (follow-up issue); the ingest warnings other than the token and agent
+- Accepted residuals, availability only (the agent keeps its spool and retries): a sustained connection flood from a peer without the
+  token can delay the agent's first connection (after a start or a lost connection) until one attempt wins the race; it cannot evict a
+  connection the agent has used; a token holder can hold all 16 connections; no log line reports a
+  connection the cap evicts or closes, since its volume would be the peer's to choose; the ingest warnings other than the token and agent
   refusals are not rate-limited, since only a token holder reaches them and the container's log cap bounds their volume.
 - Three tests rest on the real clock against `docs/UNIT_TESTS.md`, accepted for this change: `SqliteStoreWriteGivesUpAfterBusyTimeout`
   measures SQLite's busy handler, which runs on the real clock inside the native library and no `TimeProvider` drives, against the

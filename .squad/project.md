@@ -14,7 +14,7 @@ plan (`.squad/routing.md`, *Tiers*, which also says when a change is tier `secur
 files or endpoints.
 
 1. **Ingest authentication** (implemented, `src/Vandox.Backend/Ingest`: `IngestEndpoint`, `IngestSettings`, `IngestToken`, `IngestLimits`,
-   `IngestStatus`, `IngestRefusalLog`, `IngestWriteGate`, `ConnectionCap`, `FreeSpace`, `IngestFieldPath`; the request branch in
+   `IngestStatus`, `IngestRefusalLog`, `IngestWriteGate`, `ConnectionCap`, `CappedConnection`, `FreeSpace`, `IngestFieldPath`; the request branch in
    `Hosting/PortRoutingMiddleware`, the listener in `Hosting/ListenerRoutes`, the drain in `Hosting/ServeCommand`): the agent token, request limits and
    deduplication. *Goal:* only an agent holding a valid token can store data; the token is compared in
    constant time; request size, batch size and rate are bounded so a valid agent cannot exhaust the
@@ -25,7 +25,7 @@ files or endpoints.
    token is bound to one agent, and ingest answers `503` while the token or `ingest.agent_id` is unset (`IngestSettings.Create`). The bounds: the compressed body
    at most 2 MiB (`Content-Length` before the read, a 2 MiB buffer owned by each of two slots, never pooled), the decompressed batch at most 2 MiB, a
    line 1 MiB and 20,000 records (`BatchDecoder` through `IngestLimits.Wire`), two slots held from the body read through the commit, 16 connections on
-   the listener (`ConnectionCap`, HTTP/1.1 only), 30 seconds for waiting, reading and decoding; there is no request-rate cap (record 0126). The disk
+   the listener (`ConnectionCap`, HTTP/1.1 only; a further connection evicts the oldest one that has not passed the token check, and is closed only when all 16 have), 30 seconds for waiting, reading and decoding; there is no request-rate cap (record 0126). The disk
    bound is the free-space floor `ingest.min_free` (default `1GiB`, `0MiB` off): `FreeSpace` is read before every write and a batch below the floor, or
    with an unreadable volume, is answered `503` and not written. The drain: `IngestWriteGate` closes at the stop signal (the endpoint's
    `ApplicationStopping` callback), a write that started runs under a token that only the shutdown deadline (10 seconds after the stop signal)

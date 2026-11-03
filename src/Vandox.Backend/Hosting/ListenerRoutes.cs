@@ -42,7 +42,7 @@ public static class ListenerRoutes
 
     /// <summary>
     /// Labels the connections of a listener as ingest connections, serves them over HTTP/1.1 only (one request at a time per connection) and
-    /// closes a connection beyond <see cref="IngestLimits.MaxConnections"/>.
+    /// keeps at most <see cref="IngestLimits.MaxConnections"/> connections: a further connection evicts the oldest one that has not passed the token check and is closed only when all have.
     /// </summary>
     /// <param name="listener">The listener</param>
     public static void Ingest(ListenOptions listener)
