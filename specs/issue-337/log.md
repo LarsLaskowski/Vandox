@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-11-04 07:14 | 5 Tests first (round 2) | squad-tester | DONE: TestAgentReadme_TailscaleDownResidual replaced by TestAgentReadme_TailscaleDownFailureModes (agrees with AC5); remaining failures wait on Dev (opus/medium · 3,305 tokens · 46 tool uses · 1448 s · continued) |
 | 2026-11-04 07:15 | 6 Follow-up issues | Orchestrator | Created #372 (ops: production egress checks) and #373 (agent: loopback exemption via forged name answer) |
 | 2026-11-04 07:20 | 6 Implement | squad-dev | DONE: bindControl/needsDevice/dialContext implemented, docs written (README, areas, ARCHITECTURE, SECURITY, project.md, record 0134 Accepted); Go tests+analyzer pass; .NET half of coverage not run by Dev (sonnet/medium · 127,237 tokens · 23 tool uses · 366 s) |
+| 2026-11-04 07:28 | 7 Code check | Orchestrator | Format check, build, go test -race, coverage gate (new/changed 90.9%, overall 96.7%), analyzer gate and scope-check pass; committed 22d6f90 |
