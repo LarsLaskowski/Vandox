@@ -812,3 +812,47 @@ func TestHTTPTransport_FailsAtOnceWithoutTheDevice(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPTransport_BindsToTheTailnetDevice(t *testing.T) {
+	tr := newTransport(t, "http://100.64.0.1:8081")
+
+	// The literal, not tailnetDevice: a changed constant must fail here too. An empty name would make BindToDevice unbind.
+	if want := "tailscale0"; tr.device != want {
+		t.Errorf("NewHTTPTransport().device = %q (tailnetDevice = %q), want %q", tr.device, tailnetDevice, want)
+	}
+}
+
+// newLoopbackServer starts a server answering 200 on listenAddr; it skips the test with the reason when the host
+// cannot listen there (no IPv6 loopback).
+func newLoopbackServer(t *testing.T, listenAddr string) *httptest.Server {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		t.Skipf("net.Listen(%q) error = %v: the host has no such loopback address, so this case cannot run", listenAddr, err)
+	}
+	srv := httptest.NewUnstartedServer(statusHandler(http.StatusOK))
+	_ = srv.Listener.Close()
+	srv.Listener = ln
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+func TestHTTPTransport_LeavesLoopbackUnbound(t *testing.T) {
+	requireDeviceAbsent(t)
+	for _, listenAddr := range []string{"127.0.0.1:0", "[::1]:0"} {
+		t.Run(listenAddr, func(t *testing.T) {
+			srv := newLoopbackServer(t, listenAddr)
+			tr := newTransport(t, srv.URL)
+			tr.device = absentDevice
+
+			res := send(t, tr)
+
+			requireResult(t, "send to a loopback backend without the device", res, Result{Status: http.StatusOK})
+			requireOutcome(t, "send to a loopback backend without the device", res, Acknowledged)
+		})
+	}
+}
