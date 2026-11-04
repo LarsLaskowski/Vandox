@@ -47,7 +47,11 @@ and the unit's address allow-list stays as a second layer. The behavior, the fai
   send ends as a timeout. Either way the records stay spooled.
 - The monitored server must run Tailscale in TUN mode with the default interface name; Tailscale's userspace networking is not
   supported there.
-- Name-server queries for a host name in `backend.url` are not bound; they carry the name, not the token, and the documented setup
-  uses the tailnet address.
-- The control was measured on the CI runner's systemd 249 with stand-in links; the run on the production server is the maintainer's
-  (follow-up issue).
+- The guarantee holds only with the tailnet address in `backend.url`, which the documented setup asks for. A host name is resolved
+  through the local `systemd-resolved` stub, which the unit's `localhost` allows and which asks the provider's name servers; a forged
+  answer `127.0.0.1` or `::1` meets the loopback exemption and sends the token unbound to whatever listens on that local port. This
+  predates the binding; a follow-up issue proposes closing it.
+- The control was measured on the CI runner's systemd 249 with stand-in links, for IPv4 and IPv6, including a stand-in without
+  routes while a provider route covers the tailnet range; the run on the production server is the maintainer's (follow-up issue).
+- The server's egress check reads the unit's IP accounting (`IPEgressPackets`) while `tailscaled` is stopped, not a packet capture
+  on the uplink: `tcpdump` is not a documented tool of the server, and the count covers every interface without the uplink's name.
