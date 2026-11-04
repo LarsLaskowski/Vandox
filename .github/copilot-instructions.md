@@ -164,8 +164,8 @@ C# (backend): Reihitsu layout rules (run the formatter, then build), XML documen
 
 **Unit tests are mandatory for newly written code.** Standard `testing` package, colocated `_test.go`
 files, table-driven tests with `t.Run`, `t.Helper()` in helpers, `t.TempDir()` for files, failure messages
-that state got and want; no real network or clock (the one exception, a time bound tested as the ratio of
-two durations, never an absolute one, is in `docs/UNIT_TESTS.md`).
+that state got and want; no real network or clock (the narrow exceptions, such as a time bound tested as the
+ratio of two durations, never an absolute one, are in `docs/UNIT_TESTS.md`).
 
 **Profile `dotnet`**
 
@@ -173,8 +173,8 @@ two durations, never an absolute one, is in `docs/UNIT_TESTS.md`).
 FluentAssertions); test doubles as `.squad/project.md` (*Test doubles*) and `docs/UNIT_TESTS.md` prescribe —
 real objects and hand-written fakes/stubs unless the project names a mocking library. Classes
 `{TypeUnderTest}Tests`, methods `{Class}{Scenario}{ExpectedResult}` in PascalCase **without underscores**;
-always pass an assert message. Timing through an injected `TimeProvider`, never the real clock (the one
-exception, a time bound tested as the ratio of two durations, never an absolute one, is in
+always pass an assert message. Timing through an injected `TimeProvider`, never the real clock (the narrow
+exceptions, such as a time bound tested as the ratio of two durations, never an absolute one, are in
 `docs/UNIT_TESTS.md`).
 <!-- stack:end testing -->
 Full conventions, including the project's test doubles and the checklist to run before committing a new
