@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"net/url"
+	"syscall"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
@@ -29,6 +31,9 @@ const (
 	errBackendURLText   = "sender: backend url: not usable"
 	httpContentTypeGzip = "application/gzip"
 )
+
+// tailnetDevice is Tailscale's network interface on Linux; every connection to an address that is not a loopback address is bound to it.
+const tailnetDevice = "tailscale0"
 
 // errBackendURL is returned for a backend URL the transport cannot use; it never holds the URL.
 var errBackendURL = errors.New(errBackendURLText)
@@ -85,6 +90,8 @@ type HTTPTransport struct {
 	token  config.Secret
 	// dial replaces the dialer; nil: net.Dialer. Only tests set it.
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// device is the interface every non-loopback connection is bound to; tailnetDevice, only tests change it.
+	device string
 }
 
 // NewHTTPTransport returns the transport to the backend at baseURL, authenticated with token. The client uses no
@@ -95,7 +102,7 @@ func NewHTTPTransport(baseURL string, token config.Secret) (*HTTPTransport, erro
 		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errBackendURL
 	}
-	t := &HTTPTransport{url: u.Scheme + "://" + u.Host + IngestPath, token: token}
+	t := &HTTPTransport{url: u.Scheme + "://" + u.Host + IngestPath, token: token, device: tailnetDevice}
 	t.client = &http.Client{
 		Transport: &http.Transport{
 			Proxy:                  nil,
@@ -113,14 +120,46 @@ func NewHTTPTransport(baseURL string, token config.Secret) (*HTTPTransport, erro
 	return t, nil
 }
 
-// dialContext dials with the test hook when one is set, else with a plain dialer.
+// dialContext dials with the test hook when one is set, else with a dialer that binds every non-loopback connection to the device.
 func (t *HTTPTransport) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	if t.dial != nil {
 		return t.dial(ctx, network, addr)
 	}
-	var d net.Dialer
+	d := net.Dialer{Control: bindControl(t.device)}
 
 	return d.DialContext(ctx, network, addr)
+}
+
+// bindControl returns the dialer's Control function: it binds the socket to device before connect unless needsDevice(address) is false.
+func bindControl(device string) func(network, address string, c syscall.RawConn) error {
+	return func(_, address string, c syscall.RawConn) error {
+		if !needsDevice(address) {
+			return nil
+		}
+		var bindErr error
+		if err := c.Control(func(fd uintptr) {
+			bindErr = syscall.BindToDevice(int(fd), device) // #nosec G115 -- a descriptor of an open socket fits an int
+		}); err != nil {
+			return err
+		}
+
+		return bindErr
+	}
+}
+
+// needsDevice reports whether a connection to address (host:port with an IP literal, as net.Dialer passes it) must be bound:
+// false only for a loopback address; an address it cannot parse is bound.
+func needsDevice(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return true
+	}
+
+	return !addr.Unmap().IsLoopback()
 }
 
 // String returns a fixed text, so no formatting of the transport shows its fields.

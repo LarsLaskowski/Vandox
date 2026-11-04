@@ -50,21 +50,32 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   but what the maintainer enables on purpose (a commented SSH line); there is none for the web port.
 - **After a reboot** Tailscale should come up by itself with its tag and settings, and the agent sends again from its spool; the README
   has the check, not yet run on the production server (issue #338).
-- **Residual while Tailscale is not up.** Tailscale's routes exist only while it runs, and the unit's `IPAddressAllow=` filters by
-  address, not interface. While Tailscale is down (before its network map after a boot, stopped, logged out, the node removed), a send to the
-  backend's tailnet address follows the server's default route. If nothing answers, the send fails as `connection failed` or a timeout and the
-  records stay in the spool until the tailnet is up. Whoever answers at that address on the provider's path gets the token and the batch in
-  clear and, with a `2xx` answer (acknowledged) or a refusal answer (`400`, `413` or `422` with the refusal header), makes the agent drop those
-  records as delivered or give them up. The exposure predates the policy file, is stated in the README, and is not closed; issue #337 adds a
-  control (record 0132).
+- **While Tailscale is not up, the agent's sender binds to `tailscale0`.** Tailscale's routes exist only while it runs, and the unit's
+  `IPAddressAllow=` filters by address, not interface, so without a binding a send to the backend's tailnet address would follow the
+  server's default route onto the provider's network. `HTTPTransport` therefore binds every connection whose address is not a loopback
+  address (`127.0.0.0/8`, `::1`, an IPv4-mapped loopback) to the interface `tailscale0` (`SO_BINDTODEVICE`) before it connects; an
+  address it cannot parse is bound, and a connection to a loopback address (a backend on the same host) is not. The kernel then routes
+  the connection through that interface only, whatever the routing tables and the network manager hold. Without the device (`tailscaled`
+  stopped, a boot before it started) the connect fails at once, before a packet is sent, as `connection failed`; with the device but
+  without routes (before its network map, logged out) the packets go into Tailscale and the send ends as a `timeout`. Neither reaches
+  the provider's network, and the records stay in the spool until the tailnet is up. The server must run Tailscale in TUN mode with the
+  default interface name; otherwise every send fails. Binding a socket to a device needs no capability on Linux 5.7 and later. The
+  server's checks (the route while up, the egress while `tailscaled` is stopped) have not yet run (issue #372). Record 0134.
+- **Residual: a host name in `backend.url`.** The guarantee holds only with the backend's tailnet address. A host name is resolved
+  through the local `systemd-resolved` stub, which the unit's `localhost` allows and which asks the provider's name servers (Tailscale's
+  DNS is off); the lookup is unbound, and a forged answer of `127.0.0.1` or `::1` meets the loopback exemption and sends the token
+  unbound to whatever listens on that local port. This predates the binding; issue #373 proposes closing it. A root user can create an
+  interface named `tailscale0`, which changes nothing, as root already reads the token.
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
 - The backend does not embed Tailscale; the host's Tailscale carries the traffic (see the backend host area).
-- **The agent's unit enforces this on the server.** `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the
-  agent's process reach only localhost and the tailnet ranges, so a `backend.url` elsewhere, and a host name resolved by a name server outside
-  localhost and the tailnet, fails as `connection failed`; the install script warns about both. Use the tailnet address: the documented setup turns Tailscale's DNS off on the monitored server (`tailscale set --accept-dns=false`),
+- **The agent's unit enforces this on the server, as the second layer.** The first is the binding to `tailscale0` above.
+  `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent's process reach only localhost
+  and the tailnet ranges, so a `backend.url` elsewhere fails as `connection failed`; the install script warns about it. The allow-list
+  does not stop a host name: the local name-server stub is localhost, so a lookup through it is not blocked (the residual above), and
+  only a name server outside localhost and the tailnet fails. Use the tailnet address: the documented setup turns Tailscale's DNS off on the monitored server (`tailscale set --accept-dns=false`),
   because its policy lets the server reach only the ingest port, so Tailscale's name servers can be out of reach and lookups can fail; MagicDNS names then do not resolve there
-  ([Agent](agent.md), *Installation*, [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md)).
+  ([Agent](agent.md), *Installation*, [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md), [record 0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md)).
 - The agent sends its token only in the `Authorization` header of its requests to `backend.url`, connects only to that URL's host and
   port (no proxy from the environment, no redirect followed), verifies the certificate of an `https` URL and never switches the check
   off. Plain `http` is meant only for the backend host's tailnet address or MagicDNS name, where Tailscale encrypts and authenticates

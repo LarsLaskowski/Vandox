@@ -12,7 +12,7 @@
 # another user or writable by others, the repository's own install.sh, a VERSION the binary does not match, a
 # changed --version option, a tampered pin, another binary), E8 (a kept invalid agent.yaml, ends with a
 # purge), first install, security score, ptrace, repeat install, restart after a removed spool directory,
-# address allow-list, uninstall, reinstall, purge. It changes the host (user, /etc/vandox, /var/lib/vandox, a unit), so it is meant for a throw-away
+# address allow-list, tailnet device, uninstall, reinstall, purge. It changes the host (user, /etc/vandox, /var/lib/vandox, a unit), so it is meant for a throw-away
 # runner and always ends with a purge. The agent's backend (100.64.0.1) is not reachable here; the agent
 # spools, which is what the checks need.
 set -euo pipefail
@@ -45,6 +45,32 @@ unit_source=""
 # The transient unit of the address allow-list case and the file its client writes the result to.
 readonly IPCHECK_UNIT="/run/systemd/system/vandox-agent-ipcheck.service"
 readonly IPCHECK_OUT="/run/vandox-agent-ipcheck.out"
+# The case "tailnet device" (issue #337): a provider stand-in behind the networkd-managed link vx-up and a tailnet
+# stand-in behind a veth named tailscale0, each a namespace that holds the backend's addresses on its loopback.
+readonly TN_PROVIDER_NS="vx-provider"
+readonly TN_TAILNET_NS="vx-tailnet"
+readonly TN_DEVICE="tailscale0"
+readonly TN_DEVICE_PEER="vx-ts-peer"
+readonly TN_UPLINK="vx-up"
+readonly TN_UPLINK_PEER="vx-up-peer"
+readonly TN_NETWORK_FILE="/run/systemd/network/05-vx-up.network"
+readonly TN_BACKEND4="100.64.0.1"
+readonly TN_BACKEND6="fd7a:115c:a1e0::1"
+readonly TN_RANGE4="100.64.0.0/10"
+readonly TN_RANGE6="fd7a:115c:a1e0::/48"
+# The IPv6 addresses of vx-up (set by networkd) and of its peer, the provider's next hop for TN_RANGE6.
+readonly TN_UPLINK_ADDR6="2001:db8:76::1/64"
+readonly TN_UPLINK_PEER_ADDR6="2001:db8:76::2/64"
+readonly TN_PORT=8081
+readonly TN_IPV6_URL="https://[$TN_BACKEND6]:$TN_PORT"
+readonly TN_ACCOUNTING_DROPIN="/run/systemd/system.control/vandox-agent.service.d/50-IPAccounting.conf"
+readonly TN_NOT_ACCEPTING="backend not accepting batches"
+readonly TN_ACCEPTED_RE="^accepted "
+# Set while the case's links, namespaces, routes and runtime property exist; the cleanup removes them then.
+tailnet_active=0
+# The copy of agent.yaml while the IPv6 sub-case has changed backend.url.
+tailnet_config_backup=""
+tailnet_pids=()
 
 # The case names of the messages that several cases share (SonarQube shelldre:S1192).
 readonly CASE_PURGE_BEFORE_INSTALL="purge before install"
@@ -72,6 +98,48 @@ note() {
   echo "== $*"
 }
 
+# tailnet_teardown: removes what the case "tailnet device" created and restores agent.yaml; does nothing when the
+# case has not set anything up. Every step tolerates a part that is already gone.
+tailnet_teardown() {
+  local pid
+
+  if [[ $tailnet_active -ne 1 ]]; then
+    return 0
+  fi
+
+  tailnet_active=0
+
+  for pid in "${tailnet_pids[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+
+  while ip rule del pref 5270 2>/dev/null; do
+    :
+  done
+
+  ip route flush table 52 2>/dev/null || true
+  ip link del "$TN_DEVICE" 2>/dev/null || true
+  rm -f -- "$TN_NETWORK_FILE"
+  networkctl reload 2>/dev/null || true
+  ip link del "$TN_UPLINK" 2>/dev/null || true
+  ip netns del "$TN_PROVIDER_NS" 2>/dev/null || true
+  ip netns del "$TN_TAILNET_NS" 2>/dev/null || true
+
+  if [[ -n "$tailnet_config_backup" && -f "$tailnet_config_backup" ]]; then
+    cat -- "$tailnet_config_backup" >"$CONFIG_FILE" || true
+    rm -f -- "$tailnet_config_backup"
+  fi
+
+  tailnet_config_backup=""
+
+  if [[ -e "$TN_ACCOUNTING_DROPIN" ]]; then
+    rm -f -- "$TN_ACCOUNTING_DROPIN"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+
+  return 0
+}
+
 cleanup() {
   local pid
 
@@ -84,6 +152,8 @@ cleanup() {
     rm -f -- "$IPCHECK_UNIT" "$IPCHECK_OUT"
     systemctl daemon-reload >/dev/null 2>&1 || true
   fi
+
+  tailnet_teardown
 
   # The host is left without the agent whatever happened (the scripts of the extracted bundle live in $work,
   # so they run before it is removed).
@@ -954,6 +1024,436 @@ grep -Fxq accepted "$work/listener-loopback.log" || fail "the loopback listener 
 if grep -Fxq accepted "$work/listener-own.log"; then
   fail "the listener on $own_ip got a connection through the address filter"
 fi
+
+# --- case: tailnet device --------------------------------------------------------------------------------
+# Issue #337: the agent binds every non-loopback connection to tailscale0. A provider route for the tailnet ranges
+# on the networkd-managed link vx-up stands in for the default route while Tailscale is down; the agent must never
+# reach the provider listener behind it, with or without a tailscale0, with or without Tailscale's table-52 route,
+# and after networkd reconfigures vx-up or its carrier flaps. Unbound probes from the host, outside the unit, show
+# first that each listener a state names is reachable; IP accounting of the unit counts the agent's packets.
+note "case: tailnet device (issue #337)"
+networkd_state="$(systemctl is-active systemd-networkd || true)"
+echo "systemd-networkd: $networkd_state"
+[[ "$networkd_state" == "active" ]] || fail "tailnet device: systemd-networkd is '$networkd_state', want active"
+
+tn_provider4_log="$work/tn-provider4.log"
+tn_provider6_log="$work/tn-provider6.log"
+tn_tailnet4_log="$work/tn-tailnet4.log"
+tn_tailnet6_log="$work/tn-tailnet6.log"
+tn_journal=""
+# Seconds the agent gets for one more send (SendInterval is 4 s) before a listener is checked for its connections.
+tn_settle=5
+
+cat >"$work/tnprobe.py" <<'PY'
+import socket
+import sys
+
+host, port = sys.argv[1], int(sys.argv[2])
+family = socket.AF_INET6 if ":" in host else socket.AF_INET
+s = socket.socket(family, socket.SOCK_STREAM)
+s.settimeout(5)
+try:
+    if len(sys.argv) > 3:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, sys.argv[3].encode())
+    s.connect((host, port))
+    print("reached", flush=True)
+except OSError as e:
+    print("blocked: " + str(e), flush=True)
+finally:
+    s.close()
+PY
+
+# tn_listener NS ADDRESS LOG: an accept-and-record listener on ADDRESS:TN_PORT inside NS, one line
+# "accepted <peer address>" per connection, appended to LOG (so LOG can be emptied while it runs).
+tn_listener() {
+  local ns=$1
+  local address=$2
+  local log=$3
+  local i
+
+  ip netns exec "$ns" python3 -c 'import socket,sys
+family = socket.AF_INET6 if ":" in sys.argv[1] else socket.AF_INET
+s = socket.create_server((sys.argv[1], int(sys.argv[2])), family=family)
+while True:
+    c, peer = s.accept()
+    print("accepted " + peer[0], flush=True)
+    c.close()' "$address" "$TN_PORT" >>"$log" 2>&1 &
+  tailnet_pids+=("$!")
+  helper_pids+=("$!")
+
+  for ((i = 0; i < 20; i++)); do
+    if ip netns exec "$ns" ss -ltnH "sport = :$TN_PORT" | grep -Fq -- "$address"; then
+      return 0
+    fi
+
+    sleep 0.5
+  done
+
+  fail "tailnet device: the listener on $address:$TN_PORT in $ns did not start: $(<"$log")"
+}
+
+# tn_reaches WHAT HOST LOG [DEVICE]: the positive control. A probe from the host namespace, outside the unit,
+# bound to DEVICE when given, connects to HOST:TN_PORT, and the listener writing LOG records it; LOG is emptied
+# before and afterwards.
+tn_reaches() {
+  local what=$1
+  local host=$2
+  local log=$3
+  local device=${4:-}
+  local out
+  local i
+
+  : >"$log"
+  out="$(python3 "$work/tnprobe.py" "$host" "$TN_PORT" ${device:+"$device"} 2>&1)" || true
+  echo "$what: probe of $host${device:+ bound to $device}: $out"
+
+  if [[ "$out" != "reached" ]]; then
+    tn_debug
+    fail "$what: the probe of $host${device:+ bound to $device} did not connect: $out"
+  fi
+
+  for ((i = 0; i < 10; i++)); do
+    if grep -Eq "$TN_ACCEPTED_RE" "$log"; then
+      break
+    fi
+
+    sleep 0.5
+  done
+
+  if ! grep -Eq "$TN_ACCEPTED_RE" "$log"; then
+    tn_debug
+    fail "$what: the listener behind $host recorded no connection of the probe"
+  fi
+
+  : >"$log"
+}
+
+# tn_debug: prints the addresses, routes, rules and neighbours of the host and of both namespaces (both families)
+# and the IPv6 switches of the case's links, so a failed positive control can be diagnosed from the job log.
+tn_debug() {
+  local ns
+  local family
+  local object
+
+  {
+    echo "--- tailnet device: network state of the host"
+    for family in -4 -6; do
+      for object in addr route neigh rule; do
+        echo "# ip $family $object"
+        ip "$family" "$object" 2>&1 || true
+      done
+    done
+    echo "# ip route show table 52"
+    ip route show table 52 2>&1 || true
+    sysctl "net.ipv6.conf.$TN_UPLINK.disable_ipv6" "net.ipv6.conf.$TN_UPLINK.keep_addr_on_down" 2>&1 || true
+    networkctl status "$TN_UPLINK" --no-pager 2>&1 || true
+
+    for ns in "$TN_PROVIDER_NS" "$TN_TAILNET_NS"; do
+      echo "--- tailnet device: network state of the namespace $ns"
+      for family in -4 -6; do
+        for object in addr route neigh; do
+          echo "# ip -n $ns $family $object"
+          ip -n "$ns" "$family" "$object" 2>&1 || true
+        done
+      done
+      ip netns exec "$ns" sysctl net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.all.keep_addr_on_down 2>&1 || true
+    done
+  } >&2
+
+  return 0
+}
+
+# tn_ipv6_ready NS DEVICE ADDRESS: ADDRESS (with its prefix length) is on DEVICE, in NS or with NS "" on the host,
+# and neither tentative nor failed in duplicate address detection.
+tn_ipv6_ready() {
+  local ns=$1
+  local device=$2
+  local address=$3
+  local line
+
+  if [[ -n "$ns" ]]; then
+    line="$(ip -n "$ns" -6 -o addr show dev "$device" 2>/dev/null | grep -F "inet6 $address " || true)"
+  else
+    line="$(ip -6 -o addr show dev "$device" 2>/dev/null | grep -F "inet6 $address " || true)"
+  fi
+
+  [[ -n "$line" && "$line" != *tentative* && "$line" != *dadfailed* ]]
+}
+
+# tn_restart WHAT [LOG]: restarts the agent; it must be active and, within 15 s, the journal of this invocation must
+# show TN_NOT_ACCEPTING, or LOG (when given) a connection. Sets tn_journal to that journal.
+tn_restart() {
+  local what=$1
+  local log=${2:-}
+  local id
+  local i
+  local seen=0
+
+  systemctl restart vandox-agent || {
+    journalctl -u vandox-agent -n 50 --no-pager || true
+    fail "$what: vandox-agent did not restart"
+  }
+  id="$(systemctl show -P InvocationID vandox-agent)"
+  [[ -n "$id" ]] || fail "$what: vandox-agent has no invocation ID"
+
+  for ((i = 0; i < 15; i++)); do
+    sleep 1
+    tn_journal="$(journalctl "_SYSTEMD_INVOCATION_ID=$id" --no-pager -o cat 2>/dev/null || true)"
+
+    if grep -Fq -- "$TN_NOT_ACCEPTING" <<<"$tn_journal" || { [[ -n "$log" ]] && grep -Eq "$TN_ACCEPTED_RE" "$log"; }; then
+      seen=1
+      break
+    fi
+  done
+
+  if [[ $seen -ne 1 ]]; then
+    echo "$tn_journal"
+    fail "$what: within 15 s of the restart the agent logged no '$TN_NOT_ACCEPTING'${log:+ and its tailnet listener recorded no connection}"
+  fi
+
+  [[ "$(systemctl is-active vandox-agent)" == "active" ]] || fail "$what: vandox-agent is not active after the restart"
+}
+
+# tn_no_agent WHAT LOG: the provider listener writing LOG accepted no connection since LOG was emptied.
+tn_no_agent() {
+  local what=$1
+  local log=$2
+
+  if grep -Eq "$TN_ACCEPTED_RE" "$log"; then
+    fail "$what: the provider listener accepted a connection of the agent: $(tr '\n' ' ' <"$log")"
+  fi
+}
+
+# tn_egress: the unit's IPEgressPackets.
+tn_egress() {
+  systemctl show -P IPEgressPackets vandox-agent
+}
+
+# tn_wait_uplink WHAT: waits up to 30 s until networkd's provider routes for both ranges are on vx-up and the IPv6
+# addresses of both ends of vx-up are usable (not tentative), so the IPv6 next hop answers neighbour discovery.
+tn_wait_uplink() {
+  local what=$1
+  local route4=""
+  local route6=""
+  local i
+
+  for ((i = 0; i < 60; i++)); do
+    route4="$(ip route show "$TN_RANGE4")"
+    route6="$(ip -6 route show "$TN_RANGE6")"
+
+    if [[ "$route4" == *"dev $TN_UPLINK"* && "$route4" == *"proto static"* && "$route6" == *"dev $TN_UPLINK"* ]] &&
+      tn_ipv6_ready "" "$TN_UPLINK" "$TN_UPLINK_ADDR6" && tn_ipv6_ready "$TN_PROVIDER_NS" "$TN_UPLINK_PEER" "$TN_UPLINK_PEER_ADDR6"; then
+      echo "$what: ip route show $TN_RANGE4: $route4"
+      echo "$what: ip -6 route show $TN_RANGE6: $route6"
+      return 0
+    fi
+
+    sleep 0.5
+  done
+
+  tn_debug
+  fail "$what: the provider routes are not on $TN_UPLINK with proto static, or an IPv6 address of $TN_UPLINK is not usable: '$route4' '$route6'"
+}
+
+# tn_flap WHAT: takes the carrier of vx-up away and back (its peer down and up), then waits for networkd's routes.
+# The peer's IPv6 address is set again after the flap: the kernel removes the IPv6 addresses of a link that goes
+# down unless keep_addr_on_down is on (set for the namespace; this covers a kernel that ignores it).
+tn_flap() {
+  local what=$1
+
+  ip -n "$TN_PROVIDER_NS" link set "$TN_UPLINK_PEER" down
+  sleep 3
+  ip -n "$TN_PROVIDER_NS" link set "$TN_UPLINK_PEER" up
+  ip -n "$TN_PROVIDER_NS" -6 addr replace "$TN_UPLINK_PEER_ADDR6" dev "$TN_UPLINK_PEER" nodad
+  tn_wait_uplink "$what"
+}
+
+# tn_reconfigure WHAT: networkd configures vx-up again, then its routes are waited for.
+tn_reconfigure() {
+  local what=$1
+
+  networkctl reconfigure "$TN_UPLINK"
+  sleep 2
+  tn_wait_uplink "$what"
+}
+
+# tn_standin_add: the tailnet stand-in, a veth tailscale0 to the tailnet namespace with addresses outside the
+# tailnet's backend address and return routes for them; no route for the tailnet ranges on it.
+tn_standin_add() {
+  ip link add "$TN_DEVICE" type veth peer name "$TN_DEVICE_PEER" netns "$TN_TAILNET_NS"
+  sysctl -qw "net.ipv6.conf.$TN_DEVICE.disable_ipv6=0" || fail "tailnet device: IPv6 cannot be enabled on $TN_DEVICE"
+  ip addr add 100.100.0.1/32 dev "$TN_DEVICE"
+  ip addr add fd7a:115c:a1e0:ffff::1/128 dev "$TN_DEVICE" nodad
+  ip link set "$TN_DEVICE" up
+  ip -n "$TN_TAILNET_NS" link set "$TN_DEVICE_PEER" up
+  ip -n "$TN_TAILNET_NS" route add 100.100.0.1/32 dev "$TN_DEVICE_PEER"
+  ip -n "$TN_TAILNET_NS" -6 route add fd7a:115c:a1e0:ffff::1/128 dev "$TN_DEVICE_PEER"
+  echo "ip route get $TN_BACKEND4 oif $TN_DEVICE: $(ip route get "$TN_BACKEND4" oif "$TN_DEVICE" 2>&1 || true)"
+  echo "ip route show $TN_RANGE4: $(ip route show "$TN_RANGE4")"
+}
+
+# tn_state_absent WHAT: no tailscale0: every send fails as connection failed, the provider listener accepts nothing
+# and the unit sends no packet over 20 s.
+tn_state_absent() {
+  local what=$1
+  local before
+  local after
+
+  if ip link show "$TN_DEVICE" >/dev/null 2>&1; then
+    fail "$what: $TN_DEVICE exists, want it absent"
+  fi
+
+  tn_reaches "$what" "$TN_BACKEND4" "$tn_provider4_log"
+  tn_restart "$what"
+  grep -F -- "$TN_NOT_ACCEPTING" <<<"$tn_journal" | grep -Fq -- 'reason="connection failed"' ||
+    fail "$what: the agent's '$TN_NOT_ACCEPTING' line lacks reason=\"connection failed\": $tn_journal"
+  before="$(tn_egress)"
+  sleep 20
+  after="$(tn_egress)"
+  echo "$what: IPEgressPackets $before, 20 s later $after"
+  [[ "$before" == "0" && "$after" == "0" ]] || fail "$what: IPEgressPackets is $before, then $after, want 0 both times"
+  tn_no_agent "$what" "$tn_provider4_log"
+}
+
+# tn_state_unrouted WHAT: tailscale0 without a route for the tailnet: the provider listener accepts nothing from the
+# agent; what the tailnet listener got is printed.
+tn_state_unrouted() {
+  local what=$1
+
+  tn_reaches "$what" "$TN_BACKEND4" "$tn_provider4_log"
+  tn_reaches "$what" "$TN_BACKEND4" "$tn_tailnet4_log" "$TN_DEVICE"
+  tn_restart "$what" "$tn_tailnet4_log"
+  sleep "$tn_settle"
+  echo "$what: tailnet listener (printed, not asserted): $(grep -Ec "$TN_ACCEPTED_RE" "$tn_tailnet4_log" || true) connection(s)"
+  tn_no_agent "$what" "$tn_provider4_log"
+}
+
+# tn_state_ipv6 WHAT: with backend.url on the IPv6 tailnet address, the provider listener accepts nothing.
+tn_state_ipv6() {
+  local what=$1
+
+  tn_reaches "$what" "$TN_BACKEND6" "$tn_provider6_log"
+  tn_restart "$what"
+  sleep "$tn_settle"
+  tn_no_agent "$what" "$tn_provider6_log"
+}
+
+tailnet_active=1
+
+for ns in "$TN_PROVIDER_NS" "$TN_TAILNET_NS"; do
+  ip netns add "$ns"
+  ip netns exec "$ns" sysctl -qw net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0 ||
+    fail "tailnet device: IPv6 cannot be enabled in $ns"
+  # A carrier flap takes the peer link down; without this the kernel drops its IPv6 addresses (not its IPv4 ones).
+  ip netns exec "$ns" sysctl -qw net.ipv6.conf.all.keep_addr_on_down=1 net.ipv6.conf.default.keep_addr_on_down=1 ||
+    fail "tailnet device: keep_addr_on_down cannot be set in $ns"
+  ip -n "$ns" link set lo up
+  ip -n "$ns" addr add "$TN_BACKEND4/32" dev lo
+  ip -n "$ns" addr add "$TN_BACKEND6/128" dev lo nodad
+done
+
+ip link add "$TN_UPLINK" type veth peer name "$TN_UPLINK_PEER" netns "$TN_PROVIDER_NS"
+sysctl -qw "net.ipv6.conf.$TN_UPLINK.disable_ipv6=0" || fail "tailnet device: IPv6 cannot be enabled on $TN_UPLINK"
+# vx-up's addresses are on the peer's subnets, so the provider namespace has its return routes as link routes.
+ip -n "$TN_PROVIDER_NS" addr add 198.51.100.2/30 dev "$TN_UPLINK_PEER"
+ip -n "$TN_PROVIDER_NS" -6 addr add "$TN_UPLINK_PEER_ADDR6" dev "$TN_UPLINK_PEER" nodad
+ip -n "$TN_PROVIDER_NS" link set "$TN_UPLINK_PEER" up
+mkdir -p -- "$(dirname "$TN_NETWORK_FILE")"
+cat >"$TN_NETWORK_FILE" <<NETWORK
+[Match]
+Name=$TN_UPLINK
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+
+[Address]
+Address=198.51.100.1/30
+
+[Address]
+Address=$TN_UPLINK_ADDR6
+DuplicateAddressDetection=none
+
+[Route]
+Destination=$TN_RANGE4
+Gateway=198.51.100.2
+
+[Route]
+Destination=$TN_RANGE6
+Gateway=2001:db8:76::2
+NETWORK
+networkctl reload
+tn_wait_uplink "tailnet device setup"
+
+tn_listener "$TN_PROVIDER_NS" "$TN_BACKEND4" "$tn_provider4_log"
+tn_listener "$TN_PROVIDER_NS" "$TN_BACKEND6" "$tn_provider6_log"
+tn_listener "$TN_TAILNET_NS" "$TN_BACKEND4" "$tn_tailnet4_log"
+tn_listener "$TN_TAILNET_NS" "$TN_BACKEND6" "$tn_tailnet6_log"
+
+systemctl set-property --runtime vandox-agent IPAccounting=yes
+
+# (a) No tailscale0.
+tn_state_absent "tailnet device (a)"
+
+# (b') The stand-in without Tailscale's table-52 route and rule, also after networkd reconfigures vx-up and after
+# a carrier flap of vx-up.
+tn_standin_add
+tn_state_unrouted "tailnet device (b')"
+tn_reconfigure "tailnet device (b') reconfigure"
+tn_state_unrouted "tailnet device (b') after reconfigure"
+tn_flap "tailnet device (b') carrier flap"
+tn_state_unrouted "tailnet device (b') after a carrier flap"
+
+# (b) With Tailscale's route in table 52 and its rule at pref 5270: the agent reaches the tailnet listener.
+ip route add "$TN_RANGE4" dev "$TN_DEVICE" table 52
+ip rule add pref 5270 table 52
+tn_route="$(ip route get "$TN_BACKEND4")"
+echo "tailnet device (b): ip route get $TN_BACKEND4: $tn_route"
+[[ "$tn_route" == *"dev $TN_DEVICE"* ]] || fail "tailnet device (b): ip route get $TN_BACKEND4 does not name dev $TN_DEVICE: $tn_route"
+tn_reaches "tailnet device (b)" "$TN_BACKEND4" "$tn_tailnet4_log"
+tn_restart "tailnet device (b)"
+for ((tn_i = 0; tn_i < 15; tn_i++)); do
+  if grep -Eq "$TN_ACCEPTED_RE" "$tn_tailnet4_log"; then
+    break
+  fi
+
+  sleep 1
+done
+grep -Eq "$TN_ACCEPTED_RE" "$tn_tailnet4_log" || fail "tailnet device (b): the agent did not reach the tailnet listener within 15 s"
+sleep "$tn_settle"
+tn_no_agent "tailnet device (b)" "$tn_provider4_log"
+tn_egress_b="$(tn_egress)"
+echo "tailnet device (b): IPEgressPackets $tn_egress_b"
+[[ "$tn_egress_b" =~ ^[0-9]+$ && "$tn_egress_b" -gt 0 ]] || fail "tailnet device (b): IPEgressPackets is '$tn_egress_b', want it above 0"
+ip rule del pref 5270
+ip route flush table 52
+
+# (c) The stand-in removed, networkd reconfigures vx-up and its carrier flaps: (a) holds again.
+ip link del "$TN_DEVICE"
+tn_reconfigure "tailnet device (c) reconfigure"
+tn_flap "tailnet device (c) carrier flap"
+tn_state_absent "tailnet device (c)"
+
+# IPv6: backend.url on the backend's IPv6 tailnet address, a provider route for fd7a:115c:a1e0::/48 on vx-up and no
+# route on tailscale0, without and with the stand-in.
+tailnet_config_backup="$work/agent.yaml.tailnet"
+cp -p -- "$CONFIG_FILE" "$tailnet_config_backup"
+sed "s#^  url: $BACKEND_URL\$#  url: $TN_IPV6_URL#" "$tailnet_config_backup" >"$CONFIG_FILE"
+grep -Fxq "  url: $TN_IPV6_URL" "$CONFIG_FILE" || fail "tailnet device (IPv6): agent.yaml lacks the line '  url: $TN_IPV6_URL'"
+tn_state_ipv6 "tailnet device (IPv6, no $TN_DEVICE)"
+tn_standin_add
+tn_state_ipv6 "tailnet device (IPv6, $TN_DEVICE without a route)"
+cat -- "$tailnet_config_backup" >"$CONFIG_FILE"
+rm -f -- "$tailnet_config_backup"
+tailnet_config_backup=""
+[[ "$(sha256sum "$CONFIG_FILE")" == "$config_before" ]] || fail "tailnet device: agent.yaml was not restored"
+
+tailnet_teardown
+systemctl restart vandox-agent
+wait_active 30 || fail "tailnet device: vandox-agent is not active after the case"
 
 # --- case: uninstall -------------------------------------------------------------------------------------
 note "case: uninstall"

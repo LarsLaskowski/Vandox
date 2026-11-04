@@ -833,15 +833,18 @@ func TestAgentReadme_TailscaleRebootCheck(t *testing.T) {
 		"tailscale status", "tailscale debug prefs", "/v1/batches", "systemctl is-active vandox-agent")
 }
 
-func TestAgentReadme_TailscaleDownResidual(t *testing.T) {
+// TestAgentReadme_TailscaleDownFailureModes holds the two failure modes of a send while Tailscale is not up (plan of
+// issue #337, fact 13): `connection failed` without tailscale0, a timeout while tailscaled runs without routes, and
+// the records kept in the spool meanwhile.
+func TestAgentReadme_TailscaleDownFailureModes(t *testing.T) {
 	t.Parallel()
 
 	text := collapse(tailscaleSection(t))
 
-	containsAll(t, text, "the Tailscale section", "default route", "token", "in clear", "drops those records", "give them up", "#337")
+	containsAll(t, text, "the Tailscale section", "connection failed", "timeout", "spool")
 
 	if stale := "every send fails as `connection failed`"; strings.Contains(text, stale) {
-		t.Errorf("the Tailscale section still says %q, want the residual: a send follows the default route while Tailscale is down", stale)
+		t.Errorf("the Tailscale section still says %q, want both failure modes: connection failed without tailscale0, a timeout while tailscaled has no routes", stale)
 	}
 }
 
