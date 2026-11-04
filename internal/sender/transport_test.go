@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -694,6 +695,120 @@ func TestHTTPTransport_RefusesOversizedHeaders(t *testing.T) {
 			res := send(t, newTransport(t, srv.URL))
 
 			requireResult(t, "answer with large headers", res, tc.want)
+		})
+	}
+}
+
+// absentDevice is a device name no test host has; binding a socket to it fails with ENODEV before connect.
+const absentDevice = "vxnodev0"
+
+func TestNeedsDevice_FalseOnlyForLoopback(t *testing.T) {
+	cases := []struct {
+		address string
+		want    bool
+	}{
+		{"127.0.0.1:8081", false},
+		{"127.255.255.254:1", false},
+		{"[::1]:8081", false},
+		{"[::ffff:127.0.0.1]:8081", false},
+		{"100.64.0.1:8081", true},
+		{"[fd7a:115c:a1e0::1]:8081", true},
+		{"192.0.2.1:443", true},
+		{"0.0.0.0:8081", true},
+		{"[::]:8081", true},
+		{"[fe80::1%eth0]:8081", true},
+		{"localhost:8081", true},
+		{"127.0.0.1", true},
+		{"", true},
+	}
+	for _, tc := range cases {
+		t.Run(strconv.Quote(tc.address), func(t *testing.T) {
+			if got := needsDevice(tc.address); got != tc.want {
+				t.Errorf("needsDevice(%q) = %t, want %t", tc.address, got, tc.want)
+			}
+		})
+	}
+}
+
+// requireDeviceAbsent stops the test when the host has a device named absentDevice, since the tests rely on its absence.
+func requireDeviceAbsent(t *testing.T) {
+	t.Helper()
+
+	if iface, err := net.InterfaceByName(absentDevice); err == nil {
+		t.Fatalf("the host has a device %q (index %d), want none: the test needs a device that does not exist", absentDevice, iface.Index)
+	}
+}
+
+// skipWithoutIPv6Sockets skips the test when the host cannot create an AF_INET6 socket.
+func skipWithoutIPv6Sockets(t *testing.T) {
+	t.Helper()
+
+	fd, err := syscall.Socket(syscall.AF_INET6, syscall.SOCK_STREAM, 0)
+	if errors.Is(err, syscall.EAFNOSUPPORT) {
+		t.Skipf("syscall.Socket(AF_INET6) error = %v: the host has no IPv6 sockets, so the IPv6 case cannot run", err)
+	}
+	if err != nil {
+		t.Fatalf("syscall.Socket(AF_INET6) error = %v, want nil or EAFNOSUPPORT", err)
+	}
+	_ = syscall.Close(fd)
+}
+
+// requireBoundBeforeConnect dials the unspecified address of the family at a port with a local listener. The kernel
+// connects such a dial to the host itself, so a transport that does not bind it reaches only that listener; the
+// test stops then, before anything dials an address beyond the host.
+func requireBoundBeforeConnect(t *testing.T, tr *HTTPTransport, unspecified, listenAddr string) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", listenAddr)
+	port := "1"
+	if err == nil {
+		t.Cleanup(func() { _ = ln.Close() })
+		_, port, _ = net.SplitHostPort(ln.Addr().String())
+	}
+	address := net.JoinHostPort(unspecified, port)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	conn, err := tr.dialContext(ctx, "tcp", address)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatalf("dialContext(%q) connected without binding to %q, want an error wrapping ENODEV; stopping before a dial beyond the host", address, tr.device)
+	}
+	if errors.Is(err, syscall.ENODEV) == false {
+		t.Fatalf("dialContext(%q) error = %v, want an error wrapping ENODEV; stopping before a dial beyond the host", address, err)
+	}
+}
+
+func TestHTTPTransport_FailsAtOnceWithoutTheDevice(t *testing.T) {
+	requireDeviceAbsent(t)
+	cases := []struct {
+		name, baseURL, backend, unspecified, listen string
+		ipv6                                        bool
+	}{
+		{"IPv4", "http://100.64.0.1:8081", "100.64.0.1:8081", "0.0.0.0", "127.0.0.1:0", false},
+		{"IPv6", "http://[fd7a:115c:a1e0::1]:8081", "[fd7a:115c:a1e0::1]:8081", "::", "[::1]:0", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.ipv6 {
+				skipWithoutIPv6Sockets(t)
+			}
+			tr := newTransport(t, tc.baseURL)
+			tr.device = absentDevice
+			requireBoundBeforeConnect(t, tr, tc.unspecified, tc.listen)
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			conn, err := tr.dialContext(ctx, "tcp", tc.backend)
+			if err == nil {
+				_ = conn.Close()
+				t.Fatalf("dialContext(%q) error = nil, want an error wrapping ENODEV", tc.backend)
+			}
+			if errors.Is(err, syscall.ENODEV) == false {
+				t.Errorf("dialContext(%q) error = %v, want an error wrapping ENODEV", tc.backend, err)
+			}
+
+			requireResult(t, "send without the device", send(t, tr), Result{Reason: "connection failed"})
 		})
 	}
 }
