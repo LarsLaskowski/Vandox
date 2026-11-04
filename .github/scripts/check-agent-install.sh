@@ -58,6 +58,9 @@ readonly TN_BACKEND4="100.64.0.1"
 readonly TN_BACKEND6="fd7a:115c:a1e0::1"
 readonly TN_RANGE4="100.64.0.0/10"
 readonly TN_RANGE6="fd7a:115c:a1e0::/48"
+# The IPv6 addresses of vx-up (set by networkd) and of its peer, the provider's next hop for TN_RANGE6.
+readonly TN_UPLINK_ADDR6="2001:db8:76::1/64"
+readonly TN_UPLINK_PEER_ADDR6="2001:db8:76::2/64"
 readonly TN_PORT=8081
 readonly TN_IPV6_URL="http://[$TN_BACKEND6]:$TN_PORT"
 readonly TN_ACCOUNTING_DROPIN="/run/systemd/system.control/vandox-agent.service.d/50-IPAccounting.conf"
@@ -1103,7 +1106,11 @@ tn_reaches() {
   : >"$log"
   out="$(python3 "$work/tnprobe.py" "$host" "$TN_PORT" ${device:+"$device"} 2>&1)" || true
   echo "$what: probe of $host${device:+ bound to $device}: $out"
-  [[ "$out" == "reached" ]] || fail "$what: the probe of $host${device:+ bound to $device} did not connect: $out"
+
+  if [[ "$out" != "reached" ]]; then
+    tn_debug
+    fail "$what: the probe of $host${device:+ bound to $device} did not connect: $out"
+  fi
 
   for ((i = 0; i < 10; i++)); do
     if grep -Eq "$TN_ACCEPTED_RE" "$log"; then
@@ -1113,8 +1120,64 @@ tn_reaches() {
     sleep 0.5
   done
 
-  grep -Eq "$TN_ACCEPTED_RE" "$log" || fail "$what: the listener behind $host recorded no connection of the probe"
+  if ! grep -Eq "$TN_ACCEPTED_RE" "$log"; then
+    tn_debug
+    fail "$what: the listener behind $host recorded no connection of the probe"
+  fi
+
   : >"$log"
+}
+
+# tn_debug: prints the addresses, routes, rules and neighbours of the host and of both namespaces (both families)
+# and the IPv6 switches of the case's links, so a failed positive control can be diagnosed from the job log.
+tn_debug() {
+  local ns
+  local family
+  local object
+
+  {
+    echo "--- tailnet device: network state of the host"
+    for family in -4 -6; do
+      for object in addr route neigh rule; do
+        echo "# ip $family $object"
+        ip "$family" "$object" 2>&1 || true
+      done
+    done
+    echo "# ip route show table 52"
+    ip route show table 52 2>&1 || true
+    sysctl "net.ipv6.conf.$TN_UPLINK.disable_ipv6" "net.ipv6.conf.$TN_UPLINK.keep_addr_on_down" 2>&1 || true
+    networkctl status "$TN_UPLINK" --no-pager 2>&1 || true
+
+    for ns in "$TN_PROVIDER_NS" "$TN_TAILNET_NS"; do
+      echo "--- tailnet device: network state of the namespace $ns"
+      for family in -4 -6; do
+        for object in addr route neigh; do
+          echo "# ip -n $ns $family $object"
+          ip -n "$ns" "$family" "$object" 2>&1 || true
+        done
+      done
+      ip netns exec "$ns" sysctl net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.all.keep_addr_on_down 2>&1 || true
+    done
+  } >&2
+
+  return 0
+}
+
+# tn_ipv6_ready NS DEVICE ADDRESS: ADDRESS (with its prefix length) is on DEVICE, in NS or with NS "" on the host,
+# and neither tentative nor failed in duplicate address detection.
+tn_ipv6_ready() {
+  local ns=$1
+  local device=$2
+  local address=$3
+  local line
+
+  if [[ -n "$ns" ]]; then
+    line="$(ip -n "$ns" -6 -o addr show dev "$device" 2>/dev/null | grep -F "inet6 $address " || true)"
+  else
+    line="$(ip -6 -o addr show dev "$device" 2>/dev/null | grep -F "inet6 $address " || true)"
+  fi
+
+  [[ -n "$line" && "$line" != *tentative* && "$line" != *dadfailed* ]]
 }
 
 # tn_restart WHAT [LOG]: restarts the agent; it must be active and, within 15 s, the journal of this invocation must
@@ -1166,7 +1229,8 @@ tn_egress() {
   systemctl show -P IPEgressPackets vandox-agent
 }
 
-# tn_wait_uplink WHAT: waits up to 30 s until networkd's provider routes for both ranges are on vx-up.
+# tn_wait_uplink WHAT: waits up to 30 s until networkd's provider routes for both ranges are on vx-up and the IPv6
+# addresses of both ends of vx-up are usable (not tentative), so the IPv6 next hop answers neighbour discovery.
 tn_wait_uplink() {
   local what=$1
   local route4=""
@@ -1177,7 +1241,8 @@ tn_wait_uplink() {
     route4="$(ip route show "$TN_RANGE4")"
     route6="$(ip -6 route show "$TN_RANGE6")"
 
-    if [[ "$route4" == *"dev $TN_UPLINK"* && "$route4" == *"proto static"* && "$route6" == *"dev $TN_UPLINK"* ]]; then
+    if [[ "$route4" == *"dev $TN_UPLINK"* && "$route4" == *"proto static"* && "$route6" == *"dev $TN_UPLINK"* ]] &&
+      tn_ipv6_ready "" "$TN_UPLINK" "$TN_UPLINK_ADDR6" && tn_ipv6_ready "$TN_PROVIDER_NS" "$TN_UPLINK_PEER" "$TN_UPLINK_PEER_ADDR6"; then
       echo "$what: ip route show $TN_RANGE4: $route4"
       echo "$what: ip -6 route show $TN_RANGE6: $route6"
       return 0
@@ -1186,16 +1251,20 @@ tn_wait_uplink() {
     sleep 0.5
   done
 
-  fail "$what: the provider routes are not on $TN_UPLINK with proto static: '$route4' '$route6'"
+  tn_debug
+  fail "$what: the provider routes are not on $TN_UPLINK with proto static, or an IPv6 address of $TN_UPLINK is not usable: '$route4' '$route6'"
 }
 
 # tn_flap WHAT: takes the carrier of vx-up away and back (its peer down and up), then waits for networkd's routes.
+# The peer's IPv6 address is set again after the flap: the kernel removes the IPv6 addresses of a link that goes
+# down unless keep_addr_on_down is on (set for the namespace; this covers a kernel that ignores it).
 tn_flap() {
   local what=$1
 
   ip -n "$TN_PROVIDER_NS" link set "$TN_UPLINK_PEER" down
   sleep 3
   ip -n "$TN_PROVIDER_NS" link set "$TN_UPLINK_PEER" up
+  ip -n "$TN_PROVIDER_NS" -6 addr replace "$TN_UPLINK_PEER_ADDR6" dev "$TN_UPLINK_PEER" nodad
   tn_wait_uplink "$what"
 }
 
@@ -1275,6 +1344,9 @@ for ns in "$TN_PROVIDER_NS" "$TN_TAILNET_NS"; do
   ip netns add "$ns"
   ip netns exec "$ns" sysctl -qw net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0 ||
     fail "tailnet device: IPv6 cannot be enabled in $ns"
+  # A carrier flap takes the peer link down; without this the kernel drops its IPv6 addresses (not its IPv4 ones).
+  ip netns exec "$ns" sysctl -qw net.ipv6.conf.all.keep_addr_on_down=1 net.ipv6.conf.default.keep_addr_on_down=1 ||
+    fail "tailnet device: keep_addr_on_down cannot be set in $ns"
   ip -n "$ns" link set lo up
   ip -n "$ns" addr add "$TN_BACKEND4/32" dev lo
   ip -n "$ns" addr add "$TN_BACKEND6/128" dev lo nodad
@@ -1284,7 +1356,7 @@ ip link add "$TN_UPLINK" type veth peer name "$TN_UPLINK_PEER" netns "$TN_PROVID
 sysctl -qw "net.ipv6.conf.$TN_UPLINK.disable_ipv6=0" || fail "tailnet device: IPv6 cannot be enabled on $TN_UPLINK"
 # vx-up's addresses are on the peer's subnets, so the provider namespace has its return routes as link routes.
 ip -n "$TN_PROVIDER_NS" addr add 198.51.100.2/30 dev "$TN_UPLINK_PEER"
-ip -n "$TN_PROVIDER_NS" addr add 2001:db8:76::2/64 dev "$TN_UPLINK_PEER" nodad
+ip -n "$TN_PROVIDER_NS" -6 addr add "$TN_UPLINK_PEER_ADDR6" dev "$TN_UPLINK_PEER" nodad
 ip -n "$TN_PROVIDER_NS" link set "$TN_UPLINK_PEER" up
 mkdir -p -- "$(dirname "$TN_NETWORK_FILE")"
 cat >"$TN_NETWORK_FILE" <<NETWORK
@@ -1302,7 +1374,7 @@ IPv6AcceptRA=no
 Address=198.51.100.1/30
 
 [Address]
-Address=2001:db8:76::1/64
+Address=$TN_UPLINK_ADDR6
 DuplicateAddressDetection=none
 
 [Route]
