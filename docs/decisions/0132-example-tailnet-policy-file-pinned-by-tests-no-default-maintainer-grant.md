@@ -44,8 +44,7 @@ split into a follow-up issue after Security's second review; this change states 
 - The maintainer's devices lose the web UI, SSH and file services of the backend host over the tailnet unless the opt-in is enabled;
   in the home LAN nothing changes.
 - The file is not part of the install bundle; the bundle's file lists name their files explicitly.
-- Until the follow-up issue adds a control, the token and the batch go in clear to whoever answers at the backend's tailnet address
-  on the provider's path while Tailscale is down, and an answering party can make the agent drop or give up those records (a `2xx` or a
-  refusal answer); if nothing answers, the records stay spooled. The exposure predates this change, and the area document names it.
+- The token's exposure while Tailscale is down, which predates this change, is closed by the follow-up issue #337
+  ([record 0134](0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md)).
 - Until the maintainer's run on the production tailnet, the console's acceptance of the file and of its `tests` entries is unverified;
   a wrong syntax makes the save fail visibly.
