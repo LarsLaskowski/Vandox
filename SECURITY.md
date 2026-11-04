@@ -37,7 +37,7 @@ web UI with its login, and must keep secrets (tokens, keys) only in environment 
 secrets, never in the configuration file or on the command line. Once the agent ships (v0.2.0; v0.1.0 has none), it must run as the
 dedicated user `vandox-agent`, never as root, with only the rights its installation files under `deploy/agent/` list, and the unit's confinement
 (system-call filter, no further capabilities) must be kept; its one capability, `CAP_SYS_PTRACE`, lets it read every file whose own mode allows the agent, also below directories closed to it, and the readable `/proc` files of every process (but not `/etc/shadow` or another user's process memory or environment), so treat the server's credentials as readable by the agent. The Tailscale ACL must
-allow the monitored server only the ingest port on the backend host, the monitored server must run Tailscale in TUN mode with the interface `tailscale0` (the agent binds its connections to it and sends only through it), and, once Telegram is added, the Telegram user
+allow the monitored server only the ingest port on the backend host, the monitored server must run Tailscale in TUN mode with the interface `tailscale0` (the agent binds every connection to an address that is not a loopback address to it), and, once Telegram is added, the Telegram user
 allowlist must be set.
 
 Keep the web port as `deploy/backend/docker-compose.yml` publishes it, on `127.0.0.1` (or on the address of the

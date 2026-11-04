@@ -751,10 +751,13 @@ Items the CI run and the server run both still flag (the same 15 items; the expo
 the server): `ptrace(PTRACE_ATTACH)` under the unit's confinement printed `EPERM`, the running agent's `CapEff` and `CapBnd` were `0000000000080000`;
 the address allow-list blocked the runner's non-tailnet address and reached loopback; the four install-time checks printed `ok`; and install,
 repeat install, restart after a removed spool directory, uninstall, reinstall and purge all passed.
-The CI job also runs the case "tailnet device" (issue #337) with stand-in links (a provider route for `100.64.0.0/10` and `fd7a:115c:a1e0::/48`
-on a networkd-managed link, a `tailscale0` stand-in with and without routes, a `networkctl reconfigure` and a carrier flap, IPv4 and IPv6): the
-installed agent sends nothing to the provider stand-in in any state and reaches the tailnet stand-in only when `tailscale0` has the routes.
-Its printed results are in the job's log of the pull request; they are the runner's, not the server's.
+The CI job also runs the case "tailnet device" (issue #337) with stand-in links: a provider route for `100.64.0.0/10` and `fd7a:115c:a1e0::/48`
+on the networkd-managed link `vx-up`, a `tailscale0` stand-in with and without Tailscale's table-52 route and rule, a `networkctl reconfigure` and
+a carrier flap, IPv4 and IPv6. In its run the provider stand-in accepted no connection of the installed agent in any state. Without `tailscale0`
+(before the stand-in and after its removal) the agent logged `reason="connection failed"` and the unit's `IPEgressPackets` stayed 0 over 20 seconds.
+With the stand-in but no route, the bound connections still went through `tailscale0` and reached the tailnet stand-in, also after
+`networkctl reconfigure` and after a carrier flap. With the table-52 route, `ip route get 100.64.0.1` named `dev tailscale0` and `IPEgressPackets`
+rose to 6. These are the runner's results, not the server's.
 
 ## Checks on the server
 
