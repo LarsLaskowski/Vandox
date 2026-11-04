@@ -6,4 +6,4 @@ are quoted in full.
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-11-04 06:26 | 1 Intake | Orchestrator | Issue 337 read: open, labels area: security/area: ops, treated as bug (security exposure); branch claude/bold-mccarthy-6dd67v off main eb91203 |
-| 2026-11-04 06:37 | 2 Plan | squad-lead | DONE: tier security; control = SO_BINDTODEVICE to tailscale0 for non-loopback dials in internal/sender/transport.go; record 0134; follow-up issue for production measurement (opus/medium · usage pending) |
+| 2026-11-04 06:37 | 2 Plan | squad-lead | DONE: tier security; control = SO_BINDTODEVICE to tailscale0 for non-loopback dials in internal/sender/transport.go; record 0134; follow-up issue for production measurement (opus/medium · 156,682 tokens · 53 tool uses · 636 s) |
