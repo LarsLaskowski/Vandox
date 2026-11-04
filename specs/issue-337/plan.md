@@ -1,7 +1,7 @@
 # Plan: Keep the agent's token off the provider's network while Tailscale is down
 
 Source: Issue #337
-Status: Revised (1)
+Status: Revised (2)
 Tier: security — the change creates a security control: a guard in the agent's sender that decides through which interface the token and the batches may leave the server.
 Security areas touched: 11 Outbound calls (`internal/sender` `HTTPTransport`); 2 Tailscale ACL and port binding (`deploy/agent/README.md`, *Tailscale on the monitored server*); CI configuration (`.github/scripts/check-agent-install.sh`, a new case of the `agent-install` job)
 
@@ -51,13 +51,15 @@ names the interface.
 - [ ] AC4: (CI, systemd 249) the installed agent under the shipped unit, with `backend.url` `https://100.64.0.1:8081` and a provider
   stand-in route for `100.64.0.0/10` on the networkd-managed link `vx-up` (`ip route show 100.64.0.0/10` names `dev vx-up` and
   `proto static`). Each state first runs the positive controls (an unbound probe from the host namespace outside the unit reaches the
-  listener the state names, its log is cleared afterwards), then restarts the agent and asserts:
+  listener the state names, its log is cleared afterwards), then restarts the agent and asserts, besides the state's checks: the unit
+  is `active` and, within 15 s, its journal for that invocation (`_SYSTEMD_INVOCATION_ID`) shows `backend not accepting batches`
+  (any reason) or, in (b'), the tailnet listener recorded a connection — after every restart, the IPv6 runs included:
   (a) no `tailscale0`: the provider listener records the unbound probe; the agent's journal shows `backend not accepting batches`
   with `reason="connection failed"` within 15 s; the provider listener accepts nothing; the unit's `IPEgressPackets` stays 0 over
   20 s;
   (b') `tailscale0` stand-in, no table-52 route or rule: an unbound probe reaches the provider listener, a probe bound to `tailscale0`
   reaches the tailnet listener; the provider listener accepts nothing from the agent; the tailnet listener's result is printed,
-  not asserted; the same holds after `networkctl reconfigure vx-up` and a carrier flap of `vx-up`;
+  not asserted; the same holds after `networkctl reconfigure vx-up` and after a carrier flap of `vx-up`, each followed by a restart;
   (b) plus the table-52 route and rule pref 5270: `ip route get 100.64.0.1` names `dev tailscale0`, the unbound probe and the agent
   reach the tailnet listener, the provider's accepts nothing, `IPEgressPackets` rises;
   (c) the stand-in removed, `networkctl reconfigure vx-up` and a carrier flap: (a) holds again;
@@ -85,7 +87,8 @@ The device name `vxnodev0` must not exist on the test host; with an absent devic
 sends a packet to a non-loopback address (`docs/UNIT_TESTS.md`, loopback only).
 
 The documented egress check (*Approach*), held by `TestReadme_EgressCheckStartsTailscaleOnEveryFailure` (the line from the README's
-fenced block, run by bash with stubs for `setsid`, `ip`, `systemctl`, `sleep` on `PATH`, CRLF normalized first): (a) all lines pasted
+fenced block, CRLF normalized first, run by `/bin/bash` with `PATH` set to the stub directory alone, stubs for `setsid`, `ip`,
+`systemctl`, `sleep`; the test first asserts the line calls these four by bare name, never by path): (a) all lines pasted
 at once and (b) one at a time are the same, it is one line; (c) a failing step — `systemctl set-property` or `systemctl stop`
 failing — still runs `systemctl start tailscaled`; (d) a lost variable — `systemctl show` printing nothing or `[not set]` — writes
 the failure to the output file and still starts `tailscaled`. Each case asserts the stub log ends with `systemctl start tailscaled`.
@@ -245,24 +248,19 @@ with the default interface name, which the documented install already gives.
 
 ## Challenge
 
-- M1 (accepted): AC4 gains state (b') — stand-in present, no table-52 route or rule, provider route present, agent restarted — before
-  (b); the provider listener must accept nothing, the tailnet result is printed; repeated after `networkctl reconfigure` and a
-  carrier flap.
-- M2 (accepted): every state runs positive controls first (unbound probe from the host namespace, as `ipcheck.py`), clears the log,
-  then asserts the agent; `ip route show 100.64.0.0/10` must name `dev vx-up` and `proto static`; in (b') the tailnet stand-in is
-  checked with a probe bound to `tailscale0` (an unbound probe goes to the provider there), in (b) with an unbound one.
-- M3 (accepted, no escalation): the egress check uses the unit's IP accounting through `systemctl` instead of `tcpdump`, needs no
-  uplink name and counts every interface; the `tcpdump` question goes into the follow-up issue (fact 21).
+- M1, M2, m6 (accepted): AC4's state (b'), the positive controls first in every state, the `proto static` check of the provider
+  route, and the stand-in's addresses and return routes, as AC4 and *Approach* state them.
+- M3 (accepted, no escalation): IP accounting instead of `tcpdump` in the egress check (fact 21, record 0134).
 - m4 (accepted): AC2's IPv6 sub-test skips with a reason on `EAFNOSUPPORT`.
-- m5 (accepted): the PR closes #337 and names the fact-13 deviation and the follow-up issue (*Approach*, *Pull request*).
-- m6 (accepted): host-side `tailscale0` gets `100.100.0.1/32`, `vx-tailnet` a return route, the job prints
-  `ip route get 100.64.0.1 oif tailscale0`.
+- m5 (accepted): *Pull request* in *Approach*.
 
 ## Security review
 
-- B1 (accepted): state (b') as M1; an IPv6 sub-case with `backend.url` `http://[fd7a:115c:a1e0::1]:8081`, the provider route
-  `fd7a:115c:a1e0::/48` on `vx-up` and none on `tailscale0` (fact 18, unverified until the CI run; the case fails rather than
-  skips); the stand-in's addresses and return routes as m6, for both families.
+- B1 (accepted): state (b') and the IPv6 sub-case of AC4 (fact 18; the case fails rather than skips).
 - B2 (accepted): the name-lookup residual is restated in plan, record 0134 and the area documents (fact 20): a forged loopback answer
   sends the token unbound to a local listener; pre-existing; the guarantee holds only with the tailnet address. A second follow-up
   issue proposes closing it.
+- B3 (accepted): AC4 no longer passes on an agent that never sent: after every restart the unit is active and its journal shows
+  `backend not accepting batches` within 15 s (logged at each episode start, `sender.go:302-323`), or in (b') the tailnet listener
+  recorded a connection; the (b') repeats each restart the agent, since a running sender logs no second episode with the same reason.
+- N1 (accepted): the egress-line test runs `/bin/bash` with `PATH` the stub directory alone and asserts bare command names.
