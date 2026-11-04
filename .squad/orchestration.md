@@ -61,9 +61,9 @@ to create the issue, e.g. `add_repo`); only if attaching is refused it is filed 
 
 Every member is launched with the model and effort of its agent file, except: every `squad-tester` launch of a run
 whose `plan.md` names tier `security` gets `model: opus` (effort unchanged); a continued agent keeps the model it
-was launched with. Log such a launch with `--launch opus/<effort>` instead of `--agent squad-tester`, on the
-pending row and on its amend; `squad-log.py` refuses `--agent` alone there, so the summary shows the model the
-launch really ran on.
+was launched with, so the first Tester launch of such a run already passes `model: opus` explicitly. Log such a
+launch with `--launch opus/<effort>` instead of `--agent squad-tester`, on the pending row and on its amend;
+`squad-log.py` refuses `--agent` alone there, so the summary shows the model the launch really ran on.
 
 ## Continuing a member
 
@@ -76,7 +76,9 @@ the next implementation, the Tester's `tests-first` and `coverage` agents likewi
 the head SHA. A fresh launch stays the rule for the first launch of any other mode, after a
 session restart (the agent id is gone) and when the previous launch ended on an API error. Once an agent has been continued five times or its
 reported tokens pass 300,000, the next round is a fresh launch with a short hand-over — the plan or task
-group, what the earlier rounds settled, the open findings and the head SHA. A continuation is logged as a
+group, what the earlier rounds settled, the open findings and the head SHA. An agent that ran on another model
+than *Launch model* names is never continued: its next round is a fresh launch with the right model and the
+same hand-over, logged without `--continued` or `--continued-from`. A continuation is logged as a
 launch with `--continued` or `--continued-from` (`squad-issue`, step 1); what a continued member may do is in
 `team.md` (*Shared rules*).
 
