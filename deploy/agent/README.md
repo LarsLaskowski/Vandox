@@ -6,19 +6,31 @@ the agent holds, each with the collector that needs it, follow under *Rights per
 
 ## Tailscale on the monitored server
 
-The agent sends its data only over Tailscale: its unit lets it reach nothing but localhost and the tailnet ranges `100.64.0.0/10` and
+The agent sends its data only over Tailscale: its sender binds every connection that is not to a loopback address to the network
+interface `tailscale0`, and its unit lets it reach nothing but localhost and the tailnet ranges `100.64.0.0/10` and
 `fd7a:115c:a1e0::/48`. Do these steps once, before you install the agent. They follow Tailscale's documentation and a run on a real
 tailnet; where Tailscale's pages differ from this summary, follow Tailscale. The steps and checks added for issue #43 (the settings line
 and its check, the extended checks, the reboot check and the key expiry) have **not yet run** on the production server; each says so, and
 the maintainer's run is tracked in issue #338.
 
-**What stays open while Tailscale is not up.** Tailscale's routes exist only while it runs. While it is not up on this server (before it has
-its network map after a boot, stopped, logged out, or the node removed), a send to the backend's tailnet address follows the server's
-default route. The unit's `IPAddressAllow=` filters by address, not by interface, so it does not stop this. If nothing answers, the send
-fails as `connection failed` or a timeout, and the records stay in the spool until the tailnet is up. If someone answers at that address
-on the hosting provider's path, it gets the agent's token and the batch in clear; the agent treats a 2xx answer as delivered and drops
-those records, and a refusal answer (`400`, `413` or `422` with the refusal header) makes it give them up. This exposure predates the
-policy file below and is not closed here; issue #337 adds a control.
+**While Tailscale is not up.** Tailscale's routes exist only while it runs; without them a connection to the backend's tailnet address
+would follow the server's default route onto the hosting provider's network. The agent's sender therefore binds every connection to a
+non-loopback address to the interface `tailscale0` (`SO_BINDTODEVICE`) before it connects, so the kernel sends it through that
+interface whatever the routing tables hold. A connection to a loopback address (a backend on the same host) is not bound. Two cases
+follow, and neither reaches the provider's network (records 0134, 0132):
+
+- `tailscale0` does not exist (`tailscaled` stopped, a boot before it started): the connect fails at once, before a packet is sent, and
+  the agent logs `backend not accepting batches` with `reason="connection failed"`.
+- `tailscale0` exists but Tailscale has no routes yet (before its network map, logged out): the packets go into the Tailscale
+  interface and the send ends as a `timeout` after 30 seconds.
+
+Either way the records stay in the spool until the tailnet is up, and the agent sends them then. The unit's `IPAddressAllow=` stays as
+the second layer. This holds only with the backend's tailnet **address** in `backend.url`, as step 4 and *What you need* ask: a host
+name is resolved through the server's local name-server stub (which the unit allows as localhost), unbound, by the hosting provider's
+name servers, and a forged answer of `127.0.0.1` or `::1` meets the loopback exemption and sends the token unbound to whatever listens
+on that local port (issue #373). The server needs Tailscale in TUN mode with the default interface name `tailscale0`; with Tailscale's
+userspace networking or another name no send gets through (`connection failed`). A user who can create an interface named `tailscale0` is
+root, who reads the token anyway. The checks of this binding on the production server have **not yet run** (issue #372).
 
 1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
    Use the package repository method that the guide describes. Check what a script does before you run it, as you would with any
@@ -228,9 +240,21 @@ policy file below and is not closed here; issue #337 adds a control.
    - `tailscale status` shows the server logged in and the backend host as its peer; `tailscale debug prefs` shows the values of step 3
      unchanged; the two `curl` lines print `404` and `401`.
    - `systemctl is-active vandox-agent` prints `active`. The journal shows the agent sending again, with the records of the window from
-     its spool, and no further `connection failed` after the tailnet is up. Until the tailnet is up, the residual at the top of this
-     section applies in that window: if nothing answers, sends fail and the records stay spooled; an answering party on the provider's
-     path gets the token and the batch and, with a `2xx` or a refusal answer, makes the agent drop or give up those records.
+     its spool, and no further `connection failed` after the tailnet is up. Until the tailnet is up, sends fail as `connection failed`
+     or end as a timeout and the records stay spooled (the binding at the top of this section).
+   - `ip route get 100.64.0.1` names `dev tailscale0` while Tailscale is up. The egress check below shows that the agent sends no packet
+     on any interface while `tailscaled` is stopped; run as root, it stops `tailscaled` for about a minute and starts it again whatever
+     failed (one line, the detached start of step 4's route probe):
+
+     ```
+     setsid -f bash -c "systemctl set-property --runtime vandox-agent IPAccounting=yes; systemctl stop tailscaled; a=\$(systemctl show -P IPEgressPackets vandox-agent); l=\$(ip link show tailscale0 2>&1); sleep 60; b=\$(systemctl show -P IPEgressPackets vandox-agent); systemctl start tailscaled; systemctl set-property --runtime vandox-agent IPAccounting=no; case \"\$a.\$b\" in *[^0-9.]*|.*|*.|*..*) echo \"check failed: counts '\$a' '\$b'\";; *) echo \"before=\$a after=\$b\";; esac; echo \"\$l\"" > /root/vandox-egress.txt 2>&1
+     ```
+
+     After about 90 seconds, `cat /root/vandox-egress.txt` must show two equal counts (the unit sent no packet while `tailscaled` was
+     stopped, on any interface) and `Device "tailscale0" does not exist.`; the agent's journal shows `connection failed` in that window
+     and sending again afterwards. A line with `check failed` means a count could not be read; the check then proves nothing. These
+     checks have **not yet run** on the production server (issue #372). A boot is covered by the same mechanism and the reboot check
+     above; `netplan apply` and a carrier flap are not run on the production server (the CI job covers them).
    - If `tailscale status` says Tailscale is stopped or logged out, check `systemctl status tailscaled` and run
      `systemctl enable --now tailscaled`; if it asks for a login, join again with step 3. The agent keeps spooling meanwhile.
 
@@ -241,7 +265,7 @@ policy file below and is not closed here; issue #337 adds a control.
 - The monitored server: Ubuntu 22.04 with systemd on `x86_64`, `root` access (`sudo`), and `curl`, `sha256sum`, `tar` and `gzip` (no `git`).
 - Tailscale on this server, logged in to the same tailnet as the backend host (see *Tailscale on the monitored server* below).
 - The backend, already running with its ingest port on its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)): you
-  need that address and port, for example `http://100.64.0.1:8081`. Use the address, not a host name: the agent can reach nothing but localhost and the tailnet, and with Tailscale's DNS turned off on
+  need that address and port, for example `http://100.64.0.1:8081`. Use the address, not a host name: the binding to `tailscale0` holds only for an address, and with Tailscale's DNS turned off on
 this server (*Tailscale on the monitored server*, step 3) MagicDNS names do not resolve.
 - A backend with the ingest API: `vandoxd` v0.2.0 or later. v0.1.0 has no ingest endpoint and answers `404`; until v0.2.0 is
   released, use an image built from `main` since PR #316. Ingest must also be enabled: `ingest.agent_id` and the agent token set
@@ -400,9 +424,11 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
   because the bundle holds the binary's checksum, verifying the bundle also covers the binary:
   `gh attestation verify vandox-agent-install-vX.Y.Z.tar.gz --repo LarsLaskowski/Vandox` (and the same for `vandox-agent-linux-amd64`).
 - **The name server.** With Tailscale's DNS turned off (*Tailscale on the monitored server*, step 3), the server keeps its own name
-  server and MagicDNS names do not resolve, so `backend.url` uses the backend's tailnet address. A host name would be resolved by
-  the name server of `/etc/resolv.conf`, and the unit blocks every name server outside localhost and the tailnet (`install.sh:
-  WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`).
+  server and MagicDNS names do not resolve, so `backend.url` uses the backend's tailnet address. A host name would be resolved through
+  the name server of `/etc/resolv.conf`; the unit blocks every name server outside localhost and the tailnet (`install.sh:
+  WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`), but the local stub `127.0.0.53` is
+  localhost, so a lookup through it is not blocked: it asks the provider's name servers unbound, and a forged answer of
+  `127.0.0.1` or `::1` meets the loopback exemption of the binding (issue #373). Use the tailnet address.
 - **The server run from the CI artifact.** For the Product Manager's run of a pull request's head, download the artifact
   `agent-install-files` of the `agent-install` run of the approved head SHA (the run ID and the SHA are given with the request).
   Put its three files into `/root/vandox-files`, check their names as in the offline variant, and run
@@ -599,7 +625,7 @@ shipped to the backend as written. Grant the agent only the logs whose content m
 
 ### Unit settings that must stay as they are
 
-- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector) and **`AF_INET`** and **`AF_INET6`** (the sender's connection to the backend; the unit's `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent reach only localhost and the tailnet, so `backend.url` names a tailnet address or a MagicDNS name; a host name that is resolved by a name server outside localhost and the tailnet fails as `connection failed`, and `install.sh` warns about such a name server).
+- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector) and **`AF_INET`** and **`AF_INET6`** (the sender's connection to the backend; the unit's `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent reach only localhost and the tailnet, so `backend.url` names the tailnet address; the sender binds its non-loopback connections to `tailscale0`, and a host name is resolved through the local stub, which the unit allows, so a lookup is not blocked and a forged loopback answer reaches the loopback exemption, issue #373; a host name resolved directly by a name server outside localhost and the tailnet fails as `connection failed`, and `install.sh` warns about such a name server).
 - No own network namespace: no `PrivateNetwork=` and no `NetworkNamespacePath=`, or `/proc/net` shows another namespace's sockets.
 - `/run/dbus/system_bus_socket` stays reachable: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`.
 - No `ProcSubset=pid`: it hides `/proc/net`.
@@ -683,7 +709,7 @@ neither group, and neither do the connection, systemd and MariaDB collectors.
 | `RestrictNamespaces=yes`, `RestrictRealtime=yes`, `RestrictSUIDSGID=yes`, `LockPersonality=yes`, `MemoryDenyWriteExecute=yes`, `RemoveIPC=yes`, `UMask=0077`, `KeyringMode=private` | Further confinement; none is used by the collectors. |
 | `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6` | The socket probe, the bus and the MariaDB socket need `AF_UNIX`; the sender needs the two internet families. |
 | `SystemCallArchitectures=native`, `SystemCallFilter=@system-service adjtimex`, `SystemCallFilter=~ptrace process_vm_readv process_vm_writev pidfd_getfd open_by_handle_at process_madvise`, `SystemCallErrorNumber=EPERM` | `adjtimex` is read by the `clock` collector; the six denied calls are barrier (b) of record 0122. `process_madvise` is named because `@system-service` includes it. |
-| `IPAddressDeny=any`, `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` | The agent connects only over the tailnet (records 0006, 0010); the unit enforces it. `localhost` allows loopback TCP and UDP (a backend on the same host, which is also the target of the CI check); Unix sockets (MariaDB, the system bus, the journal) are not subject to `IPAddressAllow=` at all. |
+| `IPAddressDeny=any`, `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` | The agent connects only over the tailnet (records 0006, 0010): the sender binds its connections to `tailscale0` (record 0134) and this allow-list is the second layer, which filters by address, not by interface. `localhost` allows loopback TCP and UDP (a backend on the same host, which is also the target of the CI check); Unix sockets (MariaDB, the system bus, the journal) are not subject to `IPAddressAllow=` at all. |
 | `MemoryMax=256M` | The documented worst cases (a process run 48 MiB, MariaDB 32 MiB, logs 24 MiB, kernel 4 MiB, the sender one 1 MiB batch per stream) sum to about 112 MiB if all peak at once under memory pressure; with `GOMEMLIMIT=192MiB` this leaves headroom for the runtime and page cache. The memory pressure mode reads the system's `MemAvailable`, not the cgroup's. The agent's measured peak RSS in normal mode is 20.4 MB over 24 hours on the production server (BENCHMARKS, *Agent footprint*); the peak under memory pressure is still to be measured (the parallel run of #45), and until then the values rest on the documented bounds. |
 | `CPUQuota=50%` | Bounds a runaway loop to half a core; collector timeouts are at most 10 s, so an idle server never reaches it. |
 | `Nice=5`, `IOWeight=50` | The agent yields to the monitored services without starving while an outage builds. |
@@ -725,6 +751,10 @@ Items the CI run and the server run both still flag (the same 15 items; the expo
 the server): `ptrace(PTRACE_ATTACH)` under the unit's confinement printed `EPERM`, the running agent's `CapEff` and `CapBnd` were `0000000000080000`;
 the address allow-list blocked the runner's non-tailnet address and reached loopback; the four install-time checks printed `ok`; and install,
 repeat install, restart after a removed spool directory, uninstall, reinstall and purge all passed.
+The CI job also runs the case "tailnet device" (issue #337) with stand-in links (a provider route for `100.64.0.0/10` and `fd7a:115c:a1e0::/48`
+on a networkd-managed link, a `tailscale0` stand-in with and without routes, a `networkctl reconfigure` and a carrier flap, IPv4 and IPv6): the
+installed agent sends nothing to the provider stand-in in any state and reaches the tailnet stand-in only when `tailscale0` has the routes.
+Its printed results are in the job's log of the pull request; they are the runner's, not the server's.
 
 ## Checks on the server
 
@@ -767,6 +797,8 @@ The results are in the last column; they are the first run's, with a note where 
 | Tailscale checks | the probes of step 4 of *Tailscale on the monitored server*, with `tailscale status` and `tailscale exit-node list` | `404` and `401` from the ingest port; every other probe blocked; the backend host the only peer; no exit node | not yet run (issue #338) |
 | Tailscale settings | the `tailscale set` line and `tailscale debug prefs` (step 3) | SSH, accepted routes, advertised routes, exit node, app connector, web client and Tailscale's DNS off; tag `tag:vandox-agent` | not yet run (issue #338) |
 | Tailscale after a reboot | `sudo reboot`, then step 5 | Tailscale up by itself with the same settings; the ingest probes as before; `active`; the agent sends again from its spool | not yet run (issue #338) |
+| Route while Tailscale is up | `ip route get 100.64.0.1` (step 5 of *Tailscale on the monitored server*) | names `dev tailscale0` | not yet run (issue #372) |
+| Egress while `tailscaled` is stopped | the one line of step 5 of *Tailscale on the monitored server* (IP accounting of the unit), then `cat /root/vandox-egress.txt` | two equal `IPEgressPackets` counts, `tailscale0` absent, `connection failed` in the agent's journal in that window and sending again afterwards | not yet run (issue #372) |
 | Key expiry of the tagged server | the server's entry in the admin console (step 3) | expiry disabled | not yet run (issue #338) |
 
 The same cases, on a throw-away runner with systemd 249, run in the CI job `agent-install` (`.github/scripts/check-agent-install.sh`); its results

@@ -52,9 +52,14 @@ rules below for the parts not implemented are the target the implementation is h
   (never skipped, TLS 1.2 at least), ends a request after 30 seconds, reads the header of an answer up to 16 KiB and at most 4,096 bytes
   of its body, which it discards.
 - Plain `http` is meant only for the backend host's tailnet address or its MagicDNS name, because the tailnet encrypts and
-  authenticates the transport; every other address is `https`. The installed unit lets the agent reach only localhost and the tailnet
-  ranges (`IPAddressAllow=`, *Installation*), so any other address, and a host name resolved by a name server outside localhost and the
-  tailnet, fails as `connection failed`: use the tailnet address. A MagicDNS name works only while Tailscale manages the server's DNS, which the documented setup turns off
+  authenticates the transport; every other address is `https`. The sender binds every connection to an address that is not a loopback
+  address to the interface `tailscale0` (`SO_BINDTODEVICE`, before it connects; an unparseable address is bound; record 0134), so
+  while Tailscale is down a send never leaves through another interface: without `tailscale0` it fails at once as `connection failed`,
+  with the interface but no routes it ends as a timeout. A connection to a loopback address is not bound, which a backend on the same
+  host needs and which a forged name answer can reach (below). The installed unit lets the agent reach only localhost and the tailnet
+  ranges (`IPAddressAllow=`, *Installation*) as the second layer, so any other address, and a host name resolved by a name server
+  outside localhost and the tailnet, fails as `connection failed`; a host name resolved through the local stub is not blocked, and the
+  binding holds only for the address, so use the tailnet address (issue #373 for the forged-answer residual). A MagicDNS name works only while Tailscale manages the server's DNS, which the documented setup turns off
 (`tailscale set --accept-dns=false`): with a policy that lets the server reach only the ingest port, Tailscale's name servers can be out of reach and lookups on the server can fail. The scheme must match the listener: an `https` URL at a plain-http
   listener fails as `connection failed`, and an `http` URL at a TLS port gets a `400` without the refusal header (*Sending*), which
   counts as a backend that does not accept batches, so the agent only waits and gives no record up.
@@ -2001,7 +2006,7 @@ by the agent logs nothing.
   `default` (a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`).
 - **Sender.** The sender needs no group and no capability: it dials the backend's ingest port as the agent's user. The unit must allow
   it: `RestrictAddressFamilies=` keeps **`AF_INET` and `AF_INET6`** beside `AF_UNIX`, and a system-call filter must not deny `socket` and
-  `connect` for them, or every request fails as `connection failed`. (The unit restricts the addresses the agent may reach to localhost and the tailnet ranges, *Installation*.)
+  `connect` for them, or every request fails as `connection failed`. Binding the socket to `tailscale0` needs no capability on Linux 5.7 and later (the agent has none but `CAP_SYS_PTRACE`). (The unit restricts the addresses the agent may reach to localhost and the tailnet ranges, *Installation*.)
   With a host name in `backend.url` the agent also queries the name server of `/etc/resolv.conf` (port 53), which an `IPAddressAllow=` must include.
 - **Systemd collector.** Reading unit states over the system bus needs no group and no capability: systemd's bus policy lets every user
   call `Properties.Get`, `ListUnitsByPatterns`, `ListUnitsByNames` and `LoadUnit` (the server capture was taken with every call made
@@ -2162,12 +2167,11 @@ the only one that joins the check and `tar` with `&&` (`deploy/agent/README.md`,
 [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md).
 The monitored server must be a node of the backend host's tailnet (Tailscale installed and logged in; the steps are in
 `deploy/agent/README.md`, *Tailscale on the monitored server*). The unit's allow-list admits only localhost, `100.64.0.0/10` and
-`fd7a:115c:a1e0::/48`, by address, not by interface: while Tailscale is not up, a send to the backend's tailnet address follows the
-server's default route. If nothing answers, it fails as `connection failed` or a timeout and the agent keeps spooling and retrying
-(*Sending*). Whoever answers at that address on the hosting provider's path gets the token and the batch in clear and, with a `2xx` or a
-refusal answer, makes the agent drop or give up those records (the residual in
-[Network and security model](network-and-security-model.md), issue #337). The unit has no ordering on `tailscaled`, because the sender
-retries until the tailnet is up.
+`fd7a:115c:a1e0::/48`, by address, not by interface; the interface is the sender's binding to `tailscale0` (*Connection*). While Tailscale
+is not up, a send fails at once as `connection failed` (no `tailscale0`) or ends as a timeout (the interface without routes), never
+through the provider's network, and the agent keeps spooling and retrying (*Sending*). The guarantee holds with the tailnet address in
+`backend.url` (the host-name residual in [Network and security model](network-and-security-model.md), issue #373; record 0134). The unit
+has no ordering on `tailscaled`, because the sender retries until the tailnet is up.
 
 **Command.** `install.sh [--agent-id ID --backend-url URL] [--from DIR] [--no-mariadb]`; the version is the one in `VERSION`, there is no
 `--version`. `--agent-id` and `--backend-url` are required while no `/etc/vandox/agent.yaml` exists and are ignored when it does.

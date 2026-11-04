@@ -1,6 +1,6 @@
 # 0134: The sender binds every non-loopback connection to the tailnet device, so the token never leaves through another interface
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-04
 - **Area:** Network and security model
 - **Source:** Issue #337
@@ -50,8 +50,8 @@ and the unit's address allow-list stays as a second layer. The behavior, the fai
 - The guarantee holds only with the tailnet address in `backend.url`, which the documented setup asks for. A host name is resolved
   through the local `systemd-resolved` stub, which the unit's `localhost` allows and which asks the provider's name servers; a forged
   answer `127.0.0.1` or `::1` meets the loopback exemption and sends the token unbound to whatever listens on that local port. This
-  predates the binding; a follow-up issue proposes closing it.
+  predates the binding; issue #373 proposes closing it.
 - The control was measured on the CI runner's systemd 249 with stand-in links, for IPv4 and IPv6, including a stand-in without
-  routes while a provider route covers the tailnet range; the run on the production server is the maintainer's (follow-up issue).
+  routes while a provider route covers the tailnet range; the run on the production server is the maintainer's (issue #372).
 - The server's egress check reads the unit's IP accounting (`IPEgressPackets`) while `tailscaled` is stopped, not a packet capture
   on the uplink: `tcpdump` is not a documented tool of the server, and the count covers every interface without the uplink's name.

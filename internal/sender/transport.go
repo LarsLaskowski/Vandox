@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"net/url"
 	"syscall"
 	"time"
@@ -119,24 +120,47 @@ func NewHTTPTransport(baseURL string, token config.Secret) (*HTTPTransport, erro
 	return t, nil
 }
 
-// dialContext dials with the test hook when one is set, else with a plain dialer.
+// dialContext dials with the test hook when one is set, else with a dialer that binds every non-loopback connection to the device.
 func (t *HTTPTransport) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	if t.dial != nil {
 		return t.dial(ctx, network, addr)
 	}
-	var d net.Dialer
+	d := net.Dialer{Control: bindControl(t.device)}
 
 	return d.DialContext(ctx, network, addr)
 }
 
 // bindControl returns the dialer's Control function: it binds the socket to device before connect unless needsDevice(address) is false.
 func bindControl(device string) func(network, address string, c syscall.RawConn) error {
-	return func(_, _ string, _ syscall.RawConn) error { return errors.New("not implemented") }
+	return func(_, address string, c syscall.RawConn) error {
+		if !needsDevice(address) {
+			return nil
+		}
+		var bindErr error
+		if err := c.Control(func(fd uintptr) {
+			bindErr = syscall.BindToDevice(int(fd), device) // #nosec G115 -- a descriptor of an open socket fits an int
+		}); err != nil {
+			return err
+		}
+
+		return bindErr
+	}
 }
 
 // needsDevice reports whether a connection to address (host:port with an IP literal, as net.Dialer passes it) must be bound:
 // false only for a loopback address; an address it cannot parse is bound.
-func needsDevice(address string) bool { return false }
+func needsDevice(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return true
+	}
+
+	return !addr.Unmap().IsLoopback()
+}
 
 // String returns a fixed text, so no formatting of the transport shows its fields.
 func (t *HTTPTransport) String() string { return "sender.HTTPTransport" }
