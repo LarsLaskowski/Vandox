@@ -35,8 +35,7 @@ route, so the agent's plain-`http` request would carry the token and the batch o
 
 ## Decision
 
-Option 3 with option 4's "nothing by default": the README names the console settings (both tags owned by `autogroup:admin`, the agent's
-one TCP rule to the ingest port, the maintainer's devices among themselves, no default rule, SSH as the only opt-in), and there is no
+Option 3 with option 4's "nothing by default": the README names the console settings, and there is no
 policy file in the repository. The token's exposure while Tailscale is down (option 5) is split into issue #337. The rules are in the
 [Network and security model](../areas/network-and-security-model.md) area.
 

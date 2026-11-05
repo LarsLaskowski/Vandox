@@ -47,8 +47,8 @@ root, who reads the token anyway. The checks of this binding on the production s
 
    - **Tags:** `tag:vandox-agent` and `tag:vandox-backend`, both owned by `autogroup:admin`. No tag may own a tag.
    - **The agent's only rule:** source `tag:vandox-agent`, destination `tag:vandox-backend`, protocol TCP, port `8081` (the backend's
-     ingest port; use yours if it differs). Choose TCP explicitly: a port without a protocol allows every protocol on that port, and
-     all TCP ports allow every port of the backend host.
+     ingest port; use yours if it differs). Choose TCP and this one port explicitly: a port without a protocol allows every protocol on
+     that port, and all TCP ports allow every TCP port of the backend host.
    - **Your own devices:** a rule from `autogroup:member` to `autogroup:self` on all ports, which keeps them reaching each other. A
      tagged host is no longer part of its user's `autogroup:self`.
    - **Nothing else.** The tailnet's default rule is gone, and there is no rule for the backend host's web port. SSH from the tailnet
