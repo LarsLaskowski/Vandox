@@ -2891,8 +2891,8 @@ func TestConnections_MemfdHolderKeepsItsOwners(t *testing.T) {
 	w.addRaw(100, 21, readFdinfoSample(t, "proc-mem-high-offset"))
 	c, logs := newRecordingCollector(w, SocketMount{ID: socketMount})
 
-	_, snap := snapshotOf(t, c, runAt(0, false))
-	_, snap = snapshotOf(t, c, runAt(1, false))
+	snapshotOf(t, c, runAt(0, false))
+	_, snap := snapshotOf(t, c, runAt(1, false))
 
 	wantLogged(t, logs, slog.LevelWarn, "socket owners partly unknown", 0)
 	wantListener(t, snap, model.ProtoTCP, sshdListener, 100, cmdSSHD, 0, "root")
