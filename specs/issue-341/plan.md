@@ -149,3 +149,14 @@ match stay; owners are found for more processes, which is the documented intent.
 
 - Capturing the server's own files: the residual of row 6, checked by the Product Manager after installation; if the warning persists,
   a new issue with the `head -4` output the issue describes.
+
+## Challenge notes
+
+Devil's Advocate, objection 1 (minor), verbatim:
+
+> The plan does not say how the PR describes the fact that the fix was never checked on the server. That matters because the PR will close the issue. The issue's first task and its first and third acceptance criteria ask for the `head -4` output of the affected processes and for the warning to be gone. The plan captures neither. Its verified-facts row 6 hands the check to the Product Manager after install, and the plan says this is not a gate. But `/home/user/Vandox/.claude/skills/squad-issue/SKILL.md:163-164` makes the PR say `Closes #341`, so the issue closes on merge before anyone has looked at the server.
+>
+> Instruction for the Lead and orchestrator:
+> - In the PR body, state that the server's own samples were not captured. Say the fix covers the two values the kernel's format string allows and the parser refused, and that it was not checked on the production server. Step 10's "the fix is not verifiable without a real external system" fits this case.
+> - Write the same residual into record 0115, option 23.
+> - Before step 10, either ask the Product Manager for the `head -4 /proc/<pid>/fdinfo/*` output of the two processes in parallel with this pipeline, or note in the decision record that it is only checked after merge.
