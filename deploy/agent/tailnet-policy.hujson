@@ -37,7 +37,7 @@
   ],
 
   // Intended to make the admin console refuse a later edit that lets the agent reach more than the ingest port.
-  // NOT YET VERIFIED: whether the console checks these entries against the grants on save is open (issue #338).
+  // NOT YET VERIFIED: whether the console checks these entries against the grants on save is open (issue #375).
   "tests": [
     {
       "src":    "tag:vandox-agent",

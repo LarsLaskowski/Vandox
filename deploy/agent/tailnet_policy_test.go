@@ -927,12 +927,12 @@ func TestAgentReadme_ChecksOnTheServerHaveRowsPerTailscaleCheck(t *testing.T) {
 
 	var rows int
 	for _, line := range strings.Split(sectionOf(t, readme, checksHeading), "\n") {
-		if strings.HasPrefix(line, "|") && strings.Contains(collapse(line), "not yet run (issue #338)") {
+		if strings.HasPrefix(line, "|") && strings.Contains(collapse(line), "not yet run (issue #375)") {
 			rows++
 		}
 	}
 
 	if rows < 3 {
-		t.Errorf("%q has %d rows marked \"not yet run (issue #338)\", want 3 (policy file, checks, reboot)", checksHeading, rows)
+		t.Errorf("%q has %d rows marked \"not yet run (issue #375)\", want 3 (policy file, checks, reboot)", checksHeading, rows)
 	}
 }

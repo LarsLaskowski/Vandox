@@ -41,7 +41,7 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   rule, when a grant reaches the backend host but for the agent's ingest port, or when the commented opt-in is anything but SSH
   ([record 0132](../decisions/0132-example-tailnet-policy-file-pinned-by-tests-no-default-maintainer-grant.md)). The file also carries two policy
   `tests` entries (the agent reaches the ingest port and not ports 22, 8080 and 443, and not the ingest port over UDP) meant to make the
-  admin console refuse a later edit that widens the server; that the console evaluates them on save is **not yet verified** (issue #338): the admin console's visual editor no longer accepts a
+  admin console refuse a later edit that widens the server; that the console evaluates them on save is **not yet verified** (issue #375): the admin console's visual editor no longer accepts a
   pasted policy, so it needs GitOps or the policy API.
 - **A compromised root cannot widen the policy.** With no `ssh` rule, no `autoApprovers` entry and no grant to a subnet or
   `autogroup:internet` that matches `tag:vandox-agent`, a root that turns on Tailscale SSH, advertises a route or an exit node, accepts
@@ -50,7 +50,7 @@ the backend host area (*Ingest endpoint*, *Compose file*).
 - **Maintainer devices get nothing on the backend host by default.** The policy grants them no access to the backend host's tailnet address
   but what the maintainer enables on purpose (a commented SSH line); there is none for the web port.
 - **After a reboot** Tailscale should come up by itself with its tag and settings, and the agent sends again from its spool; the README
-  has the check, not yet run on the production server (issue #338): it is left out on purpose, as the production server is not rebooted for it.
+  has the check, not yet run on the production server (issue #375): it is left out on purpose, as the production server is not rebooted for it.
 - **While Tailscale is not up, the agent's sender binds to `tailscale0`.** Tailscale's routes exist only while it runs, and the unit's
   `IPAddressAllow=` filters by address, not interface, so without a binding a send to the backend's tailnet address would follow the
   server's default route onto the provider's network. `HTTPTransport` therefore binds every connection whose address is not a loopback
