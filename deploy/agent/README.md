@@ -10,8 +10,8 @@ The agent sends its data only over Tailscale: its sender binds every connection 
 interface `tailscale0`, and its unit lets it reach nothing but localhost and the tailnet ranges `100.64.0.0/10` and
 `fd7a:115c:a1e0::/48`. Do these steps once, before you install the agent. They follow Tailscale's documentation and a run on a real
 tailnet; where Tailscale's pages differ from this summary, follow Tailscale. The steps and checks added for issue #43 (the settings line
-and its check, the extended checks, the reboot check and the key expiry) have **not yet run** on the production server; each says so, and
-the maintainer's run is tracked in issue #338.
+and its check, the extended checks and the key expiry) have run on the production server, with the exceptions named in each step; the
+reboot check, saving the policy file and the `401` of the ingest endpoint are still open and tracked in issue #375.
 
 **While Tailscale is not up.** Tailscale's routes exist only while it runs; without them a connection to the backend's tailnet address
 would follow the server's default route onto the hosting provider's network. The agent's sender therefore binds every connection to a
@@ -46,7 +46,9 @@ root, who reads the token anyway. The checks of this binding on the production s
    Then replace the whole policy (<https://tailscale.com/kb/1018/acls>) with the example file
    [`tailnet-policy.hujson`](tailnet-policy.hujson) of this folder. It is plain HuJSON, so the admin console accepts it as the policy
    file and GitOps can use it as it is; it is not part of the install bundle, so take it from the repository at the release's tag.
-   Whether the console accepts the file has **not yet run**; the maintainer saves it in the tailnet (issue #338). The file holds:
+   Whether the console accepts the file has **not yet run** (issue #375): the admin console's visual editor no longer offers a way to paste
+   or save a whole policy, only a read-only JSON preview of a rule. Use a way that takes the whole file, such as Tailscale's GitOps
+   integration or its policy API, which can also validate a policy and its `tests` without saving it. The file holds:
 
    - `tagOwners`: both tags are owned by `autogroup:admin`. No tag may own a tag.
    - The agent's only rule: TCP to the ingest port of the backend host. Write it exactly as `tcp:<port>`. A port without a protocol
@@ -56,7 +58,7 @@ root, who reads the token anyway. The checks of this binding on the production s
      longer part of its user's `autogroup:self`.
    - Two `tests` entries: the agent reaches the ingest port and not ports 22, 8080 and 443 of the backend host, and not the ingest port
      over UDP. They are meant to make the console refuse a later edit that lets the server reach more. Whether the console checks them
-     against the rules on save has **not yet run** (issue #338).
+     against the rules on save has **not yet run** (issue #375).
    - One commented line, off by default: SSH from the tailnet admins to the backend host.
 
    What the file changes against the default rule:
@@ -118,7 +120,8 @@ root, who reads the token anyway. The checks of this binding on the production s
 
    Expect `RunSSH` false, `RouteAll` false, `AdvertiseRoutes` empty or null, `ExitNodeID` empty, `CorpDNS` false, `RunWebClient` false,
    `AppConnector` with `Advertise` false, and `AdvertiseTags` holding `tag:vandox-agent` only. The exact output format of this command
-   has not been checked in this project. The settings line and this check have **not yet run** on the production server (issue #338).
+   has not been checked in this project. The settings line and this check have run on the production server (issue #338): the values
+   are as expected.
 
    **Tailscale's DNS is off after that line.** On Linux, Tailscale takes over the server's name resolution by default and resolves names through the tailnet's DNS settings. With the narrow policy of step 2, lookups can then fail: the install lines cannot reach `github.com` (`curl: (6) Could not resolve host`), and nothing else on the server can resolve a name either. The line above keeps the server's own name server; check it:
 
@@ -145,16 +148,17 @@ root, who reads the token anyway. The checks of this binding on the production s
 
    **Key expiry.** Tailscale documents that tagged devices have key expiry turned off by default (<https://tailscale.com/kb/1068/acl-tags>),
    because the node belongs to a tag and not to a person's login, so the server stays in the tailnet. To check, look at the server's
-   entry in the admin console: it should show no expiry (the console's wording has not been checked). That check has **not yet run**
-   (issue #338). To replace the node's key on purpose, remove the machine in the admin console and run the join line above again with
+   entry in the admin console: it should show no expiry (the console's wording has not been checked). On the production server the
+   console shows the expiry as disabled (issue #338). To replace the node's key on purpose, remove the machine in the admin console and run the join line above again with
    the tag. The server then has a new tailnet address and identity, so repeat the `tailscale whois` check with the new address; the
    agent's `backend.url` is the backend's address and stays valid. `tailscale up --force-reauth --advertise-tags=tag:vandox-agent`
    is an alternative that has not been tested.
 4. **Check the connection and the policy.** On this server, with the backend host's tailnet address in place of `100.64.0.1`, its IPv6
    tailnet address in place of `fd7a:115c:a1e0::1`, another tailnet device's address in place of `100.64.0.9`, and the backend's ingest
    port in place of `8081`. Each line stands alone and changes nothing. Only the fifth line, SSH on the backend host's IPv4 tailnet
-   address, has a result from the production server (below); the results of the other lines, the two `curl` lines and the lines added
-   for issue #43 among them, have **not yet run** there (issue #338):
+   address, had a result from the Product Manager's earlier server run (below). The lines from `tailscale ping` on have run on the production server
+   (issue #338) and give the results expected here, with one exception: the fourth line, the `401`, has **not yet run** there
+   (issue #375), because the backend on it answers `404` (it has no ingest API, see below):
 
    ```
    tailscale ip -4
@@ -186,7 +190,7 @@ root, who reads the token anyway. The checks of this binding on the production s
      - `404` means the backend has no ingest API (v0.1.0 or older), a proxy is in front of the port, or the port is the wrong one.
    - The next five lines try other targets: SSH (22) and the web port (8080) of the backend host on its IPv4 tailnet address, the web
      port and SSH on its IPv6 tailnet address, and SSH on another tailnet device. They mean something only after the third line printed
-     `404` and the fourth `401`. Each must be blocked (Tailscale's access control page: <https://tailscale.com/kb/1018/acls>).
+     `404`, which shows that this server reaches the ingest port at that address. Each must be blocked (Tailscale's access control page: <https://tailscale.com/kb/1018/acls>).
      - Blocked by the policy, as it should be: `No route to host`, or `124` (a timeout). In the Product Manager's server run the blocked attempt printed `No route to host` in one policy state and timed out (`124`) in
        another, and the allowed one, before the default rule was replaced, printed `Connection refused`.
      - The policy lets this server reach that port or device: `Connection refused` with `1`, or `0` (connected). The policy is too
@@ -220,7 +224,8 @@ root, who reads the token anyway. The checks of this binding on the production s
    Use the backend's tailnet address, not its MagicDNS name: with Tailscale's DNS turned off (step 3), MagicDNS names do not
    resolve on this server.
 5. **Check the reboot, after the agent is installed.** Tailscale should come up by itself, without a login, with its tag and its
-   settings. The check has **not yet run** on the production server (issue #338). Run as root:
+   settings. The check has **not yet run** on the production server (issue #375); it was left out on purpose, because a reboot of the
+   production server is not done for it. Run as root:
 
    ```
    sudo reboot
@@ -796,13 +801,13 @@ The results are in the last column; they are the first run's, with a note where 
 | Error logs readable by the agent | for each error log in `log_shipping.files`: `sudo -u vandox-agent head -c 0 <dir>/<file>` after the grant of *Error logs of Plesk and the web servers* | no output; the agent logs no `log file not readable` for it | not yet run: no Plesk server was available; the grant was tried only in a stand-in on Ubuntu 24.04 |
 | rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
 | Peak memory | `VmHWM` in `/proc/<pid>/status` of the running agent after 24 hours (BENCHMARKS, *Agent footprint*); under memory pressure the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | 20.4 MB peak RSS (`VmHWM`) over 24 h in normal mode (BENCHMARKS, *Agent footprint*); under memory pressure to be measured (#45) |
-| Tailscale policy file | save `deploy/agent/tailnet-policy.hujson` as the tailnet's policy (step 2 of *Tailscale on the monitored server*); then save it once with the agent's rule widened to `tcp:*` and once to `"8081"` | the console accepts the file; both widened saves are refused by the `tests` entries | not yet run (issue #338) |
-| Tailscale checks | the probes of step 4 of *Tailscale on the monitored server*, with `tailscale status` and `tailscale exit-node list` | `404` and `401` from the ingest port; every other probe blocked; the backend host the only peer; no exit node | not yet run (issue #338) |
-| Tailscale settings | the `tailscale set` line and `tailscale debug prefs` (step 3) | SSH, accepted routes, advertised routes, exit node, app connector, web client and Tailscale's DNS off; tag `tag:vandox-agent` | not yet run (issue #338) |
-| Tailscale after a reboot | `sudo reboot`, then step 5 | Tailscale up by itself with the same settings; the ingest probes as before; `active`; the agent sends again from its spool | not yet run (issue #338) |
+| Tailscale policy file | save `deploy/agent/tailnet-policy.hujson` as the tailnet's policy (step 2 of *Tailscale on the monitored server*); then save it once with the agent's rule widened to `tcp:*` and once to `"8081"` | the console accepts the file; both widened saves are refused by the `tests` entries | not yet run (issue #375): the admin console's visual editor no longer accepts a pasted policy, only a read-only JSON preview; needs GitOps or the policy API |
+| Tailscale checks | the probes of step 4 of *Tailscale on the monitored server*, with `tailscale status` and `tailscale exit-node list` | `404` and `401` from the ingest port; every other probe blocked; the backend host the only peer; no exit node | the pong, the `404` of the first `curl`, all five blocked probes (`124`, IPv4 and IPv6), `tailscale status` with the backend host as the only peer and `No exit nodes found` as expected; the second `curl` printed `404` instead of `401`, because the backend has no ingest API yet (as in *Transmission to the backend*), so the `401` is not yet run (issue #375) |
+| Tailscale settings | the `tailscale set` line and `tailscale debug prefs` (step 3) | SSH, accepted routes, advertised routes, exit node, app connector, web client and Tailscale's DNS off; tag `tag:vandox-agent` | as expected: the settings line applied, `tailscale debug prefs` shows the values above, Tailscale's DNS is off, `getent hosts github.com` prints an address, and the machine list shows `tag:vandox-agent` |
+| Tailscale after a reboot | `sudo reboot`, then step 5 | Tailscale up by itself with the same settings; the ingest probes as before; `active`; the agent sends again from its spool | not yet run (issue #375): not done on purpose, the production server is not rebooted for it |
 | Route while Tailscale is up | `ip route get 100.64.0.1` (step 5 of *Tailscale on the monitored server*) | names `dev tailscale0` | not yet run (issue #372) |
 | Egress while `tailscaled` is stopped | the one line of step 5 of *Tailscale on the monitored server* (IP accounting of the unit), then `cat /root/vandox-egress.txt` | two equal `IPEgressPackets` counts, `tailscale0` absent, `connection failed` in the agent's journal in that window and sending again afterwards | not yet run (issue #372) |
-| Key expiry of the tagged server | the server's entry in the admin console (step 3) | expiry disabled | not yet run (issue #338) |
+| Key expiry of the tagged server | the server's entry in the admin console (step 3) | expiry disabled | expiry disabled |
 
 The same cases, on a throw-away runner with systemd 249, run in the CI job `agent-install` (`.github/scripts/check-agent-install.sh`); its results
 are in *Unit*. They are the runner's, not the server's; the server's results are in the table above.

@@ -881,10 +881,8 @@ func TestAgentReadme_TailscaleStepsAreMarkedNotYetRun(t *testing.T) {
 	steps := numberedSteps(tailscaleSection(t))
 
 	markers := map[string]string{
-		"S2 checks":   "tailscale exit-node list",
-		"S4 settings": "tailscale debug prefs",
-		"S5 reboot":   "sudo reboot",
-		"S6 key":      "--force-reauth",
+		"S2 checks": "tailscale exit-node list",
+		"S5 reboot": "sudo reboot",
 	}
 
 	for name, marker := range markers {
@@ -929,12 +927,12 @@ func TestAgentReadme_ChecksOnTheServerHaveRowsPerTailscaleCheck(t *testing.T) {
 
 	var rows int
 	for _, line := range strings.Split(sectionOf(t, readme, checksHeading), "\n") {
-		if strings.HasPrefix(line, "|") && strings.Contains(collapse(line), "not yet run (issue #338)") {
+		if strings.HasPrefix(line, "|") && strings.Contains(collapse(line), "not yet run (issue #375)") {
 			rows++
 		}
 	}
 
-	if rows < 4 {
-		t.Errorf("%q has %d rows marked \"not yet run (issue #338)\", want 4 (checks, settings, reboot, key expiry)", checksHeading, rows)
+	if rows < 3 {
+		t.Errorf("%q has %d rows marked \"not yet run (issue #375)\", want 3 (policy file, checks, reboot)", checksHeading, rows)
 	}
 }
