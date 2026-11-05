@@ -235,7 +235,9 @@ func TestParseFdinfo_Rejects(t *testing.T) {
 			}
 		})
 	}
+}
 
+func TestParseFdinfo_AcceptsAndHoldsNoContent(t *testing.T) {
 	t.Run("boundary values are accepted", func(t *testing.T) {
 		data := "pos:\t0\nflags:\t02000002\nmnt_id:\t2147483647\nino:\t18446744073709551615\n"
 		got, err := ParseFdinfo([]byte(data))
