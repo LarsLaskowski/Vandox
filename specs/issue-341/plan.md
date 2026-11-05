@@ -1,7 +1,7 @@
 # Plan: Socket owners of memfd and /proc/<pid>/mem holders unknown (fdinfo values rejected)
 
 Source: Issue #341
-Status: Draft
+Status: Revised (1)
 Tier: standard — a parser's validation is widened to the value range the kernel prints, which changes behavior (owners found, no warning) but creates, changes or removes no security control: the socket-mount match and the probe's refusal of mount 0 stay as they are.
 Security areas touched: 10. Parsing of external input (`internal/connstats` `ParseFdinfo`, the reader of `/proc/<pid>/fdinfo/<n>`, also used by `internal/sockmount` `Probe`, whose result feeds the socket-mount check of record 0115)
 
@@ -46,7 +46,7 @@ damaged after the start-up probe succeeded"; it was these legitimate values. The
   of only `-`, with two signs, with `+`, or with a `-` after a digit.
 - [ ] AC2: In the owner scan a process holding a memfd and a high-offset `/proc/<pid>/mem` descriptor besides its socket is not counted
   unreadable (`unreadable` 0, `firstErr` nil) and owns its socket; a descriptor with `mnt_id:\t0` and the inode of a tracked socket is
-  never counted as a holder.
+  never counted as a holder, also when `scanOwners` itself is called with mount 0 (it then scans nothing and counts no holder).
 - [ ] AC3: The collector logs no `socket owners partly unknown` for such a process, the listener carries its PID and the aggregates are
   complete (the decision is `connstats.go:291-293`: `res.unreadable > 0`).
 - [ ] AC4: `sockmount.Probe` still fails on `mnt_id:\t0` with mount 0 and the error text `sockmount: not in the expected format` (unchanged
@@ -57,7 +57,7 @@ damaged after the start-up probe succeeded"; it was these legitimate values. The
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
 | AC1 | `TestParseFdinfo_Samples`: the two new fixtures `memfd` and `proc-mem-high-offset` added to its `want` map; `TestParseFdinfo_Rejects`: case "mnt_id zero" removed from `rejects`, new reject cases "pos only a minus" (`pos:\t-`), "pos with two minus signs" (`--1`), "pos with a plus sign" (`+1`), "pos with a minus after a digit" (`1-`), "pos minus and a space" (`- 1`); new subtest "signed pos and mount 0 are accepted" with `pos:\t-9223372036854775808`, `mnt_id:\t0` → `{0, 6087}` | `internal/connstats/owners_test.go` |
-| AC2 | `TestScanOwners_MemfdAndHighOffsetDescriptorsKeepTheProcessReadable`: PID 10 holds fd 3 = fixture `memfd`, fd 4 = fixture `proc-mem-high-offset` (`addRaw` with `readFdinfoSample`), fd 5 = socket inode 100 on `socketMount`; PID 7 holds `p.add(7, 3, 0, 100)`; want `unreadable` 0, error nil, owner of slot 0 = 10, counts 10 → 1, 7 → 0 | `internal/connstats/owners_test.go` |
+| AC2 | `TestScanOwners_MemfdAndHighOffsetDescriptorsKeepTheProcessReadable`: PID 10 holds fd 3 = fixture `memfd`, fd 4 = fixture `proc-mem-high-offset` (`addRaw` with `readFdinfoSample`), fd 5 = socket inode 100 on `socketMount`; PID 7 holds `p.add(7, 3, 0, 100)`; want `unreadable` 0, error nil, owner of slot 0 = 10, counts 10 → 1, 7 → 0; `TestScanOwners_MountZeroCountsNoHolder`: PID 10 holds `p.add(10, 3, 0, 100)` and `p.add(10, 4, socketMount, 100)`, scan with mount 0: owner of slot 0 = 0, count of 10 = 0, `unreadable` 0, error nil | `internal/connstats/owners_test.go` |
 | AC3 | `TestConnections_MemfdHolderKeepsItsOwners`: `ownedWorld`, PID 100 additionally holds two descriptors with the two fixtures' content (beside its sockets); one run: `wantListener(…, sshdListener, 100, …)`, `AggregatesIncomplete` false, `wantLogged(…, "socket owners partly unknown", 0)` | `internal/connstats/connstats_test.go` |
 | AC4 | existing `TestProbe_MalformedFdinfoFails` case "mnt_id zero" stays; new `TestProbe_MountIDZeroFails` asserting id 0 and the exact error `sockmount: not in the expected format` | `internal/sockmount/sockmount_test.go` |
 
@@ -73,7 +73,7 @@ mount numbers only, nothing private) and documents them where the fixture direct
   accepted forms.
 - `sockmount.Probe`: after `ParseFdinfo`, `if info.MountID == 0` return `0, errors.New("sockmount: not in the expected format")` before
   the inode check — today's text, so no failure text changes.
-- No change to `scanFile`, `scanPID` or the collector: a mount-0 descriptor simply does not match the socket mount (`owners.go:162`).
+- `scanOwners`: when `mount == 0` it returns the empty owners (slices sized by `index`), `unreadable` 0 and nil without opening anything, so a mount-0 descriptor can never be a holder inside the package, not only through the caller's check (`connstats.go:179-180`). No change to `scanFile`, `scanPID` or the collector.
 - No new user-visible output.
 
 ## Options considered
@@ -89,7 +89,7 @@ mount numbers only, nothing private) and documents them where the fixture direct
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| `internal/connstats` | `owners.go` (`ParseFdinfo`, new `signedDigits`) | signed `pos:`, `mnt_id:` 0 accepted |
+| `internal/connstats` | `owners.go` (`ParseFdinfo`, new `signedDigits`, `scanOwners`) | signed `pos:`, `mnt_id:` 0 accepted; no scan with mount 0 |
 | `internal/sockmount` | `sockmount.go` (`Probe`) | refuses mount ID 0 itself |
 | `testdata` | `connections/sandbox/fdinfo/memfd`, `connections/sandbox/fdinfo/proc-mem-high-offset` | new fixtures (Tester) |
 
@@ -99,6 +99,7 @@ mount numbers only, nothing private) and documents them where the fixture direct
 - `func signedDigits(b []byte) bool` (new, `internal/connstats/owners.go`) — reports whether b is an optional `-` followed by one or
   more ASCII digits.
 - `func Probe(proc fs.FS) (int32, error)` — unchanged signature.
+- `func scanOwners(ctx context.Context, proc fs.FS, pids []int32, index map[uint64]int32, mount int32) (o owners, unreadable int, firstErr error)` — unchanged signature, early return for mount 0.
 
 ## Test files
 
@@ -150,13 +151,20 @@ match stay; owners are found for more processes, which is the documented intent.
 - Capturing the server's own files: the residual of row 6, checked by the Product Manager after installation; if the warning persists,
   a new issue with the `head -4` output the issue describes.
 
-## Challenge notes
+## Challenge
 
-Devil's Advocate, objection 1 (minor), verbatim:
+- **Devil's Advocate 1 (minor): the fix was not checked on the server, yet the PR closes the issue** — accepted. Record 0115
+  option 23 now states that the server's files were not captured, that the fix covers the two values the format string allows and
+  the parser refused, and that the check on the production server happens only after merge (the Product Manager, row 6). I did not
+  ask the Product Manager for the sample in parallel: it would add a fixture, not change the fix (*Options considered*). The PR body
+  says the same (orchestrator, step 10).
 
-> The plan does not say how the PR describes the fact that the fix was never checked on the server. That matters because the PR will close the issue. The issue's first task and its first and third acceptance criteria ask for the `head -4` output of the affected processes and for the warning to be gone. The plan captures neither. Its verified-facts row 6 hands the check to the Product Manager after install, and the plan says this is not a gate. But `/home/user/Vandox/.claude/skills/squad-issue/SKILL.md:163-164` makes the PR say `Closes #341`, so the issue closes on merge before anyone has looked at the server.
->
-> Instruction for the Lead and orchestrator:
-> - In the PR body, state that the server's own samples were not captured. Say the fix covers the two values the kernel's format string allows and the parser refused, and that it was not checked on the production server. Step 10's "the fix is not verifiable without a real external system" fits this case.
-> - Write the same residual into record 0115, option 23.
-> - Before step 10, either ask the Product Manager for the `head -4 /proc/<pid>/fdinfo/*` output of the two processes in parallel with this pipeline, or note in the decision record that it is only checked after merge.
+## Security review
+
+Security: APPROVED; the two notes that left a choice:
+
+- **Note 1: `Probe` copies the text "not in the expected format" instead of wrapping a shared sentinel** — rejected. Sharing it means
+  exporting `connstats`' `errFormat` (used across `table.go` and `owners.go`) as public API for one caller; the exact-text test
+  `TestProbe_MountIDZeroFails` (AC4) catches any drift.
+- **Note 2: `scanOwners` relies on its caller to refuse mount 0** — adopted: early return in `scanOwners` (*Approach*), covered by
+  `TestScanOwners_MountZeroCountsNoHolder` (AC2).
