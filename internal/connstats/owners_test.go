@@ -151,12 +151,14 @@ func wantCount(t *testing.T, o owners, pid int32, want uint32) {
 
 func TestParseFdinfo_Samples(t *testing.T) {
 	want := map[string]Fdinfo{
-		"tcp-listen":       {MountID: 10, Inode: 6087},
-		"udp":              {MountID: 10, Inode: 6088},
-		"unix":             {MountID: 10, Inode: 6089},
-		"pipe":             {MountID: 16, Inode: 6090},
-		"regular-file":     {MountID: 28, Inode: 210788},
-		"epoll-40-watches": {MountID: 17, Inode: 26}, // the tfd: lines repeat ino: in hex and are ignored
+		"tcp-listen":           {MountID: 10, Inode: 6087},
+		"udp":                  {MountID: 10, Inode: 6088},
+		"unix":                 {MountID: 10, Inode: 6089},
+		"pipe":                 {MountID: 16, Inode: 6090},
+		"regular-file":         {MountID: 28, Inode: 210788},
+		"epoll-40-watches":     {MountID: 17, Inode: 26},   // the tfd: lines repeat ino: in hex and are ignored
+		"memfd":                {MountID: 0, Inode: 1029},  // the kernel's internal shmem mount has ID 0
+		"proc-mem-high-offset": {MountID: 23, Inode: 6503}, // pos: is printed signed (%lli) above 2^63
 	}
 	entries, err := os.ReadDir(fdinfoDir)
 	if err != nil {
@@ -208,7 +210,11 @@ func TestParseFdinfo_Rejects(t *testing.T) {
 		{"space instead of a tab in ino", "pos:\t0\nflags:\t02000002\nmnt_id:\t10\nino: 6087\n"},
 		{"pos not digits", "pos:\tabc\nflags:\t02000002\nmnt_id:\t10\nino:\t6087\n"},
 		{"flags empty", "pos:\t0\nflags:\t\nmnt_id:\t10\nino:\t6087\n"},
-		{"mnt_id zero", "pos:\t0\nflags:\t02000002\nmnt_id:\t0\nino:\t6087\n"},
+		{"pos only a minus", "pos:\t-\nflags:\t02000002\nmnt_id:\t10\nino:\t6087\n"},
+		{"pos with two minus signs", "pos:\t--1\nflags:\t02000002\nmnt_id:\t10\nino:\t6087\n"},
+		{"pos with a plus sign", "pos:\t+1\nflags:\t02000002\nmnt_id:\t10\nino:\t6087\n"},
+		{"pos with a minus after a digit", "pos:\t1-\nflags:\t02000002\nmnt_id:\t10\nino:\t6087\n"},
+		{"pos minus and a space", "pos:\t- 1\nflags:\t02000002\nmnt_id:\t10\nino:\t6087\n"},
 		{"mnt_id empty", "pos:\t0\nflags:\t02000002\nmnt_id:\t\nino:\t6087\n"},
 		{"mnt_id negative", "pos:\t0\nflags:\t02000002\nmnt_id:\t-5\nino:\t6087\n"},
 		{"mnt_id above int32", "pos:\t0\nflags:\t02000002\nmnt_id:\t2147483648\nino:\t6087\n"},
@@ -234,6 +240,15 @@ func TestParseFdinfo_Rejects(t *testing.T) {
 		data := "pos:\t0\nflags:\t02000002\nmnt_id:\t2147483647\nino:\t18446744073709551615\n"
 		got, err := ParseFdinfo([]byte(data))
 		want := Fdinfo{MountID: 2147483647, Inode: 18446744073709551615}
+		if err != nil || got != want {
+			t.Errorf("ParseFdinfo(%q) = %+v, %v, want %+v, nil", data, got, err, want)
+		}
+	})
+
+	t.Run("signed pos and mount 0 are accepted", func(t *testing.T) {
+		data := "pos:\t-9223372036854775808\nflags:\t02000002\nmnt_id:\t0\nino:\t6087\n"
+		got, err := ParseFdinfo([]byte(data))
+		want := Fdinfo{MountID: 0, Inode: 6087}
 		if err != nil || got != want {
 			t.Errorf("ParseFdinfo(%q) = %+v, %v, want %+v, nil", data, got, err, want)
 		}
@@ -524,4 +539,33 @@ func TestScanOwners_ManyDescriptorsOfALowPIDStarveNoOne(t *testing.T) {
 	wantOwner(t, o, 1, 2)
 	wantCount(t, o, 1, 1)
 	wantCount(t, o, 2, 1)
+}
+
+func TestScanOwners_MemfdAndHighOffsetDescriptorsKeepTheProcessReadable(t *testing.T) {
+	p := newProcTree(t)
+	p.addRaw(10, 3, readFdinfoSample(t, "memfd"))
+	p.addRaw(10, 4, readFdinfoSample(t, "proc-mem-high-offset"))
+	p.add(10, 5, socketMount, 100)
+	p.add(7, 3, 0, 100)
+
+	o, unreadable, err := scan(t, p.files, []int32{7, 10}, indexOf(100))
+	if err != nil || unreadable != 0 {
+		t.Fatalf("scanOwners() unreadable = %d, error = %v, want 0, nil", unreadable, err)
+	}
+	wantOwner(t, o, 0, 10)
+	wantCount(t, o, 10, 1)
+	wantCount(t, o, 7, 0)
+}
+
+func TestScanOwners_MountZeroCountsNoHolder(t *testing.T) {
+	p := newProcTree(t)
+	p.add(10, 3, 0, 100)
+	p.add(10, 4, socketMount, 100)
+
+	o, unreadable, err := scanOwners(context.Background(), p.files, []int32{10}, indexOf(100), 0)
+	if err != nil || unreadable != 0 {
+		t.Fatalf("scanOwners(mount 0) unreadable = %d, error = %v, want 0, nil", unreadable, err)
+	}
+	wantOwner(t, o, 0, 0)
+	wantCount(t, o, 10, 0)
 }
