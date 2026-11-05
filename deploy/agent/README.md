@@ -156,9 +156,9 @@ root, who reads the token anyway. The checks of this binding on the production s
 4. **Check the connection and the policy.** On this server, with the backend host's tailnet address in place of `100.64.0.1`, its IPv6
    tailnet address in place of `fd7a:115c:a1e0::1`, another tailnet device's address in place of `100.64.0.9`, and the backend's ingest
    port in place of `8081`. Each line stands alone and changes nothing. Only the fifth line, SSH on the backend host's IPv4 tailnet
-   address, had a result from the Product Manager's server run (below); the lines added for issue #43 have run on the production server
-   (issue #338) and give the results expected here, with one exception: the fourth line, the `401`, has **not yet run** there, because
-   the backend on it answers `404` (it has no ingest API, see below):
+   address, had a result from the Product Manager's earlier server run (below). The lines from `tailscale ping` on have run on the production server
+   (issue #338) and give the results expected here, with one exception: the fourth line, the `401`, has **not yet run** there
+   (issue #375), because the backend on it answers `404` (it has no ingest API, see below):
 
    ```
    tailscale ip -4
@@ -190,7 +190,7 @@ root, who reads the token anyway. The checks of this binding on the production s
      - `404` means the backend has no ingest API (v0.1.0 or older), a proxy is in front of the port, or the port is the wrong one.
    - The next five lines try other targets: SSH (22) and the web port (8080) of the backend host on its IPv4 tailnet address, the web
      port and SSH on its IPv6 tailnet address, and SSH on another tailnet device. They mean something only after the third line printed
-     `404` and the fourth `401`. Each must be blocked (Tailscale's access control page: <https://tailscale.com/kb/1018/acls>).
+     `404`, which shows that this server reaches the ingest port at that address. Each must be blocked (Tailscale's access control page: <https://tailscale.com/kb/1018/acls>).
      - Blocked by the policy, as it should be: `No route to host`, or `124` (a timeout). In the Product Manager's server run the blocked attempt printed `No route to host` in one policy state and timed out (`124`) in
        another, and the allowed one, before the default rule was replaced, printed `Connection refused`.
      - The policy lets this server reach that port or device: `Connection refused` with `1`, or `0` (connected). The policy is too
