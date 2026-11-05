@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-18
 - **Area:** Agent
-- **Source:** Issue #33, Issue #279 (the socket's UID), Issue #305 (a known endpoint whose socket UID changes)
+- **Source:** Issue #33, Issue #279 (the socket's UID), Issue #305 (a known endpoint whose socket UID changes), Issue #341 (fdinfo values the parser rejected)
 - **Supersedes:** —
 
 ## Context
@@ -108,6 +108,17 @@ measured on 6.18.44, squad record of #305).
     leaves an endpoint is no signal. Reporting every run while an endpoint is mixed was rejected as the flood the issue names.
 22. **The changed endpoints inside `new_listeners` with a marker** — no new list, but a reader counting new listeners (the backend's
     marks, the report's "new") would count endpoints that are not new. Rejected.
+23. **The first four `fdinfo` lines as the kernel prints them (chosen, #341)**: the parser had demanded unsigned digits and a
+    non-zero `mnt_id:`, so a process holding a memfd (on the kernel's internal shmem mount, the first mount the kernel creates, whose
+    ID is 0) or a `/proc/<pid>/mem` positioned above 2^63 (`pos:` signed) was counted unreadable on every run and its sockets lost
+    their owner. Upstream `fs/proc/fd.c` at v5.15 prints `pos:\t%lli`, `flags:\t0%o`, `mnt_id:\t%i`, `ino:\t%lu`, and
+    `fs/namespace.c` at v5.15 numbers mounts from 0 (`ida_alloc`) with `shmem_init` the first mount in `mnt_init`; both values were
+    captured on 6.18.44. The parser accepts what that format prints; the mount ID 0 is never the socket mount, and the start-up
+    probe keeps refusing it, because 0 means "not learned" to the collector. Residual: the server's own files were not captured,
+    so its warning is attributed to these values by the kernel source, not by a sample from the server.
+24. **Skipping a descriptor whose `fdinfo` has another shape instead of stopping its process** — would have silenced #341 without
+    knowing the cause, and would let a future format change drop owners without a warning. Rejected: an unexpected shape stays
+    visible as `socket owners partly unknown`.
 
 ## Decision
 
@@ -122,6 +133,9 @@ lowest and `mixed_uids`; the rules are in [Agent](../areas/agent.md) (*Connectio
 
 For #305, option 21: a compared endpoint whose socket UID changes is reported in `changed_listeners`; the rules are in
 [Agent](../areas/agent.md) (*The listener check*) and [Wire format](../areas/wire-format.md).
+
+For #341, option 23: the owner scan reads the first four `fdinfo` lines in the range the kernel prints them; the rules are in
+[Agent](../areas/agent.md) (*Owners*).
 
 ## Consequences
 
