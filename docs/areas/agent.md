@@ -432,7 +432,7 @@ only: an address first seen after the 4,096 are counted, however heavy, is missi
 **Owners.** The agent does not read the `/proc/<pid>/fd` links, because listing them needs `CAP_DAC_READ_SEARCH`, which the agent does not
 hold (*Rights*). For every
 listed process it lists `<pid>/fdinfo` in chunks of 256 and, per descriptor, opens the file, reads at most 256 bytes and closes it. The
-first four lines must be `pos:`, `flags:`, `mnt_id:` (1 to 10 digits, not 0) and `ino:` (1 to 20 digits), each a tab and digits; later lines
+first four lines must be `pos:`, `flags:`, `mnt_id:` (1 to 10 digits, 0 to 2147483647) and `ino:` (1 to 20 digits), each a tab and digits (`pos:` may carry a leading `-`, because the kernel prints it signed for descriptors such as `/proc/<pid>/mem`; a memfd shows `mnt_id: 0`, the kernel's internal shmem mount, which is never the socket mount); later lines
 (an epoll's `tfd:`) are not read. A descriptor counts only when its `ino:` is the inode of a tracked socket **and** its `mnt_id:` is the
 **socket mount** (below). Per tracked socket the collector keeps two 32-bit numbers, its owner and the last PID that counted it, so several
 descriptors of one socket in one process count once for that process; per PID it counts the distinct sockets. No list of matches is kept,
@@ -473,7 +473,7 @@ global, a file on a user-namespace tmpfs showed `mnt_id: 76`. At start-up the ag
 connected or sent on, reads the first lines of its own `/proc/self/fdinfo/<fd>`, checks that the `ino:` equals the inode `fstat` reports for the
 descriptor (else the probe fails: `sockmount: self/fdinfo: inode mismatch`), closes both and keeps the `mnt_id:` for its lifetime
 (`internal/sockmount`). The probe needs no right. Its failure texts are `sockmount: socket: <errno>`, `sockmount: self/fdinfo: <os error>` and
-`sockmount: <fixed reason>`. When it fails, or when a collector is built without a probed mount, the collector opens no `fdinfo`, no
+`sockmount: <fixed reason>`; a mount ID 0 is refused with `sockmount: not in the expected format`, since 0 means "not learned". When it fails, or when a collector is built without a probed mount, the collector opens no `fdinfo`, no
 socket has an owner, `processes` is empty, the aggregates are incomplete, the sample succeeds and one warning `socket owners unknown` (`err`) is
 logged at the first run; the state lasts until the agent restarts.
 
@@ -530,7 +530,7 @@ also while `socket owners unknown` holds. The lines are written only for a run t
 
 **Failures and rights.** The sample fails (a gap) when no table exists, a table cannot be read, `/proc` cannot be listed or the run's context ends.
 It succeeds when `/etc/passwd` cannot be read (*Socket UIDs*) and when a process or a descriptor cannot be read: the first `EACCES`, `EPERM` or other error on a process, or an `fdinfo` that does not
-have the four-line shape (a file changed or damaged after the start-up probe succeeded), counts that process unreadable once, stops its scan,
+have the four-line shape (a format the kernel does not print today), counts that process unreadable once, stops its scan,
 and the sockets it held have no owner. Without `CAP_SYS_PTRACE` that is every process of another user, so the warning is logged. With `hidepid=1` and without the
 capability the same. With `hidepid=2` and without the capability other users' processes are **not listed at all**, so their sockets have no owner
 **without a warning** (stated residual). With the capability `hidepid=2` hides nothing (measured, *Rights*).
