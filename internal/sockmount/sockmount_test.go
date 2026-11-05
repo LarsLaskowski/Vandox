@@ -166,6 +166,16 @@ func TestProbe_MalformedFdinfoFails(t *testing.T) {
 	}
 }
 
+func TestProbe_MountIDZeroFails(t *testing.T) {
+	id, err := Probe(fdinfoFS{data: "pos:\t0\nflags:\t02000002\nmnt_id:\t0\nino:\t6087\n"})
+	if err == nil || err.Error() != "sockmount: not in the expected format" {
+		t.Fatalf("Probe() = %d, %v, want an error with the text %q", id, err, "sockmount: not in the expected format")
+	}
+	if id != 0 {
+		t.Errorf("Probe() mount = %d with an error, want 0", id)
+	}
+}
+
 func TestProbe_ClosesTheSocket(t *testing.T) {
 	_ = openFDs(t) // the first listing may open the runtime's poller
 

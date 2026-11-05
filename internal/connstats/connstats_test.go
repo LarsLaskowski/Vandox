@@ -2884,3 +2884,19 @@ func TestConnections_UnchangedUIDStaysRegular(t *testing.T) {
 		}
 	}
 }
+
+func TestConnections_MemfdHolderKeepsItsOwners(t *testing.T) {
+	w := ownedWorld(t)
+	w.addRaw(100, 20, readFdinfoSample(t, "memfd"))
+	w.addRaw(100, 21, readFdinfoSample(t, "proc-mem-high-offset"))
+	c, logs := newRecordingCollector(w, SocketMount{ID: socketMount})
+
+	snapshotOf(t, c, runAt(0, false))
+	_, snap := snapshotOf(t, c, runAt(1, false))
+
+	wantLogged(t, logs, slog.LevelWarn, "socket owners partly unknown", 0)
+	wantListener(t, snap, model.ProtoTCP, sshdListener, 100, cmdSSHD, 0, "root")
+	if snap.AggregatesIncomplete {
+		t.Error("aggregates_incomplete = true, want false while every descriptor can be read")
+	}
+}

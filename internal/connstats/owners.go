@@ -31,8 +31,9 @@ type Fdinfo struct {
 	Inode   uint64
 }
 
-// ParseFdinfo parses the first four lines of an fdinfo file (pos, flags, mnt_id, ino); later lines are not read. Its errors name
-// a fixed reason and never hold file content.
+// ParseFdinfo parses the first four lines of an fdinfo file (pos, flags, mnt_id, ino); later lines are not read. pos is an optional
+// minus and digits (the kernel prints it signed), flags and ino are digits, mnt_id is 1 to 10 digits from 0 to 2147483647 (a memfd
+// prints 0). Its errors name a fixed reason and never hold file content.
 func ParseFdinfo(data []byte) (Fdinfo, error) {
 	var vals [fdinfoLines][]byte
 	prefixes := [fdinfoLines]string{prefixPos, prefixFlags, prefixMount, prefixInode}
@@ -43,7 +44,7 @@ func ParseFdinfo(data []byte) (Fdinfo, error) {
 			return Fdinfo{}, errFormat
 		}
 		val, ok := bytes.CutPrefix(rest[:end], []byte(prefix))
-		if !ok || !allDigits(val) {
+		if !ok || (i == 0 && !signedDigits(val)) || (i > 0 && !allDigits(val)) {
 			return Fdinfo{}, errFormat
 		}
 		vals[i] = val
@@ -53,7 +54,7 @@ func ParseFdinfo(data []byte) (Fdinfo, error) {
 		return Fdinfo{}, errFormat
 	}
 	mount, err := strconv.ParseInt(string(vals[2]), decimalBase, 32)
-	if err != nil || mount == 0 {
+	if err != nil {
 		return Fdinfo{}, errFormat
 	}
 	inode, err := parseInode(vals[3])
@@ -61,6 +62,11 @@ func ParseFdinfo(data []byte) (Fdinfo, error) {
 		return Fdinfo{}, err
 	}
 	return Fdinfo{MountID: int32(mount), Inode: inode}, nil
+}
+
+// signedDigits reports whether b is an optional minus followed by one or more ASCII digits.
+func signedDigits(b []byte) bool {
+	return allDigits(bytes.TrimPrefix(b, []byte("-")))
 }
 
 // owners holds, per tracked socket, its owner PID (0: none) and the last PID that counted it, and per PID its distinct sockets.
@@ -82,13 +88,16 @@ type scanState struct {
 
 // scanOwners reads the fdinfo files of pids and assigns each socket of index to the lowest PID that holds it on mount. index maps
 // an inode to a slot 0..len(index)-1; owners are indexed by slot. A PID that cannot be read completely is counted once in
-// unreadable and its scan stops; firstErr is the first such failure. A canceled ctx stops the scan; the caller reads ctx.Err().
+// unreadable and its scan stops; firstErr is the first such failure. A mount of 0 means "not learned": nothing is scanned. A canceled ctx stops the scan; the caller reads ctx.Err().
 func scanOwners(ctx context.Context, proc fs.FS, pids []int32, index map[uint64]int32, mount int32) (o owners, unreadable int, firstErr error) {
 	s := &scanState{
 		proc:  proc,
 		index: index,
 		mount: mount,
 		o:     owners{owner: make([]int32, len(index)), last: make([]int32, len(index)), perPID: make(map[int32]uint32)},
+	}
+	if mount == 0 {
+		return s.o, 0, nil
 	}
 	for _, pid := range pids {
 		if ctx.Err() != nil {
