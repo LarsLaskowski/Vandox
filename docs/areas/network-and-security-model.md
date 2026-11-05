@@ -40,13 +40,15 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   opt-in. There is no policy file in the repository: the admin console no longer takes a pasted policy, so a file could not be applied
   as it is ([record 0132](../decisions/0132-tailnet-policy-documented-as-console-settings-no-default-maintainer-grant.md)). The settings
   are in place on the production tailnet, and the probes of step 4 show their effect (issue #338). Go tests in `deploy/agent` pin the
-  settings in the README and fail when it shows a policy file or a wide grant.
+  README's list of settings word for word and the key items of its list of rules that must never be added, so a widening edit of the
+  README fails them. Nothing in the console refuses a later edit that widens what the server reaches; the probes of step 4 are the check.
 - **A compromised root cannot widen the policy.** With no `ssh` rule, no `autoApprovers` entry and no grant to a subnet or
   `autogroup:internet` that matches `tag:vandox-agent`, a root that turns on Tailscale SSH, advertises a route or an exit node, accepts
   routes or selects an exit node still reaches only the ingest port. The README's settings line turns these off anyway and a settings check
   (`tailscale debug prefs`) shows them; both have run on the production server with the expected values (issue #338).
 - **Maintainer devices get nothing on the backend host by default.** The policy grants them no access to the backend host's tailnet address
-  but what the maintainer enables on purpose (a commented SSH line); there is none for the web port.
+  but what the maintainer enables on purpose (the one opt-in: a rule from `autogroup:admin` to `tag:vandox-backend` on TCP port 22); there
+  is none for the web port.
 - **While Tailscale is not up, the agent's sender binds to `tailscale0`.** Tailscale's routes exist only while it runs, and the unit's
   `IPAddressAllow=` filters by address, not interface, so without a binding a send to the backend's tailnet address would follow the
   server's default route onto the provider's network. `HTTPTransport` therefore binds every connection whose address is not a loopback
@@ -147,8 +149,8 @@ agent's installation: `install.sh` creates it on the first install, `uninstall.s
 - [0127](../decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) — why TUN mode and a
   required bind address.
 - [0016](../decisions/0016-web-ui-in-home-lan-with-login.md) — why the web UI is LAN-only with a login.
-- [0132](../decisions/0132-tailnet-policy-documented-as-console-settings-no-default-maintainer-grant.md) — why the policy is documented as console settings
-  pinned by tests, gives maintainer devices nothing by default, and leaves the token's exposure while Tailscale is down to a follow-up.
+- [0132](../decisions/0132-tailnet-policy-documented-as-console-settings-no-default-maintainer-grant.md) — why the policy is documented in the README as console
+  settings, the README pinned by tests, gives maintainer devices nothing by default, and leaves the token's exposure while Tailscale is down to a follow-up.
 - [0013](../decisions/0013-mariadb-access-via-unix-socket-process-privilege.md) — why a `unix_socket` user with only `PROCESS`.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the
   agent's own minimal client, fixed captured statements and a refusal recorded with its error number.

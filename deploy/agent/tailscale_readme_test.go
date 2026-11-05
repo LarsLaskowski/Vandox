@@ -76,14 +76,60 @@ func policyStep(t *testing.T) string {
 	return steps[1]
 }
 
+// policySettings is the list of console settings in step 2, word for word: any rule added to it, or any widened one,
+// changes the text and fails the test.
+const policySettings = `- **Tags:** ` + "`tag:vandox-agent` and `tag:vandox-backend`, both owned by `autogroup:admin`. No tag may own a tag." + `
+- **The agent's only rule:** source ` + "`tag:vandox-agent`, destination `tag:vandox-backend`, protocol TCP, port `8081` (the backend's" + `
+ingest port; use yours if it differs). Choose TCP explicitly: a port without a protocol allows every protocol on that port, and
+all TCP ports allow every port of the backend host.
+- **Your own devices:** a rule from ` + "`autogroup:member` to `autogroup:self` on all ports, which keeps them reaching each other. A" + `
+tagged host is no longer part of its user's ` + "`autogroup:self`." + `
+- **Nothing else.** The tailnet's default rule is gone, and there is no rule for the backend host's web port. SSH from the tailnet
+admins to the backend host is an opt-in: a rule from ` + "`autogroup:admin` to `tag:vandox-backend` on TCP port `22` and nothing else."
+
+// forbiddenRules are the items of step 2's list of rules that must never be added; removing one fails the test.
+var forbiddenRules = []string{
+	"not `*`, not `autogroup:tagged`, not `tag:vandox-agent` with another destination",
+	"not an address, a cidr, a host alias or an ipset that covers it",
+	"no `autoapprovers` entry, no `ssh` rule and no grant to a subnet or to `autogroup:internet` with such a source",
+	"no tag as a tag owner",
+	"`autogroup:tagged` or `autogroup:danger-all` as destination",
+	"no rule but the agent's one may have `tag:vandox-agent` as source",
+}
+
+// betweenMarkers returns the part of text after start and before end, or fails the test when one is missing.
+func betweenMarkers(t *testing.T, text, start, end string) string {
+	t.Helper()
+
+	from := strings.Index(text, start)
+	if from < 0 {
+		t.Fatalf("step 2 lacks %q, want it", start)
+	}
+
+	rest := text[from+len(start):]
+	to := strings.Index(rest, end)
+	if to < 0 {
+		t.Fatalf("step 2 lacks %q after %q, want it", end, start)
+	}
+
+	return rest[:to]
+}
+
 func TestAgentReadme_TailscalePolicyStepNamesTheConsoleSettings(t *testing.T) {
 	t.Parallel()
 
-	step := collapse(policyStep(t))
+	got := collapse(betweenMarkers(t, policyStep(t), "The policy holds exactly this:", "On the production tailnet"))
+	if want := collapse(policySettings); got != want {
+		t.Errorf("the settings list of step 2 = %q, want exactly %q", got, want)
+	}
+}
 
-	containsAll(t, step, "step 2 of the Tailscale section", agentTag, backendTag, "autogroup:admin",
-		"source `tag:vandox-agent`, destination `tag:vandox-backend`, protocol tcp, port `8081`",
-		"`autogroup:member` to `autogroup:self`", "default rule", "no rule for the backend host's web port")
+func TestAgentReadme_TailscalePolicyStepKeepsTheForbiddenRules(t *testing.T) {
+	t.Parallel()
+
+	step := collapse(betweenMarkers(t, tailscaleSection(t), "Rules that must never be added:", "\n3. **"))
+
+	containsAll(t, step, "the forbidden rules of step 2", forbiddenRules...)
 }
 
 func TestAgentReadme_TailscalePolicyStepHoldsNoPolicyFile(t *testing.T) {
