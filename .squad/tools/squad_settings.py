@@ -37,7 +37,7 @@ COVERAGE_REPORTS = [
 ]
 COVERAGE_PATHSPECS = ["*.go", "*.cs", "*.razor"]
 COVERAGE_EXCLUDES = ["*_test.go", "tests/*", "**/obj/*"]
-COVERAGE_TEST_PATHSPECS = ["*_test.go", "tests/*"]
+COVERAGE_TEST_PATHSPECS = ["*_test.go", "tests/*", "testdata/*"]  # the file guard lets the Tester write these (shared fixtures included)
 
 # Size warnings (config-check.py, decision-check.py): a file past its limit is reported with the split it needs.
 PROJECT_MAX_WORDS = 1500  # .squad/project.md, read by five members on every launch
