@@ -7,11 +7,18 @@ Advocate, Security, the Tester and the Reviewer. Not template-managed: `adopt-te
 and never overwrites it. A product PR updates it when the change makes an entry untrue
 (`.squad/routing.md`, *Scope of a product PR*).
 
+Every entry points: it names files, types or endpoints and links the document that says more. Behavior, values,
+limits and sequences are written once, in the area documents (`docs/areas/README.md`), and the reasons in the
+decision records; a copy here goes stale with the next change. `config-check.py` warns when this file grows past
+`PROJECT_MAX_WORDS` words (`.squad/tools/squad_settings.py`).
+
 ## Security areas
 
 A change that touches one of these lists it under *Security areas touched* in its plan, so Security reviews the
-plan (`.squad/routing.md`, *Tiers*, which also says when a change is tier `security`). Name the concrete types,
-files or endpoints.
+plan (`.squad/routing.md`, *Tiers*, which also says when a change is tier `security`). One line per area: what is
+protected, the concrete types, files or endpoints, and a link to the area document that states its rules
+(`- Session tokens: issued in src/Auth/, checked by every /api route — [Sessions](../docs/areas/sessions.md)`); no
+limits, patterns or sequences.
 
 1. **Ingest authentication** (implemented, `src/Vandox.Backend/Ingest`: `IngestEndpoint`, `IngestSettings`, `IngestToken`, `IngestLimits`,
    `IngestStatus`, `IngestRefusalLog`, `IngestWriteGate`, `ConnectionCap`, `CappedConnection`, `FreeSpace`, `IngestFieldPath`; the request branch in
@@ -356,8 +363,8 @@ with a zero `Timex` (mode 0, read-only; no capability needed), so the unit uses 
 
 ## Guarantees
 
-Deliberate behavior that must not change without the Product Manager. Each one is described in
-`docs/ARCHITECTURE.md` and, where it was a real choice, has a decision record.
+Deliberate behavior that must not change without the Product Manager. One line each: the guarantee in a few words,
+a link to its decision record where it was a real choice, and a link to the area document that states it.
 
 - **No data gaps unless explicitly recorded**: collection is gapless across backend downtime (spool and
   backfill); data that is nevertheless missing (agent stopped, spool full, collector timed out, sequence
@@ -442,7 +449,8 @@ touches:
 ## Test doubles
 
 The hand-written fakes and stubs the tests reuse (no mocking library unless `docs/UNIT_TESTS.md` says
-otherwise). Go rows are for the agent, C# rows for the backend:
+otherwise), one line each: the double, where it lives and what it stands in for; how it behaves is read in its code.
+Go rows are for the agent, C# rows for the backend:
 
 Status of every row: planned (not implemented yet), except where the row says implemented. The first feature that introduces a surface adds its
 double under this name and changes the status.
