@@ -400,7 +400,7 @@ change with it.
 - its public interface and the package (Go, under `internal/`) or project (C#, under `src/`) that owns it
 - where it is wired up: `cmd/vandox-agent`, or `src/Vandox.Backend` (`Hosting`, `Cli`, `Program.cs`)
 - the test double used by the tests of its callers
-- the component list in `docs/ARCHITECTURE.md`
+- the component overview in `docs/ARCHITECTURE.md` (the packages and projects it lists)
 
 **A new web UI page, component or static asset** touches:
 - a page: the navigation in `src/Vandox.Backend/Components/Layout/MainLayout.razor`
@@ -424,7 +424,7 @@ change with it.
 
 **A new external API call or DTO** touches:
 - the client and its types — the external shape must not leak past it
-- the fake/stub in the tests
+- the hand-written fake or stub of that client in the tests (*Test doubles* below)
 
 **A new or changed external source or destination** (`/proc`, `/sys`, systemd D-Bus, journald, the MariaDB
 socket, the Telegram Bot API, the Tailscale network) touches:
