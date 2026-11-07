@@ -1,6 +1,6 @@
 # 0003: Squash-merge pull requests
 
-- **Status:** Accepted
+- **Status:** Superseded by [0135](0135-the-squads-process-decisions-live-in-process-md.md)
 - **Date:** 2026-10-03
 - **Area:** —
 - **Source:** Squad adopted from Squad-Spec-Repository-Template

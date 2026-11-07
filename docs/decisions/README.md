@@ -24,6 +24,8 @@ once in the [area document](../areas/README.md) of the record's area, and the re
   released record itself stays unedited.
 - Written by the squad Lead (see [`.claude/agents/squad-lead.md`](../../.claude/agents/squad-lead.md));
   anyone may add one for a change made outside the squad.
+- The squad's own process decisions are no records: they stand in [`process.md`](process.md), whose introduction
+  says how they change.
 - Committed together with the change it explains.
 - **Released or not decides how a record changes.** A record is *released* once the commit that added it is
   contained in a release tag (`v*`; check with `git tag --contains <commit>`, the commit is
@@ -38,24 +40,31 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 - A new record that **amends** a released record without superseding it names the older one under
   *Supersedes* and says there, in one sentence, what it amends. The older record is **not edited** — not even
   with a pointer; a reader of the older record finds the amendment through the index and the new record.
-- **One record per decision that has lasting weight, grouped by topic — not one per pull request.** Not for
+- **One record per decision that has lasting weight — not one per pull request, and not one per topic.** Not for
   routine changes: a record is needed when a choice between real alternatives was made that shapes the
   architecture or behavior, a trade-off or limitation was accepted, or a documented guarantee was touched.
-  Before adding a record, look for an unreleased record on the same topic and extend it instead. A review
-  finding that was deliberately not fixed, a follow-up split, or a dependency change gets its own record only
-  if it touches a guarantee or the architecture; otherwise it belongs in the pull request description or the
-  follow-up issue, or as a sentence in the record of the topic it concerns.
+  Before adding a record, look for an unreleased record of the same decision and extend it instead (a changed
+  option, a new consequence); another decision on a topic that already has a record gets a record of its own,
+  which links the other. A review finding that was deliberately not fixed, a follow-up split, or a dependency
+  change gets its own record only if it touches a guarantee or the architecture; otherwise it belongs in the pull
+  request description or the follow-up issue, or as a sentence in the record of the decision it concerns.
+- **Size.** A record that an extension would take past `RECORD_MAX_WORDS` words or `RECORD_MAX_OPTIONS` options
+  (`.squad/tools/squad_settings.py`) holds more than one decision and is split instead: one record per decision,
+  each with its own context, options and consequences. An unreleased record keeps its number for one of them, the
+  others take the next free numbers with their index rows, and every link to it points at the record of its
+  decision; a released record is never split.
 - `.squad/tools/decision-check.py` (also run by `config-check.py`) checks the index, the links between records
-  and that no released record was changed.
+  and that no released record was changed, and warns about an unreleased record past the size limits and an area
+  document past `AREA_MAX_WORDS`, naming the split.
 
 ## Index
 
 <!-- project:begin index -->
 | #    | Title | Status | Date |
 | ---- | ----- | ------ | ---- |
-| 0001 | Quality gates run locally before the pull request; CI builds, tests, checks the format and runs the code analysis | Accepted | 2026-10-03 |
-| 0002 | Squad working records stay off main, and product PRs never change the squad | Superseded by [0109](0109-squad-working-records-off-main-and-product-prs-never-change-the-squad.md) | 2026-10-03 |
-| 0003 | Squash-merge pull requests | Accepted | 2026-10-03 |
+| 0001 | Quality gates run locally before the pull request; CI builds, tests, checks the format and runs the code analysis | Superseded by [0135](0135-the-squads-process-decisions-live-in-process-md.md) | 2026-10-03 |
+| 0002 | Squad working records stay off main, and product PRs never change the squad | Superseded by [0135](0135-the-squads-process-decisions-live-in-process-md.md) | 2026-10-03 |
+| 0003 | Squash-merge pull requests | Superseded by [0135](0135-the-squads-process-decisions-live-in-process-md.md) | 2026-10-03 |
 | 0004 | Own project instead of an off-the-shelf monitoring stack | Accepted | 2026-10-03 |
 | 0006 | The agent connects outbound only; commands are pulled | Accepted | 2026-10-03 |
 | 0007 | SQLite with FTS5, no external database | Accepted | 2026-10-03 |
@@ -137,7 +146,6 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0106 | The logs view takes every filter from the address, searches in bounded pages from the index or by a time-ordered scan, and finds a template's lines by normalizing candidates | Accepted | 2026-10-13 |
 | 0107 | The incidents view reads bounded summaries and the window's own records; notes are rows per incident number that follow merges, saved by a form post with the antiforgery token; every time links to the logs of that moment | Accepted | 2026-10-14 |
 | 0108 | The report page renders the blocks the Markdown is written from, lists the outages in pages of 50 by a new run, takes the language from the address, and runs one report at a time under a deadline of 2 minutes; the Markdown is a GET download | Accepted | 2026-10-15 |
-| 0109 | Squad working records stay off main, and product PRs never change the squad | Accepted | 2026-10-17 |
 | 0110 | The agent's runtime frame: one runner per collector at a fixed rate, a gap for every missed sample, sd_notify by hand with a watchdog gated on the runners, journal logging on stderr | Accepted | 2026-10-17 |
 | 0111 | System metrics: three collectors read /proc, /sys, statfs and adjtimex; missing pressure data is logged once and never recorded as zero | Accepted | 2026-10-17 |
 | 0112 | gosec G115 as the local stand-in for CodeQL's integer-conversion query; enabled for the whole module, no exclusions | Accepted | 2026-10-17 |
@@ -163,4 +171,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | [0132](0132-tailnet-policy-documented-as-console-settings-no-default-maintainer-grant.md) | Tailnet policy documented as console settings, without a default grant for maintainer devices, with the token's exposure while Tailscale is down split off | Accepted | 2026-11-05 |
 | [0133](0133-agent-footprint-measured-on-the-server-as-peak-rss-and-cpu-of-one-core.md) | Agent footprint measured on the server as peak RSS and CPU time of one core | Accepted | 2026-10-30 |
 | [0134](0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md) | The sender binds every non-loopback connection to the tailnet device, so the token never leaves through another interface | Accepted | 2026-11-04 |
+| [0135](0135-the-squads-process-decisions-live-in-process-md.md) | The squad's process decisions live in process.md | Accepted | 2026-11-06 |
 <!-- project:end index -->

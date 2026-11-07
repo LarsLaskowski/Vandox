@@ -60,6 +60,16 @@ and `uninstall.sh` and the files they ship (`vandox-agent.service`, `agent.yaml`
 - Go: `TestFunction_Scenario` or `TestType_Method` with `t.Run` subtests named after the scenario, e.g.
   `t.Run("empty input returns error", …)`.
 
+## Criterion ids
+
+A test written for an acceptance criterion of a squad plan or spec carries the criterion's id, so that
+`.squad/tools/plan-check.py --matrix` finds it by id after a rename or a split; a test that asserts several
+criteria carries each id. The test name follows *Naming* unchanged.
+
+- .NET: the id as a test category, `[TestCategory("AC3")]` on the test method.
+- Go: the id at the start of the subtest name, `t.Run("AC3 empty input returns error", …)`, or as the last part of
+  the test function's name, `TestParse_EmptyInput_AC3`.
+
 ## Structure
 
 - .NET: `// Arrange`, `// Act`, `// Assert` comments in every test; several inputs through `[DataRow]` (or
@@ -147,5 +157,6 @@ the pattern for `vandoxd`).
 - [ ] The *Analyzer gate* passes.
 - [ ] At least 80 % line coverage on new/changed production code and overall (*Coverage gate*).
 - [ ] Table-driven where there is more than one input; failure messages with got and want.
+- [ ] A test for a squad acceptance criterion carries its id (*Criterion ids*).
 - [ ] Go: passes with `-race`; no real network or clock except the ratio of two durations (see Structure; timeouts: `synctest` or injected durations, decision 0062). .NET: no real network, clock or sleep, again except such a ratio and a library timer that cannot be injected (see Structure); the whole solution builds without any analyzer diagnostic.
 - [ ] *Format* from `.squad/stack.md` run before committing.
