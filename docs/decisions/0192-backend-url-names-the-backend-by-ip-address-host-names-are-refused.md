@@ -35,7 +35,7 @@ sends: v0.1.0 has no sender, so no deployed configuration relies on a name reach
 ## Decision
 
 Option 1. The configuration loader refuses a `backend.url` whose host is not an IP address without a zone, the sender's transport
-refuses to be built from one, and `install.sh` refuses a host name in `--backend-url` (it accepts IPv4 literals and bracketed IPv6 literals; a malformed IPv6 literal it lets through fails at the agent's start); a loopback address stays exempt from the binding only as such a
+refuses to be built from one, and `install.sh` refuses a host name in `--backend-url` (it accepts IPv4 literals and the bracketed IPv6 literals the agent's parser takes, without an embedded IPv4 part); a loopback address stays exempt from the binding only as such a
 literal. The rule and its error texts are in [Configuration options](../areas/configuration-options.md) and
 [Agent installation](../areas/agent-installation.md), what it guarantees in [Network and security model](../areas/network-and-security-model.md).
 
