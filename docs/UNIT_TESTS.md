@@ -25,6 +25,21 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
 - Go: colocated `_test.go` files, one per source file under test (`foo.go` → `foo_test.go`), in the same
   package (white-box) unless the test exercises only the exported API (`package foo_test`).
 
+## Test doubles
+
+The reusable fakes and stubs are listed in `.squad/project.md` (*Test doubles*); reuse them before writing a new
+one, and add a new one there.
+
+- A double of an ASP.NET Core request or response stream behaves as Kestrel does: it refuses synchronous I/O, and a
+  response stream starts the response on any flush, not only when a byte is written (`StartingResponseBody` is the
+  reference). The ingest tests' `CountingBodyStream` is the one exception: it accepts synchronous reads, because the
+  endpoint reads only asynchronously and answers with a status and headers only.
+- Any other claim about server behavior that a double encodes is checked once against real Kestrel
+  (`.squad/team.md`, *Test doubles that model a real component*): the header handling the ingest doubles encode
+  (whitespace and duplicates, invalid bytes, `Content-Length`) is checked against the running service by
+  `ServeTests.ServeIngestHeaderWhitespaceAndDuplicates`.
+  A double once started the response only on a written byte, and only a review with a Kestrel probe found it.
+
 ## Deploy scripts (Go tests of shell scripts)
 
 `deploy/agent` is a test-only Go package: its `_test.go` files test the shell scripts `common.sh`, `install.sh`

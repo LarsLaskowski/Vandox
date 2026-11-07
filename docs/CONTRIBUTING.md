@@ -161,8 +161,8 @@ tags look like `vX.Y.Z-rc.N`; the install bundle is packaged only for `vX.Y.Z` a
    highest stable `v*.*.*` tag. A pre-release tag publishes only its own version. If the version already
    exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
    never overwritten.
-6. Creates SLSA build provenance attestations and SBOM attestations (`sbom-path`, SPDX) for the binary and
-   the install bundle and the image digest (GitHub artifact attestations, stored on GitHub, not in Docker Hub) in the `attest` job,
+6. Creates SLSA build provenance attestations for the binary, the install bundle and the image digest, and SBOM
+   attestations (`sbom-path`, SPDX) for the binary and the image digest (GitHub artifact attestations, stored on GitHub, not in Docker Hub) in the `attest` job,
    which holds only `id-token: write` and `attestations: write`, has no environment and reads no secret, and
    verifies all of them with the README's flags, the SBOM ones with `--predicate-type
    https://spdx.dev/Document/v2.3` (the image by its published tag, see *Verifying a release*).
@@ -243,6 +243,27 @@ and that the database survives re-creating the container (record
 compares the base image digests with the registry (*Base image digests*); a stale
 digest or a failed registry lookup is only a warning there, not a failure. It uploads, pushes and releases
 nothing and reads no secret.
+
+### Workflow rules
+
+These rules hold for `release.yml`, `base-image-digests.yml` and the *Release build check* of `ci.yml` (security
+area 13 of [`.squad/project.md`](../.squad/project.md)):
+
+- Every action is pinned by its full commit SHA, every base image by digest (*Base image digests*).
+- No `${{ }}` expression of any kind stands inside a `run:` script; every value reaches a script through `env:`.
+  Checkout never persists the job token (`persist-credentials: false`).
+- A release build restores no CI cache: `setup-go` with `cache: false`, plain `docker build --no-cache`, no cache
+  backend.
+- The Docker Hub token is readable only by the tag-triggered job `publish-image` (environment `release`) and enters
+  `docker login` only through standard input.
+- Only `attest` holds the signing permission; it declares no environment, reads no secret and checks out no
+  repository code.
+- The SBOM generator also gets no token (*SBOM generator*).
+- Each of the two scheduled jobs of `base-image-digests.yml` holds only `contents: read` and `issues: write`, runs
+  its registry and Git lookups without a token, writes only image, tag and digest values that passed a regular
+  expression into its own issue, and never writes to the repository.
+- The workflow's check that the tagged commit is on `main` runs in code the tagger controls, so the tag ruleset
+  (*One-time setup*, item 1) is the boundary.
 
 ### One-time setup (maintainer)
 

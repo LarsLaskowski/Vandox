@@ -1,483 +1,190 @@
 # Project
 
-What the squad needs to know about this project that is not stack-specific. The repository has two
-languages (record 0073): the agent `vandox-agent` is Go (`cmd/vandox-agent`, `internal/`), the backend `vandoxd`
-is .NET 10 with Blazor (`src/Vandox.*`). An entry names the place in each language where it applies. Read by the Lead, the Devil's
-Advocate, Security, the Tester and the Reviewer. Not template-managed: `adopt-template` creates it once
-and never overwrites it. A product PR updates it when the change makes an entry untrue
-(`.squad/routing.md`, *Scope of a product PR*).
+What the squad needs to know beyond the stack; read by the Lead, the Devil's Advocate, Security, the Tester and the
+Reviewer. The agent `vandox-agent` is Go (`cmd/vandox-agent`, `internal/`), the backend `vandoxd` .NET 10 with
+Blazor (`src/Vandox.*`, record 0073). Not template-managed: `adopt-template` creates it once; a product PR updates
+it when the change makes an entry untrue (`.squad/routing.md`, *Scope of a product PR*).
 
-Every entry points: it names files, types or endpoints and links the document that says more. Behavior, values,
-limits and sequences are written once, in the area documents (`docs/areas/README.md`), and the reasons in the
-decision records; a copy here goes stale with the next change. `config-check.py` warns when this file grows past
-`PROJECT_MAX_WORDS` words (`.squad/tools/squad_settings.py`).
+Every entry points: it names files or endpoints and links the area document (`docs/areas/README.md`) or record that
+states the rules; values, limits and sequences stand only there. `config-check.py` warns past `PROJECT_MAX_WORDS`
+words.
 
 ## Security areas
 
 A change that touches one of these lists it under *Security areas touched* in its plan, so Security reviews the
 plan (`.squad/routing.md`, *Tiers*, which also says when a change is tier `security`). One line per area: what is
-protected, the concrete types, files or endpoints, and a link to the area document that states its rules
-(`- Session tokens: issued in src/Auth/, checked by every /api route — [Sessions](../docs/areas/sessions.md)`); no
-limits, patterns or sequences.
+protected, where, and the area documents that state its rules.
 
-1. **Ingest authentication** (implemented, `src/Vandox.Backend/Ingest`: `IngestEndpoint`, `IngestSettings`, `IngestToken`, `IngestLimits`,
-   `IngestStatus`, `IngestRefusalLog`, `IngestWriteGate`, `ConnectionCap`, `CappedConnection`, `FreeSpace`, `IngestFieldPath`; the request branch in
-   `Hosting/PortRoutingMiddleware`, the listener in `Hosting/ListenerRoutes`, the drain in `Hosting/ServeCommand`): the agent token, request limits and
-   deduplication. *Goal:* only an agent holding a valid token can store data; the token is compared in
-   constant time; request size, batch size and rate are bounded so a valid agent cannot exhaust the
-   backend's memory or disk; a resent record (same agent ID
-   and sequence number), and so a resent batch, is stored once and never overwrites stored data. The token check runs before the body is read:
-   `IngestToken` compares the SHA-256 digests of the presented and the configured token with `CryptographicOperations.FixedTimeEquals` (one value,
-   scheme `Bearer`, never the query string), and the batch header's `agent_id` must equal `ingest.agent_id` ordinally (`403` otherwise): the one
-   token is bound to one agent, and ingest answers `503` while the token or `ingest.agent_id` is unset (`IngestSettings.Create`). The bounds: the compressed body
-   at most 2 MiB (`Content-Length` before the read, a 2 MiB buffer owned by each of two slots, never pooled), the decompressed batch at most 2 MiB, a
-   line 1 MiB and 20,000 records (`BatchDecoder` through `IngestLimits.Wire`), two slots held from the body read through the commit, 16 connections on
-   the listener (`ConnectionCap`, HTTP/1.1 only; a further connection evicts the oldest one that has not passed the token check, and is closed only when all 16 have), 30 seconds for waiting, reading and decoding; there is no request-rate cap (record 0126). The disk
-   bound is the free-space floor `ingest.min_free` (default `1GiB`, `0MiB` off): `FreeSpace` is read before every write and a batch below the floor, or
-   with an unreadable volume, is answered `503` and not written. The drain: `IngestWriteGate` closes at the stop signal (the endpoint's
-   `ApplicationStopping` callback), a write that started runs under a token that only the shutdown deadline (10 seconds after the stop signal)
-   cancels, and `ServeCommand` waits for the writes in flight (`IngestEndpoint.DrainAsync`) in a `finally` before it closes the store. Logs carry the peer, fixed reasons,
-   line numbers, field paths with map keys reduced to `[]` (`IngestFieldPath`) and exception type names, never the token, the header, the body or
-   record content. The deduplication is implemented by `BatchWriter` in `src/Vandox.Storage` (partial unique index `records_agent_seq`,
-   `INSERT ... ON CONFLICT DO NOTHING`, no code path updates a record row). `BatchWriter` also writes the derived listener rows (`ListenerMarkWriter`: `connection_marks` and `listener_comparisons`)
-   only for a usable agent snapshot whose record insert returned an ID, in the same transaction, so a resent batch writes none. For a batch with an agent ID the `SqliteStore` write transaction also runs `AgentTimeline` (`src/Vandox.Storage`): it classifies each agent record (`records.live`, set in the insert) and writes the agent's `gaps`, `agent_streams`, `agent_clock_samples` and `agent_sample_times` rows, adding at most three `gaps` rows per stored record (two unless it is an agent `gap` record) with indexed seeks only (`AgentTimelineQueriesUseIndexSearchesOnly`), all time arithmetic in 128-bit integers and sequence ranges clipped in unsigned numbers, so no capture time or number can make the write throw or cost more than a constant number of seeks. The only rows the write path ever updates are `listener_comparisons` rows and these timeline rows, never a `records` row. Records 0032, 0044, 0045, 0063, 0077, 0116, 0126, 0128, 0130.
-2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL: the policy settings in `deploy/agent/README.md`):
-   *Goal:* a compromised monitored server can reach only the ingest port on the backend host's tailnet
-   address and nothing else in the tailnet or home LAN; the ingest port is bound only to the tailnet
-   address; the web UI is not offered on the tailnet to the monitored server.
-   `deploy/backend/docker-compose.yml` publishes the web port on `127.0.0.1` by default (defense in depth, not
-   the boundary) and the ingest port 8081 on `${INGEST_BIND_ADDRESS}`, a required variable without a default (the host's tailnet address, `127.0.0.1` for an
-   import-only setup), so the port is never published on an address the operator did not choose; the Dockerfile has no `EXPOSE`. The host needs Tailscale in TUN
-   mode, because in userspace mode the tailnet address is no host interface (record 0127). In the service the ingest listener (`ListenerRoutes.Ingest`) serves
-   only `POST /v1/batches` (`PortRoutingMiddleware`, `404` for everything else, the web pipeline never runs on it) over HTTP/1.1 with at most 16 connections. Records 0010,
-   0016, 0017, 0059, 0060, 0081, 0127, 0132.
-3. **Web UI login** (implemented): password hashing, sessions, CSRF, rate limiting, reverse-proxy
-   trust. *Goal:* the password is stored only as a salted, deliberately slow hash; session IDs are random,
-   expire, are invalidated on logout and travel only in `HttpOnly`, `SameSite` cookies that are `Secure`
-   whenever the request reached the proxy over HTTPS; every state-changing request is CSRF-protected;
-   failed logins are rate-limited; forwarded headers (`X-Forwarded-For`, `X-Forwarded-Proto`) are trusted
-   only from the configured reverse proxy, and the UI port is published for that proxy only, as defense in
-   depth (0060). In `src/Vandox.Backend/Security` (`PasswordHash`, `LoginService`, `LoginThrottle`,
-   `SessionStore`, `SessionCircuitHandler`, `SessionRevalidatingStateProvider`, `ForwardedHeadersSetup`,
-   `WebAuthentication`), `Components/Account/Login.razor`, `Hosting/RelativeRedirectMiddleware` and `Vandox.Core` `TrustedProxyList`; the hash
-   uses the dependency Konscious.Security.Cryptography.Argon2. The logs view (`/logs`, `/logs/templates`) is behind this login like
-   every page below `Components/Pages` (`[Authorize]` in `Pages/_Imports.razor`) and reads through `GatedLogExplorer` (two concurrent
-   calls across the service, so two of the four reader connections stay free for `/healthz`); the number of circuits, each holding up to
-   about 5 MiB of capped log text, is not bounded, but only a signed-in client can open one, and the host has no `Host`-header
-   allow-list (a DNS-rebound name gets no session cookie, which is host-only, and still needs the password). The incidents view (`/incidents`, `/incidents/<number>`) is behind
-   the same login and reads through the same gate: `GatedIncidentBrowser` and `GatedRecordReader` (under `IncidentWindowReader`) take one `WebReaderGate` of two slots with `GatedLogExplorer`, held per
-   store call, so the bound spans both views; the number of circuits, each holding up to about 10 MB while an incident's charts are built (the per-circuit amounts of
-   the web UI area, *Limits and errors*), is not bounded, and only a signed-in client can open one. The incidents view adds the first write of the web UI, a note: `POST /incidents/<number>/notes`
-   (`IncidentNoteEndpoint`) has no `AllowAnonymous` (the fallback policy demands a session: anonymous is `401`) and carries `RequiredAntiforgery`; the handler checks the
-   antiforgery validation feature first (missing or invalid is `400`, before the form is read), then the route number, then reads `note` and `written_for` from the form only (never the
-   query string or the route; a field twice, in any letter case, is refused), refuses U+0000 and more than 1,800 UTF-16 characters (`IncidentNoteText`), builds the redirect from the
-   parsed number and logs a failed save with the exception only, **never the note text**, a form value or the written-for number (`IncidentNoteSaveFailed`). The save does not use the reader gate, and the note
-   is the service's first write outside an import (one immediate transaction under the write lock). The report page (`/report`, `Pages/ReportPage`) is behind the same login, and so is its
-   download `GET /report/markdown` (`ReportDownloadEndpoint`, no `AllowAnonymous`: anonymous is redirected to the login, and the ingest listener answers `404`). Both run
-   `ReportService`, which allows one report at a time across the service (a second one waits within its own deadline of 2 minutes, `ReportsView.Deadline`, and stops waiting when cancelled) and reads
-   through `GatedRecordReader`, `GatedIncidentStore` and `GatedListenerHistoryReader` of the shared `WebReaderGate` (the listener reader takes one slot per call and only reads); `GatedIncidentStore.SaveIncidentAsync` refuses, so the web cannot write an incident. The
-   page keeps a document of at most 50 outages per circuit (about 6.6 MB of capped text counted in characters, not the runs' worst case, which is measured only for the listener texts, plus up to about 82 MB for the new listeners section (measured worst case of the commands and user names plus the computed changed lines, render tree aside), the web UI area, *Limits and errors*); the run keeps up to about 60 MB plus about 20 MB for the listener section once for the whole
-   service. The session cookie is `SameSite=Lax`, so another site can make a signed-in browser start a run; it reveals nothing to that site and is bounded by the run slot and the deadline.
-   Records 0016, 0023, 0060, 0103, 0104, 0105, 0106, 0107, 0108, 0116.
-4. **Command signing for remote actions** (later, not part of v0.1.0): *Goal:* the agent executes only
-   commands with a valid signature that name an action from its local fixed list and were confirmed by the
-   user; a forged, altered or replayed command is rejected; the signing key exists only on the backend
-   host. Records 0006, 0009.
-5. **Telegram allowlist** (not implemented yet): *Goal:* the bot sends only to the private chats of
-   allowlisted Telegram user IDs and acts on an update (message, command, callback) only when its sender is
-   allowlisted and it comes from that user's private chat; every other update, including any from a group,
-   is ignored without acting on its content and logged only as sanitized metadata. Updates arrive by
-   outbound polling (`getUpdates`) or through a webhook; a webhook is a new inbound endpoint reachable from
-   the internet that 0006, 0012 and 0016 do not cover and needs its own decision (choice left to #60).
-   Records 0012, 0031.
-6. **Agent privileges** (`deploy/agent/`: user, systemd unit; from v0.6.0 the polkit rule): *Goal:* the
-   agent never runs as root; it holds only the group memberships (`adm`, `systemd-journal`), from #42 the
-   capability `CAP_SYS_PTRACE` alone (bounding set limited to it), and,
-   once self-healing exists, a polkit rule that allows restarting only the configured units, each listed
-   and justified in `deploy/agent/`. While any capability is granted, the unit is confined:
-   `NoNewPrivileges=yes`; `SystemCallFilter=` denies at least `ptrace`, `process_vm_readv`,
-   `process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise` (with
-   `SystemCallErrorNumber=EPERM`; `process_madvise` is named explicitly because `@system-service` includes
-   it, and `pidfd_open` stays allowed), and `SystemCallArchitectures=native`; no write-side capability. A compromised agent cannot use its capability to write into another user's process or file, or to run code as another user,
-   except through a file whose own mode grants the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted
-   residual, record 0122). Three distinct barriers stop the write vectors examined, and none of them alone covers all: (a) DAC plus the
-   bounding set: opening another user's `/proc/<pid>/mem` (and any other owner-only writable `/proc/<pid>/` file, such as `clear_refs`)
-   for writing needs `CAP_DAC_OVERRIDE`, which `CAP_SYS_PTRACE` does not grant, the lookup in `/proc/<pid>/fd` (mode `0500`, owned by the
-   target's user) needs `CAP_DAC_READ_SEARCH`, and following the links in `/proc/<pid>/map_files/` needs `CAP_SYS_ADMIN` or
-   `CAP_CHECKPOINT_RESTORE`, so the bounding set must keep them out; (b) the system-call filter, for `ptrace` (POKE), `process_vm_writev`,
-   `pidfd_getfd`, `open_by_handle_at` and `process_madvise`, and not for `openat` or `pwrite`, which the filter does not deny; (c) the
-   kernel, behind the filter, for `pidfd_open` plus `process_madvise`: the call needs `CAP_SYS_NICE` (since kernel 5.12), which the
-   bounding set must also keep out, and the kernel refuses destructive advice on another process (version-dependent, so defence in depth
-   only). The bounding set holds `CAP_SYS_PTRACE` only; adding any capability to it is a `security` change that supersedes record 0122.
-   For example, `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other processes' open files, memfds included,
-   and below closed directories; `CAP_DAC_OVERRIDE` and the other write-side DAC capabilities the write open of `mem`; `CAP_SYS_NICE`
-   `process_madvise` on another process; `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE`, together with directory search, the links in
-   `/proc/<pid>/map_files/`. Removing one of the six denied calls is such a change too. Accepted residual, stated openly: with
-   `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
-   `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, and the `/proc/<pid>/exe` and `/proc/<pid>/task/<tid>/exe` links, so every file whose own mode grants the agent's user, its groups or others read or
-   write is reachable even below a closed directory that contains another process's working or root directory, and the `exe` link reaches that process's executable file, readable or writable as its own mode allows (a file is reachable only
-   along paths from some process's `cwd` or `root`, or that process's executable through `exe`; the path components after the link are still checked against their own modes), and the
-   `root` link reaches the file tree of another mount namespace (a container's). A write into such a file reaches another user's process
-   memory where that process maps the file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a
-   script or configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollup`,
-   `fdinfo`, …), not another user's `mem` or `environ` and not `/etc/shadow`; credentials read that way may still lead to root through
-   other services (password reuse, Plesk or MariaDB administration). `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
-   `/etc/gshadow`) are defence in depth against accidental reads only, not a limit on a compromised agent,
-   which bypasses them through `/proc/<pid>/root` where the files' own modes allow it. The system call filter of the unit must allow `adjtimex`, which the `clock` collector calls
-with a zero `Timex` (mode 0, read-only; no capability needed), so the unit uses neither `ProtectClock=yes` nor an allow-list without it (#42). The process collector (`internal/procstats`) is the user of `CAP_SYS_PTRACE`: `smaps_rollup` of another user's process needs it and `CAP_DAC_READ_SEARCH` does not replace it (measured, record 0113); without it the collector records RSS and leaves PSS out, and `deploy/agent/README.md` lists the right. The connection collector (`internal/connstats`) is the second user of `CAP_SYS_PTRACE` and adds no right: it reads another user's `/proc/<pid>/fdinfo/<n>` with it alone (measured, record 0115), and not `/proc/<pid>/fd`, which needs `CAP_DAC_READ_SEARCH` (the right to read every file), which the agent does not hold (record 0122); it also reads the world-readable `/etc/passwd` once per run for the names of the sockets' UIDs, which needs no right (record 0115). The log shipping collector (`internal/logship`, `internal/journal`, `internal/zstdfield`, `internal/syslogline`) adds no right: it reads the files `log_shipping.files` names with the group `adm`, and each is opened by `OpenNoLinks` through a walk from `/` with `openat` (`O_PATH|O_DIRECTORY|O_NOFOLLOW` per directory, `O_NOFOLLOW|O_NONBLOCK` for the file, then `fstat`: a regular file with one link), so a link in any element, a FIFO, a device or a hard link to another file is refused (against an attacker who races the check, the hard-link refusal relies on the distribution default `fs.protected_hardlinks=1`) and a service user who replaces its log file with a link to `/etc/shadow` gets nothing shipped; a file `adm` cannot read is logged `log file not readable` with the reason `permission denied` and not shipped, because `CAP_DAC_READ_SEARCH` is not granted (record 0122); the directory of a rotated file is reached by the same walk and a candidate is accepted only when the opened descriptor has the saved device and inode. It also reads the system and user journal files (`user-<UID>.journal`, with the group `systemd-journal`) and `/etc/localtime`, and `deploy/agent/README.md` lists these reads. The agent's start-up probe of the socket mount (`internal/sockmount`) opens one Unix datagram socket, never bound, connected or sent on, and needs no right, but the unit's filters must allow `AF_UNIX` (`RestrictAddressFamilies=`), must not give the agent a network namespace of its own (`PrivateNetwork=`, `NetworkNamespacePath=`), must not set `ProcSubset=pid` and must leave `ProtectProc=` at `default`. The systemd collector (`internal/svcstats`, `internal/sdbus`) reads unit states over the system bus socket `/run/dbus/system_bus_socket` and needs no group and no capability, because systemd's bus policy lets every user make the read calls it uses (the server capture was taken as `nobody`); the unit must keep that socket reachable (`AF_UNIX` in `RestrictAddressFamilies=`, no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`), and `deploy/agent/README.md` lists it. The MariaDB collector (`internal/mariadb`) needs no group and no capability: it connects to the local socket as `vandox-agent` (area 7); the unit must keep `/run/mysqld` reachable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it) and `AF_UNIX` in `RestrictAddressFamilies=`, and `deploy/agent/README.md` lists it. The kernel event collector (`internal/kernevents`, `internal/journal`) is the user of the group `systemd-journal`: it reads the journal files below `/var/log/journal` and `/run/log/journal` in pure Go and adds no capability; the unit must keep both paths readable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them) and start after `systemd-journal-flush.service`. The backup collector (`internal/backups`) reads `/proc` like the process collector and needs no right. Records 0013, 0030, 0111, 0113, 0115, 0117, 0118, 0119, 0120, 0121, 0122. The unit `deploy/agent/vandox-agent.service` and the root-run scripts `deploy/agent/install.sh`, `uninstall.sh` and `common.sh` (record 0131) are part of this area: the unit holds `CAP_SYS_PTRACE` as its only ambient capability and bounding set, the system-call filter, `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` and the resource limits (`TestService_*` pin every setting); `install.sh` and `uninstall.sh` come from the release's install bundle (record 0131); before anything is sourced or read their inline entry check requires the physical script directory, every ancestor, the script and `common.sh` to be owned by uid 0, no link and not writable by group or others (ancestors may carry the sticky bit; the bundle entries no special bit; modes compared as octal numbers), and `check_bundle_dir` applies the per-entry rule to the other bundle files before they are read (`TestEntryCheck_*`, `TestCheckBundleDir_*`). `install.sh` never runs a downloaded binary before its SHA-256 equals the bundle's one-line pin (regular file, no link, at most 4 KiB, and the binary at most 64 MiB, checked by size before they are read), runs it for `-version` only as `nobody` through `setpriv`, requires it to equal the bundle's `VERSION`, follows no link where it writes, and never puts the token in an argument, an environment variable or its output. The log shipping collector (`internal/logship`, with `internal/syslogline` and `internal/errorlogline`) opens the configured files through the link-free walk and uses no capability (record 0122); the error logs of Plesk and the web servers (`/var/log/nginx/error.log`, `/var/log/apache2/error.log`, `/var/log/plesk/panel.log`, `/var/log/sw-cp-server/error_log`) are read only when the operator grants the agent read by hand with the commands of `deploy/agent/README.md` (*Error logs of Plesk and the web servers*): no new right of the agent in the unit or the installer, but that grant widens what a compromised agent can read, and a default ACL on a log directory widens what every file later created there grants, which the README states (#289).
-7. **MariaDB monitoring user**: *Goal:* the agent connects over the local socket as `vandox-agent`,
-   authenticated by `unix_socket`, with only the `PROCESS` privilege: no database password exists and no
-   table data is readable; the agent issues read-only status queries only. `deploy/agent/mariadb-user.sql` is the one
-   source of the account: exactly `CREATE OR REPLACE USER 'vandox-agent'@'localhost' IDENTIFIED VIA unix_socket WITH
-   MAX_USER_CONNECTIONS 2` and `GRANT PROCESS ON *.* TO 'vandox-agent'@'localhost'`, run as the database administrator
-   (`mariadb < mariadb-user.sql`, or `plesk db < mariadb-user.sql` on Plesk) and safe to run again
-   (`TestUserSQL_CreatesOnlyTheProcessUser` pins its statements). The collector (`internal/mariadb`) sends no credential
-   (empty authentication data, an authentication switch is answered with an empty payload once, a second one ends the run),
-   only a fixed list of read-only statements over one connection (`SHOW GLOBAL STATUS`, `SHOW GLOBAL VARIABLES`, `SHOW FULL
-   PROCESSLIST` when `Threads_running` is above 10 or the agent is under memory pressure, `SELECT CURRENT_USER()` and a
-   `USER_PRIVILEGES` query on the current account's rows) and checks every `up` run that the account is `vandox-agent` and
-   holds `PROCESS`. `PROCESS` shows the statement texts of all connections; they can hold customer data and credentials
-   (`IDENTIFIED BY '...'`, values of an `INSERT`) and are sent to the backend and shown in the web UI, which
-   `deploy/agent/README.md` states. Records 0013, 0118. `deploy/agent/mariadb-user-remove.sql` is the one source of the removal (`uninstall.sh --purge`): exactly `DROP USER IF EXISTS 'vandox-agent'@'localhost'` (`TestMariadbRemoveSQL_DropsOnlyTheAgentAccount`); `install.sh` runs `mariadb-user.sql` unchanged, and a failure only warns.
-8. **Secrets handling** (backend login, Telegram bot token, agent/ingest token, later the command-signing
-   key): *Goal:* secrets are read only from environment variables or Docker secrets, never from the
-   configuration file or the command line; never logged, shown in the UI, written to the spool or put into
-   error messages; a secret checked against input (ingest token, later TOTP codes) is compared in constant
-   time, the UI password through its hash function's comparison (`PasswordHash`, `CryptographicOperations.FixedTimeEquals`; the
-   hash is checked at start-up and the password is never logged, echoed or stored). Implemented for the agent in `internal/config`
-   (`readSecret`, `checkEnviron`, `Secret`) and for the backend in `src/Vandox.Core/Configuration`
-   (`SecretReader`, `Secret`, `BackendSecrets`). The running agent holds the token in `config.Agent` (`Secrets`) and never logs it: `internal/agent` `Run` passes
-   a logger only `agent_id`, the version and the errors of the loader and the notifier (`TestRun_DoesNotLogSecret`). The token is never in the spool: the spool stores records only, and after a run with a token set no spool file holds its bytes (`TestRun_SpoolHoldsNoSecret`). The only place the agent token leaves the process is the `Authorization: Bearer` header of the sender's request to `backend.url` (`internal/sender` `HTTPTransport.Send`; the transport keeps it as a `config.Secret` and reads its value only to set the header, `TestHTTPTransport_SendsTokenOnlyToBackend`), and the sender's log lines and results carry no token, URL or host (`TestSender_LogsHoldNoURLTokenOrBody`). Records 0032, 0050, 0078, 0104, 0110, 0124. On the server the agent token is a systemd credential: `install.sh` reads it from the terminal or one line of standard input with bash built-ins only (`read_token`, `validate_token`, `write_token`; no export, no `set -x`, no child process sees it; `TestTokenPath_NeverReachesAChildProcess`), writes it to `/etc/vandox/agent-token` (root:root 0600) through a temporary file and `mv -T`, and the unit hands it over with `LoadCredential=` and `VANDOX_AGENT_TOKEN_FILE` (never `VANDOX_AGENT_TOKEN`, never the `%d` specifier).
-9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
-   backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
-   size-bounded, files are created with restrictive permissions. The database file `vandox.db`
-   (`src/Vandox.Storage`: `DatabaseFile`, `SqliteStore`) is created with mode 0600 inside the existing
-   `storage.directory`, which is never created, and a symbolic link or other non-regular file in place of
-   `vandox.db` or its `-wal`/`-shm` files is refused. The log import (`src/Vandox.Import`: `Scanner`,
-   `SourceRoot`, `Importer`; `src/Vandox.Core/IO`: `SecureRoot`, `FileProbe`) extracts nothing and writes no
-   file: every open below the import root goes through `SecureRoot` (`openat2` with `RESOLVE_BENEATH` and
-   `RESOLVE_NO_SYMLINKS`; on kernels without `openat2`, such as NAS kernels 4.4, `lstat` of every directory of the path
-   and a refusal of `..`, then an open of the last element with `O_NOFOLLOW`, so containment is checked by the
-   application, not enforced by the kernel, and a link swapped in between check and open is not caught), links and special files are listed and never
-   followed or opened (`O_NONBLOCK`), entry names and paths are labels only, and a run handles at most 20,000
-   entries, counted while scanning. The agent writes one file, its state file `agent-state.json` in `spool.directory` (`internal/agentstate`): written to a temporary file in that directory with mode 0600 and renamed over the old one, read through an `O_NOFOLLOW` descriptor that is trusted only after `fstat` (a regular file, owned by the agent's user, at most 64 KiB: the log positions of 256 journal IDs and 16 files fit with room), and the directory is never created; the log positions hold a configured file as the SHA-256 of its path, never the path, and are decoded strictly (an unknown key, a hash that is not 64 lower-case hex digits, a negative offset or more than 256 journal or 16 file positions make the file unusable). One store-level write lock (`Store.saving`) covers encoding, writing and the update of the dirty state in the state job and in `Store.Flush`, which the agent calls once when it stops, so the one fixed temporary file is never written by two saves. The agent's spool (`internal/spool`: `Open`, `Put`, `Read`, `Ack`, `Sync`, `Close`) writes in `spool.directory` the segment files `segment-<number>.spool` and `spool-meta.json` (through `spool-meta.json.tmp`), all with mode 0600, never creates the directory and fails the start for a missing directory, a file or a symbolic link in its place, a directory that is not writable and a refused entry in place of `spool-meta.json` or its temporary file (a refused entry in place of a data file is damage, not a start failure); every operation goes through `syscall.Openat`, `Unlinkat`, `Renameat` and, for the `spool.min_free` check, `Fstatfs` relative to the directory's descriptor, never by path and never through `os.Root`, files are opened with `O_NOFOLLOW|O_NONBLOCK`, a file is trusted only after `fstat` with exactly one link, the agent's owner and no group or other bits, and a data file is removed only when its device and inode match; entries it does not own (`agent-state.json` among them) are never read, counted, overwritten or deleted. The spool is size-bounded: all its files together stay within `spool.max_size` (64 MiB to 64 GiB, default 2 GiB) and the file system keeps `spool.min_free` free (0 to 1024 GiB, default 1 GiB; 0 switches the check off), the oldest data files are dropped first with a `spool_dropped` gap, a data file is sealed at `spool.max_size`/128, within 1 to 64 MiB, unless a single hand-over is larger, there are at most 1,024 data files (one more first drops the oldest, reason `file_limit`) and at most 1,026 names are held at start, the `spool.min_free` free-space check is compared without overflow and the size bound's sum saturates, a saturated sum counting as no room, and the meta file holds at most 65 acknowledged ranges (64 above the oldest unacknowledged record); damaged data is never handed out. The log shipping collector writes no file and opens the configured files for reading only. Records 0045, 0069, 0077, 0079, 0120, 0121. On the server `install.sh` and `uninstall.sh` write and delete as root: `spool.directory` of a kept `agent.yaml` must be exactly one directory below a root-owned `/var/lib/vandox` that is no link and not group- or other-writable (so no element on the way is the agent's), the spool is created with `mkdir -m 0700` and `chown -h` of that one entry, nothing recurses into it (no `chown -R`), and `--purge` deletes `/var/lib/vandox` with `rm -rf --one-file-system`; every file the script writes (token, configuration, binary, unit) goes through a temporary file and `mv -T`, and a link in its place is refused.
-10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
-    wire format (backend: `Vandox.Core.Wire.BatchDecoder`, `WireLimits`; Go: `internal/wire`: `NewDecoder`, `Decoder.Next`,
-    `wire.Limits`; truncated or corrupt gzip is an error, record 0076); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
-    input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
-    configuration files are read by `internal/config` (`decodeStrict`, `readFile`; agent) and
-    `Vandox.Core.Configuration` (`StrictYamlDecoder`, `BackendConfigLoader`; backend). The agent's command line (`internal/cli` `Parse`: `-config` takes any
-    non-empty path, which the loader checks; a positional argument or an empty `-config` is a usage error), the systemd variables it reads from the environment slice it
-    is given (`internal/sdnotify` `FromEnviron` and `WatchdogInterval`: ASCII digit guards, `NOTIFY_SOCKET` an absolute path or an abstract name within `sun_path`, `WATCHDOG_USEC`
-    at least 100 ms so a hostile value cannot make a busy loop, a variable set twice an error; `internal/agent` `journalStream`: `JOURNAL_STREAM` counts only as `<dev>:<ino>`
-    of stderr's own device and inode), the binary journal files of the kernel collector (`internal/journal`: bounds checked on every offset and size, chains followed only to larger offsets, payload 4,096 bytes, no decompression, no `mmap`; a damaged file ends in `ErrMalformed` and becomes a gap in `internal/kernevents`; record 0119), the journal files of the log shipping collector (`File.SeekAll` and `File.NextWith`: a value is read up to 16,384 bytes and the excess is not read, a compressed object over 4 MiB is not read, at most four compressed items are decoded per entry, a damaged data object of an item makes only its entry unreadable and a damaged entry array or entry object is `ErrMalformed` with the cursor kept; `internal/zstdfield` refuses before any output a source that is not exactly one frame (the block headers are walked to the last block, so no second frame follows) or whose frame is not single-segment, states no content size over 4 MiB or uses a dictionary, and decodes into one output buffer that is allocated once and never grown; record 0121), the syslog lines of `internal/syslogline` (hand-written, linear on bytes, the year and daylight-saving rules through `Clock`, `/etc/localtime` read up to 64 KiB, an error never falls back to UTC), the error log lines of `internal/errorlogline` (the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs: hand-written, linear, ASCII byte comparisons only, the import's counts and bounds, no date built before the range checks of `Clock.ResolveLocal`; a line that is not of the format or has no usable time is shipped raw, never an error; a line time later than its run never moves a file's last time or a gap start, record 0121), the options `log_shipping` of `internal/config` (at most 16 files and 64 rules; every drop pattern is parsed with `regexp/syntax`, simplified and compiled, at most 1,024 bytes and 400 instructions each and 400 together, so matching one 16 KiB line takes under 100 ms; an error names the key and never the value or the pattern's compile error), the agent's state file (`internal/agentstate`: at most 64 KiB; a file that is not usable is treated as missing), the spool's data files and meta file (`internal/spool`: a frame's payload is at most the wire line limit plus 8 bytes, checked before any allocation, and decoded by `wire.UnmarshalRecord`, which applies the decoder's line rules; checksums, format version, increasing record numbers and the file name's number are checked, `spool-meta.json` is at most 16 KiB and decoded strictly with at most 65 acknowledged ranges, at most 1,026 data files are examined; the damaged record and the rest of its file are never handed out, the records before it stay readable, a `spool_dropped` gap names the dropped numbers where they are known and `spool data damaged` is logged once per file, never a crash, an unbounded allocation or a hang) and the `/proc` reads of `internal/backups` (through `procstats.CommandReader`) never crash, hang or allocate without bound; `self/status` is read up to 64 KiB (`internal/selfstats`). The log search text
-    (`SqliteStore` search, `FtsQuery`) reaches SQLite's FTS5 query parser and is reduced to quoted literal terms
-    with bounded length and term count. Log files and archives reach the log import
-    (`src/Vandox.Import`: `Scanner`, `FormatSniffer`, `ImportLimits`: entries, path length and batch size) and the
-    parsers through `Vandox.Core.LogParsing` (`LogLineReader` cuts lines at 16 KiB, a parser's memory is bounded
-    independently of the input size): `JournalExportParser` and `JournalExportReader` (binary-safe entry reader with
-    bounded memory), `SyslogParser`, `SyslogLine` and `SyslogClock` (hand-written line parser, years and time
-    zones of year-less times, range-checked dates), `SystemLogGrouper`, `MailLineClassifier` (Postfix and Dovecot lines of the journal and syslog and Dovecot's own log file: severity marker and MySQL
-    connection failures at the anchored positions, ordinal text operations, no state; a classification, not a trust
-    boundary: local processes can forge markers and events, record 0091), `MariaDbLineGrouper` and `KernelReportGrouper` (bounded multi-line
-    reports; MariaDB lines of the journal and syslog are joined per host, program and pid, within 60 seconds of the
-    header line and 16,384 bytes, into one open entry, and a line that does not fit ends it and is kept as a plain
-    line; the program filter `mariadbd`/`mysqld` is a classification, not a trust boundary: local processes can
-    forge entries and events and, in a syslog file, join or split the server's entry, and a journal entry without
-    `_PID` takes the sender-chosen `SYSLOG_PID` and so behaves like a syslog line for forging, record 0088 option 36),
-    `MariaDbErrorLogParser`, `MariaDbParseSession`, `MariaDbLine` and `MariaDbMessage` (hand-written header parser on raw
-    bytes, entries bounded to 16 KiB, claimed by the first non-empty line only and never for a syslog name),
-    `DovecotLogParser`, `DovecotLine` (Dovecot's own log file: traditional stamp plus marker at Dovecot's position, no state beyond the year clock, claimed by the first line only and never for a syslog name),
-    `ErrorLogParser`, `ErrorLogParseSession`, `ErrorLogLine` and `LogPath` (the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs: hand-written, linear, ordinal
-    ASCII line parser without regular expressions, no date built before the range checks of `SyslogClock.ResolveLocal`; a configured path is compared with the
-    listed name as text by parent directory and base name and never opened or resolved; unreadable lines are kept as raw
-    records whose time is the previous record's or a modification time inside the storable range, else skipped; forged lines in
-    these logs are a documented limitation, record 0092), `LegacyMonitorParser`, `LegacyMonitorHeader`, `LegacyMonitorSnapshot` (with `LegacyProcessTable`, `LegacyConnectionTally`),
-    `LegacyTopLine`, `LegacyProcLine` and `LegacyLsofLine` (the legacy `top`/`lsof` monitoring log: hand-written ASCII grammars, numbers validated as digit strings with
-    digit bounds and 64-bit checks before any conversion or scaling, no date built before the range checks, caps that count every line of a part, skips reported at once;
-    `LegacyLsofLine` puts a strict address guard in front of `IPAddress.TryParse`, so only the forms `lsof` prints reach it and no zone is looked up on the host;
-    `LegacyServiceNames` is a built-in table of port names, never a lookup; forged snapshots are a documented limitation, record 0093), and the backend options `import.time_zone` (`SourceTimeZone`) and
-    `import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log` and `import.apache_error_log`
-    (`BackendConfigLoader`: absolute, clean path of a file in a directory, the value never shown in an error). The signature detection over stored log lines
-    (`Vandox.Core.Signatures`: `SignatureCatalog`, `SignatureDetector`, `BuiltInSignatures`) reads the embedded catalog and the decoded messages of stored
-    records: patterns run on the non-backtracking engine in linear time, with the constructs it cannot run refused when the catalog loads; a signature
-    without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`, `php_too_many_connections`, `php_disk_full`, `nginx_disk_full`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in the fields a web server or
-    mail server adds and in PHP's own messages cannot trigger it; an application that logs request data at the start of a message (`trigger_error`, `error_log`, standard error of programs it starts)
-    or in PHP output that nginx, `mod_fcgid` or `mod_proxy_fcgi` splits into several entries can create PHP events (record 0094); integer fields are accepted only as ASCII digits by an ordinal scan of the whole captured text and range-checked before
-    use (`NumberGuard`); text fields are cut to 1,024 bytes; at most 1,024 events are open and 256 IDs kept per event, and an open event keeps no message,
-    match or record; an event is a classification, not proof of origin: local processes can log as `kernel`, `systemd`, `mariadbd`, `postfix/*` or
-    `dovecot`, and MariaDB entries forged through a login name reach the MariaDB signatures (record 0094). The log template normalizer
-    (`Vandox.Core.Templates.LogTemplateNormalizer`, with `TokenRules` and `TemplateWriter`) turns the message of every stored log line into a template:
-    hand-written, one linear forward pass, ordinal ASCII comparisons, no regular expression and no culture, no shared mutable state (no static or
-    thread-static buffer; the output goes into a buffer on the stack of the call with the fixed size of 1,024 characters, so no input can make it
-    grow), the template cut at 1,024 UTF-8 bytes at a character boundary; control characters of category Cc are removed as separators, format
-    characters (Cf, e.g. U+202E, U+200B) are kept, and the normalizer is a grouping, not a guard. The template queries (`TemplateQueries`,
-    `ILogTemplateReader`) bind every value as a parameter, bound the range (the usual-level query at most 744 hours), the limit (1 to 10,000)
-    and the baseline (at most 2,160 hours), and refuse a *find* message of more than 16 KiB; the work of the usual-level query is **not** bounded by
-    range or limit (it evaluates every template hour of the range that reaches the minimum count); a cancelled token or
-    deadline interrupts a running reader statement (`ReaderQuery`: a progress handler on every reader connection, checked every
-    1,000 instructions), which then ends with `OperationCanceledException`, so a caller that serves a user bounds it with a deadline
-    (records 0095, 0097). The logs view (record 0106) takes every filter from the address: `LogsAddress` (`Parse`, `Validate`, `ToQuery`; the
-    query string is decoded by `QueryHelpers.ParseQuery` and the page passes `new Uri(NavigationManager.Uri).Query`, so no fragment) refuses a repeated
-    parameter, and a `q`, `source` or `program` of more than 1,024 UTF-8 bytes or with a character of category Cc, Cf, Zl or Zp or invalid UTF-16, a `severity` that is not one
-    of the eight names (`Severities`), a `template` that is not 1 to 18 ASCII digits, and a `from` or `to` that is not `yyyy-MM-ddTHH:mm[:ss]` in ASCII digits within the
-    storable range, with texts that name only the parameter, and writes an address only from validated values (`ToQuery` throws otherwise). The values then reach
-    only `FtsQuery`, bound SQL parameters or `long` and `DateTimeOffset.ParseExact` with fixed formats. The explorer (`ILogExplorer`, `SqliteStore`; `LogFilterRules`,
-    `LogCriteria`, `LogFinder`, `LogFinderQueries`, `LogExplorerQueries`, `TemplateTerms`) bounds every request: a page of 1 to 1,000 lines, a scan of at most
-    `ScanLimit` (1 to 100,000; the page uses 8,000, divided by the word parts of the user's text, `FtsQuery.CountTokens`) examined lines whose full-text test (of the user's text only) is a per-line `EXISTS` that collects nothing, a selectivity probe that reads at most
-    12,000 row IDs under a 0.7 s time budget (`LogFinder.ProbeBudget`, `ReaderQuery.AttachBudget`), a context of 0 to 20 lines per side examining at most 2,000 rows per side, 64 sources, a template list of 1 to 1,000 templates, source hours of 1 to
-    10,000; the template words reach the search only through `FtsQuery` (at most 16 terms and 1,024 bytes joined with the user's) and the candidates are compared with
-    the template by `LogTemplateNormalizer`. A text of several common words makes FTS5 walk their doclists, but the progress handler does run inside FTS5 (measured, gaps of at most 31 ms), so
-    the probe is stopped by the deadline or by its budget; a stopped probe turns the request into a scan (`LogPage.IndexCheckStopped`). The scan tests every one-part word with its own `EXISTS` (`LogFinderQueries.BuildScan`)
-    and the terms of several parts in a private in-memory FTS5 index of at most 64 examined lines or 256 KiB of characters (`LineIndex`: bound parameters only, the expression
-    only from `FtsQuery.BuildTerms`, the call's token as progress handler, disposed on every path, no reader lease), and ends after 1.5 s (`LogFinder.PageBudget`), at least
-    one line examined; residual: one `MATCH` inside a chunk runs to its end (about 0.3 s on the development host, 1.5 s on the reference host with crafted messages, a page up to
-    about 3 s; the deadline still ends the call). Cases 12 to 15 of `tools/Vandox.StorageBenchmark --search-lines`, `docs/BENCHMARKS.md`. Each page runs one store call at a time under a 10-second deadline, and `GatedLogExplorer` lets two calls run at once across the service
-    (a wait counts against the deadline). The backend options `incidents.window_before` and
-    `incidents.window_after` (`BackendConfigLoader`, `ConfigDuration`) accept exactly one to four ASCII digits and `m` or `h` by an ordinal scan (no parsing API, no culture, sign,
-    white space, other digit script or second unit), within 1 minute to 24 hours, the value never shown in an error. The incident reconstruction (`vandoxd incidents`)
-    reads stored external text, including forged lines, under bounds it must keep: `KillClusterer` keeps 16 kills per incident and ignores a kill at the last storable
-    instant; `IncidentBuilder` keeps at most 1,000 timeline entries within a 4 MiB budget measured with `IncidentJson` (the options the store serializes with), 3 + 3
-    candidates, 20 + 20 templates and two program maps of at most 4,096 entries (`Vandox.Core.Incidents`: `IncidentLimits`); `IncidentReconstructor` reads log lines and
-    metrics in pages of 1,000 and process and connection snapshots one per page, pages by capture time and record ID (`RecordQuery.AfterId`) and fails a page that does not
-    lead past the previous one; `RecordQueries.ReadJson` reads the payload as UTF-8 bytes so that one forged maximum process snapshot of an earlier build peaks near 240 MiB (this version stores no payload of more than 16 MiB of JSON: `StorageLimits.MaxPayloadBytes`, checked by `RecordRules.CheckPayloadSize` in the importer's `RecordEmitter` and by `BatchWriter` while it serializes with `PayloadJson` into a `BoundedBufferWriter`, which drops the bytes above the limit); `IncidentRepository` refuses an
-    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts, and reads stored incident data as UTF-8 bytes. `vandoxd templates` (`SqliteStore.RebuildTemplatesAsync`, `TemplateRebuilder`) reads stored log lines in batches of 10,000 by record ID up to the high-water ID fixed when the tables are emptied, one transaction each, with the write path's normalizer and tally, so a batch's tally holds at most `batchLines` keys of source (at most 128 UTF-8 bytes), program (at most 1,024) and template (at most 1,024), plus as many source hours, each with its own source string (about 46 MB of UTF-16 strings at 10,000, plus dictionary overhead), and reads one message (at most 16 KiB) at a time; every counting transaction checks the run marker in `meta`, so a run superseded by a later one counts nothing more and fails; the transaction that empties the tables grows with the statistics. The forensics report (`vandoxd report`:
-    `ForensicsReporter` in `src/Vandox.Backend/Reports`, `ForensicsAnalysis` and `ReportLimits` in `src/Vandox.Core/Reports`) reads every stored
-    log line in pages of 1,000 through `RecordPager` and every process snapshot one per page, and the incidents one at a time (`IncidentQuery.Limit` 1, each page
-    starting at the end of the previous incident's window, a page that does not lead past it is `store: reading incidents: page did not advance`), twice; it keeps
-    only counters for the incidents and, across the run, at most 1,000,000 snapshot points (24 bytes each), 10,000 boots, 100,000 runs of consecutive observed hours and
-    4,096 programs (`ReportLimits`; the caps count decoded, stored items, never bytes), so its memory does not grow with the database (about 60 MB at the
-    caps); over a cap the statements that need the data are unknown and the notes name the cap. The incident browser (`IIncidentBrowser`, `SqliteStore`, `IncidentRepository`,
-    `IncidentNoteRepository`) bounds what the incidents view reads: a list page of 1 to 100 summaries (the web UI asks for 20) whose `data` is read as UTF-8 bytes and decoded by a
-    projection of three members, one row at a time, a keyset position (start and number) that is validated, one incident decoded whole (up to 8 MiB, transient) by a
-    positive number, at most 64 notes read (`StorageLimits.MaxNotesRead`) of at most 1,800 UTF-16 characters and 5,400 UTF-8 bytes each, the table's byte `CHECK` holding whatever
-    the text contains (U+0000 is refused before SQL because `length()` stops at it) and the foreign key without a cascade; `IncidentWindowReader` reads the window's snapshots one per
-    page with the source of the chart (`RecordPager` carries `Source` and `Name` into every page query), at most 300 process snapshots, 300 connection snapshots and 1,000 points
-    per metric series, and `ProgramMemorySeries` tells at most 4,096 programs apart (the rest is summed), so a window read holds one snapshot and about 4,096 x 300 values. The `-lang` flag of `vandoxd report` is the one CLI value
-    that selects behavior: `CommandLine` compares it ordinally with exactly `en` and `de` (`ReportText.For`), any other value, also another case, `de-DE`, a
-    padded or Cf-bearing look-alike, is a usage error that shows it only through `Terminal.Quote`, and the unknown flag names of `CommandLine` are escaped the
-    same way. The report page and its download take the same choice from the address: `ReportAddress.Parse` reads `new Uri(NavigationManager.Uri).Query` (the page) or the request's query
-    string (the download), so never the fragment, through `QueryHelpers.ParseQuery`, and accepts a `lang` only when its decoded value is exactly `en` or `de` (`ReportText.For`, ordinal);
-    `DE`, `de-DE`, an empty value, `lang` without `=`, a value with a space, a control or format character, a percent-encoded look-alike such as `%E2%80%AEde` or `en%00`, and a key given twice
-    (in any letter case, with any value) are refused with a fixed text that names only the parameter, a refused address runs nothing (the download answers `400` without a body before any
-    store call), other keys are ignored, and the address is written only from the validated language (`ToQuery`, `ReportsView.PageHref`, `DownloadHref`, `FileName`); the `Content-Disposition`
-    of the download carries only that fixed file name. Forged kill lines make forged incidents
-    (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
-    take the 4,096 program places first (records 0100, 0101). The agent's readers of `/proc` and `/sys` (`internal/sysstats`) bound every read before parsing: the first line of `stat` 4 KiB, `loadavg` 256 B, `meminfo` 16 KiB and 128 lines, `vmstat` 64 KiB, a pressure file 256 B, a block `stat` 1 KiB, `self/mountinfo` streamed line by line at 64 KiB per line; at most 16 disks and 16 mount points; every number is checked as 1 to 20 ASCII digits before conversion; the products of `statfs` counts are checked for 64-bit overflow with `bits.Mul64`; no error text holds file content or a configured path (a mount point is named by its index). `TestSysstats_ImportsOnlyAllowedPackages` holds the package to an allow-list of imports and of the `syscall` and `os` selectors it uses (no program, socket, cgo, `unsafe`, raw system call or `//go:` directive but `//go:build`). The option `filesystem.mount_points` is checked by `checkMountPoints` (`internal/config`), and `decode.go` refuses a null list element before decoding because the YAML library drops it silently. The process collector (`internal/procstats`) reads text any local user chooses (`comm`, command lines) and bounds every read before parsing: `stat` 4 KiB read whole and split at the last `)`, `status` 16 KiB with the lines `Uid:`, `VmRSS:` and `VmSwap:` read at most once each, `smaps_rollup` 4 KiB with `Rss:` and `Pss:` once each, `cmdline` 4 KiB read and cut to 1,024 bytes of valid UTF-8 while it is built (invalid bytes become U+FFFD), `/proc/stat` line by line at 1 MiB in total (a line over 64 KiB skipped), `/etc/passwd` 1 MiB with lines of 4 KiB and names cut to 256 bytes; `/proc` is listed in chunks of 256 entries, only canonical decimal PID directory names count, and a bounded max-heap keeps the 4,096 lowest PIDs; every number is 1 to 20 ASCII digits parsed into its target width, kB values times 1,024 are checked for overflow and sums saturate, `started_at` must be before the year 10000; every entry is validated and encoded alone and left out when it fails, so no user-chosen text can fail the sample, and a run over 4,096 maximal processes allocates at most 48 MiB (`TestProcesses_LargeSnapshotFitsTheLineLimit`). No error text holds file content, a `comm`, a command line or a user name. `TestProcstats_ImportsOnlyAllowedPackages` holds the package to an allow-list of imports (`os/user` is not allowed). The connection collector (`internal/connstats`) reads the kernel tables `/proc/net/{tcp,tcp6,udp,udp6}` and `/proc/<pid>/fdinfo/<n>` within bounds set before any decoding: a table line of 512 bytes (longer ones skipped), address fields of exactly 8 or 32 hex digits, a port of 4, a state of 2, an inode of 1 to 20 digits within 64 bits, a `uid` of 1 to 10 digits within 32 bits (checked before conversion; any other value makes the line unreadable, never a guess); `/etc/passwd` once per run through `procstats.ReadUsers` with the process collector's bounds (1 MiB, lines of 4 KiB, names cut to 256 bytes), an unreadable file only turning every `user` into the decimal UID; an `fdinfo` file at most 256 bytes, its first four lines fixed keys with `mnt_id` of 1 to 10 digits and `ino` of 1 to 20; `/proc` listed in chunks of 256 with the lowest 4,096 PIDs scanned, 65,536 sockets tracked for owners, 4,096 entries per list, 4,096 remote addresses and at most 64 new listeners and 64 changed listeners reported; no error text or log line holds table content, an address or process text. A descriptor counts as a socket only on the socket mount the agent learned from a socket of its own at its start (`internal/sockmount`: the probe reads its own `fdinfo`, checks that `ino:` equals the `fstat` inode, and any failure leaves every socket ownerless), so a file with a socket's inode number on another mount, however often duplicated, owns nothing, and the number of one process's descriptors changes no other process's owners. Stated residuals: the 32-bit inode counter wrap and the PID cap (record 0115). Its `connection_snapshot` carries the fields `inventory` (`all`, `privileged`, `cut`, `skipped`) and `tables` (distinct protocols, at most four) and the `listener_check` value `start` (record 0116), validated in `internal/model` (`validateInventory`) and `Vandox.Core.Model.ConnectionSnapshot` (`ValidateInventory`) with the one-of and `duplicate protocol` errors; the backend's write path decodes a stored payload only for the snapshots around an agent start (two per start and batch), and a payload that does not decode makes that start not comparable instead of failing the batch; the stored `new_listeners` and `changed_listeners` of a snapshot are cut to 64 each whatever the wire allows (4,096). `TestConnstats_ImportsOnlyAllowedPackages` and `TestSockmount_ImportsOnlyAllowedPackages` pin imports and the `os` and `syscall` selectors. The decoder walks a list of mappings (`processes.programs`, `walkList`) with the same strictness as a section: unknown or duplicate keys, anchors, aliases, custom tags, null and non-mapping elements are refused with the element's line and index in the key path; `checkProgramRules` checks the rules (literal comparisons, no pattern language). Record 0113. The systemd collector reads from the system bus, where any local user may send a signal to the agent's connection (up to 32 MiB, with file descriptors), through a client of its own (`internal/sdbus`) that bounds every read before it decodes: only `Read`, `Write`, `SetDeadline` and `Close` of the connection and no file-descriptor passing (the kernel closes any descriptor sent to it), `EXTERNAL` authentication with an answer line cut at 512 bytes, a message of at most 2^27 bytes, every signal, call and unknown message skipped by its length without decoding or keeping (a flood grows no memory), a method return or error read only with header fields of at most 64 KiB whose codes 1 to 9 have their fixed basic types, an awaited reply body of at most 1 MiB with exactly the expected signature, strings that are NUL-terminated valid UTF-8, object paths checked against the D-Bus grammar before they are sent back, one entry per requested name, and error replies reported by a name that follows the error-name grammar and never by their body; the socket path is a constant, no environment variable is read. `TestSdbus_ImportsOnlyAllowedPackages` and `TestSvcstats_ImportsOnlyAllowedPackages` pin the imports and selectors (no `ReadMsgUnix`, `ReadFrom*`, `SyscallConn`, `File`, `syscall`, `os.Getenv`, `os.LookupEnv`), `TestSession_DiscardsUnsolicitedSignalsWithoutKeepingThem` the memory bound and `TestSession_CallsOnlyReadMethods` the method list. The option `services.units` is checked by `checkServiceUnits` (`internal/config`): at most 64 entries of 1 to 255 bytes of `A-Z a-z 0-9 : _ . @ - * ?`, only service units, no template, no entry twice, and an error text that names the key and a fixed reason, never the value. A pattern match is tracked only when its name passes the wire format's unit-name rule, at most 256 units are tracked, and a unit whose state the wire format refuses is left out by the collector itself. Accepted residual (record 0117): a local user who learns the agent's unique bus name during a run can flood that connection with signals; the run discards them until its deadline and becomes a recorded gap, and no memory grows. The MariaDB client (`internal/mariadb`) decodes a protocol whose replies carry text local users choose, with every read bounded before it is parsed: packets by 3-byte length and checked sequence, the greeting at 1 KiB, every control packet at 64 KiB, row packets cell by cell with a limit per column (`Info` 16 KiB, a status or variable value 1,025 bytes), a status or variable name compared with a fixed selection of 34 slots and never kept otherwise, a process list reduced to 4,096 threads of which 64 keep their statement text through preallocated pools, an encoded record of at most 1 MiB by an upper-bound estimate before encoding, and the memory of a run independent of what the server sends (`TestCollect_WorstCaseProcessListIsBounded`, `TestPacketReader_DiscardsBeyondTheLimitWithBoundedMemory`); a local-file request, a second result set, an unexpected column layout or an authentication switch repeated ends the run with a fixed reason. Error texts hold the OS error number or a fixed reason, never a server message. The process list text is cleaned (`procstats.CleanText`), the exported `/proc/meminfo` and `/proc/net/tcp*` readers keep their bounds, the option `mariadb.socket` is checked by `checkSocketPath` (absolute, clean, at least 2 and at most 107 bytes; `mariadb.enabled` is a boolean the decoder checks) and the wire field `mariadb_status.error_code` (1 to 65535, only with `not_answering`) is checked by both decoders. `TestMariadb_ImportsOnlyAllowedPackages` pins the package to an allow-list of imports and selectors and the only dial. Accepted residuals are in record 0118 (the refusal replies of a real server are not captured yet). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108, 0110, 0111, 0113, 0116, 0117, 0118. The install script's readers of external input are bounded and fail closed: its arguments (`--agent-id`, `--backend-url` by fixed grammars, the token never as an option), `MANIFEST.sha256` (a bounded reader before `common.sh` is sourced: a regular file of at most 4 KiB, exactly seven lines of fixed names in a fixed order, then `sha256sum --check --strict`), `VERSION` (one line ending in a line feed, `vX.Y.Z` or `vX.Y.Z-rc.N`, at most 64 bytes), the bundle's pin `vandox-agent-linux-amd64.sha256` (exactly one line, at most 4 KiB), the binary (at most 64 MiB), each checked as a regular file by size before it is read, `agent.yaml` (`read_spool_directory`: printable ASCII only and fixed line rules, anything else exit 2), the `nameserver` lines of `/etc/resolv.conf` (printed only when an IP literal) and the `-version` line of the verified binary.
-11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
-    agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
-    destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
-    reached only over the tailnet (WireGuard encryption and node authentication by Tailscale), never over a
-    public address. Telegram and the AI service are called over HTTPS with certificate verification;
-    external checks verify the certificate whenever they use TLS, and a failed verification is a check
-    result. Certificate verification is never switched off (no `InsecureSkipVerify`), and no secret is sent
-    over an unencrypted connection. The image's health check (`HealthCheckCommand` in `src/Vandox.Backend/Cli`) calls only the
-    configured web listener, on loopback for an unspecified host, with a 4 s timeout, no proxy, no redirects,
-    no credentials and no environment. The agent's HTTP client (`internal/sender` `HTTPTransport`) goes only to `backend.url`: no proxy (`TestHTTPTransport_IgnoresProxyEnvironment`), no redirect (`TestHTTPTransport_FollowsNoRedirect`), a 30 s timeout for every request, certificate verification against the system roots with TLS 1.2 at least and never `InsecureSkipVerify` (`TestHTTPTransport_RefusesUntrustedCertificate`), an answer's header bounded to 16 KiB and its body to 4,096 bytes read and discarded (`TestHTTPTransport_RefusesOversizedHeaders`, `TestHTTPTransport_ReadsAtMostFourKiBOfBody`), and a refusal recognized only by a status of 400, 413 or 422 with the exact header `Vandox-Refused: batch` (`TestHTTPTransport_RefusedOnlyWithHeader`); plain `http` is meant only for the backend host's tailnet address or MagicDNS name; every connection to a non-loopback address is bound to the device `tailscale0` before it connects, a loopback address stays unbound and an address that cannot be parsed is bound, so nothing leaves through another interface while Tailscale is down (`TestNeedsDevice_FalseOnlyForLoopback`, `TestHTTPTransport_FailsAtOnceWithoutTheDevice`, `TestHTTPTransport_LeavesLoopbackUnbound`; with a host name in `backend.url` the guarantee depends on the name answer, issue #373). Besides the ingest port the agent writes only to the local systemd notification socket named by `NOTIFY_SOCKET`
-    (`internal/sdnotify`: one unix datagram of the fixed states `READY=1`, `WATCHDOG=1` and `STOPPING=1`, a 1 s deadline per notification, no network) and to the local system bus socket `/run/dbus/system_bus_socket` (`internal/sdbus`: one unix stream connection per run of the `systemd` collector to the constant path, the run's deadline as the connection's deadline, read methods only, no network) and to the local MariaDB socket (`internal/mariadb`: one unix stream connection per run to the configured `mariadb.socket`, dialed with the constant network `unix` in `UnixDialer`, the run's budget of 4 s (greeting 2 s) as deadlines, no TLS, no credential, no network). Records 0006, 0008, 0010, 0012, 0017, 0023, 0059, 0110, 0117, 0118, 0124, 0125, 0134. The unit enforces this: `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent reach nothing else, and `install.sh` downloads only the binary, only over HTTPS from this repository's release (`curl --proto =https --proto-redir =https --fail --max-time 300 --max-filesize`). The operator's documented download of the install bundle and `SHA256SUMS` is a sequence of single lines in a new `mktemp -d`: `awk` selects the bundle's line by exact name field, `sha256sum -c --strict -` checks that file, and only in the same line after a passed check `tar -xzf` unpacks it; the script runs by its full path in that directory, and no document pipes a download into a shell (`TestInstallDocuments_UseTheReleaseBundle`).
-12. **Logging and display of external data** (log lines, process names and text derived from them, e.g. an
-    AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
-    web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
-    text without a parse mode). Record 0031 for Telegram; Razor escapes HTML by default in the web UI (record
-    0081). The log shipping collector (`internal/logship`) ships log lines as external text: every field is made valid UTF-8 (each invalid byte becomes U+FFFD) and cut at a character boundary to its limit (message 16,384 bytes, host and program 1,024) with `truncated` set, control and format characters stay for whoever displays them to escape; the collector's own log lines are fixed texts (`journal not readable`, `log file not readable` with the index of the file and a fixed reason, `renamed log file given up` with the index of the file, `time zone not readable` and their recoveries) and never carry a path, a field value or a message (record 0121). Its live classification (`internal/logstages`, the port of the import's mail, MariaDB and kernel stages, record 0121) has the import's bounds (entry 16,384 bytes, report 2,000 lines, 60 seconds), is a classification and no trust boundary, keeps its buffers only while a group is open, and the held state stays within the collector's 24 MiB. The spool's log lines are fixed texts (`spool created`, `spool data damaged` with a file name it listed itself and a fixed reason, `spool data dropped` with a fixed reason and a count, `spool data no longer dropped`, `spool write failed`, `spool writes again`, `spool records of another agent dropped`, `spool not closed`) and never carry a path, a record or a system error text other than the errno text of `spool write failed`. Every web response carries one self-only Content-Security-Policy (`default-src 'none'`, no inline code,
-    no external origin), `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options`, set by
-    `SecurityHeadersMiddleware` (record 0099); `WebUiContentTests` checks the sources with `WebSourceScanner`: the
-    own scripts (`wwwroot/js`) contain none of its HTML sinks, no `eval`/`Function`/string timer and no
-    `setAttribute`; component markup and code contain no `MarkupString` or `AddMarkupContent`, so external text
-    never reaches the page as raw HTML. What only the policy covers is listed in the Web UI area (*Limits and
-    errors*). The logs view shows log lines and templates only through `ExternalText` and `LogText`: Razor's text encoding, every character of category Cc (except
-    line feed and tab), Cf, Zl, Zp, Co, Cn and U+FFFD written as a visible `\uXXXX` escape in a span of its own, at most 256 runs per field, a cap of 16,384 characters
-    for a message and 2,048 for source, host, program and template text with a visible `[cut: <n> more characters]` marker (`LogLineView` builds the capped runs, so a page
-    keeps no `StoredRecord`), `unicode-bidi: isolate` per field, no `MarkupString`; links are the fixed paths `logs` and `logs/templates` plus the `ToQuery()` of a validated
-    address, and the chart (`TimeSeriesChart`) gets only the fixed texts `LogsView.ChartTitle` and `LogsView.ChartSeries`, never external text. Forged lines appear in the view
-    like real ones. The incidents view shows the external text of a stored incident (kill hosts and victims, timeline types, hosts and texts, programs, commands, metric names
-    and sources, templates) only through `ExternalText` and `LogText` with the same escaping: timeline texts capped at 512 characters, every other field at 2,048; a timeline row's
-    CSS class comes from a fixed map (`oom_kill`, `boot`, `backup_first_seen`, `backup_last_seen` to `mark-oom`, `mark-boot`, `mark-backup`) and any other type gets none and is shown as text;
-    links are the fixed paths `incidents/<number>`, `incidents/<number>/notes` and `logs` plus the `ToQuery()` of a validated address and numbers; no `MarkupString`, no `style` attribute.
-    The program names of the stacked memory chart are chart labels: `LogText.Escape(name, 64)`, written by uPlot through `textContent` (read in the vendored file), so a label carries no
-    markup and its direction controls are visible escapes; chart titles and the other series labels are fixed texts. A note is user text, shown only as the content of a `textarea`
-    (Razor-encoded, so `</textarea>` cannot end it), and the headings of moved notes hold only numbers. The report page (`Components/Reports/ReportContent`) shows the victim commands
-    and program names of the forensics report only as `<code><ExternalText Runs="…" /></code>` with runs of `LogText.Runs(text, LogText.MaxShortChars)` (Razor's text encoding, the visible
-    escapes, 2,048 displayed characters, 256 runs, the `[cut: <n> more characters]` marker, `unicode-bidi: isolate`); external text is only ever a piece of a paragraph or list item
-    (`ReportPiece.Code`), never of a heading or a table cell, an empty text is the plain dash `—`, the labels, numbers and times are plain text from `ReportText` and the composer, and the page
-    uses no `MarkupString`, no `style` attribute and only the fixed links `report?lang=<en|de>` and `report/markdown?lang=<en|de>`. The Markdown of the download writes the same external text through
-    `MarkdownText.Code` (backslashes doubled, invisible characters as `\uXXXX`, a fence longer than any backtick run), and the log of a failed run holds the exception only.
-    Records 0098, 0099, 0106, 0107, 0108.
-    Configuration error texts never echo document text other than schema or safe key names
-    (`decodeStrict`, `StrictYamlDecoder`), never a `_FILE` value or path or an unsafe variable name
-    (`readSecret`/`SecretReader`, `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but
-    are still logged only as structured attributes, never concatenated into a message. `vandoxd` logs through the
-    JSON line provider (`src/Vandox.Backend/Logging`), which escapes control characters, with `[LoggerMessage]`
-    methods (`BackendLog`), and `/healthz` never returns an error text. `vandoxd import` prints every path and
-    reason in its summary through `Terminal.Quote`; its log lines carry the input-derived attributes (`path`, `reason`,
-    a run error's text) as JSON strings, whose encoder escapes control characters, DEL, C1 controls and
-    format characters (`ImportSummaryWriter`, `ImportProgressLogger`). The text fields of detected events (`DetectedEvent.Texts`: victim command, unit,
-    description, result, kernel version) are captures of log text and external text: whoever shows them escapes them like any log line. Log templates
-    (`LogTemplate.Template`, and the templates of `TemplateSpike`) are external text as well: the normalizer removes control characters of category Cc but
-    keeps format characters (Cf, e.g. U+202E, which reverses the display direction, and U+200B), `<`, `&` and any other markup, so whoever shows a template escapes it
-    like any log line and handles format characters. `vandoxd incidents` prints the victim command of an incident's first kill through `Terminal.Quote`
-    (`IncidentSummaryWriter`); its log lines carry only the store's text and the first kill time, no input text, and the texts of a stored incident (kill victims and hosts,
-    timeline texts, programs, commands, templates) are external text for whoever shows them. `vandoxd report` writes the victim commands and program names of
-    the report (`IncidentKill.VictimCommand`, `ProgramGrowth.Program`, `ProgramUsage.Program`, `ConsumerSummary.Program`) only through `MarkdownText.Code`
-    (`src/Vandox.Backend/Reports`), as Markdown code spans: backslashes doubled, line feed, carriage return and tab as `\n`, `\r`, `\t`, other Cc, Cf, Zl, Zp,
-    private-use, unassigned and invalid characters as the escapes of `Terminal.Quote` (`\u202e`), a fence longer than any backtick run, padding spaces, an empty
-    text as a dash; a code span keeps inline HTML, entities, links, autolinks and emphasis literal, no external text stands in a table or a heading, and the
-    report's own labels, numbers and times come from `ReportText`; the `-lang` value in the usage error and an unknown flag name go through `Terminal.Quote`;
-    standard output is UTF-8 without a byte order mark (`Program`). The new listeners section shows the owner `command` of a listener, the socket's user name and the agent ID (`Listener.Command`, `SocketOwner.User`, `ListenerFinding.AgentId`, `ListenerTally.AgentId`; the user name is cut to `ReportLimits.MaxShownUserBytes`, 32, UTF-8 bytes before it is escaped) only as code spans: in the Markdown through `MarkdownText.Code`, on the page through `ReportPiece.Code` (`<code><ExternalText …/></code>`), inside a sentence or list item and never in a heading or a table cell; the protocol, endpoint, PID, times and counts are plain text, and the backend's log holds no listener, command or address. The agent logs through `slog.TextHandler` on stderr (`internal/agent` `NewLogger`): values with control
-    characters are quoted and escaped, so a value cannot start a forged line; panic values and stacks of collectors are attributes, cut to 1 KiB and 4 KiB; the message and every
-    string, error or `fmt.Stringer` value are cut to 4 KiB and each line to 32 KiB, below journald's `LineMax=`, so no continuation can start with a forged `<N>` priority; the
-    configuration is never passed to a logger. The connection collector logs only fixed texts and counts (`socket owners partly unknown`, `socket lines not read`, `socket tables unavailable`, `socket owners unknown`, `user names unavailable`, `user names available`): no process text, no address, no user name and no UID, and its `command` entries and the stored `user` names are the process collector's text to be escaped by whoever displays them, while the PID is the kernel's (`TestConnections_LogsHoldNoProcessTextOrAddress`). The process collector logs only counts and fixed texts: process names, command lines, user names and rule values are never logged by the agent, and its error texts name a file relative to `/proc` or `/etc` and a fixed reason (`TestProcesses_ErrorsAndLogsHoldNoProcessText`); the stored `command`, `cmdline`, `user` and `program` are text to be escaped by whoever displays them. The systemd collector logs only fixed texts and counts with `collector=systemd` (`systemd units not found`, `systemd units cut`, `systemd units not tracked`, `systemd unit state not recorded`, `systemd unit state recorded again`); a unit name appears only as an attribute value and only a name that passed the configuration rules or the wire format's unit-name rule (`unit`, `units`), the field of a refused state only by its name, never the value systemd sent, and the error texts of `internal/sdbus` hold the socket path's OS error or a fixed reason and never a string of a reply body; the stored unit names and states are text to be escaped by whoever displays them. The MariaDB collector logs only fixed texts with counts, byte values and error numbers as attributes (`mariadb down`, `mariadb not answering`, `mariadb answering again`, `mariadb user missing or not allowed`, `mariadb login refused`, `mariadb user not as installed`, `mariadb restarted`, `mariadb memory maximum above RAM`, `mariadb listens on a non-loopback address`, `mariadb listens on loopback only`): never a statement, a user, a host, a database or a server message (`TestThreads_TextIsCleanedAndNeverLogged`); the stored process list (`user`, `host`, `db`, `command`, `state`, `info`) is text to be escaped by whoever displays it and can hold customer data and credentials. The kernel event collector logs only fixed texts (`kernel messages not readable` with `err` one of the fixed `journal: …` reasons, `kernel messages readable again`, `boot ID not readable`): never a path, a journal field or a message (`TestKernel_LogsHoldNoMessageText`); the stored `victim_command` and `message` are the kernel's line made valid UTF-8 and cut to 1,024 and 16,384 bytes, text to be escaped by whoever displays it, and a line of the kernel transport at facility 0 in the kill form is recorded as a kill (Agent area, *Kernel events*). The backup collector logs nothing of its own (`TestBackups_LogsHoldNoProcessText`); its `command` is the process collector's text. The state file's warnings are the fixed texts `agent state not available` and `agent state not saved`, the latter with the system error text, never a path. The sender's log lines (`component=sender`) are fixed texts (`backend not accepting batches` with a fixed `reason` and the status, `backend accepting batches again`, `backfill started`, `backfill finished`, `backfill paused`, `backfill resumed`, `record refused` with the status, the sequence number and the record kind, `acknowledgement not kept` and `spool not readable` with the spool's error text) and never carry the URL, the token, a host, a record's content or an answer's text (`TestSender_LogsHoldNoURLTokenOrBody`); the transport's results hold a fixed reason, never an error text. The backend's timeline log lines of the ingest endpoint (`ingest gaps changed`, `agent clock off`, `agent clock in step`) carry only the agent ID (it passed the wire format's rule), counts and the offset in seconds, never record content (`IngestEndpointTimelineTests`). Records 0072, 0081, 0095, 0096, 0100, 0110, 0113, 0116, 0117, 0118, 0119, 0120, 0125, 0130.
-13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
-    `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
-    `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
-    `.github/scripts/smoke-test-backend.sh` runs on pull requests, reads no secret and pushes nothing): *Goal:* artifacts are
-    published only from a GitHub release whose SemVer tag only the repository admin can create (tag ruleset)
-    and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
-    so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by
-    digest (`FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` with build-argument defaults that the release
-    build never overrides; the release workflow checks the form).
-    Release binaries are built without restored CI caches (`setup-go` `cache: false`, plain
-    `docker build --no-cache`, no cache backend) and only after `govulncheck` and the NuGet vulnerability check
-    (`dotnet list package --vulnerable --include-transitive`) pass. The builder image's .NET version must equal the
-    target framework (`check-builder-dotnet-version.sh`, record 0041). The registry token is
-    readable only by the tag-triggered publish job, enters `docker login` only via stdin, and is limited to
-    pushing `networlddev/vandox`. No `${{ }}` expression of any kind appears inside a `run:` script; every
-    value goes through `env:`, and checkout does not persist the job token. The published image runs as a
-    non-root user, a published version tag is never overwritten, and every published binary and the install bundle have a checksum
-    in `SHA256SUMS`. The install bundle (`.github/scripts/package-agent.sh`, checked by `check-agent-bundle.sh`: ten files in eleven entries in a fixed order, a manifest, owner 0/0, fixed modes, `VERSION` equal to the tag, byte-reproducible, packaged only for `vX.Y.Z` and `vX.Y.Z-rc.N`) is built in the `build` job. The OIDC signing permission (`id-token: write`, `attestations: write`) is granted only
-    to the `attest` job, which declares no environment, reads no secret and runs no repository code; every
-    published binary and image digest gets a build provenance attestation and an SBOM attestation (the install bundle a provenance attestation) that the
-    workflow verifies before the assets are attached to the GitHub release. The SBOM generator is a container image pinned by
-    index digest (form-checked in `.github/scripts/generate-sbom.sh`), run without network, capabilities,
-    token or writable access to `dist/`. Each of the scheduled check's two jobs (base image
-    digests, SBOM generator pin) holds only `contents: read` and `issues: write`, runs its lookups (registries,
-    syft's Git tags) without a token, writes only regex-checked image, tag and digest values into its own
-    issue, and never writes to the repository. Records 0027, 0037, 0041.
-    Vendored browser code (`src/Vandox.Backend/wwwroot/lib/uplot/`, uPlot 1.6.32) is copied by hand from the release
-    tag, pinned by SHA-256 in `WebUiContentTests`, not loaded from a CDN and excluded from the code analysis, not
-    from review (record 0098).
-    The cloud sessions have no Docker daemon: a change to the Dockerfile, compose file, `.dockerignore` or the smoke
-    script is verified by the CI job *Release build check* on the pull request head, not locally (the local
-    substitutes are listed in `.squad/stack.md`, *Not checkable in a cloud session*).
+1. **Ingest authentication** — only the agent holding its bound token stores data, within memory and disk bounds; a
+   resent record is stored once. `POST /v1/batches`, `src/Vandox.Backend/Ingest/`, `src/Vandox.Backend/Hosting/`,
+   `BatchWriter` and `AgentTimeline` (`src/Vandox.Storage/`) — [ingest-endpoint](../docs/areas/ingest-endpoint.md),
+   [storage-writing](../docs/areas/storage-writing.md).
+2. **Tailscale ACL and port binding** — a compromised server reaches only the ingest port on the tailnet address.
+   `deploy/backend/docker-compose.yml`, `deploy/backend/Dockerfile`, the tailnet policy in `deploy/agent/README.md` —
+   [network-and-security-model](../docs/areas/network-and-security-model.md),
+   [backend-host](../docs/areas/backend-host.md), [agent-installation](../docs/areas/agent-installation.md).
+3. **Web UI login** — only a signed-in user reads data or writes a note (hash, sessions, CSRF, throttling, trusted
+   proxy). `src/Vandox.Backend/Security/`, `Components/Account/Login.razor`, every page under `Components/Pages/`,
+   `POST /incidents/<number>/notes`, `GET /report/markdown`, `TrustedProxyList` —
+   [web-login](../docs/areas/web-login.md), [web-ui](../docs/areas/web-ui.md) and its `web-ui-*.md` views.
+4. **Command signing for remote actions** (planned) — only signed, confirmed commands from a fixed list run —
+   [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
+5. **Telegram allowlist** (planned) — the bot talks only to allowlisted private chats —
+   [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
+6. **Agent privileges** — never root, only the listed groups and capability, no write into other users' processes
+   (record 0122). `deploy/agent/` (`vandox-agent.service`, `install.sh`, `uninstall.sh`, `common.sh`, `README.md`),
+   the collectors that use a right — [agent-rights](../docs/areas/agent-rights.md),
+   [agent-installation](../docs/areas/agent-installation.md).
+7. **MariaDB monitoring user** — a password-less socket account with only `PROCESS`, read-only queries.
+   `deploy/agent/mariadb-user.sql`, `mariadb-user-remove.sql`, `internal/mariadb` —
+   [agent-mariadb](../docs/areas/agent-mariadb.md).
+8. **Secrets handling** — read only from the environment, Docker secrets or a systemd credential, compared in constant
+   time, never logged, shown or spooled. `internal/config`, `internal/sender`, `src/Vandox.Core/Configuration/`,
+   `PasswordHash`, `/etc/vandox/agent-token` —
+   [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
+   [agent-sending](../docs/areas/agent-sending.md), [agent-installation](../docs/areas/agent-installation.md).
+9. **File writes and paths derived from external input** — writes stay in the configured directories, follow no link,
+   use restrictive modes; the spool is bounded. `vandox.db` (`src/Vandox.Storage/`), `src/Vandox.Import/`,
+   `src/Vandox.Core/IO/`, `spool.directory` (`internal/spool`, `internal/agentstate`), `deploy/agent/install.sh` and
+   `uninstall.sh` — [storage](../docs/areas/storage.md), [log-import](../docs/areas/log-import.md),
+   [agent-spool](../docs/areas/agent-spool.md), [agent](../docs/areas/agent.md) (*Agent state*),
+   [agent-installation](../docs/areas/agent-installation.md).
+10. **Parsing of external input** — hostile input yields an error or a skipped record, never a crash, unbounded
+    allocation or hang. `internal/` (every reader of external input); `src/Vandox.Core/` (`Wire`, `Configuration`,
+    `LogParsing`, `Signatures`, `Templates`, `Incidents`, `Reports`), `src/Vandox.Import/`, the log search of
+    `src/Vandox.Storage/`, `/logs` and `/report` addresses, `vandoxd` flags, `install.sh` inputs; later Telegram
+    commands — [wire-format](../docs/areas/wire-format.md),
+    [wire-format-records](../docs/areas/wire-format-records.md),
+    [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
+    [configuration-options](../docs/areas/configuration-options.md), the `agent*.md` and `log-*.md` documents,
+    [incidents](../docs/areas/incidents.md), [forensics-report](../docs/areas/forensics-report.md),
+    [storage-reading](../docs/areas/storage-reading.md), the `web-ui-*.md` views,
+    [ingest-endpoint](../docs/areas/ingest-endpoint.md).
+11. **Outbound calls** — each call has a timeout and reaches only its destination, encrypted to a verified peer.
+    `internal/sender`, `internal/sdnotify`, `internal/sdbus`, `internal/mariadb`, `deploy/agent/vandox-agent.service`,
+    the download in `install.sh`, the health check in `src/Vandox.Backend/Cli/`; Telegram, external checks, AI service planned —
+    [agent-sending](../docs/areas/agent-sending.md),
+    [network-and-security-model](../docs/areas/network-and-security-model.md),
+    [backend-host](../docs/areas/backend-host.md), [agent-installation](../docs/areas/agent-installation.md),
+    [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
+12. **Logging and display of external data** — external text cannot inject into logs, pages, reports or Telegram.
+    `src/Vandox.Backend/Logging/`, the components and security headers of `src/Vandox.Backend/`, `vandoxd` output, the
+    agent's logger (`internal/agent`) — [web-ui](../docs/areas/web-ui.md) and its `web-ui-*.md` views,
+    [forensics-report](../docs/areas/forensics-report.md), [listener-changes](../docs/areas/listener-changes.md),
+    [incidents](../docs/areas/incidents.md), [log-templates](../docs/areas/log-templates.md),
+    [log-signatures](../docs/areas/log-signatures.md), [backend-host](../docs/areas/backend-host.md),
+    [log-import](../docs/areas/log-import.md),
+    [configuration-and-secrets](../docs/areas/configuration-and-secrets.md), the `agent*.md` documents,
+    [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
+13. **Release pipeline and published artifacts** — published only from an admin-tagged release, built from pinned
+    inputs, checksummed and attested; token and signing permission each in one job. `.github/workflows/release.yml`,
+    `base-image-digests.yml`, the *Release build check* of `ci.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
+    `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`, vendored
+    `src/Vandox.Backend/wwwroot/lib/uplot/` — [CONTRIBUTING](../docs/CONTRIBUTING.md) (*Versioning and releases*),
+    records [0027](../docs/decisions/0027-project-name-and-docker-image.md),
+    [0037](../docs/decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md),
+    [0041](../docs/decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md),
+    [0052](../docs/decisions/0052-image-labels-description-added-no-logo-label.md); uPlot:
+    [web-ui](../docs/areas/web-ui.md) (*Static assets*); without Docker: `.squad/stack.md` (*Not checkable in a cloud
+    session*).
 
 ## Guarantees
 
-Deliberate behavior that must not change without the Product Manager. One line each: the guarantee in a few words,
-a link to its decision record where it was a real choice, and a link to the area document that states it.
+Deliberate behavior that changes only with the Product Manager.
 
-- **No data gaps unless explicitly recorded**: collection is gapless across backend downtime (spool and
-  backfill); data that is nevertheless missing (agent stopped, spool full, collector timed out, sequence
-  numbers missing) is recorded as a gap and treated as "unknown", never as "normal". `docs/ARCHITECTURE.md`
-  section *Offline behavior and backfill*; records 0028, 0045.
-- **A hanging collector or database never blocks the agent** (Go agent): every collector runs in its own goroutine
-  under a deadline and is abandoned when the deadline passes (a blocked `/proc` or `/sys` read cannot be
-  cancelled, only abandoned; sources that take a context also get it); a hung source (`/proc`, `/sys`,
-  D-Bus, journald, MariaDB) loses only its own sample, recorded as a gap, while the other collectors, the
-  spool and the sender keep running; while a collector is still stuck it is not started again.
-  `docs/ARCHITECTURE.md` section *Components*; records 0029, 0110. Implemented by `internal/scheduler` (a runner goroutine and a worker goroutine per collector,
-  a gap for every timeout, skip, panic, error and late wake-up).
-- **Backfilled data never raises an alert by itself**: the backend classifies every record as live or
-  backfilled from the data; alert rules run on live data only; backfill is stored and analyzed but never
-  alerts. `docs/ARCHITECTURE.md` section *Offline behavior and backfill*; records 0022, 0130. Implemented by `LiveRules`, `ClockEstimator` and `AgentTimeline` in `src/Vandox.Storage`: the decision is made once when a record is stored, and every case the data cannot settle is backfilled.
+- **No data gaps unless explicitly recorded**: missing data is a recorded gap, unknown, never normal —
+  [0028](../docs/decisions/0028-data-gaps-are-always-recorded.md),
+  [0045](../docs/decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md);
+  [agent](../docs/areas/agent.md) (*Gaps*), [agent-spool](../docs/areas/agent-spool.md),
+  [agent-sending](../docs/areas/agent-sending.md).
+- **A hanging collector or database never blocks the agent**: a hung source loses only its own sample, as a gap —
+  [0029](../docs/decisions/0029-hanging-collector-never-blocks-the-agent.md),
+  [0110](../docs/decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample.md);
+  [agent](../docs/areas/agent.md) (*Scheduling*).
+- **Backfilled data never raises an alert by itself**: every record is classified live or backfilled once, when
+  stored; alerts run on live data only — [0022](../docs/decisions/0022-backfill-detection-and-live-only-alerts.md),
+  [0130](../docs/decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md);
+  [detection-and-reports](../docs/areas/detection-and-reports.md) (*Live data and backfill*).
 
 ## Integration surface
 
-What the Reviewer checks when the diff introduces or changes a thing of this kind: every place that must
-change with it.
+The places the Reviewer checks for each kind of change.
 
-**A new or changed configuration option** touches:
-- the configuration type and its loading: for the agent `internal/config` (`Agent`, `LoadAgent`, `AgentKeys`), for the backend `src/Vandox.Core/Configuration` (`BackendConfig` and its option classes with `ConfigKey` attributes, `BackendConfigLoader`)
-- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`: the example file sets the option explicitly (an optional one at its default; one without a default commented out with an example value, which the test checks): `TestLoadAgent_Example` and `BackendConfigLoaderLoadsRepositoryExample` load these files and fail when a key is missing, except `import.time_zone`, which has no default and must stay commented out (0049)
-- the *Agent options* or *Backend options* table in `README.md` (key, default, description); a non-secret option has no environment variable (0049), a secret is added as **a new secret** below instead
-- the tests that pin the configuration loading: `internal/config/agent_test.go` and `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs`
+**A configuration option** touches:
+- `internal/config` (`Agent`, `LoadAgent`, `AgentKeys`) or `src/Vandox.Core/Configuration` (`BackendConfig`,
+  `ConfigKey`, `BackendConfigLoader`)
+- the example `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml` (0049)
+- the *Agent options* or *Backend options* table in `README.md` and
+  [configuration-options](../docs/areas/configuration-options.md)
+- `internal/config/agent_test.go`, `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs`
 
-**A new secret** touches: its `Env*` constant (`internal/config` for the agent, `ConfigConstants` and
-`BackendSecrets` for the backend), the known-variable list of each binary that reads it, the secrets table in
-`README.md`
+**A secret** touches: its `Env*` constant (`internal/config`; `ConfigConstants`, `BackendSecrets`), each binary's
+known-variable list, the secrets table in `README.md`
 
-**A new or changed service / module** touches:
-- its public interface and the package (Go, under `internal/`) or project (C#, under `src/`) that owns it
-- where it is wired up: `cmd/vandox-agent`, or `src/Vandox.Backend` (`Hosting`, `Cli`, `Program.cs`)
-- the test double used by the tests of its callers
-- the component overview in `docs/ARCHITECTURE.md` (the packages and projects it lists)
+**A service or module** touches:
+- its public interface and the package (`internal/`) or project (`src/`) that owns it
+- its wiring: `cmd/vandox-agent`, or `src/Vandox.Backend` (`Hosting`, `Cli`, `Program.cs`)
+- the test double its callers' tests use
+- the component overview in `docs/ARCHITECTURE.md`
 
-**A new web UI page, component or static asset** touches:
+**A web UI page, component or static asset** touches:
 - a page: the navigation in `src/Vandox.Backend/Components/Layout/MainLayout.razor`
-- a file the browser loads: the *Static assets* list in `docs/areas/web-ui.md` and `ServeTests.ServeServesWebAssetsOnlyOnWebPort`
-  (served on the web port, `404` on the ingest port)
-- the rules of record 0099, checked by `WebUiContentTests` (no inline code, no external URL, no raw HTML)
+- a browser-loaded file: *Static assets* in [web-ui](../docs/areas/web-ui.md),
+  `ServeTests.ServeServesWebAssetsOnlyOnWebPort`
+- record 0099, checked by `WebUiContentTests`
 - a brand file: the byte copy of `docs/assets/` in `wwwroot/brand/`
 
-**A new log parser** touches:
-- its type in `src/` (implementing `ILogParser`, with a type accepted by `ParserTypes.IsValid`)
-- its registration where `ImportCommand` builds the `ParserRegistry` (`src/Vandox.Backend/Cli`), in priority order
-- detection tests against the other registered parsers, so that no file is claimed by two of them
-- the list of supported sources in `README.md` (*Import logs*)
+**A log parser** touches:
+- its `ILogParser` type in `src/`, with a type `ParserTypes.IsValid` accepts
+- its registration, in priority order, where `ImportCommand` builds the `ParserRegistry`
+- detection tests against the other registered parsers
+- *Import logs* in `README.md` and its `log-parsers-*.md` document
 
-**A new or changed wire format field or record kind** touches (record 0075):
-- the Go model and encoder (`internal/model`, `internal/wire`) and the C# model and decoder
-  (`src/Vandox.Core/Model`, `src/Vandox.Core/Wire`)
-- the golden batches `testdata/wire/all-kinds.jsonl` and `testdata/wire/replaced-text.jsonl` (regenerate both with `VANDOX_UPDATE_GOLDEN=1 go test ./internal/wire`)
-  and both tests that read them (`internal/wire/golden_test.go`, `WireContractTests`)
-- `docs/areas/wire-format.md` and, for a version change, the major/minor rules (0043)
+**A wire format field or record kind** touches (record 0075):
+- `internal/model`, `internal/wire`, `src/Vandox.Core/Model`, `src/Vandox.Core/Wire`
+- the golden batches `testdata/wire/all-kinds.jsonl` and `replaced-text.jsonl` (`VANDOX_UPDATE_GOLDEN=1 go test
+  ./internal/wire`), read by `internal/wire/golden_test.go` and `WireContractTests`
+- [wire-format](../docs/areas/wire-format.md) or [wire-format-records](../docs/areas/wire-format-records.md); a
+  version change follows record 0043
 
-**A new external API call or DTO** touches:
+**An external API call or DTO** touches:
 - the client and its types — the external shape must not leak past it
-- the hand-written fake or stub of that client in the tests (*Test doubles* below)
+- that client's fake in *Test doubles*
 
-**A new or changed external source or destination** (`/proc`, `/sys`, systemd D-Bus, journald, the MariaDB
-socket, the Telegram Bot API, the Tailscale network) touches:
-- the small interface the code reads it through, and its fake in *Test doubles*
-- the deadline that keeps it from blocking the agent (0029) and the gap it records on timeout (0028)
-- the privilege it needs in `deploy/agent/` (0030) or the ACL and port binding (0010, 0017)
-- the *Security areas* entry it falls under
+**An external source or destination** (`/proc`, `/sys`, D-Bus, journald, the MariaDB socket, Telegram, the
+tailnet) touches:
+- the small interface it is read through, and its fake in *Test doubles*
+- the deadline that keeps it from blocking the agent (0029) and its gap on timeout (0028)
+- the privilege in `deploy/agent/` (0030) or the ACL and port binding (0010, 0017)
+- its *Security areas* entry
 
-**A change to a configuration file that a decision record constrains** — `.github/dependabot.yml`, a workflow
-under `.github/workflows/`, `.golangci.yml`, `deploy/backend/Dockerfile` or `deploy/backend/docker-compose.yml` —
-touches:
-- the records that constrain it; records mostly name these files in prose ("the compose file", "the release
-  workflow", "a weekly workflow"), so search for the topic, not the file name:
-  `grep -l -i -E 'dependabot|workflow|dockerfile|compose|golangci|ci\.yml' docs/decisions/0*.md`. Among them: 0041 (base images
-  pinned by digest through build arguments, no Dependabot `docker` entry, the weekly digest report in
-  `base-image-digests.yml`), 0060 (the compose file, no Dependabot entry for it), 0037 (release workflow), 0047
-  (`gocognit` and its exclusions in `.golangci.yml`), 0112 (`gosec` limited to G115 in `.golangci.yml`, no
-  exclusions) and 0052 (image labels)
-- a change that contradicts such a record is not merged as is: the record is edited (unreleased) or superseded
-  (released) in the same pull request, or the change is dropped
+**A file a decision record constrains** — `.github/dependabot.yml`, a workflow, `.golangci.yml`,
+`deploy/backend/Dockerfile`, `deploy/backend/docker-compose.yml` — touches:
+- the records found by topic: `grep -l -i -E 'dependabot|workflow|dockerfile|compose|golangci|ci\.yml'
+  docs/decisions/0*.md` (among them 0037, 0041, 0047, 0052, 0060, 0112)
+- a contradicted record: edited (unreleased) or superseded (released) in the same pull request, or the change dropped
 
 ## Test doubles
 
-The hand-written fakes and stubs the tests reuse (no mocking library unless `docs/UNIT_TESTS.md` says
-otherwise), one line each: the double, where it lives and what it stands in for; how it behaves is read in its code.
-Go rows are for the agent, C# rows for the backend:
+Hand-written and reused (no mocking library); rules in `docs/UNIT_TESTS.md` (*Test doubles*). Implemented unless
+marked planned.
 
-Status of every row: planned (not implemented yet), except where the row says implemented. The first feature that introduces a surface adds its
-double under this name and changes the status.
-
-| Surface | Test double |
-| ------- | ----------- |
-| `/proc` | collectors read through an `io/fs.FS` (production `os.DirFS("/proc")`; symlink targets such as `/proc/<pid>/fd/*` through `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by `os.DirFS` and `fstest.MapFS`, the blocking wrapper must implement `fs.ReadLinkFS` (`ReadLink` and `Lstat`) as well)); tests use fixtures under `testdata/proc/` (via `os.DirFS`; `testdata/proc/self/status` is a real capture read by the self-metrics, implemented for `self/status`) or `fstest.MapFS` (the variants of that file are made in memory), plus a **blocking filesystem wrapper** whose reads block until the test releases them (in `t.Cleanup`), for 0029, and a wrapper whose open or read answers a given error such as `syscall.EOPNOTSUPP` (implemented in `internal/sysstats`: fixtures `testdata/proc/{stat,loadavg,meminfo,vmstat,pressure,self/mountinfo}`; and in `internal/procstats`: fixtures `testdata/proc/<pid>/{stat,status,cmdline,smaps_rollup}` captured from a Linux 6.18 kernel, `testdata/etc/passwd`, a per-file error wrapper (`faultFS`: a given error at open or at the first read of a named file, `.` for the listing, as `smaps_rollup` of a kernel thread answers `ESRCH`) and a wrapper that blocks the open of one file; and in `internal/connstats`, implemented: fixtures `testdata/proc/net/{tcp,tcp6,udp,udp6}` (the anonymized server capture) and `testdata/connections/sandbox/{tcp,udp,fdinfo/*}`, an `fstest.MapFS` built with PID directories and `fdinfo/<n>` files made from the captured samples with only `ino:` and `mnt_id:` changed, a `blockingFS` that blocks the open of one name, a `recordingFS` that lists the names opened, and generators of tables and descriptor sets for the cap tests; the socket mount is passed in `Sources.SocketMount`, so only `internal/sockmount`'s tests open a real socket, through `os.DirFS("/proc")`) |
-| `/sys` | same filesystem interface and blocking wrapper; fixtures under `testdata/sys/` (implemented: `testdata/sys/block`, `internal/sysstats`) |
-| `statfs` and `adjtimex` | the collectors take function values (`Sources.StatFS`, `Sources.Clock`; production `StatFS` and `ReadClock`, both read-only system calls); tests use fake functions with scripted results and errors per path, and variants that block until the test releases them (in `t.Cleanup`), for 0029 (implemented; `internal/sysstats`) |
-| systemd notification socket | a `unixgram` socket bound in `t.TempDir()` (or an abstract `@name`) that the test reads; it is local IPC, not network. The agent's watchdog loop is tested with a recording `notifier` (records state and time of every call, optional failure) (implemented; `internal/sdnotify`, `internal/agent`) |
-| collectors and sink (scheduler) | scripted collector (per-run results, errors and panics), hanging collector (blocks ignoring its context, released in `t.Cleanup`), recording sink (records every `Put` with its time, optional blocking `Put`), recording `slog.Handler` (implemented; `internal/scheduler`) |
-| systemd D-Bus | `internal/svcstats`: a hand-written fake `Opener` (`fakeSystemd`) and `Reader` (scripted unit states and errors per run, a reader that blocks until its context is cancelled, for 0029, and a recorder of the calls made). `internal/sdbus`: a fake bus server on one end of a `net.Pipe`, or on a unix stream socket in `t.TempDir()` for `Dial`; local IPC, not network. It answers with the measured authentication and `Hello` bytes (`testdata/systemd/hello-dbus-1.14.hex`) and the replies of the capture of systemd 249 (`testdata/systemd/capture-systemd249.pcap`, read by a helper of the tests), builds a `ListUnitsByNames` reply in the captured layout, can send captured or generated messages before a reply and records every request (implemented; `internal/sdbus`, `internal/svcstats`) |
-| journald | implemented (`internal/journal`, `internal/kernevents`): no fake reader; the binary journal files are written by `internal/journal/journaltest` (a pure-Go writer of the non-compact layout of systemd 249 and, with `Options.Compact`, of the COMPACT layout of systemd 255, the same entries as `journalctl -o export`) and read through `io/fs.FS`/`io.ReaderAt` (`fstest.MapFS` or `t.TempDir()` for the growth of a journal and for rotation, a blocking and an erroring wrapper for 0029); fixtures `testdata/journal/` (an online, an archived and a set-aside file and `kernel.export`, with no real value of a server), `testdata/journal/compact/` (the same three files in the COMPACT layout, equal to the writer's output) and `testdata/journal/systemd-255/` (`kernel.journal` and `live.journal`, real output of systemd-journal-remote 255 made from the committed exports, the header machine ID replaced; they hold some entries twice, so `journalctl --verify` refuses them, and the tests pin their counts per file); the real files of a server are never committed (`VANDOX_REAL_JOURNAL_DIR`); for log shipping `testdata/journal/live.export` (21 generated entries in the field shapes of the server, with zstd-compressed items and a 20,000 byte message), `live-records.jsonl` (the records the import's journal mapping makes of them, read by the Go and the C# test) and `zstd-frames.txt` (frame headers of the server's 340 compressed objects), `journaltest.Options.Compress` (real frames of the library in the server's form) and the `world` harness of `internal/logship` (journal, log files, `/etc`, state file and a scripted clock in `t.TempDir()`); `TestReal_NextWithDecodesEveryEntry` reads every entry of a real copy (counts only) |
-| agent state file | `internal/agentstate`: a real file in `t.TempDir()` (a missing, a foreign, a linked, an oversized and an unwritable directory); the collectors take the `*agentstate.Store`, so their tests share one store over a temporary directory (implemented) |
-| MariaDB socket | `internal/mariadb`: a replaying fake server (`fakeserver_test.go`) on a `net.Pipe` or local unix socket that answers with the two captures under `testdata/mariadb/` (`select-status-variables-processlist.txt`, `account-check.txt`, read by `capture_test.go` as the packets of each direction) and records every command it receives; the replies that were not captured (statement, login and greeting errors, the ping OK, authentication switch and continuation) come from `...FromDocs` builders that follow the protocol documentation, and a source that hangs until its context is cancelled, for 0029 (implemented) |
-| database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, base lookup, scripted begin, find and write failures, `AfterBatch` hook; also records line hashes with scripted failures and emulates attempts and containment as the store does; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented); the incident reconstruction is tested against the real store with `IncidentSamples` (records written through the store, `tests/Vandox.Backend.Tests`) and hand-written decorators around it (`RecordingRecordReader`, `RepeatingRecordReader`, `RecordingTemplateReader`, `RefusingIncidentStore`), a logger that keeps its messages (`ListLogger`) and a writer that cancels the run (`CancellingWriter`) (implemented); the forensics report tests add two decorators for `IIncidentStore` in `tests/Vandox.Backend.Tests`: `RecordingIncidentStore` (passes every call to another store and keeps a copy of every incident query, for the limit and start of each page) and `ScriptedIncidentStore` (answers the incident queries with scripted pages, optionally repeating the last one, and stops a runaway loop; for the page checks and the changed count between the two passes), next to `RecordingRecordReader` and `RepeatingRecordReader` for the record pages (implemented); the incidents view adds `FakeIncidentBrowser` (`IIncidentBrowser` with scripted results per method, copies of every call with its token, the highest number of calls in flight, a `Before` hook that can wait for a token or signal, and scripted failures) and `ScriptedRecordReader` (an `IRecordReader` over snapshots, connection snapshots and metric points that a test adds, answering a query as the store does with kind, source, metric name, range, keyset position, order and limit, so a page query that drops the source or the name returns the records of other series; it keeps a copy of every query with its token, counts the calls in flight and has a `Before` hook and a scripted failure), both in `tests/Vandox.Backend.Tests` (implemented); the report page and its download add `ReportSamples` (the hand-built summaries, outages and activities of the report tests: a rich sample that has every part of the report and a sparse one with the variants it cannot show, `WriteAsync` feeds them to any `IReportWriter`; the golden files `testdata/report/forensics-{en,de}.md` are its output as the unchanged writer of 91f6bde made it), `ReportPieces` (`FromMarkdown` and `FromHtml` read the headings, paragraphs, list items and table cells of a Markdown report or of the `article.report` element of a page, so that the two can be compared), `ReportPageHarness` (the report page with a `ReportService` over a `ScriptedRecordReader` and a `ScriptedIncidentStore`, or over a real store; fake clock, `ListLogger`, `RecordingNavigationManager`, static and interactive rendering, the pieces of the report, buttons and links by text and address), `GateProbeIncidentStore` (an `IIncidentStore` that counts reads, saves and the calls in flight, for the gate), `StartingResponseFeature` and `StartingResponseBody` (a response that reports `HasStarted` once a byte was written or the body was flushed, as Kestrel does, and refuses synchronous I/O as the server does, for the download handler under a `DefaultHttpContext`) and a scripted failure at a given query of `ScriptedIncidentStore` (`FailAtCall`, `Failure`) (implemented); the listener comparisons add `ScriptedListenerHistoryReader` (an `IListenerHistoryReader` that answers the reads of the tallies and of the findings with scripted pages, per kind of finding, keeps a copy of every finding query with the tokens of all reads and fails every read with a scripted exception; `tests/Vandox.Backend.Tests`) (implemented) |
-| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` and `ProbeParser` (counts starts and completions, can stop reading early) in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records, skips and warnings, validates every record like the importer except the payload size, optional failure and observer), `CountingEmitter` (validates like `RecordingEmitter`, so also except the payload size, keeps no record, counts per event, priority and warnings), `JournalExportBuilder` (text and binary fields as bytes), `MariaDbSamples` (records, journal entries, syslog lines and the feeds of the error log fixture for the MariaDB line tests), `PatternStream` (lazily generated input for the heap-bound tests), `LegacyMonitorSamples` (summary lines, rows, sockets and snapshots of the legacy monitoring log as text) and `SegmentStream` (byte segments repeated lazily, for the heap-bound tests of the legacy monitoring log parser), `SignatureSamples` (log line records, catalog texts and a detector run for the signature tests) and `DiscardingEventCollection` (counts the detected events and keeps none, for the heap-bound test) in `tests/Vandox.Core.Tests` (implemented) |
-| files (C#) | `TempDirectory` helper per test project (a unique directory below the temp path, removed on dispose); `RepositoryFiles.Path` for fixtures such as `testdata/` and `deploy/` |
-| Blazor components (C#) | `RecordingJsRuntime` (`IJSRuntime`: records identifier, arguments and token of every call in `RecordedJsCall` entries, hands out `RecordingJsObjectReference` instances for `import` (module) and `create` or `createStacked` (chart), and throws an exception scripted with `Fail(target, identifier, exception)`), `RecordingJsObjectReference` (`IJSObjectReference`: records its calls and its `DisposeAsync` in the call list of its runtime), `TestNavigationManager` (`NavigationManager` initialized with `http://localhost/`, for `NavLink` under `HtmlRenderer`; it records the navigations it is asked for in `Navigations` and does not navigate), `RecordingNavigationManager` (`NavigationManager` that starts at any address, records the targets of `NavigateTo` and applies them as the new address) and `FakeLogExplorer` (`ILogExplorer` with scripted results per method, copies of every query with its token, the highest number of calls in flight, a `Before` hook that can wait for a token or signal, and scripted failures; `LogPageHarness` wires it with the renderer, clock and logger for the page tests) (implemented), `IncidentPageHarness` (the same for the incident pages: a `FakeIncidentBrowser`, an `IncidentWindowReader` over a `ScriptedRecordReader`, clock, logger, recording script runtime and a fixed antiforgery token; static and interactive rendering, and a wait for a condition on the markup that the renderer signals after each render) (implemented) and `ComponentTestRenderer` (a `Renderer` subclass that renders a root component, runs `OnAfterRenderAsync`, re-renders it with new parameters, collects the exceptions the components hand to the renderer and waits for a condition after each render with `WaitUntilAsync`; no bUnit), all in `tests/Vandox.Backend.Tests`; static markup through `HtmlRenderer` as in `HomePageTests`; the web sources (`.razor`, scripts, style sheets) are checked by `WebSourceScanner` in `WebUiContentTests` (implemented); for the web login (all in `tests/Vandox.Backend.Tests`, implemented): `LoginTestClient` (an `HttpClient` for the web port of the running service, no automatic redirects and its own cookie jar that also sends `Secure` cookies over plain HTTP; reads the antiforgery token and `_handler` from the login form, posts the login form with optional extra headers, posts `/logout` with the token of the signed-in page, posts form and multipart bodies, copies cookies into a second client), `ScriptedPasswordVerifier` (`IPasswordVerifier`: accepts one password, counts calls, records overlapping calls and can block until released), `FixedAuthenticationStateProvider` (`AuthenticationStateProvider` returning a given principal), `FixedAntiforgeryStateProvider` (`AntiforgeryStateProvider` with one fixed token, for `<AntiforgeryToken />` under a plain renderer), `FixedAntiforgeryValidationFeature` (`IAntiforgeryValidationFeature` with a given result), `RecordingAuthenticationService` (`IAuthenticationService` that records sign-ins and sign-outs), `LoginServiceFixture` (a `LoginService` over a `ScriptedPasswordVerifier`, a `LoginThrottle`, a `FakeTimeProvider` and a `ListLogger`, with request contexts), `CountingTextReader` (a `TextReader` that counts the characters taken from it), `ReferenceVectors` (the argon2id vectors of `testdata/argon2/reference-argon2id.txt`); `BackendFixture` passes `VANDOX_WEB_PASSWORD_HASH` (the hash of `BackendFixture.Password` at the lowest accepted cost, a constant) when a caller gives no environment, can write the option `web.trusted_proxies`, starts the service with a given clock and reads the JSON log lines |
-| ingest endpoint (C#) | `IngestEndpoint` is built without a host in `tests/Vandox.Backend.Tests` through `IngestRig` (a `FakeTimeProvider` clock, a `RecordingRecordWriter`, a scripted `FreeSpace` probe, a `ControlledApplicationLifetime`, an `IngestLogCapture`; `CreateWithStoreAsync` puts a real `SqliteStore` in a `TempDirectory` behind the writer) and fed `IngestCall` requests (a `DefaultHttpContext` with the headers of a correct post, a `CountingBodyStream` body, a `FakeMaxRequestBodySizeFeature`, an in-memory response body: the endpoint answers with a status and headers only, so the response stream rules above do not apply to it). `RecordingRecordWriter` (an `IRecordWriter` that keeps every batch and token it gets, counts the calls, the writes in flight, the highest number in flight and the ones completed or ended, can hold a write until `ReleaseOne` or `ReleaseAll`, fails the next write with an exception given to `FailNext`, and passes the batch on to an inner writer, such as a real store, after the hold; `UnusedRecordWriter` and `StoppedApplicationLifetime` are the inert variants for tests that never reach the write or the stop signal) and `CountingBodyStream` (a request body that serves fixed bytes, an endless run of zero bytes or fixed bytes followed by a read that waits for its cancellation, and counts the calls and bytes read and completes `FirstRead` at the first one; it does not model Kestrel's refusal of synchronous reads, the endpoint reads asynchronously only) are the two the tests reuse for any route that reads a body or writes a batch. The real Kestrel behaviors the doubles encode (whitespace and duplicates in headers, invalid bytes, `Content-Length`) were checked once with `ServeIngestHeaderWhitespaceAndDuplicates` (implemented, #40). `ConnectionCap` is tested with `AbortRecordingConnection` (a `ConnectionContext` that counts the aborts the server makes). The memory bound of a request is measured with `HeapSampler` (the live heap from a second thread, `GC.GetTotalMemory(true)` behind the one `S1215` suppression) and SQLite's `sqlite3_memory_highwater`, on bodies from `IngestMemoryBodies` (implemented, #40) |
-| Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
-| Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested through the `sender.BatchSender` interface with a scripted fake (`internal/sender` `helpers_test.go`, `internal/agent` `fakeTransport`; results, a transport that hangs until its context ends, counts of requests and requests in flight) and `sender.HTTPTransport` against a `net/http/httptest` server standing in for the ingest port (loopback, its dial hook for the dial target; a TLS server with an untrusted certificate for `tls failed`), implemented; the sender's time runs in `testing/synctest` bubbles; the ACL itself is deployment configuration, reviewed, not unit-tested |
-| time | Go: injectable clock (spool age, live/backfill classification, deadlines); the scheduler and the watchdog loop read the `time` package and are tested in `testing/synctest` bubbles (0062; implemented); C#: `TimeProvider` with `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) |
-
-A double of an ASP.NET Core request or response stream behaves as Kestrel does: it refuses synchronous I/O, and
-a response stream starts the response on any flush, not only when a byte is written (`StartingResponseBody` is
-the reference). A
-test double hid this once: it started the response only on a written byte, and only a Security delta review with
-a Kestrel probe found the real behavior. Any other claim about server behavior that a double encodes is checked
-once against real Kestrel.
+| Surface | Double (where) | Stands in for |
+| ------- | -------------- | ------------- |
+| `/proc`, `/sys` | `io/fs.FS` over `testdata/` or `fstest.MapFS`, blocking and erroring wrappers (collector tests) | kernel files |
+| `statfs`, `adjtimex` | scripted functions in `Sources` (`internal/sysstats`) | system calls |
+| notification socket | `unixgram` socket in `t.TempDir()`, recording `notifier` (`internal/sdnotify`, `internal/agent`) | `NOTIFY_SOCKET` |
+| scheduler | scripted and hanging collectors, recording sink (`internal/scheduler`) | collectors, spool |
+| systemd D-Bus | `fakeSystemd` (`internal/svcstats`); replaying bus server (`internal/sdbus`) | the system bus |
+| journald | `internal/journal/journaltest` writer, `testdata/journal/`, `world` harness (`internal/logship`) | journal and log files |
+| agent state | a real store in `t.TempDir()` (`internal/agentstate`) | `agent-state.json` |
+| MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
+| ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
+| time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider` | the clock |
+| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `ListLogger` (Backend tests) | store, readers |
+| log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
+| files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
+| Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
+| web login (C#) | `BackendFixture`, `LoginTestClient`, `ScriptedPasswordVerifier`, `Fixed*` providers (Backend tests) | service, browser |
+| ingest (C#) | `IngestRig`, `IngestCall`, `RecordingRecordWriter`, `CountingBodyStream`, `StartingResponseBody` (Backend tests) | request, writer |
+| Telegram Bot API | planned: a fake client | the Bot API |
