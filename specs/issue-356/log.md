@@ -24,3 +24,5 @@ are quoted in full.
 | 2026-11-07 18:33 | 8 Decide skipped | Orchestrator | skipped — the only non-blocking finding (record 0149 wording) had a verbatim fix, applied in 3c68445 as verbatim |
 | 2026-11-07 18:33 | 8 Decide | Lead | RESULT: DECIDED — accept both verbatim fixes of 3c68445; nothing more needed (opus/medium · 23,892 tokens · 3 tool uses · 13 s · 6 in · 907 out · 41,909 cache read · 23,403 cache write · 71,780 weighted) |
 | 2026-11-07 18:34 | 9 PR approval | Lead | RESULT: APPROVED; string.Equals deviation accepted (CA2251/S1125), plan documentation updates all in diff; record 0193 set to Accepted (opus/medium · 36,521 tokens · 5 tool uses · 23 s · 8 in · 2,140 out · 84,986 cache read · 24,289 cache write · 90,637 weighted) |
+| 2026-11-07 18:37 | 7 Gate stamp | Orchestrator | PASS on 352b166a3018ecec6d9e848ded96f05dfb0bb36b (tier security, verbatim): Format check pass; decision-check.py pass; scope-check.py pass |
+| 2026-11-07 18:37 | 9 Record status | Orchestrator | verbatim: decision record 0193 and its index row set to Accepted (PR approval) |
