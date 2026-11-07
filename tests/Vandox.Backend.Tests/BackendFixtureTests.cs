@@ -52,6 +52,7 @@ public class BackendFixtureTests
         // Assert
         Assert.IsInstanceOfType<LockedTextWriter>(fixture.Error, "the captured standard error is a locked writer");
         Assert.IsTrue(counts.All(count => count <= lineCount), "no call returns more entries than lines written");
+        Assert.IsTrue(counts.Zip(counts.Skip(1)).All(pair => pair.First <= pair.Second), "every call returns at least the entries of the call before");
         Assert.HasCount(lineCount, final, "the last call returns every line");
         Assert.AreEqual((lineCount - 1).ToString(System.Globalization.CultureInfo.InvariantCulture), final[^1]["n"], "the last entry is the last line written");
     }
