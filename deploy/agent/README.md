@@ -694,7 +694,7 @@ Not set, on purpose (the *Unit settings that must stay as they are* section): `P
 a `ProtectProc=` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `DynamicUser`, any specifier, `VANDOX_AGENT_TOKEN=`, and any
 `InaccessiblePaths=` over `/run/dbus`, `/run/mysqld`, `/var/log/journal` or `/run/log/journal`.
 
-**`systemd-analyze security vandox-agent`.** Required: the overall exposure level `OK` or better (record 0131). A draft with these settings scored 2.2
+**`systemd-analyze security vandox-agent`.** Required: the overall exposure level `OK` or better (record 0188). A draft with these settings scored 2.2
 `OK` offline on systemd 255 in a development session; the shipped unit was measured on 249 as below.
 
 | Where | systemd | Overall exposure level |
@@ -713,8 +713,8 @@ Items the CI run and the server run both still flag (the same 15 items; the expo
 | `ProtectClock=` | 0.2 | The `clock` collector calls `adjtimex` (record 0111), which `ProtectClock=` would deny. |
 | `ProtectProc=` | 0.2 | Must stay `default`: a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`. |
 | `SystemCallFilter=~@clock` | 0.2 | The `clock` collector calls `adjtimex`, which `@clock` holds. |
-| `SystemCallFilter=~@privileged` | 0.2 | `@privileged` holds `@clock`, so `adjtimex` (record 0131, option 9). |
-| `SystemCallFilter=~@resources` | 0.2 | `@resources` holds calls the Go runtime may make at start (record 0131, option 9). |
+| `SystemCallFilter=~@privileged` | 0.2 | `@privileged` holds `@clock`, so `adjtimex` (record 0185, option 1). |
+| `SystemCallFilter=~@resources` | 0.2 | `@resources` holds calls the Go runtime may make at start (record 0185, option 1). |
 | `IPAddressDeny=` | 0.1 | Flagged because the allow-list has entries other than localhost: the tailnet ranges are the point of the setting. |
 | `AmbientCapabilities=` | 0.1 | The unprivileged process holds `CAP_SYS_PTRACE` through it. |
 | `RootDirectory=` / `RootImage=` | 0.1 | Not applicable to this unit: the agent reads the host's `/proc`, journal and sockets. |

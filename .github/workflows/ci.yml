@@ -266,7 +266,7 @@ jobs:
 
   # Installs the agent with deploy/agent/install.sh on a runner whose PID 1 is systemd 249 (Ubuntu 22.04, the
   # target of the unit) and runs every case of .github/scripts/check-agent-install.sh: install, upgrade,
-  # uninstall, purge, the unit's confinement and address allow-list (record 0131). The binary is built here
+  # uninstall, purge, the unit's confinement and address allow-list (record 0188). The binary is built here
   # without privileges and handed over with --from, so nothing is downloaded; no secret is read.
   agent-install:
     name: Agent install (systemd 249)

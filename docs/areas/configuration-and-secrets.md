@@ -16,7 +16,8 @@ what the options and secrets do at run time is described in the area that owns t
   host](backend-host.md)).
 - The file must be a regular file of at most 1 MiB. It is opened without blocking and its type is checked on the
   opened file, never only on the path before the open, so a FIFO or device named as the file, or swapped in while
-  it is opened, is refused without being read and cannot block start-up. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
+  it is opened, is refused without being read and cannot block start-up. The backend also checks the path before the open,
+  only to give a missing or non-regular path its own message; the agent checks the opened file only. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
   only" (for the agent, whose `agent_id` and `backend.url` have no default, that is an error naming the missing key).
 - The file is **strict**. Only keys of the schema are accepted, and they are case-sensitive. These are errors:
   - an unknown key, a duplicate key, a key that is not a string;

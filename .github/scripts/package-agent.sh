@@ -63,7 +63,7 @@ mtime="$(git -C "$repo" log -1 --format=%ct HEAD)"
 readonly mtime
 
 # The member order is fixed: the manifest sits before both scripts, so a script that exists was extracted
-# after an attempted manifest (record 0131, option 34).
+# after an attempted manifest (record 0190, option 3).
 tar --create --format=ustar --no-recursion --owner=0 --group=0 --numeric-owner --mtime="@$mtime" \
   -C "$stage" "$top" "$top/VERSION" "$top/agent.yaml" "$top/common.sh" "$top/mariadb-user-remove.sql" \
   "$top/mariadb-user.sql" "$top/$PIN" "$top/vandox-agent.service" "$top/$MANIFEST" \
