@@ -10,3 +10,5 @@ are quoted in full.
 | 2026-11-07 14:51 | 2 Challenge skipped | Orchestrator | challenge skipped — tier tests is never challenged |
 | 2026-11-07 15:15 | 6 Coverage | Tester | Test changes done: 8 MiB line, bound 170; correct max 41.2 (full coverage), quadratic 488-654 in all 3 configs (sonnet/medium · 98,594 tokens · 25 tool uses · 1246 s · 44 in · 10,503 out · 1,746,362 cache read · 190,314 cache write · 465,088 weighted) |
 | 2026-11-07 15:15 | 6 Coverage | Tester | Doc comments for 8 MiB and bound added (sonnet/medium · 87,763 tokens · 26 tool uses · 205 s · 50 in · 4,336 out · 1,877,680 cache read · 34,024 cache write · 252,028 weighted) |
+| 2026-11-07 15:16 | 6 Documentation | Orchestrator | written in step 6 (docs/UNIT_TESTS.md by the Tester) |
+| 2026-11-07 15:22 | 7 Gate stamp | Orchestrator | FAIL on 3ac0a3cc2586a005d6f1992efbebc675e2cc2484 (tier tests): Format check pass; Analyzer gate pass; Test FAIL; scope-check.py --tier tests pass |
