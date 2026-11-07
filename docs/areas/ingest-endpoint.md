@@ -165,10 +165,10 @@ once. The web UI and the import do not check the floor; the database still grows
   `ingest batch refused`, `ingest request timed out` and the rest) have no such limit; only a request that passed the token check
   produces them.
 - No ingest log line holds the token, the `Authorization` header, body bytes, a map key, other record content or a parser's or the
-  store's own text; an exception is logged by its type name only. The timeline lines (`ingest gaps changed`, `agent clock off`, `agent
-  clock in step`) carry only the agent ID (it passed the wire format's rule), counts and the offset in seconds.
-- An unexpected exception of the endpoint is answered `503` (when the answer has not started) and logged as the error `ingest request
-  failed` with `exception`.
+  store's own text; an exception is logged by its type name only. The timeline lines (`ingest gaps changed`, `agent clock off`,
+  `agent clock in step`) carry only the agent ID (it passed the wire format's rule), counts and the offset in seconds.
+- An unexpected exception of the endpoint is answered `503` (when the answer has not started) and logged as the error
+  `ingest request failed` with `exception`.
 
 ## Related decisions
 

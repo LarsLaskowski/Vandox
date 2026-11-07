@@ -103,7 +103,7 @@ built only from such lines has no `uid`, `user` or `mixed_uids`.
 - The `user` is the name of the UID from `/etc/passwd`, read once per run after the owner scan, with the process collector's rules (first
   line of a UID wins, valid UTF-8, cut to 256 bytes, control characters kept for the encoder to escape), else the UID in decimal; one UID
   has one name in both snapshots of a run that read the same file. A `passwd` that cannot be read within its bounds makes every `user` the
-  decimal UID; `uid` is unchanged and the sample succeeds. Names come only from `/etc/passwd` (no NSS, LDAP or dynamic users).
+  decimal UID; `uid` is unchanged and the sample succeeds. The `user` is external text that whoever displays it escapes. Names come only from `/etc/passwd` (no NSS, LDAP or dynamic users).
 
 ## The socket mount
 
@@ -174,13 +174,11 @@ One line per change, with `collector=connections`, only for a run that finishes 
 process text, address, user name, UID value or table content:
 
 - info `socket tables unavailable` (`tables`: the missing ones, comma-separated, in table order) and `socket tables available`;
-- warning `socket lines not read` (`lines`: the number, `err`: `connstats: net/<table>: line <n>: <reason>`, reason `not in the expected
-  format`, `unknown state` or `line too long`) and info `socket lines read again`;
+- warning `socket lines not read` (`lines`: the number, `err`: `connstats: net/<table>: line <n>: <reason>`, reason `not in the expected format`, `unknown state` or `line too long`) and info `socket lines read again`;
 - warning `socket owners partly unknown` (`processes`: the number of scanned processes whose descriptors could not be read, `err`:
   `connstats: <pid>/fdinfo: <fixed reason or os error>`) and info `socket owners known again`;
 - warning `socket owners unknown` (*The socket mount*);
-- warning `user names unavailable` (`err`: `procstats: passwd: <fixed reason or os error>`, never file content) and info `user names
-  available`, also while `socket owners unknown` holds.
+- warning `user names unavailable` (`err`: `procstats: passwd: <fixed reason or os error>`, never file content) and info `user names available`, also while `socket owners unknown` holds.
 
 ## Failures and rights
 

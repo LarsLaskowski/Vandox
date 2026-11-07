@@ -19,9 +19,7 @@ connection. It starts no program and uses no client library: it speaks MariaDB's
 
 Each run opens one connection to the Unix socket `mariadb.socket` (default `/run/mysqld/mysqld.sock`), reads the greeting, logs in as
 `vandox-agent` (*The login*) and closes the connection at its end with `COM_QUIT`, sent with a write deadline of 250 ms and not waited
-for. In between it sends, in this order: one `COM_PING`, whose round trip on the monotonic clock is `ping_latency_ns`; `SHOW GLOBAL
-STATUS`; `SHOW GLOBAL VARIABLES`; the account check's `SELECT CURRENT_USER()` and `SELECT PRIVILEGE_TYPE FROM
-information_schema.USER_PRIVILEGES WHERE GRANTEE LIKE '%vandox-agent%'`; and `SHOW FULL PROCESSLIST` only when the status value
+for. In between it sends, in this order: one `COM_PING`, whose round trip on the monotonic clock is `ping_latency_ns`; `SHOW GLOBAL STATUS`; `SHOW GLOBAL VARIABLES`; the account check's `SELECT CURRENT_USER()` and `SELECT PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES WHERE GRANTEE LIKE '%vandox-agent%'`; and `SHOW FULL PROCESSLIST` only when the status value
 `Threads_running` is above 10 (the agent's own statement counts) or the run started in memory pressure mode. No other statement is ever
 sent and none takes input. The agent holds at most one connection at a time: a run's connection is closed before it returns, and the
 collector is not started while a run is stuck. After the connection the run reads `MemTotal` of `/proc/meminfo` and the TCP tables
@@ -108,7 +106,7 @@ threads whose `command` is not `Sleep` first, then the sleeping ones, each by `t
 ## The record always fits
 
 The collector bounds the record's encoded line by an estimate made before anything is encoded, never less than the encoded size: 6 bytes
-per byte of every kept text, 21 per number, 8 per map entry, 256 per thread for its keys and punctuation and 1 KiB for the record. Threads
+per byte of every kept text (the longest JSON escape, `\u00XX`), 21 per number, 8 per map entry, 256 per thread for its keys and punctuation and 1 KiB for the record. Threads
 that cannot fit within 1 MiB even without a statement (by the estimate of their raw short texts) are not built. Then, while the estimate is
 above 1 MiB, every `info` is cut to 4,096, then 1,024, then 0 bytes (each cut sets `truncated`), and then the thread list is halved from
 its end, so idle sleepers go first. The scheduler's record check therefore passes.
@@ -216,9 +214,7 @@ These fail the run: no record, a gap with cause `unknown`, and the scheduler log
 - an error packet in answer to the ping or the status, variables or process list statement (`mariadb: <step>: server error <n>`).
 
 The error texts are `mariadb: connect: <OS error text>` (never the path) or `mariadb: connect: failed`, and `mariadb: <step>: <reason>`
-with the step `greeting`, `login`, `ping`, `status`, `variables`, `processlist` or `account` and the reason `malformed packet`, `packet out
-of sequence`, `packet too large`, `unexpected reply`, `unexpected columns`, `cell too long`, `local file request refused`, `more results
-refused`, `authentication switch refused`, `name sent twice` or `server error <n>`. The reasons `no answer in time` and `connection closed`
+with the step `greeting`, `login`, `ping`, `status`, `variables`, `processlist` or `account` and the reason `malformed packet`, `packet out of sequence`, `packet too large`, `unexpected reply`, `unexpected columns`, `cell too long`, `local file request refused`, `more results refused`, `authentication switch refused`, `name sent twice` or `server error <n>`. The reasons `no answer in time` and `connection closed`
 end a run as `not_answering`, not as a failure. No error text holds a byte the server sent.
 
 ## Residuals (record 0118)

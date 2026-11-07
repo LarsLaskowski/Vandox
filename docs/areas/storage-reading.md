@@ -47,7 +47,8 @@ a reader connection and is interrupted by a cancelled token or a passed deadline
 
 The template statistics are read by the queries of [Log templates](log-templates.md) (template of a line, hourly counts, new templates,
 templates above their usual level), with the same time range and limit rules, on a reader connection. The cost of the usual-level query is
-not bounded by its range or limit; a cancelled token or deadline interrupts it.
+not bounded by its range or limit; a cancelled token or deadline interrupts it ([Log templates](log-templates.md), *Limits of
+templates*).
 
 ### Listener history
 
@@ -167,8 +168,8 @@ optional position *after* (capture time and record ID), a page size and a scan b
   bytes`, `program is longer than 1024 bytes`, `priority must be between 0 and 7`, `template ID must not be negative`, `after must be
   within the storable range`, `after id must be positive`, and the rules of *Log search* for a non-empty text.
 
-**Context.** A line is returned with up to 0 to 20 lines before and 0 to 20 after it with the same source, log name and host, in
-capture-time order, whatever their other fields; lines of other logs of the source are skipped. Each side examines at most **2,000** lines
+**Context.** A line is returned with up to the requested number of lines before and after it (0 to 20 each) with the same source, log
+name and host, in capture-time order, whatever their other fields; lines of other logs of the source are skipped. Each side examines at most **2,000** lines
 of the source and returns fewer when that bound or the data ends. Errors: `record ID must be positive`, `context lines must be between 0 and
 20`, `unknown log line` (an ID that is not a stored log line).
 

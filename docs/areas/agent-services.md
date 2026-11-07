@@ -45,7 +45,7 @@ systemd's bus policy lets every user make these calls.
 - After a lost sample (the previous-sample-lost flag, [Agent](agent.md), *Scheduling*) the next successful run records every tracked
   unit again, as after a start.
 - A state that came and went between two runs without a new `active_enter_at` or a higher `restarts` (a short `activating` or
-  `reloading`) is not seen; a change is recorded at most one interval after it happened.
+  `reloading`) is not seen; a change is recorded at most one interval after it happened (the exact second of a failure is in the journal).
 - **A refused unit state.** The collector checks every record against the wire format itself before it returns the run's records. A unit
   whose state is refused (an `active_state` or `load_state` a newer systemd adds, a `sub_state` with characters other than `[a-z0-9-]` or
   longer than 64 bytes) is left out and its last record forgotten; the other records are kept, and the run returns one gap with cause
@@ -73,8 +73,7 @@ a reply or message the client refuses and a reply larger than 1 MiB fail the run
 gap with cause `unknown`, and the scheduler logs `collector failed` once and `collector recovered`. The run's deadline is the connection's
 deadline, so a systemd or bus daemon that does not answer ends the run at the 5-second timeout as a `collector_timeout` gap, the collector
 is not started again while it is stuck, and no other collector waits. After `daemon-reexec`, `daemon-reload` or a restart of the bus
-daemon the next run connects anew. The failure texts are `sdbus: connect: <os error>`, `sdbus: authentication refused`, `sdbus: message:
-<fixed reason>`, `sdbus: <member>: error reply <error name>` (the name only when it follows the D-Bus error-name grammar and is at most 255
+daemon the next run connects anew. The failure texts are `sdbus: connect: <os error>`, `sdbus: authentication refused`, `sdbus: message: <fixed reason>`, `sdbus: <member>: error reply <error name>` (the name only when it follows the D-Bus error-name grammar and is at most 255
 bytes), `sdbus: <member>: reply too large`, `sdbus: <member>: unexpected signature` and `sdbus: <member>: malformed body`; none contains a
 string of a reply body.
 

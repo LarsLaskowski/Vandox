@@ -206,9 +206,9 @@ What the decoder does with unusual input; each row is a test case.
 | Two values on a line, comments, trailing comma, `NaN`, single quotes | rejected, malformed |
 | Line is `null` | header: unsupported version; record: unknown kind |
 | Line is an array, string, number, `true` or `false` (header or record) | rejected, malformed |
-| Keys in other ASCII case (`FORMAT_MAJOR`, `Kind`, `DATA`, `PID`), also escaped (`"Kind"`) | accepted as the field |
-| A key with a character outside ASCII after unescaping, at any depth, also a map key or an unknown key (`"Kind"` with U+212A KELVIN SIGN, `"ſeq"` with U+017F, `"agent_ıd"` with U+0131, `"Kind"`, a surrogate pair, an unpaired surrogate escape such as `"\ud800"`, invalid UTF-8) | rejected, malformed |
-| Two keys in one object equal ignoring ASCII case after unescaping, at any depth, also in a map or an unknown key (`seq` twice, `kind` and `Kind`, `kind` and `"kind"`, `format_major` then `null`, labels `Mount` and `mount`) | rejected, malformed; in the header before the major is read |
+| Keys in other ASCII case (`FORMAT_MAJOR`, `Kind`, `DATA`, `PID`), also escaped (`"\u004bind"`) | accepted as the field |
+| A key with a character outside ASCII after unescaping, at any depth, also a map key or an unknown key (`"Kind"` with U+212A KELVIN SIGN, `"ſeq"` with U+017F, `"agent_ıd"` with U+0131, `"\u212aind"`, a surrogate pair, an unpaired surrogate escape such as `"\ud800"`, invalid UTF-8) | rejected, malformed |
+| Two keys in one object equal ignoring ASCII case after unescaping, at any depth, also in a map or an unknown key (`seq` twice, `kind` and `Kind`, `kind` and `"\u006bind"`, `format_major` then `null`, labels `Mount` and `mount`) | rejected, malformed; in the header before the major is read |
 | The same key in sibling or nested objects (`[{"a":1},{"a":2}]`, `{"a":{"a":1}}`) | accepted |
 | Nesting of objects and arrays deeper than 64, the outermost value counting as 1, also inside an unknown key | rejected, malformed; 64 accepted |
 | Unknown keys at any depth | ignored |
@@ -226,8 +226,8 @@ What the decoder does with unusual input; each row is a test case.
 | Time with another offset (`+02:00`); the zero time | rejected, field error |
 | Time with a space for `T`, lower-case `t`/`z`, not RFC 3339 | rejected, malformed |
 | Invalid UTF-8 anywhere in a line (a byte `FF` or `F5`, a stray continuation byte `80`, an overlong form `C0 AF` or `E0 80 80`, an encoded surrogate `ED A0 80`, `F4 90 80 80` above U+10FFFF, a sequence cut short such as `E2 82` before the closing quote), also in `kind`, `agent_id`, a label value, the value of an unknown key or a header of another major | rejected, malformed, reason `line not valid UTF-8` (a line cut short or with content after its value: the syntax error) |
-| An unpaired surrogate escape in a string (`\ud800`, `\udc00`, `\ud800A`, `\ud800x`, `\udc00\ud800`, `\ud800𐀀`, `\uD800`), also in `kind`, `unit`, `agent_id` or the value of an unknown key | rejected, malformed, reason `unpaired surrogate escape` |
-| An escaped surrogate pair in any hex case (`😀`, `😀`), escaped `�` or `￿`, an escaped backslash before `ud800` (`\\ud800`), raw multi-byte UTF-8 | accepted |
+| An unpaired surrogate escape in a string (`\ud800`, `\udc00`, `\ud800\u0041`, `\ud800x`, `\udc00\ud800`, `\ud800\ud800\udc00`, `\uD800`), also in `kind`, `unit`, `agent_id` or the value of an unknown key | rejected, malformed, reason `unpaired surrogate escape` |
+| An escaped surrogate pair in any hex case (`\ud83d\ude00`, `\uD83D\uDE00`), escaped `\ufffd` or `\uffff`, an escaped backslash before `ud800` (`\\ud800`), raw multi-byte UTF-8 | accepted |
 | Escaped control characters in a string | accepted in text fields, rejected where a name pattern applies |
 | Address with a zone (`fe80::1%eth0`, `[fe80::1%eth0]:80`, `::ffff:1.2.3.4%eth0`), also with `\n`, `]:` or 5000 bytes in the zone | rejected, field error, reason `zone not allowed` |
 | Empty address, hostname, missing port, empty zone (`fe80::1%`), zone on IPv4 | rejected (field error or malformed) |

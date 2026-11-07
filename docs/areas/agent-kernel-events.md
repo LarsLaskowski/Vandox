@@ -62,8 +62,7 @@ is exactly `0`. Only a counted entry with exactly one `MESSAGE` item can be a ki
 
 ## The kill line
 
-The `MESSAGE` starts with exactly one of `Out of memory: Killed process `, `Memory cgroup out of memory: Killed process ` and `Out of memory
-(oom_kill_allocating_task): Killed process `, followed by the PID (1 to 10 digits, 1 to 2,147,483,647) and ` (`; the victim's name runs to
+The `MESSAGE` starts with exactly one of `Out of memory: Killed process `, `Memory cgroup out of memory: Killed process ` and `Out of memory (oom_kill_allocating_task): Killed process `, followed by the PID (1 to 10 digits, 1 to 2,147,483,647) and ` (`; the victim's name runs to
 the **last** `) total-vm:` of the line, and a line without one is no kill. The rest is split at `, ` and at spaces; only the tokens
 `anon-rss:<1 to 20 digits>kB` (times 1,024, within 64 bits) and `oom_score_adj:<optional minus and 1 to 4 digits>` (−1000 to 1000) are
 used, and one that is missing, malformed, out of range or present twice leaves its field out while the event stays. The report lines
@@ -172,8 +171,7 @@ seconds after the last request. Kills an earlier run queued are not requested a 
 
 ## Logging and memory
 
-One line per change: warning `kernel messages not readable` with `err` one of `journal: machine ID not readable`, `journal: no journal
-directory`, `journal: directory not readable` and `journal: <online|archived>: <unsupported layout|malformed file|read failed>`, and info
+One line per change: warning `kernel messages not readable` with `err` one of `journal: machine ID not readable`, `journal: no journal directory`, `journal: directory not readable` and `journal: <online|archived>: <unsupported layout|malformed file|read failed>`, and info
 `kernel messages readable again`; with *Boots*, warning `boot ID not readable`. No line per event and none with a path, a field value or a
 message.
 

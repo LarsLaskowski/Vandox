@@ -52,8 +52,7 @@ the second sample on, its five rates.
   100.00, and T 1 to 20 ASCII digits within 64 bits; anything else fails the sample. A file without `full` line (the `cpu` file before
   kernel 5.13) gives only the `some` values.
 - **Pressure not offered.** When a pressure file does not exist (a kernel without PSI, or booted with `psi=0`) or its read answers
-  "operation not supported", that resource's values are left out and the sample succeeds. One warning `pressure stall information
-  unavailable` with `resources` (the unavailable resources, comma-separated, in the order `memory`, `cpu`, `io`) is logged when that set
+  "operation not supported", that resource's values are left out and the sample succeeds. One warning `pressure stall information unavailable` with `resources` (the unavailable resources, comma-separated, in the order `memory`, `cpu`, `io`) is logged when that set
   changes and is not empty, one info line `pressure stall information available` when it becomes empty again; an unchanged set logs
   nothing.
 - **Disks.** A disk is an entry of `/sys/block` that has a `device` entry (so loop, RAM, zram, device-mapper and RAID devices are left

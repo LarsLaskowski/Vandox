@@ -19,7 +19,7 @@ fetching commands from the backend and restarting units (remote actions, self-he
   text and exits with 1, before it notifies systemd of anything. It then opens its state file (*Agent state*) and, after it, its spool
   ([Agent spool](agent-spool.md)); a spool that cannot be opened ends the start the same way, with the error line `agent cannot start`.
 - It runs until it receives SIGTERM or SIGINT, then stops its collectors (a collector stuck in a run is not waited for), lets the
-  collectors that hold lines put them ([Agent log shipping](agent-log-shipping.md), *The stop flush*), saves its state (*Saving at the
+  collectors that hold lines put them ([Agent log shipping](agent-log-shipping.md), *Classification*, **The stop flush**), saves its state (*Saving at the
   stop*), tells systemd that it is stopping and exits with 0.
 
 ## Logging
@@ -163,7 +163,7 @@ The `system` collector decides the mode after each successful `system` sample, f
   at least 10.00;
 - it turns **off** only when `MemAvailable` is at least 15 % of `MemTotal` (20 × `MemAvailable` ≥ 3 × `MemTotal`) and `some avg10` is
   below 5.00 or the memory pressure file is not available;
-- otherwise it keeps its mode. The products are exact (128 bits, no floating point). The thresholds are fixed, not options.
+- otherwise it keeps its mode. The products are exact (128 bits, no floating point). The thresholds are fixed, not options, until the parallel run of #45 shows a reason.
 
 The mode starts off. Only a change switches the scheduler (*Scheduling*) and the sender ([Agent sending](agent-sending.md)) and logs one
 info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`, `mem_available_bytes` and, when the pressure
@@ -180,7 +180,8 @@ recorded gap, bounded by the record budget (residual).
 
 - When systemd started the agent with a notification socket, the agent sends `READY=1` once its collectors run, `WATCHDOG=1` while the
   watchdog is enabled, and `STOPPING=1` when it stops. Each notification is one datagram; dial and write have a deadline of one second, so
-  a socket whose queue is full makes the notification fail at that deadline instead of blocking the agent.
+  a socket whose queue is full (measured: about 11 queued datagrams) makes the notification fail at that deadline instead of blocking
+  the agent.
 - The socket is the one `NOTIFY_SOCKET` names: an absolute path of at most 107 bytes, or `@` and an abstract name of 1 to 107 bytes. Any
   other value (a relative path, `@` alone, a longer name, the `vsock:` forms) disables the notification with a warning; the agent runs the
   same. Unset or empty means no notification and no warning.
@@ -193,7 +194,7 @@ recorded gap, bounded by the record budget (residual).
 - The unit must use `Type=notify`, set `WatchdogSec=` and allow notifications from the main process (`NotifyAccess=main`); the installed
   unit does, with `WatchdogSec=2min`, `Restart=on-failure`, `RestartSec=30s` and `StartLimitIntervalSec=0`, so a failed, watchdog-stopped
   or memory-limit-killed agent is restarted twice a minute at most, for ever. It limits the agent to `MemoryMax=256M` with
-  `GOMEMLIMIT=192MiB`, `CPUQuota=50%`, `Nice=5` and `IOWeight=50` ([Agent installation](agent-installation.md)).
+  `GOMEMLIMIT=192MiB`, `CPUQuota=50%`, `Nice=5` and `IOWeight=50` (the reasons are in `deploy/agent/README.md`, *Unit*; [Agent installation](agent-installation.md)).
 
 ## Gaps
 
@@ -214,9 +215,7 @@ The agent keeps one small state file, `agent-state.json` in `spool.directory` (s
 uptime and boot time, the `kernel` collector's journal position, the open backup run and the positions of the `logs` collector. Besides
 the spool's files it is the agent's only file write. The agent never creates the directory; the installation does.
 
-**Format.** One JSON object `{"version":1,"boot":{"id","uptime_ns","booted_at"},"journal":{"seqnum_id","seqnum","realtime"},
-"backup":{"boot_id","started_at","last_seen","max_processes"},"logs":{"journal":[{"seqnum_id","seqnum","realtime"}],"files":[{"path_sha256",
-"device","inode","offset","head_sha256","head_len","last_time","renamed":{"device","inode","offset","size"}}]}}`, the four sections,
+**Format.** One JSON object `{"version":1,"boot":{"id","uptime_ns","booted_at"},"journal":{"seqnum_id","seqnum","realtime"},"backup":{"boot_id","started_at","last_seen","max_processes"},"logs":{"journal":[{"seqnum_id","seqnum","realtime"}],"files":[{"path_sha256","device","inode","offset","head_sha256","head_len","last_time","renamed":{"device","inode","offset","size"}}]}}`, the four sections,
 `logs.journal`, `logs.files` and `renamed` optional, IDs as lower-case UUIDs, times in RFC 3339 UTC. A file position names its configured
 file by the SHA-256 of the path (64 lower-case hex digits), never by the path; `offset` is the start of the first line not yet shipped
 (or, while the source holds an open group, of the oldest line the group holds), `head_sha256` the SHA-256 of the file's first `head_len`
@@ -234,8 +233,7 @@ missing directory, an absent file beside other entries, a link, a file of anothe
 corrupt file — is treated as no state and logged once as warning `agent state not available`; the first save replaces the file. The state
 file is read before the spool is opened, so on a first start the directory is still empty and neither warns; a missing directory logs this
 warning and then ends the start, because the spool refuses it, so the agent never runs without its directory. Residual: a start that ends
-after the spool created its files and before the first state save leaves spool files without a state file, and the next start logs `agent
-state not available` once.
+after the spool created its files and before the first state save (a `kill -9` in the first seconds, a later start error) leaves spool files without a state file, and the next start logs `agent state not available` once.
 
 **Saving.** The `state` job (interval 10 seconds, timeout 5 seconds, last in the job list; it records nothing) saves when a change waits:
 
@@ -251,8 +249,7 @@ a link, mode 0600), writes and syncs it, renames it over `agent-state.json` and 
 the write and the bookkeeping of a save, so the job's save and the stop's never run at once. **Every save first makes the spool durable**
 (within the save's deadline: the job's timeout, or 5 seconds at the stop), so no saved position or state covers a record a crash can still
 lose; when that sync fails or does not finish in time, the save is not written. A failure, also a missing directory, is logged once as
-warning `agent state not saved` with `err` `agentstate: save: <system error text>` (never a path), or `agentstate: save: spool not
-durable` when the spool's sync failed, until a save succeeds, and the agent goes on; a save that hangs past the job's timeout is a gap of
+warning `agent state not saved` with `err` `agentstate: save: <system error text>` (never a path), or `agentstate: save: spool not durable` when the spool's sync failed, until a save succeeds, and the agent goes on; a save that hangs past the job's timeout is a gap of
 collector `state`.
 
 **Saving at the stop.** After the scheduler has stopped, the agent saves the state once more when anything changed since the last save, so

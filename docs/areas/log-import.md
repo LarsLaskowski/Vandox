@@ -11,8 +11,8 @@ in the documents under *Not here*.
 - `vandoxd [flags] import [-config <file>] <path>` imports the input at `<path>`. `-config` is accepted before and
   after `import`. The command takes exactly one path. `-h` prints its usage and exits 0. `-healthcheck` together
   with `import` is a usage error.
-- In the container: `docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/<name>`. `-it` is needed for Ctrl-C to
-  reach the import; stopping the container also ends it. Nothing committed is lost, and the next run resumes.
+- In the container: `docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/<name>` (`-it` lets Ctrl-C reach
+  the import). Stopping the container also ends it; nothing committed is lost, and the next run resumes.
 - The import loads the configuration like the service ([Configuration and secrets](configuration-and-secrets.md)), logs
   as JSON lines to standard error at `log.level`, opens the database next to the running service, and stops cleanly on
   SIGINT or SIGTERM.
@@ -42,7 +42,7 @@ in the documents under *Not here*.
   links, devices, FIFOs and unknown types are listed; a corrupt header ends the archive, which is listed as failed.
   A tar entry with a PAX size record is refused with a reason, and extended headers are capped at 1 MiB.
 - Symbolic links, hard links and special files in a directory or archive are listed and never followed or opened as
-  data. The operator copies the target instead.
+  data; the operator copies the target instead.
 - At most **20,000 entries** per run (every directory entry of any kind and every tar header except PAX global
   headers). The limit is enforced while scanning: the entry that exceeds it ends the scan at once, is not read, and
   nothing has been written. A larger input is split by the operator.
@@ -92,7 +92,7 @@ in the documents under *Not here*.
 - Pass 1 lists every file, detects its parser and reads the whole decompressed content to compute hash and size; a
   file that cannot be read completely (truncated or corrupt gzip, I/O error) fails there and is not imported, not even
   in part (the operator can decompress the readable part and import it as a plain file). Pass 2 imports the recognized
-  files in input order. Hashing reports progress every 64 MiB.
+  files in input order.
 - Records are written in **batches** of at most 2,000 records or the records from 4 MiB of input, whichever comes
   first, each batch in one transaction, so the single write lock is never held for a whole file. Per file the store
   keeps the number of records stored; a batch advances it in the same transaction as its records, as a
@@ -180,7 +180,7 @@ documents add only their own rules.
 - The parsers are registered in an explicit, ordered list (the order is part of the behavior). The registry refuses
   a missing parser, a duplicate type or an invalid type name. A new parser is one parser and one entry in the list;
   the importer does not change.
-- Unless a hook replaces it, `vandoxd import` registers, in this order: `journal`, `mariadb`, `dovecot`, `syslog`,
+- Unless a hook replaces it, `vandoxd import` registers in this order: `journal`, `mariadb`, `dovecot`, `syslog`,
   `plesk-panel`, `sw-cp-server-error`, `nginx-error`, `apache-error`, `legacy-monitor` (documents under *Not here*).
 - Detection receives the file (cleaned name and modification time) and its **head**, the first 4,096 bytes, and
   returns a confidence, in rising order none, name match, content match or path match (only the Plesk and web server error log parsers
@@ -215,8 +215,8 @@ documents add only their own rules.
   expression, and are linear in the length of a line.
 - Skip reasons are fixed texts that never contain input content. Skip line numbers are 1-based and count in the whole
   file (the journal export reports 0).
-- A parser may keep a line it cannot read as a **raw record** and report it with a warning (a fixed reason with the
-  line number, like a skip). The line is stored, not skipped; the importer counts such lines per file and keeps the
+- A parser may keep a line it cannot read as a **raw record** and report it with a warning (a fixed reason and a line
+  number, as for a skip). The line is stored, not skipped; the importer counts such lines per file and keeps the
   first ten reasons. Only the Plesk and web server error log parsers keep raw lines; the others skip.
 - The importer validates every record, including the size of a JSON payload (at most 16,777,216 bytes of JSON; metric
   points and log lines are not checked). A refused record is counted as a skipped line with a reason that begins
