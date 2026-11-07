@@ -306,11 +306,12 @@ func TestLoadAgent_InvalidValues(t *testing.T) {
 	cases := map[string][]string{
 		"agent_id": {"''", quote(longID), "-a", quote("a b"), quote("a/b"), quote(sentinel + "/value"), "~", "[a]", "{a: b}", "", quote("\u00E4")},
 		"backend.url": {
-			"''", "'ftp://h:1'", "'h:1'", "'http://'", quote("http://u:" + secretValue + "@h:1"),
-			quote("http://h:1/?token=" + secretValue), "'http://h:1/?'", "'http://h:1/#f'", "'http://h:1/ingest'",
-			"'http://h:0'", "'http://h:65536'", "'http://h:x'", "'http://h:+80'", "'http:opaque'",
+			"''", "'ftp://100.64.0.1:1'", "'h:1'", "'http://'", quote("http://u:" + secretValue + "@100.64.0.1:1"),
+			quote("http://100.64.0.1:1/?token=" + secretValue), "'http://100.64.0.1:1/?'", "'http://100.64.0.1:1/#f'",
+			"'http://100.64.0.1:1/ingest'", "'http://100.64.0.1:0'", "'http://100.64.0.1:65536'", "'http://100.64.0.1:x'",
+			"'http://100.64.0.1:+80'", "'http:opaque'",
 			"'http://a%E2%80%A8b:1'", "'http://a%2Fb:1'", "'http://h_1:1'", quote("http://" + secretValue + " x:1"),
-			"~", "[a]", "{a: b}", "'http://h:1/a'", "'http://h:123456'",
+			"~", "[a]", "{a: b}", "'http://100.64.0.1:1/a'", "'http://100.64.0.1:123456'",
 		},
 		"spool.directory": {"''", "spool", "/var/lib/../x", "/var/lib/vandox/", quote(sentinel + "/x"), "~", "[a]", "{a: b}"},
 		"log.level":       {"INFO", "trace", "''", quote(sentinel), "~", "[a]", "{a: b}"},

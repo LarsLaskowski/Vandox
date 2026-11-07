@@ -158,4 +158,5 @@ logs nothing.
 `internal/spool`), `TestHTTPTransport_IgnoresProxyEnvironment`, `TestHTTPTransport_FollowsNoRedirect`,
 `TestHTTPTransport_RefusesUntrustedCertificate`, `TestHTTPTransport_RefusesOversizedHeaders`,
 `TestHTTPTransport_ReadsAtMostFourKiBOfBody`, `TestHTTPTransport_RefusedOnlyWithHeader`, `TestNeedsDevice_FalseOnlyForLoopback`,
-`TestHTTPTransport_FailsAtOnceWithoutTheDevice`, `TestHTTPTransport_LeavesLoopbackUnbound`.
+`TestHTTPTransport_FailsAtOnceWithoutTheDevice`, `TestHTTPTransport_LeavesLoopbackUnbound`, `TestNewHTTPTransport_RefusesHostNames`,
+`TestLoadAgent_BackendURLHostMustBeAnIPAddress` (in `internal/config`), `TestValidateBackendURL_RefusesHostNames` (in `deploy/agent`).

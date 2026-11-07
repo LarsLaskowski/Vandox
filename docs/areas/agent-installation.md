@@ -227,4 +227,5 @@ with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` (the enforceme
 
 `deploy/agent/` (`install.sh`, `uninstall.sh`, `common.sh` with `check_bundle_dir` and `read_spool_directory`, `vandox-agent.service`,
 `mariadb-user.sql`, `mariadb-user-remove.sql`, the example `agent.yaml`); a test-only Go package pins the unit and the scripts
-(`TestService_*`, `TestEntryCheck_*`, `TestCheckBundleDir_*`, `TestInstallDocuments_UseTheReleaseBundle`).
+(`TestService_*`, `TestEntryCheck_*`, `TestCheckBundleDir_*`, `TestInstallDocuments_UseTheReleaseBundle`,
+`TestValidateBackendURL_RefusesHostNames`).

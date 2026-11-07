@@ -1572,10 +1572,12 @@ func runBackendURLCases(t *testing.T) {
 	refused := []string{
 		"https://backend.tail1234.ts.net", "http://h", "http://h:65535", "https://h/", "http://a.b-c.d",
 		"http://" + label63, "http://" + name253, "http://010.0.0.1",
-		"ftp://h", "http://h/x", "http://u@h", "http://h:0", "http://h:65536", `"http://h"`, "http://h #", "http://h ", " http://h",
-		"http://h\n", "http://h_x", "http://[fd7a::1", "http://1.2.3.4.5", "", "http://", "http://:8081", "http://h:", "http://h:08081",
-		"http://256.1.1.1", "http://-h", "http://h-", "http://h..x", "http://[g::1]", "http://[1]", "http://" + label63 + "a",
-		"http://" + name254, "http://h?x=1", "http://h#x", "http://h'x", "http://h:80/\n", "HTTP2://h", "http://h:8081//",
+		"ftp://100.64.0.1", "http://100.64.0.1/x", "http://u@100.64.0.1", "http://100.64.0.1:0", "http://100.64.0.1:65536",
+		`"http://100.64.0.1"`, "http://100.64.0.1 #", "http://100.64.0.1 ", " http://100.64.0.1", "http://100.64.0.1\n",
+		"http://h_x", "http://[fd7a::1", "http://1.2.3.4.5", "", "http://", "http://:8081", "http://100.64.0.1:",
+		"http://100.64.0.1:08081", "http://256.1.1.1", "http://-h", "http://h-", "http://h..x", "http://[g::1]", "http://[1]",
+		"http://" + label63 + "a", "http://" + name254, "http://100.64.0.1?x=1", "http://100.64.0.1#x", "http://100.64.0'1",
+		"http://100.64.0.1:80/\n", "HTTP2://100.64.0.1", "http://100.64.0.1:8081//",
 	}
 
 	for _, v := range accepted {
