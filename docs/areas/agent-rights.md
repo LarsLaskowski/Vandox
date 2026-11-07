@@ -81,8 +81,8 @@ and the production kernel (5.15) predates it.
   ([Agent sending](agent-sending.md)). The unit must allow it: `RestrictAddressFamilies=` keeps **`AF_INET` and `AF_INET6`** beside
   `AF_UNIX`, and a system-call filter must not deny `socket` and `connect` for them, or every request fails as `connection failed`.
   Binding the socket to `tailscale0` needs no capability on Linux 5.7 and later. The unit restricts the addresses the agent may reach to
-  localhost and the tailnet ranges ([Agent installation](agent-installation.md)); with a host name in `backend.url` the agent also
-  queries the name server of `/etc/resolv.conf` (port 53), which an `IPAddressAllow=` must include.
+  localhost and the tailnet ranges ([Agent installation](agent-installation.md));
+  `backend.url` holds an IP address, so the agent looks up no name.
 - **Systemd collector.** Reading unit states over the system bus needs no group and no capability: systemd's bus policy lets every
   user call `Properties.Get`, `ListUnitsByPatterns`, `ListUnitsByNames` and `LoadUnit` (the server capture was taken with every call
   made as `nobody`). The unit must keep the bus `/run/dbus/system_bus_socket` reachable: `RestrictAddressFamilies=` keeps `AF_UNIX` and

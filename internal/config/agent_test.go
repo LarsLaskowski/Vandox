@@ -306,11 +306,12 @@ func TestLoadAgent_InvalidValues(t *testing.T) {
 	cases := map[string][]string{
 		"agent_id": {"''", quote(longID), "-a", quote("a b"), quote("a/b"), quote(sentinel + "/value"), "~", "[a]", "{a: b}", "", quote("\u00E4")},
 		"backend.url": {
-			"''", "'ftp://h:1'", "'h:1'", "'http://'", quote("http://u:" + secretValue + "@h:1"),
-			quote("http://h:1/?token=" + secretValue), "'http://h:1/?'", "'http://h:1/#f'", "'http://h:1/ingest'",
-			"'http://h:0'", "'http://h:65536'", "'http://h:x'", "'http://h:+80'", "'http:opaque'",
+			"''", "'ftp://100.64.0.1:1'", "'h:1'", "'http://'", quote("http://u:" + secretValue + "@100.64.0.1:1"),
+			quote("http://100.64.0.1:1/?token=" + secretValue), "'http://100.64.0.1:1/?'", "'http://100.64.0.1:1/#f'",
+			"'http://100.64.0.1:1/ingest'", "'http://100.64.0.1:0'", "'http://100.64.0.1:65536'", "'http://100.64.0.1:x'",
+			"'http://100.64.0.1:+80'", "'http:opaque'",
 			"'http://a%E2%80%A8b:1'", "'http://a%2Fb:1'", "'http://h_1:1'", quote("http://" + secretValue + " x:1"),
-			"~", "[a]", "{a: b}", "'http://h:1/a'", "'http://h:123456'",
+			"~", "[a]", "{a: b}", "'http://100.64.0.1:1/a'", "'http://100.64.0.1:123456'",
 		},
 		"spool.directory": {"''", "spool", "/var/lib/../x", "/var/lib/vandox/", quote(sentinel + "/x"), "~", "[a]", "{a: b}"},
 		"log.level":       {"INFO", "trace", "''", quote(sentinel), "~", "[a]", "{a: b}"},
@@ -360,7 +361,7 @@ func TestLoadAgent_ControlCharacters(t *testing.T) {
 }
 
 func TestLoadAgent_AcceptedValues(t *testing.T) {
-	urls := []string{"http://100.64.0.1:8081", "https://nas.tailnet.ts.net", "http://[fd7a:115c:a1e0::1]:8081", "HTTP://h:1/", "http://h:65535", "http://h"}
+	urls := []string{"http://100.64.0.1:8081", "https://100.64.0.2", "http://[fd7a:115c:a1e0::1]:8081", "HTTP://100.64.0.1:1/", "http://100.64.0.1:65535", "http://100.64.0.1"}
 	for _, u := range urls {
 		t.Run("url "+u, func(t *testing.T) {
 			got := loadAcceptedAgent(t, "url", "backend.url", quote(u))
@@ -391,6 +392,44 @@ func TestLoadAgent_AcceptedValues(t *testing.T) {
 			t.Errorf("LoadAgent(directory).Spool.Directory = %q, want %q", got.Spool.Directory, "/srv/spool")
 		}
 	})
+}
+
+func TestLoadAgent_BackendURLHostMustBeAnIPAddress(t *testing.T) {
+	const reason = "host must be an IP address without a zone, not a name"
+	refused := []string{
+		"https://nas.tailnet.ts.net", "http://localhost:8081", "http://h", "http://127.1", "http://2130706433",
+		"http://0x7f.0.0.1", "http://127.0.0.1.:8081", "http://010.0.0.1", "http://[fe80::1%25eth0]:8081",
+		"http://[::1%25lo]:1",
+	}
+	for _, u := range refused {
+		t.Run("AC1 refuses "+u, func(t *testing.T) {
+			path := writeTemp(t, agentDoc(map[string]string{"backend.url": quote(u)}))
+			got, err := LoadAgent(path, agentEnv())
+			if got != nil {
+				t.Errorf("LoadAgent(url %q) = %+v, want nil on error", u, got)
+			}
+			ke := requireKeyError(t, err, "backend.url", agentLine["backend.url"])
+			if ke.Reason != reason {
+				t.Errorf("LoadAgent(url %q) KeyError.Reason = %q, want %q", u, ke.Reason, reason)
+			}
+			want := "config: " + path + ":3: backend.url: " + reason
+			if err.Error() != want {
+				t.Errorf("LoadAgent(url %q) error = %q, want %q", u, err.Error(), want)
+			}
+		})
+	}
+	accepted := []string{
+		"http://100.64.0.1:8081", "HTTP://127.0.0.1:1/", "http://[fd7a:115c:a1e0::1]:8081", "https://[::1]",
+		"http://[::ffff:100.64.0.1]:8081",
+	}
+	for _, u := range accepted {
+		t.Run("AC1 accepts "+u, func(t *testing.T) {
+			got := loadAcceptedAgent(t, "url", "backend.url", quote(u))
+			if got.Backend.URL != u {
+				t.Errorf("LoadAgent(url %q).Backend.URL = %q, want %q", u, got.Backend.URL, u)
+			}
+		})
+	}
 }
 
 // loadAcceptedAgent loads a valid agent file with the one option key set to value

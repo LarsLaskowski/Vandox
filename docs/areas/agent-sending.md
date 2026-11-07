@@ -26,22 +26,21 @@ in outline are in [Agent](agent.md) (*Connection*).
   up to 16 KiB and at most 4,096 bytes of its body, which it discards; once 4,096 bytes of a body were read the agent closes the
   connection itself and cancels the request, so the transport does not read on. The transport's results hold a fixed reason, never an
   error text.
-- Plain `http` is meant only for the backend host's tailnet address, because the tailnet encrypts and authenticates the transport
-  (its MagicDNS name would qualify too, but does not resolve in the documented setup, below); every other address is `https`.
+- Plain `http` is meant only for the backend host's tailnet address, because the tailnet encrypts and authenticates the transport;
+  every other address is `https`. With `https` the backend's certificate must name the IP address of `backend.url` as a subject
+  alternative name, so a `*.ts.net` certificate fails as `tls failed`.
 - Every connection to an address that is not a loopback address (`127.0.0.0/8`, `::1`, an IPv4-mapped loopback) is bound to the
   interface `tailscale0` (`SO_BINDTODEVICE`) before it connects; an address that cannot be parsed is bound, and a connection to a
-  loopback address is not, which a backend on the same host needs and which a forged name answer can reach. While Tailscale is down a send therefore never leaves through another
+  loopback address is not, which a backend on the same host needs. While Tailscale is down a send therefore never leaves through another
   interface: without `tailscale0` it fails at once as `connection failed`, with the interface but no routes it ends as a `timeout`, and
   the records stay in the spool.
 - **The second layer.** The installed unit lets the agent reach only localhost and the tailnet ranges (`IPAddressAllow=`,
-  [Agent installation](agent-installation.md), *The unit in short*), so any other address, and a host name resolved by a name server
-  outside localhost and the tailnet, fails as `connection failed`. A host name resolved through the local stub is not blocked, and the
-  binding holds only for the address: configure the tailnet address in `backend.url` (issue #373 covers the forged-answer residual,
-  [Network and security model](network-and-security-model.md), *Agent to backend*; the unit settings the sender needs are in
-  [Agent rights](agent-rights.md)).
-- A MagicDNS name works only while Tailscale manages the server's DNS, which the documented setup turns off
-  (`tailscale set --accept-dns=false`); with a policy that lets the server reach only the ingest port, Tailscale's name servers can be
-  out of reach and lookups on the server can fail.
+  [Agent installation](agent-installation.md), *The unit in short*), so any other address fails as `connection failed`.
+  `backend.url` holds an IP address; no name is looked up ([Network and security model](network-and-security-model.md), *Agent to
+  backend*; the unit settings the sender needs are in [Agent rights](agent-rights.md)).
+- A host name in `backend.url` is refused by the loader and by the transport (`sender: backend url: not usable`), as are the short and
+  numeric IPv4 forms and an IPv6 zone, because a name server, not the configuration, would then choose the destination of the token
+  (record 0192).
 - The scheme must match the listener: an `https` URL at a plain-http listener fails as `connection failed`, and an `http` URL at a TLS
   port gets a `400` without the refusal header, which counts as a backend that does not accept batches (*Not accepting*), so the agent
   only waits and gives no record up.
@@ -138,6 +137,8 @@ logs nothing.
   are given up with a recorded gap, at most 10 an hour.
 - [0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md) — why every non-loopback connection is
   bound to `tailscale0`.
+- [0192](../decisions/0192-backend-url-names-the-backend-by-ip-address-host-names-are-refused.md) — why `backend.url` holds an IP address and
+  a host name is refused.
 
 ## Not here
 
@@ -158,4 +159,5 @@ logs nothing.
 `internal/spool`), `TestHTTPTransport_IgnoresProxyEnvironment`, `TestHTTPTransport_FollowsNoRedirect`,
 `TestHTTPTransport_RefusesUntrustedCertificate`, `TestHTTPTransport_RefusesOversizedHeaders`,
 `TestHTTPTransport_ReadsAtMostFourKiBOfBody`, `TestHTTPTransport_RefusedOnlyWithHeader`, `TestNeedsDevice_FalseOnlyForLoopback`,
-`TestHTTPTransport_FailsAtOnceWithoutTheDevice`, `TestHTTPTransport_LeavesLoopbackUnbound`.
+`TestHTTPTransport_FailsAtOnceWithoutTheDevice`, `TestHTTPTransport_LeavesLoopbackUnbound`, `TestNewHTTPTransport_RefusesHostNames`,
+`TestLoadAgent_BackendURLHostMustBeAnIPAddress` (in `internal/config`), `TestValidateBackendURL_RefusesHostNames` (in `deploy/agent`).

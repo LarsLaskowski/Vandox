@@ -228,4 +228,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0189 | The install scripts read spool.directory of a kept configuration with a fail-closed line reader | Accepted | 2026-10-27 |
 | 0190 | The install scripts refuse a bundle another user could change and check its manifest before sourcing | Accepted | 2026-10-27 |
 | 0191 | The documented install steps are single commands with check and extraction in one line | Accepted | 2026-10-27 |
+| 0192 | `backend.url` names the backend by IP address; host names are refused | Accepted | 2026-11-07 |
 <!-- project:end index -->

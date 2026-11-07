@@ -1438,7 +1438,7 @@ func runParseArgsCases(t *testing.T) {
 
 	tokenLine := "install.sh: the token is read from standard input, never from an option"
 	agentLine := "install.sh: --agent-id is not a valid agent ID"
-	urlLine := "install.sh: --backend-url is not http(s)://host[:port]"
+	urlLine := backendURLLine
 
 	cases := []usageCase{
 		{"version option", []string{"--version", "v1.2.3"}, []string{usageLine}},
@@ -1567,15 +1567,17 @@ func runBackendURLCases(t *testing.T) {
 	name254 := strings.Join([]string{label63, label63, label63, strings.Repeat("a", 62)}, ".")
 
 	accepted := []string{
-		"http://100.64.0.1:8081", "https://backend.tail1234.ts.net", "http://[fd7a:115c:a1e0::1]:8081/", "http://h",
-		"http://h:65535", "https://h/", "http://a.b-c.d", "http://1.2.3.4", "http://" + label63, "http://" + name253,
-		"http://[::1]:8081",
+		"http://100.64.0.1:8081", "http://[fd7a:115c:a1e0::1]:8081/", "http://1.2.3.4", "http://[::1]:8081",
 	}
 	refused := []string{
-		"ftp://h", "http://h/x", "http://u@h", "http://h:0", "http://h:65536", `"http://h"`, "http://h #", "http://h ", " http://h",
-		"http://h\n", "http://h_x", "http://[fd7a::1", "http://1.2.3.4.5", "", "http://", "http://:8081", "http://h:", "http://h:08081",
-		"http://256.1.1.1", "http://-h", "http://h-", "http://h..x", "http://[g::1]", "http://[1]", "http://" + label63 + "a",
-		"http://" + name254, "http://h?x=1", "http://h#x", "http://h'x", "http://h:80/\n", "HTTP2://h", "http://h:8081//",
+		"https://backend.tail1234.ts.net", "http://h", "http://h:65535", "https://h/", "http://a.b-c.d",
+		"http://" + label63, "http://" + name253, "http://010.0.0.1",
+		"ftp://100.64.0.1", "http://100.64.0.1/x", "http://u@100.64.0.1", "http://100.64.0.1:0", "http://100.64.0.1:65536",
+		`"http://100.64.0.1"`, "http://100.64.0.1 #", "http://100.64.0.1 ", " http://100.64.0.1", "http://100.64.0.1\n",
+		"http://h_x", "http://[fd7a::1", "http://1.2.3.4.5", "", "http://", "http://:8081", "http://100.64.0.1:",
+		"http://100.64.0.1:08081", "http://256.1.1.1", "http://-h", "http://h-", "http://h..x", "http://[g::1]", "http://[1]",
+		"http://" + label63 + "a", "http://" + name254, "http://100.64.0.1?x=1", "http://100.64.0.1#x", "http://100.64.0'1",
+		"http://100.64.0.1:80/\n", "HTTP2://100.64.0.1", "http://100.64.0.1:8081//",
 	}
 
 	for _, v := range accepted {
@@ -1587,7 +1589,45 @@ func runBackendURLCases(t *testing.T) {
 		h := newHarness(t)
 
 		got := h.run(`validate_backend_url "$1"`, "", v)
-		expectResult(t, fmt.Sprintf("validate_backend_url %q", v), got, 2, "", "install.sh: --backend-url is not http(s)://host[:port]\n")
+		expectResult(t, fmt.Sprintf("validate_backend_url %q", v), got, 2, "", backendURLLine+"\n")
+	}
+}
+
+// backendURLLine is the one message validate_backend_url prints for every refused value.
+const backendURLLine = "install.sh: --backend-url is not http(s)://ip-address[:port]"
+
+// TestValidateBackendURL_RefusesHostNames checks that only IP literals pass: a host name, an IPv4 part with a
+// leading zero and an IPv6 zone are refused with the one message, the literals of the documented setup accepted.
+func TestValidateBackendURL_RefusesHostNames(t *testing.T) {
+	t.Parallel()
+
+	refused := []string{
+		"https://backend.tail1234.ts.net", "http://h", "http://localhost:8081", "http://a.b-c.d", "http://010.0.0.1",
+		"http://100.064.0.1:8081", "http://[fe80::1%25eth0]:8081",
+	}
+	accepted := []string{
+		"http://100.0.0.1:8081", "http://100.64.0.1:8081", "http://1.2.3.4", "http://[fd7a:115c:a1e0::1]:8081/",
+		"http://[::1]:8081",
+	}
+
+	for _, v := range refused {
+		t.Run("AC3 refuses "+v, func(t *testing.T) {
+			t.Parallel()
+
+			h := newHarness(t)
+			got := h.run(`validate_backend_url "$1"`, "", v)
+			expectResult(t, fmt.Sprintf("validate_backend_url %q", v), got, 2, "", backendURLLine+"\n")
+		})
+	}
+
+	for _, v := range accepted {
+		t.Run("AC3 accepts "+v, func(t *testing.T) {
+			t.Parallel()
+
+			h := newHarness(t)
+			got := h.run(`validate_backend_url "$1"`, "", v)
+			expectResult(t, fmt.Sprintf("validate_backend_url %q", v), got, 0, "", "")
+		})
 	}
 }
 
@@ -2130,69 +2170,6 @@ func TestTailnetWarning_OnlyForLiteralsOutsideTheRanges(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestNameServerWarning_ForServersOutsideLocalhostAndTheTailnet checks E12 and N10: only a name host is
-// checked, only a nameserver value that is an IP literal is printed, anything else is skipped.
-func TestNameServerWarning_ForServersOutsideLocalhostAndTheTailnet(t *testing.T) {
-	t.Parallel()
-
-	const (
-		nameURL = "https://backend.tail1234.ts.net"
-		ipURL   = "http://100.64.0.1:8081"
-	)
-
-	warn := func(ip string) string {
-		return "install.sh: WARNING name server " + ip + " is blocked by the unit; use the tailnet address or MagicDNS\n"
-	}
-
-	cases := []struct {
-		name   string
-		url    string
-		resolv string
-		want   string
-	}{
-		{"systemd-resolved stub", nameURL, "nameserver 127.0.0.53\n", ""},
-		{"tailnet resolver", nameURL, "nameserver 100.100.100.100\n", ""},
-		{"IPv6 loopback", nameURL, "nameserver ::1\n", ""},
-		{"IPv6 tailnet resolver", nameURL, "nameserver fd7a:115c:a1e0::53\n", ""},
-		{"public resolver", nameURL, "nameserver 1.1.1.1\n", warn("1.1.1.1")},
-		{"above the tailnet range", nameURL, "nameserver 100.128.0.1\n", warn("100.128.0.1")},
-		{"below the tailnet range", nameURL, "nameserver 100.63.255.255\n", warn("100.63.255.255")},
-		{"an IP host", ipURL, "nameserver 1.1.1.1\n", ""},
-		{"a server followed by a junk suffix", nameURL, "nameserver 1.1.1.1;x\n", ""},
-		{"a command substitution", nameURL, "nameserver $(id)\n", ""},
-		{"an escape sequence", nameURL, "nameserver " + asciiESC + "[31m\n", ""},
-		{"an octet out of range", nameURL, "nameserver 999.1.1.1\n", ""},
-		{"a link-local server with a zone", nameURL, "nameserver fe80::1%eth0\n", warn("fe80::1")},
-		{
-			"several lines", nameURL,
-			"# nameserver 9.9.9.9\nsearch example.com\nnameserver 127.0.0.53\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n",
-			warn("8.8.8.8") + warn("1.1.1.1"),
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			h := newHarness(t)
-			resolv := h.writeFile("resolv.conf", tc.resolv)
-
-			got := h.run(`name_server_warning "$1" "$2"`, "", tc.url, resolv)
-
-			expectResult(t, "name_server_warning", got, 0, tc.want, "")
-		})
-	}
-
-	t.Run("no resolv.conf", func(t *testing.T) {
-		t.Parallel()
-
-		h := newHarness(t)
-		got := h.run(`name_server_warning "$1" "$2"`, "", nameURL, filepath.Join(h.dir, "missing"))
-
-		expectResult(t, "name_server_warning", got, 0, "", "")
-	})
 }
 
 // currentGroup returns the name of the test process's group.

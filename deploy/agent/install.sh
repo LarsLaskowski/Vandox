@@ -238,29 +238,7 @@ _is_ipv4() {
     done
 }
 
-# _is_host_name VALUE: labels of A-Za-z0-9- (1 to 63 bytes, not starting or ending with -) joined by single dots,
-# 253 bytes at most.
-_is_host_name() {
-    local value=$1
-    local label
-    local re='^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$'
-    local re_chars='^[A-Za-z0-9.-]+$'
-    local -a labels
-
-    if [[ ! $value =~ $re_chars ]] || ((${#value} > 253)) || [[ $value == .* || $value == *. || $value == *..* ]]; then
-        return 1
-    fi
-
-    IFS=. read -r -a labels <<<"$value"
-
-    for label in "${labels[@]}"; do
-        if ((${#label} > 63)) || [[ ! $label =~ $re ]]; then
-            return 1
-        fi
-    done
-}
-
-# validate_backend_url VALUE: http(s)://host[:port][/]; status 2 with the message.
+# validate_backend_url VALUE: http(s)://ip-address[:port][/]; status 2 with the message.
 validate_backend_url() {
     local value=$1
     local LC_ALL=C
@@ -269,6 +247,7 @@ validate_backend_url() {
     local re_host='^([^:]+)(:([0-9]+))?$'
     local re_port='^[1-9][0-9]{0,4}$'
     local re_digits='^[0-9.]+$'
+    local re_zero='(^|\.)0[0-9]'
     local hostport host port=""
 
     if [[ $value =~ $re_url ]]; then
@@ -282,10 +261,10 @@ validate_backend_url() {
             host=${BASH_REMATCH[1]}
             port=${BASH_REMATCH[3]}
 
-            if [[ $host =~ $re_digits ]]; then
+            if [[ $host =~ $re_digits && ! $host =~ $re_zero ]]; then
                 _is_ipv4 "$host" || host=""
             else
-                _is_host_name "$host" || host=""
+                host=""
             fi
         else
             host=""
@@ -300,7 +279,7 @@ validate_backend_url() {
         fi
     fi
 
-    echo "install.sh: --backend-url is not http(s)://host[:port]" >&2
+    echo "install.sh: --backend-url is not http(s)://ip-address[:port]" >&2
     return 2
 }
 
@@ -331,54 +310,6 @@ tailnet_warning() {
     fi
 
     echo "install.sh: WARNING $URL_HOST is not a tailnet address; the unit blocks it"
-}
-
-# name_server_warning URL RESOLVCONF: for a host name, warns about each name server outside localhost and the
-# tailnet; a value that is not an IP literal is skipped.
-name_server_warning() {
-    local url=$1
-    local resolv=$2
-    local LC_ALL=C
-    local key value rest first second lower
-    local re_v6='^[0-9A-Fa-f:]+$'
-
-    _split_url "$url"
-
-    if [[ $URL_HOST == *:* ]] || _is_ipv4 "$URL_HOST"; then
-        return 0
-    fi
-
-    if [[ ! -r $resolv ]]; then
-        return 0
-    fi
-
-    while read -r key value rest || [[ -n $key ]]; do
-        if [[ $key != nameserver ]]; then
-            continue
-        fi
-
-        value=${value%%\%*}
-
-        if _is_ipv4 "$value"; then
-            IFS=. read -r first second _ <<<"$value"
-            first=$((10#$first))
-            second=$((10#$second))
-
-            if ((first == 127)) || ((first == 100 && second >= 64 && second <= 127)); then
-                continue
-            fi
-        elif [[ $value == *:*:* && $value =~ $re_v6 ]]; then
-            lower=${value,,}
-
-            if [[ $lower == "::1" || $lower == fd7a:115c:a1e0:* ]]; then
-                continue
-            fi
-        else
-            continue
-        fi
-
-        echo "install.sh: WARNING name server $value is blocked by the unit; use the tailnet address or MagicDNS"
-    done <"$resolv"
 }
 
 # --- the token (bash builtins only: it never reaches a child process) ------------------------------------
@@ -978,7 +909,6 @@ main() {
         fi
 
         tailnet_warning "$BACKEND_URL"
-        name_server_warning "$BACKEND_URL" /etc/resolv.conf
     fi
 
     check_spool_directory "$spool" || exit 1

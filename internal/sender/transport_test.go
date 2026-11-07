@@ -186,8 +186,42 @@ func TestHTTPTransport_IgnoresProxyEnvironment(t *testing.T) {
 	}
 }
 
+func TestNewHTTPTransport_RefusesHostNames(t *testing.T) {
+	refused := []string{
+		"https://nas.tailnet.ts.net", "http://localhost:8081", "http://h", "http://127.1", "http://2130706433",
+		"http://0x7f.0.0.1", "http://127.0.0.1.:8081", "http://010.0.0.1", "http://[fe80::1%25eth0]:8081",
+		"http://[::1%25lo]:1",
+	}
+	for _, u := range refused {
+		t.Run("AC2 refuses "+u, func(t *testing.T) {
+			tr, err := NewHTTPTransport(u, testSecret(t, testToken))
+			if tr != nil {
+				t.Errorf("NewHTTPTransport(%q) = %+v, want a nil transport", u, tr)
+			}
+			if !errors.Is(err, errBackendURL) {
+				t.Fatalf("NewHTTPTransport(%q) error = %v, want errBackendURL", u, err)
+			}
+			if err.Error() != "sender: backend url: not usable" {
+				t.Errorf("NewHTTPTransport(%q) error text = %q, want %q", u, err.Error(), "sender: backend url: not usable")
+			}
+		})
+	}
+	accepted := []string{
+		"http://100.64.0.1:8081", "HTTP://127.0.0.1:1/", "http://[fd7a:115c:a1e0::1]:8081", "https://[::1]",
+		"http://[::ffff:100.64.0.1]:8081",
+	}
+	for _, u := range accepted {
+		t.Run("AC2 accepts "+u, func(t *testing.T) {
+			tr := newTransport(t, u)
+			if tr.client == nil {
+				t.Errorf("NewHTTPTransport(%q) built no http client, want a transport", u)
+			}
+		})
+	}
+}
+
 func TestHTTPTransport_BuiltWithoutProxyAndRedirects(t *testing.T) {
-	tr := newTransport(t, "https://backend.example:8081")
+	tr := newTransport(t, "https://100.64.0.1:8081")
 	if tr.client == nil {
 		t.Fatalf("NewHTTPTransport() built no http client")
 	}
