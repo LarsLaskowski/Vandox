@@ -43,6 +43,21 @@ public static class LogText
     }
 
     /// <summary>
+    /// Splits a text into plain and escaped runs. The runs together hold at most <paramref name="maxChars"/> characters; a text that does not fit ends in an
+    /// escaped run that names the characters not shown.
+    /// </summary>
+    /// <param name="text">The text</param>
+    /// <param name="maxChars">The output cap</param>
+    /// <param name="maxRuns">The most runs; the last one holds the rest</param>
+    /// <returns>The runs, at most <paramref name="maxRuns"/></returns>
+    public static IReadOnlyList<TextRun> Runs(string text, int maxChars, int maxRuns)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxRuns, 1);
+
+        return Build(text, maxChars, maxRuns);
+    }
+
+    /// <summary>
     /// Escapes a text into one string.
     /// </summary>
     /// <param name="text">The text</param>
@@ -87,9 +102,17 @@ public static class LogText
 
             if (current.Length == 0 && runs.Count == maxRuns - 1)
             {
-                var rest = Escape(text[index..], maxChars - used);
+                var remaining = text[index..];
+                var rest = Escape(remaining, maxChars - used);
 
-                runs.Add(new TextRun(rest, rest.Length != text.Length - index));
+                if (string.Equals(rest, remaining, StringComparison.Ordinal))
+                {
+                    runs.Add(new TextRun(rest, false));
+                }
+                else
+                {
+                    runs.Add(new TextRun(rest, true));
+                }
 
                 return runs;
             }

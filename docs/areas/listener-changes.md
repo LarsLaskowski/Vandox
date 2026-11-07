@@ -135,7 +135,7 @@ PID, times and counts are plain text. The backend's log holds no listener, comma
   are stored and read with an empty command (a user name of 1,024 bytes as UTF-16 is 2 KiB, so an entry is at most about 2.2 KB and 64 of
   them about 140 KB). That is 40 findings of about 420 KB (16.8 MB) and 20 change-only findings of about 140 KB (2.8 MB), so the section is
   at most about 20 MB in the run (computed from these bounds, not measured as a whole; on the page, where every text also carries its runs,
-  up to about 82 MB per circuit, [Report page](web-ui-report-page.md), *Limits and errors*).
+  up to about 36 MB per circuit, [Report page](web-ui-report-page.md), *Limits and errors*).
 - **Time**: the section adds four reads of the narrow derived tables and decodes no payload, and may add at most 5 seconds to a run. Over a
   database with one more year of connection snapshots (one agent, 525,600 marks written through the store's write path in batches of
   1,440, 100 agent starts, 10,000 snapshots with agent findings, 762 MiB) the counts take 101 to 155 ms, the findings after an agent start

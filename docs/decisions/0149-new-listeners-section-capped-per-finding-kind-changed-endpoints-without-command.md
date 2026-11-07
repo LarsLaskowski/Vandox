@@ -24,8 +24,8 @@ command of 1,024 bytes).
 2. **Lower caps per kind (7 to 10, to stay near 5.5 MB on the page)** — weighed after review and rejected: they shorten the forensic
    window of restart findings, the main value of the section, to defend a worst case that needs thousands of maximal commands; the
    bound stays fixed, only a signed-in client opens a circuit, and the incident page already holds about 10 MB per circuit while it
-   reads an incident's window. The chosen caps keep the commands' page share below about 60 MB per circuit; bounding that share
-   further is a follow-up.
+   reads an incident's window. The chosen caps kept the commands' page share below about 60 MB per circuit;
+   [0193](0193-report-page-shows-each-external-text-in-at-most-16-runs.md) bounds that share further.
 3. **User names on the page as stored** — up to 1,024 bytes each; rejected for a cut to 32 UTF-8 bytes, the longest name `useradd`
    makes (64 bytes would add about 12.4 MB per circuit).
 4. **Changed socket UIDs (#305) in the findings under the existing two caps** — no new cap, but a toggling shared endpoint would push
@@ -47,4 +47,5 @@ rules are in [Listener changes](../areas/listener-changes.md), the page's memory
   instead of a newer one; the order shown within an agent is by `seq`.
 - A local user who toggles a shared endpoint can fill the change-only cap and push an earlier takeover out of it; the cap note shows
   the number left out and the rows stay stored.
-- The page's worst case per circuit is large and stated in the Report page area; lowering it is a follow-up, not part of this record.
+- The page's worst case per circuit is stated in the Report page area; the cap of runs that lowers it is
+  [0193](0193-report-page-shows-each-external-text-in-at-most-16-runs.md), not part of this record.
