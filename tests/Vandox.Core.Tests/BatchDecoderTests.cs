@@ -25,9 +25,10 @@ public class BatchDecoderTests
     private const int MaxAllocationFactor = 20;
 
     /// <summary>
-    /// The most the decoder may take as a multiple of a plain parse of the same line.
+    /// The most the decoder may take as a multiple of a plain parse of the same line. The bound is at least three times the highest ratio measured for the correct code
+    /// (41.2 at 8 MiB in the full coverage run; 55.7 at 4 MiB according to the issue) and below the 488 and more of the quadratic variant, rounded to 170.
     /// </summary>
-    private const double MaxTimeFactor = 50;
+    private const double MaxTimeFactor = 170;
 
     /// <summary>
     /// The text of an escape of a high surrogate, with its backslash.
@@ -1565,21 +1566,23 @@ public class BatchDecoderTests
     }
 
     /// <summary>
-    /// One big object followed by many small ones in a line of about 4 MiB takes at most <see cref="MaxTimeFactor"/> times a plain parse of the line. The test compares two
-    /// durations of its own run and asserts no absolute duration.
+    /// One big object followed by many small ones in a line of about 8 MiB takes at most <see cref="MaxTimeFactor"/> times a plain parse of the line. The test compares two
+    /// durations of its own run and asserts no absolute duration. The line has 8 MiB because the cost of a quadratic decoder grows with the square of the line, while the
+    /// coverage instrumentation grows only linearly with it, so a larger line separates a faulty decoder from correct code under instrumentation.
     /// </summary>
     /// <returns>A task that completes when the work is done</returns>
     [TestMethod]
+    [TestCategory("AC1")]
     public async Task BatchDecoderTimeIsInProportionToTheLine()
     {
         // Arrange
-        const int size = 4 << 20;
+        const int size = 8 << 20;
         var line = WireShapes.Record(1, WireShapes.ListOf(WireShapes.ObjectFillingBytes(size / 2), """{"a":0}""", size));
         var lineBytes = Encoding.UTF8.GetBytes(line);
         var compressed = BatchBuilder.Gzip(BatchBuilder.Header, line).ToArray();
         var limits = new WireLimits
                      {
-                         MaxLineBytes = 8 << 20
+                         MaxLineBytes = 16 << 20
                      };
         var options = new JsonDocumentOptions
                       {

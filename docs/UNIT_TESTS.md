@@ -126,7 +126,9 @@ criteria carries each id. The test name follows *Naming* unchanged.
   takes the best of three runs of each, and bounds the ratio of the code under test to a plain reference (Go
   `json.Unmarshal`, .NET `JsonDocument.Parse` of the same bytes) by at least three times the highest ratio
   measured for the correct code, instrumentation (race detector, coverage) included, so a loaded CI host does
-  not make it flaky ([0090](decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)).
+  not make it flaky. The highest ratio is measured in the project's full coverage run as well as alone, because
+  the reference runs faster once earlier tests have warmed it while the instrumented code under test does not,
+  and the input is large enough that the faulty variant exceeds the bound ([0090](decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)).
   Where no plain reference fits, the same rules bound the ratio of the code under test on a multiple of the base
   input (for example twice the base input) to the same code on the base input.
 - A second narrow exception, for a timeout that a library times itself on the real clock with no clock to inject
