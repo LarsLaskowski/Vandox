@@ -146,30 +146,86 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0106 | The logs view takes every filter from the address, searches in bounded pages from the index or by a time-ordered scan, and finds a template's lines by normalizing candidates | Accepted | 2026-10-13 |
 | 0107 | The incidents view reads bounded summaries and the window's own records; notes are rows per incident number that follow merges, saved by a form post with the antiforgery token; every time links to the logs of that moment | Accepted | 2026-10-14 |
 | 0108 | The report page renders the blocks the Markdown is written from, lists the outages in pages of 50 by a new run, takes the language from the address, and runs one report at a time under a deadline of 2 minutes; the Markdown is a GET download | Accepted | 2026-10-15 |
-| 0110 | The agent's runtime frame: one runner per collector at a fixed rate, a gap for every missed sample, sd_notify by hand with a watchdog gated on the runners, journal logging on stderr | Accepted | 2026-10-17 |
-| 0111 | System metrics: three collectors read /proc, /sys, statfs and adjtimex; missing pressure data is logged once and never recorded as zero | Accepted | 2026-10-17 |
+| 0110 | The agent's runtime frame: one runner per collector at a fixed rate, a gap for every missed sample | Accepted | 2026-10-17 |
+| 0111 | System metrics: three collectors read /proc, /sys, statfs and adjtimex, with no program, D-Bus or socket | Accepted | 2026-10-17 |
 | 0112 | gosec G115 as the local stand-in for CodeQL's integer-conversion query; enabled for the whole module, no exclusions | Accepted | 2026-10-17 |
-| 0113 | Process collector: PSS from smaps_rollup, top processes by memory and CPU with every program summed, a full snapshot under memory pressure that the system collector switches | Accepted | 2026-10-17 |
+| 0113 | Process collector: PSS from smaps_rollup, top processes by memory and CPU with every program summed, a full snapshot under memory pressure | Accepted | 2026-10-17 |
 | 0114 | The Go model measures text limits as the encoder writes them, invalid UTF-8 counted as its replacement | Accepted | 2026-10-18 |
-| [0115](0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) | Connection collector: the /proc/net tables with owners from /proc/<pid>/fdinfo, regular and full snapshots in one record kind, a bounded new-listener check that favors privileged ports | Accepted | 2026-10-18 |
-| [0116](0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) | New listeners across an agent start: the agent marks its first snapshot and what its inventory holds, the backend compares when it stores the snapshots, the forensics report shows them with the agent's own findings | Accepted | 2026-10-18 |
-| [0117](0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) | systemd collector: a hand-written D-Bus client with one connection per run, unit states recorded on change, after a lost sample and hourly | Accepted | 2026-10-20 |
-| [0118](0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) | MariaDB collector: a hand-written client over the local socket, the captured statements, a refusal recorded as `not_answering` with its error number | Accepted | 2026-10-21 |
-| [0119](0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md) | Kernel messages from the binary journal files, read in pure Go without decompression | Accepted | 2026-10-22 |
-| [0120](0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) | OOM kill events with triggered snapshots, boots from saved state, and backup runs | Accepted | 2026-10-22 |
-| [0121](0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) | Log shipping: the journal per seqnum ID with bounded zstd decoding, syslog and error log files opened without links, positions committed when the scheduler keeps a run, live lines classified by a Go port of the import's stages, open groups flushed at the stop | Accepted | 2026-10-31 |
-| [0122](0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) | CAP_SYS_PTRACE alone cannot write another user's process memory through /proc/<pid>/mem or /proc/<pid>/fd: CAP_DAC_READ_SEARCH dropped, process_madvise denied, a file-mode residual accepted (amends 0030) | Accepted | 2026-10-23 |
-| [0123](0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) | Agent spool in uncompressed segment files with checksummed frames, clock-bound sequence numbers and range acknowledgements (amends 0045) | Accepted | 2026-10-23 |
-| [0124](0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) | Ingest request: one batch per POST, bearer token, acknowledged by the status alone | Accepted | 2026-10-24 |
-| [0125](0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) | Sender with a live and a backfill stream, one shared backoff, refused records given up with a recorded gap | Accepted | 2026-10-24 |
-| [0126](0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) | Ingest endpoint: the token bound to one configured agent ID, two slots held through the commit, a free-space floor instead of a rate cap | Accepted | 2026-10-25 |
-| [0127](0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) | The backend host needs Tailscale in TUN mode; the ingest port is published on a required bind address (amends 0060) | Accepted | 2026-10-25 |
-| [0128](0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md) | The C# decoder reads the gzip framing itself, so trailing bytes and header rules match the Go decoder (amends 0076) | Accepted | 2026-10-25 |
-| [0129](0129-configuration-and-secret-files-opened-without-blocking.md) | Configuration and secret files are opened without blocking and their type is checked on the opened file (amends 0049) | Accepted | 2026-10-25 |
-| [0130](0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) | Live or backfilled is decided at write time; gaps are stateful objects; the offset comes from caught-up self samples (amends 0022) | Accepted | 2026-10-26 |
-| [0131](0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) | Agent unit and install scripts: token as a systemd credential, tailnet-only addresses, fixed resource limits with GOMEMLIMIT, checksum-verified binary, install bundle as a release asset, remove and purge (amends 0037) | Accepted | 2026-10-27 |
-| [0132](0132-tailnet-policy-documented-as-console-settings-no-default-maintainer-grant.md) | Tailnet policy documented as console settings, without a default grant for maintainer devices, with the token's exposure while Tailscale is down split off | Accepted | 2026-11-05 |
-| [0133](0133-agent-footprint-measured-on-the-server-as-peak-rss-and-cpu-of-one-core.md) | Agent footprint measured on the server as peak RSS and CPU time of one core | Accepted | 2026-10-30 |
-| [0134](0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md) | The sender binds every non-loopback connection to the tailnet device, so the token never leaves through another interface | Accepted | 2026-11-04 |
-| [0135](0135-the-squads-process-decisions-live-in-process-md.md) | The squad's process decisions live in process.md | Accepted | 2026-11-06 |
+| 0115 | Connection collector: the /proc/net tables, regular and full snapshots in one record kind | Accepted | 2026-10-18 |
+| 0116 | New listeners across an agent start are compared by the storage layer when the snapshots are stored | Accepted | 2026-10-18 |
+| 0117 | systemd collector: a hand-written D-Bus client with one connection per run | Accepted | 2026-10-20 |
+| 0118 | MariaDB collector: a hand-written client over the local socket that sends only the captured statements | Accepted | 2026-10-21 |
+| 0119 | Kernel messages from the binary journal files, read in pure Go without decompression | Accepted | 2026-10-22 |
+| 0120 | A live OOM kill triggers extra process and connection snapshots through the scheduler, linked by the kill's identity | Accepted | 2026-10-22 |
+| 0121 | Log shipping decodes zstd journal items with a bounded library decoder | Accepted | 2026-10-31 |
+| 0122 | CAP_SYS_PTRACE alone cannot write another user's process memory through `/proc/<pid>/mem` or `/proc/<pid>/fd`: CAP_DAC_READ_SEARCH dropped, `process_madvise` denied, a file-mode residual accepted | Accepted | 2026-10-23 |
+| 0123 | Agent spool in uncompressed segment files with checksummed frames and a bounded file count | Accepted | 2026-10-23 |
+| 0124 | Ingest request: one batch per POST, bearer token, acknowledged by the status alone | Accepted | 2026-10-24 |
+| 0125 | Sender with a live and a backfill stream over one shared backoff | Accepted | 2026-10-24 |
+| 0126 | The ingest token is bound to one configured agent ID | Accepted | 2026-10-25 |
+| 0127 | The backend host needs Tailscale in TUN mode; the ingest port is published on a required bind address | Accepted | 2026-10-25 |
+| 0128 | The C# decoder reads the gzip framing itself, so trailing bytes and header rules match the Go decoder | Accepted | 2026-10-25 |
+| 0129 | Configuration and secret files are opened without blocking and their type is checked on the opened file | Accepted | 2026-10-25 |
+| 0130 | Live or backfilled is decided at write time | Accepted | 2026-10-26 |
+| 0131 | The agent's install scripts, unit and files reach the server as an install bundle released with the binary | Accepted | 2026-10-27 |
+| 0132 | Tailnet policy documented as console settings, without a default grant for maintainer devices, with the token's exposure while Tailscale is down split off | Accepted | 2026-11-05 |
+| 0133 | Agent footprint measured on the server as peak RSS and CPU time of one core | Accepted | 2026-10-30 |
+| 0134 | The sender binds every non-loopback connection to the tailnet device, so the token never leaves through another interface | Accepted | 2026-11-04 |
+| 0135 | The squad's process decisions live in process.md | Accepted | 2026-11-06 |
+| 0136 | systemd notification by hand, with a watchdog fed only while every collector runner is on time | Accepted | 2026-10-17 |
+| 0137 | The agent logs text lines on standard error with the journal's priority prefix, cut below the journal's line limit | Accepted | 2026-10-17 |
+| 0138 | The clock counts as synchronized below 16 seconds of maximum error; the offset is the kernel PLL's, only while the PLL is on | Accepted | 2026-10-17 |
+| 0139 | A system file that cannot be read fails the whole sample; a measurement the host does not offer is omitted and logged once | Accepted | 2026-10-17 |
+| 0140 | A null element in a list option of the agent's configuration is refused, never dropped | Accepted | 2026-10-17 |
+| 0141 | The memory pressure mode is switched by the system collector with fixed, hysteretic thresholds | Accepted | 2026-10-17 |
+| 0142 | Process and program names follow the legacy derivation, after configurable literal grouping rules | Accepted | 2026-10-17 |
+| 0143 | New listeners are found against the last recorded inventory, bounded, with the privileged ports first | Accepted | 2026-10-18 |
+| 0144 | Socket owners come from /proc/<pid>/fdinfo on the socket mount the agent learns at its start | Accepted | 2026-10-18 |
+| 0145 | The owner scan accepts the first fdinfo lines in the range the kernel prints them | Accepted | 2026-10-18 |
+| 0146 | The socket's UID comes from the tables' uid column, with the lowest UID and a mixed flag per endpoint | Accepted | 2026-10-18 |
+| 0147 | A known endpoint whose socket UID changes is reported as a changed listener | Accepted | 2026-10-18 |
+| 0148 | The agent marks its first connection snapshot after a start and states what each snapshot's listener list holds | Accepted | 2026-10-18 |
+| 0149 | The report's New listeners section caps each kind of finding separately and lists changed endpoints without the command | Accepted | 2026-10-18 |
+| 0150 | Service unit states are polled and recorded on change, after a start or a lost sample, and hourly | Accepted | 2026-10-20 |
+| 0151 | A MariaDB login the server refuses is recorded as not_answering with its error number | Accepted | 2026-10-21 |
+| 0152 | MariaDB's exposure is counted from the kernel's TCP tables, not from bind_address | Accepted | 2026-10-21 |
+| 0153 | An OOM kill is timed by its receipt in the journal, corrected for the kernel clock's drift | Accepted | 2026-10-22 |
+| 0154 | The journal reader reads the COMPACT layout with the same code, chosen per file from the header's flag | Accepted | 2026-10-22 |
+| 0155 | The kernel collector commits its journal position only after a kept run, checks its own records and caps the re-reads | Accepted | 2026-10-22 |
+| 0156 | The agent keeps one state file in the spool directory, written by a state job | Accepted | 2026-10-22 |
+| 0157 | A boot is recognized from the saved boot ID, and the previous uptime is the one the agent saved | Accepted | 2026-10-22 |
+| 0158 | Backup runs are a record kind of their own, recognized by process rules taken from a captured Plesk backup | Accepted | 2026-10-22 |
+| 0159 | A boot and a backup run's change reach the agent's state only once the scheduler reports their run kept | Accepted | 2026-10-22 |
+| 0160 | Log shipping keeps a journal position per seqnum ID | Accepted | 2026-10-31 |
+| 0161 | Log shipping commits its positions when the scheduler keeps a run | Accepted | 2026-10-31 |
+| 0162 | Configured log files are opened through a link-free walk | Accepted | 2026-10-31 |
+| 0163 | The state file keys a configured log file by the SHA-256 of its path | Accepted | 2026-10-31 |
+| 0164 | Error logs are shipped with an operator-named format and a Go port of the import's grammars | Accepted | 2026-10-31 |
+| 0165 | Error logs the agent cannot read get a documented grant by hand, not a new right | Accepted | 2026-10-31 |
+| 0166 | A log line dated after its run's start never moves the file's bookkeeping times | Accepted | 2026-10-31 |
+| 0167 | Live log lines are classified by a Go port of the import's stages in the agent | Accepted | 2026-10-31 |
+| 0168 | Open log groups are sent at a clean stop, and a holding source is saved at its oldest held line | Accepted | 2026-10-31 |
+| 0169 | A renamed log file whose read keeps failing is given up after 150 kept runs | Accepted | 2026-10-31 |
+| 0170 | Log shipping drop patterns are bounded by their compiled size | Accepted | 2026-10-31 |
+| 0171 | A fresh spool starts its sequence numbers above a clock bound | Accepted | 2026-10-23 |
+| 0172 | The spool keeps a bounded number of acknowledged ranges | Accepted | 2026-10-23 |
+| 0173 | The spool opens its files relative to its directory's descriptor | Accepted | 2026-10-23 |
+| 0174 | Spool file sizes add up saturating, and a saturated sum is no room | Accepted | 2026-10-23 |
+| 0175 | The state file syncs the spool before every save | Accepted | 2026-10-23 |
+| 0176 | The sender gives up refused records one by one with a recorded gap, at a bounded rate | Accepted | 2026-10-24 |
+| 0177 | Ingest is bounded by two slots through the commit and a free-space floor, not a rate cap | Accepted | 2026-10-25 |
+| 0178 | A full ingest listener evicts the oldest connection that has not passed the token check | Accepted | 2026-10-25 |
+| 0179 | Ingest writes end only at the shutdown deadline and are drained before the store closes | Accepted | 2026-10-25 |
+| 0180 | Sequence and time gaps are stateful rows that become final after a quiet wait | Accepted | 2026-10-26 |
+| 0181 | The agent's clock offset is measured from caught-up self samples | Accepted | 2026-10-26 |
+| 0182 | The agent token reaches the agent as a systemd credential | Accepted | 2026-10-27 |
+| 0183 | The agent unit allows only localhost and the tailnet ranges as addresses | Accepted | 2026-10-27 |
+| 0184 | The agent unit sets a hard memory limit with GOMEMLIMIT below it | Accepted | 2026-10-27 |
+| 0185 | The agent unit's system-call filter is built from @system-service plus adjtimex | Accepted | 2026-10-27 |
+| 0186 | install.sh checks the binary against the SHA-256 the bundle carries | Accepted | 2026-10-27 |
+| 0187 | Uninstalling the agent removes it, and purging also deletes its data | Accepted | 2026-10-27 |
+| 0188 | The agent unit and scripts are verified by a CI job on systemd 249 | Accepted | 2026-10-27 |
+| 0189 | The install scripts read spool.directory of a kept configuration with a fail-closed line reader | Accepted | 2026-10-27 |
+| 0190 | The install scripts refuse a bundle another user could change and check its manifest before sourcing | Accepted | 2026-10-27 |
+| 0191 | The documented install steps are single commands with check and extraction in one line | Accepted | 2026-10-27 |
 <!-- project:end index -->
