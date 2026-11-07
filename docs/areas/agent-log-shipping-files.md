@@ -98,7 +98,7 @@ file. The import skips such lines; live, a skipped line would be lost without a 
   `log file not readable` warning and is read once the path opens again; a restart in between loses the renamed file's descriptor, and
   a renamed file no longer found then becomes a gap (*Rotation while the agent was stopped*).
 - A live record of one of these sources and an import of the same period are both stored
-  ([System and mail log parsers](log-parsers-system.md), *Duplicates*).
+  ([Plesk and web server error log parsers](log-parsers-web.md), *Duplicates*).
 
 ## Time of a year-less line
 

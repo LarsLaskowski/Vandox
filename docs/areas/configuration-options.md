@@ -183,7 +183,7 @@ section, keeps the defaults, which ship the journal at `info` and more severe an
   path of 2 to 1,024 bytes, listed once, and `format`, which is one of `syslog`, `plesk-panel`, `nginx-error`, `apache-error` and
   `sw-cp-server-error`, compared exactly (lower case). The last one is for Plesk's own web server (`/var/log/sw-cp-server/error_log`,
   nginx's line format) and is chosen by configuration only: the agent finds no file by content. The error log formats are the
-  import's ([Agent log shipping](agent-log-shipping.md), *Error log lines*); the agent reads those files only when the operator has
+  import's ([Agent log shipping from files](agent-log-shipping-files.md), *Error log lines*); the agent reads those files only when the operator has
   granted it read (`deploy/agent/README.md`). A path with U+0000 or another control or format character is refused by the general
   string rule. The path is opened at run time without following a link in any element. A file that holds what the journal ships
   (`/var/log/syslog` on a server whose rsyslog copies the journal) is shipped twice, once per source; the example file says so.

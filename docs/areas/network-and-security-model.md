@@ -4,12 +4,12 @@
 
 Who may reach whom: the transport between the agent and the backend, the exposure of the web UI, the agent's access to MariaDB, and the
 resource budget of the monitored server that limits what Vandox may cost there. The container, ports and compose file are in the backend
-host area; the agent's own rights are in the agent area; secrets are in [Configuration and secrets](configuration-and-secrets.md).
+host area; the agent's own rights are in [Agent rights](agent-rights.md); secrets are in [Configuration and secrets](configuration-and-secrets.md).
 
 ## Agent to backend
 
 Part of v0.2.0; v0.1.0 has no agent-to-backend traffic. The agent's sender posts the batches to `backend.url`
-([Agent](agent.md), *Connection*, *Sending*), and the backend's ingest endpoint stores them; the compose file publishes the ingest port
+([Agent sending](agent-sending.md)), and the backend's ingest endpoint stores them; the compose file publishes the ingest port
 on the address in `INGEST_BIND_ADDRESS`, the backend host's tailnet address. The request, the answers and the endpoint's limits are in
 the backend host area (*Ingest endpoint*, *Compose file*).
 
@@ -51,7 +51,7 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   is none for the web port.
 - **While Tailscale is not up, the agent's sender binds to `tailscale0`.** Tailscale's routes exist only while it runs, and the unit's
   `IPAddressAllow=` filters by address, not interface, so without a binding a send to the backend's tailnet address would follow the
-  server's default route onto the provider's network. `HTTPTransport` therefore binds every connection whose address is not a loopback
+  server's default route onto the provider's network. The sender therefore binds every connection whose address is not a loopback
   address (`127.0.0.0/8`, `::1`, an IPv4-mapped loopback) to the interface `tailscale0` (`SO_BINDTODEVICE`) before it connects; an
   address it cannot parse is bound, and a connection to a loopback address (a backend on the same host) is not. The kernel then routes
   the connection through that interface only, whatever the routing tables and the network manager hold. Without the device (`tailscaled`
@@ -74,7 +74,7 @@ the backend host area (*Ingest endpoint*, *Compose file*).
   does not stop a host name: the local name-server stub is localhost, so a lookup through it is not blocked (the residual above), and
   only a name server outside localhost and the tailnet fails. Use the tailnet address: the documented setup turns Tailscale's DNS off on the monitored server (`tailscale set --accept-dns=false`),
   because its policy lets the server reach only the ingest port, so Tailscale's name servers can be out of reach and lookups can fail; MagicDNS names then do not resolve there
-  ([Agent](agent.md), *Installation*, [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md), [record 0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md)).
+  ([Agent installation](agent-installation.md), [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md), [record 0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md)).
 - The agent sends its token only in the `Authorization` header of its requests to `backend.url`, connects only to that URL's host and
   port (no proxy from the environment, no redirect followed), verifies the certificate of an `https` URL and never switches the check
   off. Plain `http` is meant only for the backend host's tailnet address or MagicDNS name, where Tailscale encrypts and authenticates
@@ -115,7 +115,7 @@ agent's installation: `install.sh` creates it on the first install, `uninstall.s
   used. With at most 2 connections for the account, one stays free beside the agent's one.
 - **The login.** The agent sends the user name and empty authentication data; `unix_socket` accepts it only for the OS user of the same
   name. No password or other credential is read, stored or sent: a server that asks for another authentication method gets one empty
-  answer and nothing more ([Agent](agent.md), *MariaDB*).
+  answer and nothing more ([Agent MariaDB collector](agent-mariadb.md)).
 - **Fixed, read-only statements.** Over one connection per run the agent sends a ping, `SHOW GLOBAL STATUS`, `SHOW GLOBAL VARIABLES`, the
   two questions of the account check and, under load or memory pressure, `SHOW FULL PROCESSLIST`; no statement takes input, and the
   client neither offers nor answers a local-file request.
@@ -140,6 +140,10 @@ agent's installation: `install.sh` creates it on the first install, `uninstall.s
 ## Related decisions
 
 - [0010](../decisions/0010-tailscale-with-strict-acl.md) — why Tailscale with a strict ACL.
+- [0017](../decisions/0017-ingest-via-tailnet-address-and-published-port.md) — why ingest is reached on the backend host's tailnet
+  address through a published port.
+- [0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md) — why the sender binds every non-loopback
+  connection to `tailscale0`.
 - [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the agent's unit
   allows only tailnet addresses and localhost.
 - [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the agent sends one batch per
@@ -159,5 +163,6 @@ agent's installation: `install.sh` creates it on the first install, `uninstall.s
 ## Not here
 
 - Container, ports, compose file and TLS termination: the backend host area.
-- The agent's user, capabilities and confinement: the agent area.
+- The agent's user, capabilities and confinement: [Agent rights](agent-rights.md); its unit and install scripts:
+  [Agent installation](agent-installation.md); the sender's client rules: [Agent sending](agent-sending.md).
 - Secret handling: [Configuration and secrets](configuration-and-secrets.md).

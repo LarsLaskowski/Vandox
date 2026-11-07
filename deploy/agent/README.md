@@ -375,7 +375,7 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
   `--version`: the version is the first line of the bundle's `VERSION` (a file that is missing, a link, over 64 bytes or not one `vX.Y.Z` or `vX.Y.Z-rc.N` line
   gives `install.sh: no valid VERSION file next to install.sh; use the install bundle of a release`, exit 2). The token is read from the terminal without echo, or
   from one line of standard input; `--token` is refused. It is asked for only when `/etc/vandox/agent-token` is missing.
-- **What it does, in order,** and every message and exit code: the Agent area, *Installation* (`docs/areas/agent.md`). In short: it runs the entry
+- **What it does, in order,** and every message and exit code: the Agent installation area (`docs/areas/agent-installation.md`). In short: it runs the entry
   check, reads `VERSION`, checks root, systemd and `x86_64`, validates the configuration values and the spool directory, downloads only the binary
   over HTTPS (`curl --proto =https --proto-redir =https --fail`) into a private temporary directory, requires the bundle's `vandox-agent-linux-amd64.sha256` (a regular
   file, no link, one line, at most 4096 bytes) to match the binary (a link, a non-regular file or more than 64 MiB is refused), runs the verified binary once as
@@ -415,8 +415,8 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
 ## Rights per collector
 
 `vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are
-listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent area names (*Rights*: `CAP_SYS_PTRACE` and the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent area
-(`docs/areas/agent.md`, *Rights*) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
+listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent rights area names (`CAP_SYS_PTRACE` and the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent rights area
+(`docs/areas/agent-rights.md`) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
 `security`-tier change. The example configuration is `agent.yaml` in this folder; the unit is `vandox-agent.service`, installed by
 `install.sh` and removed by `uninstall.sh` (both in this folder, with `common.sh`); see *Install the agent*, *Install reference* and *Unit*.
 
