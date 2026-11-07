@@ -25,8 +25,8 @@ systemd unit in short (security areas 2, 6 and 9). The operator relies on it; ev
 - The unit is `vandox-agent.service`.
 - The monitored server must be a node of the backend host's tailnet (Tailscale installed and logged in; the steps are in
   `deploy/agent/README.md`, *Tailscale on the monitored server*). The unit's allow-list admits only localhost, `100.64.0.0/10` and
-  `fd7a:115c:a1e0::/48`, by address, not by interface; the interface is the sender's binding to `tailscale0`
-  ([Agent sending](agent-sending.md), *The request*). While Tailscale is not up, a send fails at once as `connection failed` (no
+  `fd7a:115c:a1e0::/48`, by address, not by interface; the interface is the sender's binding to `tailscale0`; what the allow-list
+  lets through and what fails is in [Agent sending](agent-sending.md) (*The request*, the second layer). While Tailscale is not up, a send fails at once as `connection failed` (no
   `tailscale0`) or ends as a timeout (the interface without routes), never through the provider's network, and the agent keeps spooling
   and retrying. The guarantee holds with the tailnet address in `backend.url` (the host-name residual in
   [Network and security model](network-and-security-model.md), issue #373; record 0134). The unit has no ordering on `tailscaled`,

@@ -21,7 +21,10 @@ sub-command in [Log import](log-import.md).
 - `vandoxd [flags] incidents [-config file]` rebuilds the incidents from the stored data ([Incidents](incidents.md)). Its flags are `-config` and `-h`/`-help` (usage to standard error, exit 0); any positional
   argument after `incidents` is a usage error (`vandoxd incidents: no argument is expected`, exit 2), and it is not combined with
   `-healthcheck`. It loads the configuration (invalid: exit 1), opens the database (cannot: exit 1) and writes one line per saved
-  incident and then the counts to standard output; the log goes to standard error as JSON lines. Exit **0** when the run completed
+  incident (`#<number> created|updated|unchanged <first kill, UTC, yyyy-MM-ddTHH:mm:ssZ> kills=<n> victim=<command>`, followed by
+  ` merged=<n>` when the incident took over `n` others; the first victim's command in double quotes with its own quotes escaped, `-`
+  without one) and then the counts (`Incidents:`, `created:`,
+  `updated:`, `unchanged:`, `merged:`, `kept:`, `skipped:`, `OOM kills:`, `Log lines read:`) to standard output; the log goes to standard error as JSON lines. Exit **0** when the run completed
   (also when it skipped an incident the store refused, which the counts show); **1** when the run was interrupted or the store
   failed, without the counts. Run again, it completes the work.
 - `vandoxd [flags] templates [-config file]` rebuilds the log template statistics from the stored log lines ([Storage
@@ -42,7 +45,7 @@ sub-command in [Log import](log-import.md).
   `-lang` belongs to `report` only: before the sub-command or with another one it is `flag provided but not defined: -lang`. Any
   positional argument after `report` is a usage error (`vandoxd report: no argument is expected`, exit 2), and it is not combined with
   `-healthcheck`. It starts like `incidents` (invalid configuration or database that cannot be opened: exit 1), logs `report started`
-  to standard error as a JSON line, and writes nothing but the report to standard output. Exit **0** when the report is complete;
+  to standard error as a JSON line (and no progress while it reads), and writes nothing but the report to standard output. Exit **0** when the report is complete;
   **1** when the run was interrupted (`report interrupted`) or the store failed (`report failed` with the store's text), with an
   incomplete report on standard output that is to be discarded. Apart from the migration every sub-command runs when it opens the
   database, it writes nothing to the store.
@@ -111,6 +114,7 @@ finish, the database is closed, the service logs `vandoxd stopped` and exits 0.
 
 ## Container image
 
+- The image is built for `linux/amd64` only.
 - The image is built from a pinned .NET build image and runs on the pinned *chiseled* ASP.NET runtime image (no shell, no package
   manager); both base images are referenced by digest through build arguments. The service runs as the non-root user `65532:65532` by
   default; the operator may run it as any other non-root user ID (`user:` in the compose file, `--user`), which then has to own the

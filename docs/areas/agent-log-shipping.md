@@ -230,7 +230,7 @@ further IDs (measured peak 1.63 MiB above the base, three copies included).
 
 The reader with the decoder read every entry of the server's two system files (72,909 and 73,265 entries, 340 zstd frames of
 descriptor `0x60`) and of a later copy with a user journal (`user-10000.journal` and 22 archives; 54,360 system entries, 38 to 444 per
-user file) without an unreadable item (the files are not committed). The user files' seqnum IDs differ from the system file's, their
+user file) without an unreadable item (not committed). The user files' seqnum IDs differ from the system file's, their
 sequence numbers rise strictly within and across the archives, and those of the current user file lie inside the system file's range
 without colliding with a system number, as record 0121 assumes. CI writes `testdata/journal/live.export` (21 entries of the server's
 transports and field forms, one message of 20,000 bytes) as journal files with zstd frames of the server's form
@@ -271,10 +271,10 @@ transports and field forms, one message of 20,000 bytes) as journal files with z
 ## Not here
 
 - Configured log files, their formats, rotation, truncation and the time zone: [Agent log shipping from files](agent-log-shipping-files.md).
-- Scheduler, state file, stop order, gaps in general: [Agent](agent.md).
+- Scheduler, state file, stop order, gaps: [Agent](agent.md).
 - The journal reader's layout rules and where the journal is found: [Agent kernel events and boots](agent-kernel-events.md).
 - The `log_shipping` options and their error texts: [Configuration options](configuration-options.md).
-- Its rights: [Agent rights](agent-rights.md); where records go next: [Agent spool](agent-spool.md).
+- Rights: [Agent rights](agent-rights.md); spool: [Agent spool](agent-spool.md).
 - The `log_line` record: [Wire format records](wire-format-records.md); the import's mappings and stages:
   [System and mail log parsers](log-parsers-system.md).
 

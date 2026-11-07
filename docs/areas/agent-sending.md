@@ -26,15 +26,19 @@ in outline are in [Agent](agent.md) (*Connection*).
   up to 16 KiB and at most 4,096 bytes of its body, which it discards; once 4,096 bytes of a body were read the agent closes the
   connection itself and cancels the request, so the transport does not read on. The transport's results hold a fixed reason, never an
   error text.
-- Plain `http` is meant only for the backend host's tailnet address or its MagicDNS name, because the tailnet encrypts and
-  authenticates the transport; every other address is `https`.
+- Plain `http` is meant only for the backend host's tailnet address, because the tailnet encrypts and authenticates the transport
+  (its MagicDNS name would qualify too, but does not resolve in the documented setup, below); every other address is `https`.
 - Every connection to an address that is not a loopback address (`127.0.0.0/8`, `::1`, an IPv4-mapped loopback) is bound to the
   interface `tailscale0` (`SO_BINDTODEVICE`) before it connects; an address that cannot be parsed is bound, and a connection to a
-  loopback address (a backend on the same host) is not. While Tailscale is down a send therefore never leaves through another
+  loopback address is not, which a backend on the same host needs and which a forged name answer can reach. While Tailscale is down a send therefore never leaves through another
   interface: without `tailscale0` it fails at once as `connection failed`, with the interface but no routes it ends as a `timeout`, and
-  the records stay in the spool. The binding holds only for the address: use the tailnet address in `backend.url` (the host-name
-  residual and the unit's address allow-list, the second layer, are in [Network and security model](network-and-security-model.md),
-  *Agent to backend*; the needed unit settings in [Agent rights](agent-rights.md)).
+  the records stay in the spool.
+- **The second layer.** The installed unit lets the agent reach only localhost and the tailnet ranges (`IPAddressAllow=`,
+  [Agent installation](agent-installation.md), *The unit in short*), so any other address, and a host name resolved by a name server
+  outside localhost and the tailnet, fails as `connection failed`. A host name resolved through the local stub is not blocked, and the
+  binding holds only for the address: configure the tailnet address in `backend.url` (issue #373 covers the forged-answer residual,
+  [Network and security model](network-and-security-model.md), *Agent to backend*; the unit settings the sender needs are in
+  [Agent rights](agent-rights.md)).
 - A MagicDNS name works only while Tailscale manages the server's DNS, which the documented setup turns off
   (`tailscale set --accept-dns=false`); with a policy that lets the server reach only the ingest port, Tailscale's name servers can be
   out of reach and lookups on the server can fail.
