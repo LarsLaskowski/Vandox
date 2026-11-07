@@ -47,4 +47,5 @@ rules are in [Listener changes](../areas/listener-changes.md), the page's memory
   instead of a newer one; the order shown within an agent is by `seq`.
 - A local user who toggles a shared endpoint can fill the change-only cap and push an earlier takeover out of it; the cap note shows
   the number left out and the rows stay stored.
-- The page's worst case per circuit is large and stated in the Report page area; lowering it is a follow-up, not part of this record.
+- The page's worst case per circuit is stated in the Report page area; the cap of runs that lowers it is
+  [0193](0193-report-page-shows-each-external-text-in-at-most-16-runs.md), not part of this record.
