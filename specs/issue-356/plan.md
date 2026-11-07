@@ -199,3 +199,10 @@ shown as text with visible escapes stays: the rest run is produced by the same `
   entries) state memory per circuit from characters only, but every field is kept as up to 256 runs, which costs about 22.9 KiB for a
   1,024-byte text whose plain and escaped characters alternate (#356). Restate their figures with the run cost, or cap their runs as
   record 0193 does for the report page, and pin the per-text cost with a test."
+
+## Challenge notes
+
+Minor objections of the Devil's Advocate, verbatim:
+
+1. minor — AC1 is worded too broadly ("the runs after the 15th form one escaped run"). `Build` flags the rest as escaped only when its output differs in length from the remaining text (LogText.cs:92). Tester and Dev: read AC1 as "the runs after the 15th form one run, escaped unless the rest is plain text shown whole". Docs: the record 0193 consequence and the `web-ui.md` sentence must not claim the rest is always in the escape style.
+2. minor — The AC1 case says the decoded command "ends with the marker `[cut: `". That text sits at the start of the marker, not the end. Tester: assert the decoded text ends with `[cut: 439 more characters]`, or that it contains `[cut: ` and ends with ` more characters]`.
