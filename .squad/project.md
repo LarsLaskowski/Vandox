@@ -33,11 +33,13 @@ protected, where, and the area documents that state its rules.
    [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
 6. **Agent privileges** — never root, only the listed groups and capability, no write into other users' processes
    (record 0122). `deploy/agent/` (`vandox-agent.service`, `install.sh`, `uninstall.sh`, `common.sh`, `README.md`),
-   the collectors that use a right — [agent-rights](../docs/areas/agent-rights.md),
+   the collectors that use a right (`internal/procstats`, `internal/connstats`, `internal/sockmount`, `internal/logship`,
+   `internal/kernevents`, `internal/svcstats`, `internal/mariadb`) — [agent-rights](../docs/areas/agent-rights.md),
    [agent-installation](../docs/areas/agent-installation.md).
 7. **MariaDB monitoring user** — a password-less socket account with only `PROCESS`, read-only queries.
    `deploy/agent/mariadb-user.sql`, `mariadb-user-remove.sql`, `internal/mariadb` —
-   [agent-mariadb](../docs/areas/agent-mariadb.md).
+   [agent-mariadb](../docs/areas/agent-mariadb.md), [network-and-security-model](../docs/areas/network-and-security-model.md)
+   (*MariaDB access*), [agent-installation](../docs/areas/agent-installation.md).
 8. **Secrets handling** — read only from the environment, Docker secrets or a systemd credential, compared in constant
    time, never logged, shown or spooled. `internal/config`, `internal/sender`, `src/Vandox.Core/Configuration/`,
    `PasswordHash`, `/etc/vandox/agent-token` —

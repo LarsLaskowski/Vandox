@@ -62,7 +62,7 @@ in the documents under *Not here*.
   with the kernel's beneath-root resolution without symbolic links where the kernel supports it. On kernels without it
   (older NAS kernels, such as 4.4) the fallback checks every directory of the path without following it, refuses `..`
   and opens the last element without following a link, so containment is checked by the import, not enforced by the
-  kernel; a link swapped in between check and open is not caught, as the project's security notes state.
+  kernel; a link swapped in between check and open is not caught.
 - Modification times are passed in UTC; one outside the range storable as Unix nanoseconds (for example a forged
   tar `mtime`) is stored as unknown.
 - Values derived from the input or the command line (paths, entry names, reasons, a run error's text) are never part

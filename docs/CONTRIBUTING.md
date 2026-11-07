@@ -256,8 +256,8 @@ area 13 of [`.squad/project.md`](../.squad/project.md)):
   backend.
 - The Docker Hub token is readable only by the tag-triggered job `publish-image` (environment `release`) and enters
   `docker login` only through standard input.
-- Only `attest` holds the signing permission; it declares no environment, reads no secret and checks out no
-  repository code.
+- Only `attest` holds the signing permission; it declares no environment, reads no secret, and checks out and runs
+  no repository code.
 - The SBOM generator also gets no token (*SBOM generator*).
 - Each of the two scheduled jobs of `base-image-digests.yml` holds only `contents: read` and `issues: write`, runs
   its registry and Git lookups without a token, writes only image, tag and digest values that passed a regular
