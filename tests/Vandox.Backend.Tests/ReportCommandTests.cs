@@ -37,7 +37,7 @@ public class ReportCommandTests
         await StoreKillAsync(fixture.Storage);
         Assert.AreEqual(0, await fixture.RunAsync(["incidents"], null, TestContext.CancellationToken), "the incidents are rebuilt first");
         fixture.Out.GetStringBuilder().Clear();
-        fixture.Error.GetStringBuilder().Clear();
+        fixture.Error.Clear();
 
         // Act
         var code = await fixture.RunAsync(["report"], null, TestContext.CancellationToken);
