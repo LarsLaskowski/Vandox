@@ -27,10 +27,9 @@ Only root can replace a file in `/etc/vandox`, but a start-up that hangs without
 
 ## Decision
 
-Option 2: both binaries open the configuration file and a `_FILE` secret file without blocking and check on the opened
-descriptor that it is a regular file (the agent in `internal/config`, the backend through `FileProbe.OpenRegular`).
-The backend still checks the path before the open, which only gives a missing or non-regular path its own message; the
-agent checks the opened descriptor only. The resulting behavior is in
+Option 2: both binaries open the configuration file and a `_FILE` secret file without blocking and check on the opened descriptor
+that it is a regular file. The backend still checks the path before the open, which only gives a missing or non-regular path its own
+message; the agent checks the opened descriptor only. The resulting behavior is in
 [Configuration and secrets](../areas/configuration-and-secrets.md), *Configuration file* and *Secrets*.
 
 ## Consequences

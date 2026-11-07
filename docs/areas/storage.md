@@ -2,44 +2,44 @@
 
 ## Scope
 
-The backend's database: the file and how it is opened, the schema with its migrations, how batches of records are written, how
-they are read and searched, and the write-throughput criterion. A database file written by one version of the backend must stay
-readable by the next, whichever language implements it, so the schema below is part of the contract. What a record means is in the
-[wire format](wire-format.md); how the log import tracks files on top of this store is in [Log import](log-import.md).
+The backend's database: the file and how it is opened, the connections and how a running statement is interrupted, the schema with
+its migrations, retention and the write-throughput criterion. A database file written by one version of the backend must stay readable
+by the next, whichever language implements it, so the schema below is part of the contract. How batches are written is in
+[Storage writing](storage-writing.md), how stored data is read and searched in
+[Storage reading and log exploration](storage-reading.md); what a record means is in the [wire format](wire-format.md), how the log
+import tracks files on top of this store in [Log import](log-import.md).
 
 ## Database file and connections
 
 - The backend keeps all data in one SQLite database, `vandox.db` in `storage.directory`, with FTS5 for log search. There is no external
-  database. A backup is a copy of the file (together with its `-wal` and `-shm` files).
-- The file is created exclusively with mode `0600`. A symbolic link or any other entry that is not a regular file in place of
-  `vandox.db`, `vandox.db-wal` or `vandox.db-shm` is refused, because SQLite would write next to the link target, outside
-  `storage.directory`.
+  database. A backup is a copy of the file together with its `-wal` and `-shm` files.
+- `storage.directory` must exist; the backend never creates it. The file is created exclusively with mode `0600` inside it. A symbolic
+  link or any other entry that is not a regular file in place of `vandox.db`, `vandox.db-wal` or `vandox.db-shm` is refused, because
+  SQLite would write next to the link target, outside `storage.directory`.
 - The database runs in WAL mode with `foreign_keys` on and **`synchronous=FULL`**: a committed batch survives a power cut. The
-  ingest endpoint acknowledges a batch only after its commit ([Backend host](backend-host.md), *Ingest endpoint*), and the agent then
-  deletes it from its spool, so an acknowledged batch must not become a silent gap. The endpoint supplies the batch's receive time
-  (`RecordBatch.ReceivedAt`, the same for every record of the batch) and writes under a token that only the service's shutdown
-  deadline cancels, never the request.
+  ingest endpoint acknowledges a batch only after its commit ([Ingest endpoint](ingest-endpoint.md)), and the agent then deletes it from
+  its spool, so an acknowledged batch must not become a silent gap. The endpoint supplies the batch's receive time (one instant for every
+  record of the batch), and its write is cancelled only by the service's shutdown deadline, never by the request.
 - **One writer connection**, whose transactions start with `BEGIN IMMEDIATE` (the lock is taken at the start, so the busy timeout
   applies instead of a failure in the middle of a transaction), and up to four **query-only reader connections**. Readers never wait
-  for the writer. The busy timeout is 5 seconds and bounds the **whole** wait for a lock: every connection sets both
-  `PRAGMA busy_timeout=5000` and Microsoft.Data.Sqlite's `DefaultTimeout` of 5 seconds, because the library otherwise retries
-  `SQLITE_BUSY` on its own for its default of 30 seconds (measured: about 31 s without it, about 4.5 s with 4 s). It matters only
-  against another process that opens the same file, such as `vandoxd import`, `vandoxd templates` or a backup; an ingest write that
-  hits it fails and is answered `503`. The writer has a page cache of up to 16 MiB; readers keep the default.
-- A **cancelled token or a passed deadline interrupts a running reader statement.** Every reader connection gets a SQLite progress
-  handler bound to the token of its call, checked every 1,000 virtual-machine instructions, so it also stops the work SQLite does
-  before the first row (a sort, an aggregate, the `MATCH` of a search). The call then ends with `OperationCanceledException` carrying
-  that token and no partial result; every other SQLite error stays a `StoreException` with the message of its operation. A token
-  that cannot be cancelled installs no handler. The handler also runs while the FTS5 module reads its index pages (it reads them through
-  SQLite's own statements), so a `MATCH` is interrupted too; the gap between two checks was at most 31 ms on the development host for
-  every shape measured, which is a measurement and not a proof. The bound applies while the statement runs, not while it waits for a lock. The writer connection is never
-  interrupted: a batch, an incident save, an import step and a migration run to their commit or rollback.
+  for the writer. The writer has a page cache of up to 16 MiB; readers keep the default.
+- The busy timeout is **5 seconds** and bounds the **whole** wait for a lock: every connection sets `PRAGMA busy_timeout=5000` and the
+  client library's own command timeout to the same 5 seconds, so the library does not retry `SQLITE_BUSY` on its own beyond it (about
+  31 s were measured without it). It matters only against another process that opens the same file, such as `vandoxd import`,
+  `vandoxd templates` or a backup; an ingest write that hits it fails and is answered `503`.
 - Two processes may open the database at once.
+- **A cancelled token or a passed deadline interrupts a running reader statement.** Every reader connection checks the cancellation of
+  its call every 1,000 SQLite virtual-machine instructions (a progress handler), so it also stops the work SQLite does before the first
+  row (a sort, an aggregate, the `MATCH` of a search, including the FTS5 module's reads of its index pages). The call then ends as
+  cancelled, carrying that cancellation, with no partial result; every other SQLite error stays a store error with the message of its
+  operation. A call that cannot be cancelled installs no check. The gap between two checks was at most 31 ms on the development host
+  for every statement shape measured (a measurement, not a proof). The bound applies while the statement runs, not while it waits for a
+  lock. The writer connection is never interrupted: a batch, an incident save, an import step and a migration run to their commit or
+  rollback.
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is 13 (step 13 adds to `connection_marks` and `listener_comparisons` the columns `changed_count` (`INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)`) and `changed_listeners` (`TEXT`, `NULL` when none) and the index `connection_marks_changes`; rows stored before it read as no changes (0 and `NULL`) and a start compared before it keeps its stored outcome without changes until it is compared again, as for any change of the comparison rules, record 0116: stored comparisons are not recomputed; step 12 adds `records.live`, `INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1))`, so every record stored before it reads as backfilled, and the tables `agent_streams`, `agent_clock_samples`, `agent_sample_times` and `gaps` with their indexes; `agent_streams` is seeded with one row per agent that has stored records, holding the highest stored number as `floor_seq` and `max_seq` and that record's capture and receive time, so no number below it is ever reported missing, and the other three tables start empty; step 11 adds the tables `connection_marks` and `listener_comparisons` with their indexes, empty, so agent connection snapshots stored before it have no rows there; step 10 adds the table `incident_notes` with its index, empty; step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
-`log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics until `vandoxd templates` rebuilds them; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host). Times are Unix nanoseconds in `INTEGER` columns.
+The schema version is stored in `meta.schema_version`; the current version is **13**. Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
@@ -49,7 +49,8 @@ All tables are `STRICT`.
 | `metrics` | typed rows for metric records: `record_id`, `source`, `name`, `captured_at`, `value`, `unit`, `labels` (JSON object or `NULL`) |
 | `log_lines` | typed rows for log lines: `record_id`, `log`, `program`, `pid`, `priority`, `message`, `truncated`, `host`, `event` |
 | `log_fts` | FTS5 index over `log_lines.message` (external content, tokenizer `unicode61 remove_diacritics 2`) |
-| `import_files` | one row per imported file content: SHA-256 of the decompressed content (unique), size, display name, file name and modification time of the first import, source type, number of records stored, complete flag, start and completion times, the head key (SHA-256 of the first line; `NULL` for rows of versions before 6), the id of the content it continues (no foreign key) and the continuation point in bytes (0 when it is not continued), the attempt (the number of times an incomplete content was begun; 0 for rows of versions before 7) and the attempt whose line hashes are kept (`hashes_attempt`, `NULL` when the content was completed without line hashes) |
+| `import_files` | one row per imported file content: SHA-256 of the decompressed content (unique), size, display name, file name and modification time of the first import, source type, number of records stored, complete flag, start and completion times, the head key (`head_sha256`, SHA-256 of the first line; `NULL` for rows of versions before 6), the id of the content it continues (`continues_id`, no foreign key) and the continuation point in bytes (`start_offset`, 0 when it is not continued), the attempt (`attempt`, the number of times an incomplete content was begun; 0 for rows of versions before 7) and the attempt whose line hashes are kept (`hashes_attempt`, `NULL` when the content was completed without line hashes) |
+| `import_line_hashes` | rows of line hashes of an imported content: `file_id`, `attempt`, `first_offset`, `last_offset` and `hashes` (a blob of 16-byte entries, 1 to 4,096, in ascending order of their line ends); the primary key `(file_id, attempt, last_offset)` is its index |
 | `log_templates` | one row per log template: `id`, `source` (the record's source), `program`, `template` (the normalized message, at most 1,024 UTF-8 bytes), `first_seen` and `last_seen` (the earliest and latest capture time of its lines), `count` (its stored lines, at least 1); unique on `(source, program, template)` |
 | `log_template_hours` | `template_id`, `hour` (the start of a UTC hour), `count` (the template's stored lines in that hour, at least 1); primary key `(template_id, hour)`, without row ID |
 | `log_source_hours` | `source`, `hour`, `count` (the stored log lines of the source in that hour, at least 1); primary key `(source, hour)`, without row ID |
@@ -61,352 +62,118 @@ All tables are `STRICT`.
 | `agent_clock_samples` | the clock bounds of an agent: `agent_id`, `sort` (`counted` or `run`), `bucket` (the receive time floored to 10 seconds) and `bound_ns` (the largest bound of the bucket); primary key `(agent_id, sort, bucket)`, without row ID; at most 64 rows per agent and sort, the oldest dropped |
 | `agent_sample_times` | one row per distinct capture time of an agent's stored `metric` records: `agent_id`, `captured_at`, `min_seq` and `max_seq` (the lowest and highest number of a metric at that time); primary key `(agent_id, captured_at)`, without row ID |
 | `gaps` | the gaps of an agent: `id` (`AUTOINCREMENT`), `agent_id`, `kind` (`sequence` or `time`), `cause`, `state` (`open`, `closed` or `final`), `first_seq` and `last_seq` (a sequence gap's missing numbers, `CHECK (first_seq <= last_seq)`, `NULL` for a time gap), `from_seq` and `to_seq` (a time gap's bounding samples' highest and lowest metric numbers, `NULL` for a sequence gap), `from_at` and `to_at` (the span in the agent's raw capture times; for a sequence gap the capture time of the highest record before it and of the record after it), `detected_at` and `changed_at` |
-| `import_line_hashes` | rows of line hashes of an imported content: `file_id`, `attempt`, `first_offset`, `last_offset` and `hashes` (a blob of 16-byte entries, 1 to 4,096, in ascending order of their line ends); the primary key `(file_id, attempt, last_offset)` is its index |
 
 Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records(kind, source, captured_at)`;
-`records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows with a head key (`import_files_head`);
-`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`); `incidents(started_at)` (`incidents_started_at`); `incident_notes(incident_id, written_for)` (`incident_notes_incident`); `connection_marks(agent_id, seq)`, unique (`connection_marks_agent_seq`, which serves the lookup of an agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, agent_id, seq DESC)` where `new_count > 0` (`connection_marks_findings`); `connection_marks(captured_at DESC, agent_id, seq DESC)` where `new_count = 0 AND changed_count > 0` (`connection_marks_changes`, the findings with changes only); `listener_comparisons(captured_at DESC, agent_id, seq DESC)` where `finding = 1` (`listener_comparisons_findings`); `gaps(agent_id, first_seq)` where `kind = 'sequence'` and `state <> 'closed'` (`gaps_seq`) and, apart, where `state = 'open'` (`gaps_seq_open`); `gaps(agent_id, from_at)`, unique, where `kind = 'time'` and `state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader).
+`records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows
+with a head key (`import_files_head`); `log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)`
+(`log_template_hours_hour`); `incidents(started_at)` (`incidents_started_at`); `incident_notes(incident_id, written_for)`
+(`incident_notes_incident`); `connection_marks(agent_id, seq)`, unique (`connection_marks_agent_seq`, which serves the lookup of an
+agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, agent_id, seq DESC)` where `new_count > 0`
+(`connection_marks_findings`); `connection_marks(captured_at DESC, agent_id, seq DESC)` where `new_count = 0 AND changed_count > 0`
+(`connection_marks_changes`, the findings with changes only); `listener_comparisons(captured_at DESC, agent_id, seq DESC)` where
+`finding = 1` (`listener_comparisons_findings`); `gaps(agent_id, first_seq)` where `kind = 'sequence'` and `state <> 'closed'`
+(`gaps_seq`) and, apart, where `state = 'open'` (`gaps_seq_open`); `gaps(agent_id, from_at)`, unique, where `kind = 'time'` and
+`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader).
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
-- **Migrations** are an ordered list of steps in code. A step runs in its own write transaction that first re-reads the version,
-  skips itself if the database is already at or past it, and otherwise executes and writes the new version in the same transaction;
-  a failing step rolls back completely and earlier steps stay committed. A missing `meta` table or version row is version 0. A
-  version above the last known step, or one that is not a decimal integer, is refused before anything is written. A released step is
-  never edited: every schema change is a new step, tested by migrating from the previous version. Two processes that start at once
-  apply each step once. An older build refuses a newer schema.
+- The log exploration relies on `records(kind, source, captured_at)` and `records(kind, captured_at)` serving the order of its scan; a
+  statement plan that stopped using them would turn a page into a sort of every log line of the range
+  ([Storage reading and log exploration](storage-reading.md), *Log exploration*).
 
-## Writing
+### Migration steps
 
-- A **batch** is written in one transaction. A batch holds at most 20,000 records and at least one, except the batch that completes an
-  import file. The batch has a required receive time in UTC and, for records of origin `agent`, an agent ID that follows the agent ID
-  rule of the wire format; the boot ID is stored as given.
-- Every record is validated before anything is written (the size rule of the next bullet is the exception: it is checked while the
-  record is written, in the same transaction). A record is refused with a message that names the record's index and the rule
-  when its capture time is outside 1677-09-21 to 2262-04-11 (the range of a signed 64-bit nanosecond count), its sequence number is
-  above 2^63 − 1, or it is of origin `agent` in a batch without an agent ID. An import batch has no agent ID and every record has
-  origin `import`. Invalid UTF-8 in strings that are stored as JSON (payloads, metric labels) is replaced by U+FFFD; log fields
-  and the other metric fields are stored byte for byte. A record from an agent never contains invalid UTF-8, because the wire encoder
-  replaces it and the decoder refuses a line that holds it ([Wire format](wire-format.md), *Common rules*).
-- A **JSON payload** (every payload except a metric point and a log line) is serialized to UTF-8 in a bounded buffer and stored as
-  text (the insert binds the bytes with `CAST($data AS TEXT)`, because `records` is `STRICT` and refuses a blob in a text column). A
-  payload whose JSON is larger than 16,777,216 bytes (`StorageLimits.MaxPayloadBytes`, counted after escaping, exactly the stored
-  bytes) is refused: the import skips the record with `record refused: data is larger than 16777216 bytes as JSON` (the check runs
-  before the record is buffered, so a resumed import refuses it again), and any other batch is refused whole with `store: invalid
-  batch: data is larger than 16777216 bytes as JSON` and nothing of it is stored (the exception leaves the transaction before the
-  commit). A record from an agent cannot reach the limit: its wire line has at most 1 MiB and re-serializing expands a byte by at
-  most six. Memory per payload: the JSON as bytes (at most the limit), the buffer while it is built (at most about twice the limit;
-  above the limit the bytes are dropped and the buffer is released) and SQLite's copies while it is inserted (about twice the
-  JSON). A JSON payload of an import is serialized twice, once for the size check of the importer and once by the writer; this is a
-  deliberate cost that keeps the check free of copies.
-- **Deduplication:** a record of origin `agent` is identified by (agent ID, sequence number) across all kinds. It is inserted with
-  `ON CONFLICT DO NOTHING` and counted as a duplicate; a stored record is never replaced or updated. Records of origin `import` are not
-  deduplicated, because log lines have no identity of their own; the import is made idempotent per file instead (*Log import*).
-- **Log lines:** the write path inserts the message into `log_fts` right after each `log_lines` row, in the same transaction, with no
-  trigger. Invariant: every `log_lines` row has exactly one index entry with its message, written in the transaction that wrote the row.
-  The write path of a batch is the only code that inserts into `log_lines`, so a log line is searchable as soon as its batch is
-  committed. Any code that writes or deletes `log_lines` (a repair tool, retention) must maintain `log_fts` in the same transaction.
-- **Log templates:** in the same transaction, the write path counts every log line it stored under its template (normalization and
-  rules in [Detection, alerts and reports](detection-and-reports.md), *Log templates*): the template row's `count`, `first_seen` and
-  `last_seen`, the template's hour and the source's hour. The counts of a batch are summed per template and hour first, so a batch
-  runs one statement per template, template hour and source hour it touches; a batch without log lines runs none. A record that is not
-  stored (a duplicate) is not counted. The template tables are written only by this path and the rebuild below; code that deletes log lines leaves them
-  unchanged.
-- **Listener marks and comparisons** (record 0116): a record of origin `agent`, source `connections`, with an agent ID in its batch and a
-  connection snapshot that carries `listener_check`, `inventory` and at least one table is **usable**; any other record writes nothing of
-  this. Right after the `records` insert of a usable snapshot returned an ID (a duplicate, which returns none, writes nothing, so a resent batch
-  changes nothing), in the same transaction, the write path inserts its row of `connection_marks`. The new listeners are stored cut to the first
-  64 (the wire allows 4,096), and `new_count` counts the listed and the omitted ones (the agent's `new_listeners_omitted` plus the entries cut), so
-  a read tells how many were left out. The agent's changed listeners are stored the same way: the first 64 and `changed_count` (listed plus `changed_listeners_omitted`), only for a check of `all` or `privileged`, each entry with its `command` emptied (the key stays, as `"command":""`), because the report never shows it and the run keeps every finding it reads; the user name is stored as on the wire. A mark of `listener_check` `start` is an **affected start**, and so is the agent's next mark by `seq` when it is a
-  start (a snapshot stored later below a stored start changes what that start is compared with). The comparison of each affected start is
-  computed **once per batch**, after the last record and before the commit, next to the template statistics: it reads the start's predecessor
-  mark by `seq` (never by capture time), decodes the predecessor's and the start's stored payloads (two decodes per start, however many records
-  of the batch lie below it), compares them with `ListenerComparer` ([Detection, alerts and reports](detection-and-reports.md), *New
-  listeners*) and inserts or replaces the start's row of `listener_comparisons`, with the changed endpoints of the comparison (also with an empty `command`) and `finding` 1 when it has new or changed ones. Without a predecessor the outcome is `no_earlier`; a payload that is
-  missing or does not decode makes the outcome `not_comparable` and never fails the batch, so a resend is never refused for it. The rows of a
-  batch therefore equal the rows of the same records stored in any order or batches. The rows of `listener_comparisons` and the timeline rows of the next bullet are the only rows the
-  write path ever updates; a `records` row never is. The decode count of a batch is checked by a test (`PayloadDecodes`). The throughput effect is
-  in `docs/BENCHMARKS.md` (*Storage write throughput*).
-- **Agent timeline** (record 0130): for a batch with an agent ID the write path decides, in the batch's own transaction, whether each agent record is live
-  or backfilled (the `live` column; rule and constants in [Detection, alerts and reports](detection-and-reports.md), *Live data and backfill*) and keeps the
-  agent's gaps, clock samples, sample times and stream row. Records of origin `import` or `backend`, and batches without an agent ID, are stored with `live` 0 and
-  take no part. The header's `mode` is only logged, never stored, and its `clock_offset_ns` is stored as before; neither is used. Before the inserts the agent's records are walked in ascending
-  `seq` (a sorted copy): a number above `max_seq + 1` opens a sequence gap of the numbers between (cause `sequence_missing`, state `open`, `from_at` the capture
-  time of the highest stored record, `to_at` the record's capture time) and restarts the wait; a number between `floor_seq` and `max_seq` is removed from the gap that contains it (the gap shrinks, splits in two,
-  or is `closed` when nothing is left; a split-off rest has the cause and state of its gap), and a record arriving into an `open` gap restarts the wait; consecutive numbers of the batch are applied as one run, one
-  indexed seek per gap the run touches, and each changed row is written in place. An agent `gap` record that names numbers makes the part of the open sequence gaps
-  inside `[first_seq, min(last_seq, its own seq - 1)]` final with its cause (the clip is done in unsigned numbers, so a range above 2^63 - 1 finalizes nothing and costs nothing). The **wait**: the first batch stored from an agent since the store was opened restarts it, and a batch that filled
-  no open gap and arrives 5 minutes or more after it makes every open sequence gap of the agent `final` with one statement (`changed_at` that batch's receive time). Only
-  then is each record classified, with the lowest open sequence gap that remains after the whole batch, so a batch that closes the last gap below its records is live by lateness
-  alone. After the inserts, each distinct capture time of the batch's stored agent `metric` records gets a row of `agent_sample_times`; a time not seen before narrows,
-  splits or closes the time gap that contains it (a part of at most 2 minutes is dropped), else creates a gap to the previous and to the next stored time when that
-  span is over 2 minutes (cause `no_data`, stored `open`, with the raw capture times). A time gap is stored `open` or `closed` only; the readers report a not-closed time gap
-  as `final` when no open sequence gap overlaps its bounding numbers, so no batch re-evaluates other gaps. The clock rows are written before the inserts and the stream row last. A stored record adds at most three gap rows
-  (two unless it is an agent `gap` record), each found by index seeks (`EXPLAIN QUERY PLAN` shows a search for every statement, checked by a test), so the work per record does not grow
-  with the number of open gaps. All differences of instants are computed in 128-bit integers and stored bounds are saturated, so no capture time or number can make the write fail.
-  A refused or rolled-back batch changes none of it, and the store adds an agent to its set of agents written since the start only after the commit, so a refused first batch does not
-  start the wait. Two batches of one agent give the result of their commit order (the writer lock). The throughput effect is in `docs/BENCHMARKS.md` (*Storage write throughput*).
-- **Template rebuild** (`vandoxd templates`, `SqliteStore.RebuildTemplatesAsync`): a clear transaction empties the three template tables
-  (hours first), writes the run marker (the row `template_rebuild` of `meta`, 32 random hexadecimal characters) and reads the
-  high-water ID (the highest record ID), then the stored log lines up to it are counted in batches of at most 10,000 by record ID, one
-  transaction each, with the write path's own counting. Every counting transaction first checks that the marker is its own; the finish
-  transaction checks it again and removes it. Lines stored meanwhile have IDs above the high-water ID and are counted by the write path,
-  so each line is counted once. Two runs at once: the one that cleared last wins, the other fails with `store: rebuilding templates:
-  superseded by another rebuild`. An interrupted or failed run leaves the marker: the statistics are incomplete, and hours may hold
-  **partial counts** (batches go by record ID, not by time), so they look covered with counts too low, not unknown; every run starts
-  over. The clear transaction grows with the statistics: it holds the writer lock that long (another process may hit its busy timeout
-  and is run again) and writes the deleted pages to the WAL, which grows by about the size of the three tables until the next
-  checkpoint. A batch size outside 1 to 20,000 is an `ArgumentOutOfRangeException`; database errors are `store: rebuilding templates: `
-  errors.
-- **Import batches** carry the import state: in the same transaction as its records, a batch advances the file's `records` counter with
-  a compare-and-set on the expected count (and sets the complete flag with the last batch). If the counter does not match, nothing is
-  written and the caller gets a conflict. A batch with an attempt above 0 also requires the file's current attempt; a batch with
-  attempt 0 means no line hashes. Completing a file sets `hashes_attempt` to the batch's attempt (`NULL` for attempt 0) and, in the
-  same transaction, deletes the line-hash rows of every other attempt (all rows for attempt 0).
-- **Line hashes:** adding a row validates it (offsets, 1 to 4,096 hashes of 16 bytes, no more hashes than bytes covered) and inserts it
-  in its own transaction only while the file is incomplete and its current attempt is the row's, otherwise the caller gets a conflict.
-  Beginning an import of an incomplete content raises its attempt by one and deletes, in the same transaction, the line-hash rows of
-  every other attempt of that file, so an incomplete file keeps the rows of one attempt at most.
-- **Import bases:** beginning an import with prefixes (at most 64) picks, in the same transaction, the largest prefix whose content
-  is stored complete with the same size and source type, and keeps it as the new row's continued content and continuation point; an
-  existing row keeps its continuation. The lookup of complete contents by head key and source type returns the SHA-256 and size,
-  largest first, at most 64; rows without a head key are never returned.
-- **Import containment:** beginning an import of a content that has no row first looks for a complete row of the same head key and
-  source type that is larger, using the 64 largest, largest first (the limit applies to the candidates, whether or not they have line hashes). A candidate is joined to its one line-hash row of `hashes_attempt`
-  that spans the content's size; the candidate contains the content when that row holds the first 16 bytes of its SHA-256. Then no
-  row is created and the caller gets the candidate's display name. The lookup runs before the choice of a base.
+What each step after the first adds, and how data stored before it reads:
 
-- **Incidents:** saving an incident takes the writer lock and one immediate transaction. The incident is validated first, with these
-  exact errors (`InvalidIncidentException`, a `StoreException`): `store: invalid incident: start and end must be within the storable
-  range`, `start must be before end`, `the first kill must lie in the window` (the first kill is at or after the start and before the
-  end), `kill count must be at least 1`, `saved at must be within the storable range` and `data is larger than 8388608 bytes` (the
-  UTF-8 bytes of the serialized JSON). It is serialized with one fixed set of options, the default encoder without indentation, which
-  is also what the incident builder measures its timeline with. The stored incidents whose window overlaps the new one (`started_at <
-  end` and `ended_at > start`, so windows that only touch do not overlap) are selected oldest number first: none inserts a row
-  (`created_at = updated_at =` the save time); otherwise the lowest number is kept and the others are deleted (the number of deleted
-  ones is reported as merged; **the notes of each deleted incident are first moved to the kept one in the same transaction, each keeping
-  its `written_for`**, see *Incident notes*), and when nothing was deleted and window, first kill, kill count and data are equal the row is left
-  untouched (`unchanged`, `updated_at` too), else every column but `id` and `created_at` is replaced; an update and an unchanged save keep
-  the notes of the incident. A null incident is an argument error.
-- **Incident notes:** `SaveIncidentNoteAsync` takes the writer lock and one immediate transaction, the first write of the web UI. The incident
-  must exist, else the outcome is `NotFound` and nothing changes. A note is written for one incident number (`written_for`) and belongs to one
-  incident (`incident_id`); the note of an incident is the one with `written_for` equal to its number, and the notes moved to it by a merge are the
-  others. A non-empty text with `written_for` equal to the incident upserts (`INSERT … ON CONFLICT(written_for) DO UPDATE … WHERE
-  incident_notes.incident_id = excluded.incident_id`; a conflict with the row of another incident updates nothing and is `NotFound`), with another
-  `written_for` it updates only a row of that incident, else `NotFound`. An **empty text deletes** the row of `written_for` and the incident (`Deleted`,
-  also when there was none for the incident's own number). The edit is validated first, with these exact errors (`InvalidNoteException`, a
-  `StoreException`): `store: invalid note: incident ID must be positive`, `written for must be positive`, `text is longer than 1800 characters` (UTF-16
-  characters, 1,800 accepted), `text must not contain U+0000`, `text is not valid UTF-16` and `saved at must be within the storable range`; a null
-  edit or text is an argument error. U+0000 is refused because `length()` ends at it, so a character check of the table would let a NUL hide
-  characters; the table checks the bytes whatever the text holds. A database error is `store: saving note: …`. A note of an incident survives every
-  re-run of `vandoxd incidents` that updates or keeps the incident, and follows it when it is merged; retention (#46) must move or keep notes, as an
-  incident with notes cannot be deleted.
+- **4** adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`: lines stored before it have an empty host.
+- **5** adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`: lines stored before it have an empty event.
+- **6** adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`.
+- **7** adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, `import_files.hashes_attempt`, `INTEGER`, and the table
+  `import_line_hashes`: existing rows get attempt 0 and no line hashes.
+- **8** adds `log_templates`, `log_template_hours` and `log_source_hours` with their indexes, empty: log lines stored before it have no
+  template statistics until `vandoxd templates` rebuilds them.
+- **9** adds `incidents` with its index, empty; **10** adds `incident_notes` with its index, empty.
+- **11** adds `connection_marks` and `listener_comparisons` with their indexes, empty: agent connection snapshots stored before it have
+  no rows there.
+- **12** adds `records.live`, `INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1))`, so every record stored before it reads as backfilled,
+  and the tables `agent_streams`, `agent_clock_samples`, `agent_sample_times` and `gaps` with their indexes. `agent_streams` is seeded
+  with one row per agent that has stored records, holding the highest stored number as `floor_seq` and `max_seq` and that record's
+  capture and receive time, so no number below it is ever reported missing; the other three tables start empty.
+- **13** adds to `connection_marks` and `listener_comparisons` the columns `changed_count` (`INTEGER NOT NULL DEFAULT 0 CHECK
+  (changed_count >= 0)`) and `changed_listeners` (`TEXT`, `NULL` when none) and the index `connection_marks_changes`. Rows stored before
+  it read as no changes (0 and `NULL`), and a start compared before it keeps its stored outcome without changes until it is compared
+  again; stored comparisons are not recomputed when the comparison rules change.
 
-## Reading
+### Migrations
 
-- A series is read by kind, source and name for a time range, in time order; a kind-wide time range uses the kind indexes. A query
-  returns at most 10,000 records.
-- A series or a kind can be paged through records that share a capture time with `AfterId`: when it is above 0, records whose capture
-  time equals `From` and whose ID is at most `AfterId` are skipped (the next page's `From` is the last capture time and `AfterId` its
-  ID); a negative value is refused with `store: invalid query: after id must not be negative`. This holds in whole 100 ns, because
-  every writer stores capture times in whole `DateTimeOffset` ticks, so the capture time a reader returns equals the stored one; a
-  caller that pages must check that each page leads past the previous one.
-- A stored payload is read from the column's UTF-8 bytes, not from a string, so the payload exists once as bytes and once as the
-  parsed document; the results are the same.
-- A stored payload is read with the payload options of the wire decoder, so an unknown member is ignored; this includes the `Kind`
-  member that rows written before #183 carry.
-- Incidents are read by range (`started_at < to` and `ended_at > from`, ordered by start, then number) with the window and limit rules
-  of the record query, and counted; a `data` value that does not decode (including bytes that are not valid UTF-8 in a member the incident reads; such bytes in an unknown member are skipped unchecked) is `store: reading incidents: decoding incident data`.
-  The `data` column is read from its UTF-8 bytes, like a payload. A page holds every returned incident decoded at once: in the worst
-  case up to 10,000 incidents per page, each decoded from up to 8 MiB of JSON, so the memory of a read grows with the limit. A caller
-  that serves a user does not page through this read: the web UI reads *incident summaries*, *one incident* and *incident notes* below.
-- **Incident summaries** (`IncidentSummariesAsync`) return incidents newest first (window start descending, then number descending), at most
-  `limit` of 1 to 100 per call, continuing after a position (`Before`: a start and a number; a row follows when its start is earlier, or equal and
-  its number lower, so equal starts neither repeat nor skip). A summary carries the columns (number, window, first and last kill, number of kills,
-  created and updated), the first victim, the hypothesis and whether the incident has notes; the first victim, last kill and hypothesis are
-  read from the document by a projection that skips every other member (timeline, metrics, templates), one row's bytes at a time, so a page
-  holds one document's bytes at once. The exact errors: `store: invalid query: limit must be between 1 and 100`, `before must be within the
-  storable range`, `before id must be positive`; undecodable data is `store: reading incidents: decoding incident data`.
-- **One incident** (`IncidentAsync`) returns the stored incident of a number decoded whole (up to 8 MiB of JSON), or `null`; a number that is not
-  positive is `store: invalid query: incident ID must be positive`.
-- **Incident notes** (`IncidentNotesAsync`) return the notes that belong to an incident by `written_for`, at most 64, with `More` set when a 65th
-  exists; the same rule for the incident ID.
-- The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
-  (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
-  on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it
-  (*Database file and connections*; *Limits of templates* there).
-- **Listener history** (`IListenerHistoryReader`, on the reader connections, narrow derived tables only, no payload decoded, the queries of one read on
-  one reader lease without a shared transaction, so a batch committed between them can make a total differ from the rows by that
-  batch): `ListenerTalliesAsync` returns, for the 64 lowest agent IDs of `connection_marks` (byte order of the text), the number of marks, the
-  first and last capture time and the number of starts per outcome (`Starts`, compared on all ports, compared on ports 1 to 1023 only, not
-  compared), and the number of further agent IDs (only counted when 64 were returned). `ListenerFindingsAsync` returns the latest `Limit` (1 to 20)
-  findings of one kind with the total of that kind: kind `AgentStart` reads the `listener_comparisons` rows with `finding = 1`, kind `Agent` the
-  `connection_marks` rows with `new_count > 0` and kind `AgentUidChanges` those with `new_count = 0` and `changed_count > 0` (the outcome of both agent kinds is the ports the agent compared: `all_ports` for `all`, else `privileged_only`).
-  Both order by capture time descending, then agent ID ascending, then `seq` descending, so the arrival order never matters (the capture time
-  decides which findings are the latest, and a clock that stepped back can keep an older one). A finding holds at most 64 listeners
-  and the number left out (`new_count` minus the listed), and at most 64 changed listeners and the number left out (`changed_count` minus the listed). Exact errors: `store: invalid query: kind must be a known finding kind` and `limit must be
-  between 1 and 20`; a stored listener list that does not decode is `store: reading listener findings: decoding listeners`; an unknown stored
-  outcome reads as not comparable.
-- **Classification, gaps and clock** (`IAgentTimelineReader`, on the reader connections): every stored record read carries `Live`. `GapsAsync` returns a page of 1 to 1,000 gaps of one agent in ID order (`AfterId`, `Limit`), optionally of one state, with kind, cause, state, number range or time span, `detected_at` and `changed_at`; the state of a time gap is the derived one, also for the filter. `ClockAsync` returns the measured offset and when it was measured (`NULL` fields for an agent without a measurement), or nothing for an agent the store has no stream of. Exact errors: `store: invalid query: agent id is invalid`, `unknown gap state`, `after id must not be negative`, `limit must be 1 to 1000`.
-- Callers depend on small interfaces (record writer, record reader, log searcher, log explorer, log template reader, incident store, incident browser, listener history reader, agent timeline reader, import tracker). The real store is tested against
-  real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
-  the real store. Fakes for other consumers only record calls and return what the test scripts.
-
-### Log search
-
-A search takes literal terms only; the text is never passed to FTS5 as a query.
-
-- The text must be valid UTF-8 of at most 1,024 bytes, without a control or format character other than white space. It is split at
-  white space into 1 to 16 terms, and every term needs at least one letter or decimal digit.
-- Each term is quoted as an FTS5 string (a `"` inside doubles) and the terms are joined with a space, so all terms must match
-  and no FTS5 operator, prefix (`*`), column filter or `NEAR` has any effect. The expression is bound as a parameter, never
-  concatenated into SQL.
-- Matching is case-insensitive and ignores diacritics; a term with punctuation (`anon-rss`) matches the tokens in order as a phrase.
-  `ß` is not folded to `ss`. A term that consists only of numbers that are not decimal digits (`½`, `Ⅻ`) or of private-use characters is
-  refused although the tokenizer would index it.
-- A violated rule is an error that names the rule and never contains the search text.
-- The cost of a search is not bounded by the time range or the limit: SQLite runs the `MATCH` over the whole retention first and filters
-  by time and source afterwards. The bound is time: a cancelled token or a passed deadline interrupts the
-  running search (*Database file and connections*), so every caller that serves a user must pass a deadline. The logs view does not
-  use this search: it searches through *Log exploration* below, which bounds the work of every request.
-
-### Log exploration
-
-The logs view ([Web UI](web-ui.md), *Logs view*) reads through a second interface, `ILogExplorer`, which `SqliteStore` implements next to the
-log search above; the log search keeps its rules for its other callers. Every method runs on a reader connection and is interrupted by a
-cancelled token or a passed deadline (*Database file and connections*), with no partial result. Null strings are an `ArgumentNullException`; a broken rule is an `InvalidQueryException` (a `StoreException`)
-whose message is `store: invalid query: ` and the rule, and never contains the search text.
-
-**Finding lines.** A request has a text, a source, a program, a highest priority, a template number, a time range `[From, To)`, an optional
-position `After` (capture time and record ID), a page size `Limit` and a bound `ScanLimit`.
-
-- Every filter given must hold: all words of the text (the rules of *Log search*), the source (exact), the program (exact, ordinal), the
-  priority at most the given one (a line without a priority is then not returned), the capture time in the range. An empty text applies the
-  other filters only. The lines come **oldest first, by capture time, then record ID**: that is the order of the log, not of the record
-  IDs, because imported lines are not stored in time order.
-- A page holds at most `Limit` lines. `Next` is the position (capture time, record ID) of the page's last line when the page is full,
-  and a request with `After` set to it continues with the next line, without a gap or a repeat, also across lines with the same capture
-  time. `Next` is empty at the end of the range.
-- **Two strategies, chosen per request from the full-text index alone.** First the record IDs of the matching rows are read from the index up to a cap of
-  **12,000** (`SelectiveMatches`), without looking at the lines. This index check has a **time budget of 0.7 s** (`ProbeBudget`, measured with the
-  store's clock): see *The index check budget* below. None: the page is empty and nothing more is read. Fewer than the cap:
-  **index mode**, which reads the lines with exactly those record IDs (a lookup by primary key; the index is not read again), applies the
-  filters and sorts them (at most the cap, by construction). The cap or more, or no text: **scan mode**, which walks the log
-  lines of the range in capture-time order from the position (through the index on kind, source and time with a source, or the index on kind and time without one) and keeps the lines that pass the filters and, with a text, are in the full-text match. The match is tested for each examined
-  line on its own and nothing is collected over the range, so scan mode holds at most the page and its work grows with the examined lines, not with the matches:
-  every term of the user's text that is **one word part** has its own `EXISTS` on the full-text index (a single token stops at its seek), and the terms of **several
-  parts** (an IP address, a path, `a.b`) are tested in the **line index** below. A test of the whole text in one `MATCH` is not used, because `rowid = …` does not bound the
-  full-text work to one line: an AND of terms or a phrase walks on to the next matching row or to the end of the index (a four-part phrase took 375 ms per line on
-  5,000,000 lines, sixteen words that never meet 497 ms, against 0.36 ms as sixteen tests of one word each). The lines found, followed through `Next` until it is empty, do not depend on the strategy; only scan mode can end a page early at the scan bound.
-- **The scan bound:** scan mode examines at most `ScanLimit` log lines (1 to 100,000; the logs view uses **8,000**), counted whether or not
-  they match, and for a text of several **word parts** at most the bound divided by the parts (at least 1): `ScanLimit` for no text or a
-  text of one part, `ScanLimit / n` for `n` parts. The parts are the runs of letters, numbers and private-use characters that the
-  tokenizer splits the user's text into (`10.0.0.1` has 4, `postfix/smtpd connect` 3), because the work of the per-line test grows with them.
-  The scan tests only the **user's text**: the words of a template narrow the index check only, since the normalization decides which lines are
-  the template's. When the bound ends the request before the page is full, `ScanLimitReached` is set and `Next` is the position of the last
-  examined line, also when the page is empty: a request with `After` set to it searches on, so continuing until `Next` is empty
-  returns every matching line exactly once. A full page ends the scan at its last line (`ScanLimitReached` not set).
-- **The line index.** The examined lines that pass every other test are collected in chunks of at most **64 lines** (and at most 262,144 characters of
-  messages, whichever comes first), inserted into a private `:memory:` SQLite database with one FTS5 table of the same tokenizer as `log_fts`
-  (`unicode61 remove_diacritics 2`), matched against the terms of several parts (the same quoted expression as the stored index) and emptied again; a
-  line is kept when it matches. The same library, tokenizer and expression decide on the same stored message, so scan mode and index mode return the same lines.
-  The connection is opened only for a text with such terms, once per call, reads no database file and takes no reader lease (so the reader bound of the web
-  view holds), carries the call's token as a progress handler, and is disposed on every path. Messages are bound parameters only. The work is bounded by the
-  text of one chunk: at most 64 messages of 16,384 bytes (1 MiB; 256 KiB of characters ends a chunk earlier) and their index in memory, with at most two calls at once.
-- **The page clock.** A scan ends after the examined line (or the matched chunk) at which **1.5 s** (`PageBudget`) have passed since the start of the call, the index check's
-  budget included, measured with the store's clock; at least one line is always examined. It then returns `ScanLimitReached` and `Next` at the last examined
-  line, as at the line bound, so *Continue* always advances. The line bound stays the deterministic upper bound; the clock only ends a page earlier, and the lines found by
-  following `Next` to the end do not depend on it. The calls that pass no page budget (the internal overloads used by the tests) have no clock.
-- **Template lines:** with a template number the lines are those of the template's source and program whose message normalizes (the rules of
-  [Detection, alerts and reports](detection-and-reports.md), *Log templates*) to the template's text, exactly. The words of the template
-  that contain no placeholder narrow the candidates: they are added to the text as search terms (at most 16 terms and 1,024 bytes in all,
-  the user's words first; a template longer than 1,020 bytes loses its last word, which a cut may have split; a template without such a
-  word uses scan mode). Every candidate's message is normalized and kept only when it equals the template's text; in scan mode a rejected
-  line counts as examined. A source or program filter that differs from the template's gives no lines. An unknown number is
-  `store: invalid query: unknown template`.
-- **Rules**, each refused with `store: invalid query: ` and: `from and to are required`, `from and to must be within the storable range`,
-  `from must be before to`, `limit must be between 1 and 1000`, `scan limit must be between 1 and 100000`, `source is longer than 1024
-  bytes`, `program is longer than 1024 bytes`, `priority must be between 0 and 7`, `template ID must not be negative`, `after must be within
-  the storable range`, `after id must be positive`, and the rules of *Log search* for a non-empty text.
-- **The index check budget.** The check runs under a progress handler that stops it when the call's token is cancelled (the deadline: the call
-  then ends with `OperationCanceledException`, as everywhere) or when the time since the check started reaches the budget, measured with the
-  store's clock. A check that is stopped by the budget discards its IDs and the request runs in scan mode with the bound above; the page has
-  `IndexCheckStopped` set. A budget of zero or less skips the check the same way. A check that ends within the budget works as before (no IDs: an
-  empty page; fewer than the cap: index mode; the cap: scan mode, `IndexCheckStopped` not set). Any other database error of the check is a
-  `StoreException`. The handler of the call is installed again after the check on every path. The budget is wall-clock time of the host, so on a
-  loaded host more searches go the stepwise way; which lines are found, followed to the end through `Next`, does not depend on it. Every page of
-  such a search pays the budget again, because the store does not remember the mode between requests, and the search may have no final "no
-  lines" answer until the range is narrowed.
-- **Cost.** Index mode reads at most the cap of matches. Scan mode reads at most the divided bound of lines and does one index lookup per word part
-  of the user's text for each. The index check is bounded by the budget plus one gap between two checks of the handler (31 ms at most in the
-  measurements). A scan page ends by the line bound or the page clock, whichever comes first: its time is the clock (1.5 s) plus
-  the examined line or chunk that was running when it ran out, and the read of at most 100 lines. **The residual:** one `MATCH` inside the line
-  index runs to its end, so a chunk of crafted messages (long runs of one repeated word and a phrase of many parts of it, 64 lines or 256 KiB of
-  characters) can keep one chunk busy for about 0.3 s on the development host and about 1.5 s on the reference host (an estimate of the security review, not a measurement), and a page for up to about 3 s;
-  the deadline of the caller still ends the call. A stored message is bounded (16,384 bytes) but not trusted: any local process can write such lines (security area 12).
-  The per-line tests are cheap otherwise (`docs/BENCHMARKS.md`, *Log search*). A search without a text and with a program or source that few lines have examines up to `ScanLimit` lines per request
-  and says how far it got.
-
-**Context.** `LogContextAsync` returns a line and up to `Before` lines before and `After` lines after it (0 to 20 each) with the same
-source, log name and host, in capture-time order, whatever their other fields; lines of other logs of the source are skipped. Each side
-examines at most **2,000** lines of the source and returns fewer when that bound or the data ends. Errors: `record ID must be positive`,
-`context lines must be between 0 and 20`, `unknown log line` (an ID that is not a stored log line).
-
-**Sources, templates, hours.**
-
-- `LogSourcesAsync`: the distinct sources of stored log lines in ordinal order, at most 64 (one index seek per source).
-- `TemplateAsync(id)`: the template or none (`template ID must be positive`).
-- `TemplatesAsync`: the templates with at least one line in the hours that start in the range, optionally of one source and one program,
-  each with its number of lines in those hours, most lines first, then lowest number, at most `Limit` (1 to 1,000: `limit must be
-  between 1 and 1000`; the window and length rules as above). The count is kept per UTC hour, so a `From` or `To` inside an hour counts that
-  **whole hour**. The hours are summed per template in key order (the range conditions are on the hour column without using the index on it), then joined to the templates, so the statement reads the whole table of template hours whatever the range is: its cost grows with the stored template hours (about 0.03 s for 374,000 template hours), not with the range.
-- `SourceHoursAsync`: the start of every hour in the range in which a source has lines, ascending (`source is required`; limit 1 to 10,000,
-  `limit must be between 1 and 10000`); `TemplateHoursAsync`: a template's hourly counts, as the template reader's hourly counts.
-  Both come from the template statistics, so lines stored before them (a database upgraded from schema 7) have none until `vandoxd
-  templates` has run.
-
-**Storage layout.** No table, column or index was added for this; scan mode relies on the indexes `records(kind, source, captured_at)` and
-`records(kind, captured_at)` serving the order of the scan, so a statement plan that stops using them would turn a page into a sort of
-every log line of the range (the benchmark shows it).
+- Migrations are an ordered list of steps. A step runs in its own write transaction that first re-reads the version, skips itself if
+  the database is already at or past it, and otherwise executes and writes the new version in the same transaction; a failing step
+  rolls back completely and earlier steps stay committed. Two processes that start at once apply each step once.
+- A missing `meta` table or version row is version 0. A version above the last known step, or one that is not a decimal integer, is
+  refused before anything is written: an older build refuses a newer schema.
+- A released step is never edited: every schema change is a new step, tested by migrating from the previous version.
 
 ## Retention (planned)
 
-Raw data is kept 30 days, 5-minute rollups 1 year, hourly rollups 3 years (the template statistics count as hourly rollups), incidents
-unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Open limit for #46: an incident with notes cannot be deleted (the foreign key of `incident_notes` has no cascade), so retention must move or keep the notes before it deletes an incident. The derived rows of `connection_marks` and `listener_comparisons` go with their records (their `record_id` is a foreign key without a cascade, so retention deletes them first); the comparison of a start whose predecessor was deleted would read `no_earlier` if it were recomputed, so retention must not recompute it. Open limit for #46: retention must delete the `gaps`, `agent_sample_times`, `agent_clock_samples` and `agent_streams` rows of the data it removes, and a stream row only with the agent's last record (a stream row that outlives its records keeps numbers from being reported missing; one that is deleted first reports the next batch's numbers as a new start). Open limit for #46: a template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines (retention must make the rebuild refuse or keep that history). Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
-their `log_fts` entries (the FTS5 `delete` command with the old message).
+Retention and rollups are the backend's own job and **are not implemented yet**. The planned periods: raw data 30 days, 5-minute rollups
+1 year, hourly rollups 3 years (the template statistics count as hourly rollups), logs 90 days, process and connection snapshots
+30 days, incidents without limit; an incident that no rebuilt one overlaps is kept as it is ([Incidents](incidents.md)). What retention
+must do (open limits for #46):
+
+- Deleting log lines must also remove their `log_fts` entries (the FTS5 `delete` command with the old message) in the same transaction.
+- Once lines are deleted, a re-run of `vandoxd incidents` would rebuild an incident whose window lines have partly expired from what is
+  left and replace the richer stored one (fewer kills, a shorter timeline): retention must prevent that (keep the data of incident
+  windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came
+  from, so retention must bound them, too.
+- An incident with notes cannot be deleted (the foreign key of `incident_notes` has no cascade): retention must move or keep the notes
+  before it deletes an incident.
+- The derived rows of `connection_marks` and `listener_comparisons` go with their records (their `record_id` is a foreign key without a
+  cascade, so retention deletes them first). The comparison of a start whose predecessor was deleted would read `no_earlier` if it were
+  recomputed, so retention must not recompute it.
+- Retention must delete the `gaps`, `agent_sample_times`, `agent_clock_samples` and `agent_streams` rows of the data it removes, and a
+  stream row only with the agent's last record: a stream row that outlives its records keeps numbers from being reported missing; one
+  that is deleted first reports the next batch's numbers as a new start.
+- A template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines: retention must
+  make the rebuild refuse or keep that history.
 
 ## Write throughput
 
 The reference host is a Synology DS918+ (Intel Celeron J3455). The criterion: the **median of five batches** of 10,000 records, one
-transaction each, takes under one second, measured with `tools/Vandox.StorageBenchmark` on the volume that holds the database; the
-first batch (fresh file) is reported next to it. The criterion is a stress value, since an agent sends hundreds of records per minute.
-The agent timeline of record 0130 adds its work to the same transaction (figures in `docs/BENCHMARKS.md`). The criterion is met on the SSD volume (783 ms median); on the HDD volume it is not (1,171 ms), because every commit waits for the disk, so the
-database should be on the SSD, though any volume works. Results and the procedure are in `docs/BENCHMARKS.md`. The criterion is not
-weakened silently, and `synchronous=FULL` stays unless the Product Manager decides otherwise in a new record.
+transaction each, takes under one second, measured with the storage benchmark on the volume that holds the database; the first batch
+(fresh file) is reported next to it. The criterion is a stress value, since an agent sends hundreds of records per minute. The agent
+timeline and the listener marks of [Storage writing](storage-writing.md) add their work to the same transaction. The criterion is met
+on the SSD volume (783 ms median); on the HDD volume it is not (1,171 ms), because every commit waits for the disk, so the database
+should be on the SSD, though any volume works. Results and the procedure are in `docs/BENCHMARKS.md` (*Storage write throughput*). The
+criterion is not weakened silently, and `synchronous=FULL` stays unless the Product Manager decides otherwise in a new record.
+
+## Tests
+
+The real store is tested against real files. A consumer whose behavior depends on the store's semantics (such as "a resent batch is
+stored once") is tested against the real store; fakes for other consumers only record calls and return what the test scripts.
 
 ## Related decisions
 
-- [0130](../decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) — why the write path classifies each agent record, keeps gaps as stateful rows and measures the clock offset.
 - [0007](../decisions/0007-sqlite-with-fts5-no-external-database.md) — why one SQLite file with FTS5 and no external database.
-- [0063](../decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md) — why a `records` table plus typed metric and log tables, and why the write path fills the FTS5 index.
-- [0066](../decisions/0066-log-search-takes-literal-terms-only.md) — why log search takes literal terms only.
+- [0063](../decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md) — why a `records` table plus typed metric and log tables with JSON payloads.
 - [0077](../decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md) — why the same schema on Microsoft.Data.Sqlite, one writer, `synchronous=FULL` and migrations in code.
-- [0083](../decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) — why the writer was made cheaper and why the criterion is the median of five batches.
-- [0095](../decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) — why the write path keeps the template statistics in the batch's transaction.
-- [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are matched by overlapping windows, kept per number and saved one transaction each, and why the record query pages by ID.
-- [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a progress handler interrupts reader statements and why the interruption is an `OperationCanceledException`.
-- [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view's search chooses between the index and a bounded scan and finds a template's lines by normalizing candidates.
-- [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes are rows per incident number moved in the merge, and why the incidents view reads summaries.
-- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the write path stores a mark per agent connection snapshot and the comparison of each agent start, computed once per batch.
+- [0083](../decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) — why the criterion is the median of five batches on the data volume.
+- [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a progress handler interrupts reader statements and why the interruption is a cancellation.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the tables of listener marks and comparisons exist.
 - [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
-  connections set `DefaultTimeout` to the busy timeout and why the ingest write is cancelled only by the shutdown deadline.
+  connections set the library's command timeout to the busy timeout and why the ingest write is cancelled only by the shutdown deadline.
+- [0130](../decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) — why the `live` column, the gap rows and the stream rows exist.
 
 ## Not here
 
-- The meaning of the records and the batch format: [Wire format](wire-format.md).
+- How batches, incidents, notes and import state are written, deduplicated and counted: [Storage writing](storage-writing.md).
+- How records, incidents, listener findings and gaps are read, and log search and exploration:
+  [Storage reading and log exploration](storage-reading.md).
+- The meaning of the records and the batch format: [Wire format](wire-format.md), [Wire format records](wire-format-records.md).
 - How import files are found, hashed and resumed: [Log import](log-import.md).
-- The container's volumes and memory limit: the ingest and backend host area.
+- The container's volumes and memory limit: [Backend host](backend-host.md).
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `ListenerMarkWriter`, `ListenerQueries`, `IListenerHistoryReader`, `AgentTimeline`, `AgentTimelineQueries`, `LiveRules`, `ClockEstimator`, `IAgentTimelineReader`, `TemplateQueries`, `IncidentRepository`, `IncidentNoteRepository`, `ReaderQuery`, `LogFinder`, `LogFinderQueries`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`, `TemplateTerms`, `StorageLimits`).
+`Vandox.Storage`: `SqliteStore` (opening, connections), `DatabaseFile` (file creation and the refusal of links), `SchemaMigrator`
+(steps), `ReaderQuery` (the progress handler on reader connections), `StorageLimits`; the connections set Microsoft.Data.Sqlite's
+`DefaultTimeout` next to the busy timeout. The throughput benchmark is `tools/Vandox.StorageBenchmark`.
