@@ -75,7 +75,7 @@ public sealed partial class ReportContent : ComponentBase
                        {
                            builder.OpenElement(0, "code");
                            builder.OpenComponent<ExternalText>(1);
-                           builder.AddComponentParameter(2, nameof(ExternalText.Runs), LogText.Runs(piece.Text, LogText.MaxShortChars));
+                           builder.AddComponentParameter(2, nameof(ExternalText.Runs), LogText.Runs(piece.Text, LogText.MaxShortChars, ReportsView.MaxTextRuns));
                            builder.CloseComponent();
                            builder.CloseElement();
                        }

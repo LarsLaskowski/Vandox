@@ -4,7 +4,6 @@ using System.Text;
 
 namespace Vandox.Backend.Logs;
 
-#pragma warning disable RH2003, S2325
 /// <summary>
 /// Makes external text safe to show: invisible characters become visible escapes.
 /// </summary>
@@ -53,7 +52,9 @@ public static class LogText
     /// <returns>The runs, at most <paramref name="maxRuns"/></returns>
     public static IReadOnlyList<TextRun> Runs(string text, int maxChars, int maxRuns)
     {
-        throw new NotImplementedException();
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxRuns, 1);
+
+        return Build(text, maxChars, maxRuns);
     }
 
     /// <summary>
@@ -101,9 +102,17 @@ public static class LogText
 
             if (current.Length == 0 && runs.Count == maxRuns - 1)
             {
-                var rest = Escape(text[index..], maxChars - used);
+                var remaining = text[index..];
+                var rest = Escape(remaining, maxChars - used);
 
-                runs.Add(new TextRun(rest, rest.Length != text.Length - index));
+                if (string.Equals(rest, remaining, StringComparison.Ordinal))
+                {
+                    runs.Add(new TextRun(rest, false));
+                }
+                else
+                {
+                    runs.Add(new TextRun(rest, true));
+                }
 
                 return runs;
             }

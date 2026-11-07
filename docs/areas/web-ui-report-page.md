@@ -88,22 +88,20 @@ it to read the report in a browser without a shell. What the report says is in [
 ## Limits and errors
 
 - **Memory per circuit.** The page keeps the document of one run: the summary, at most 50 outages and the notes, as text.
+  - External text is shown in at most 16 runs: the 15 runs are followed by the rest of the text as one run, in the escape
+    style whenever it differs from the text it stands for ([Web UI](web-ui.md), *External text*; record 0193). The characters shown
+    stay those of the 2,048-character cap.
   - Outages: at most 22 external texts per outage (16 victims, 3 growth candidates, 3 consumers), each a stored text of at most 1,024
-    bytes (at most 2 KiB as UTF-16) plus its runs for the page (at most 2,048 displayed characters, 4 KiB), so up to about 6 KiB each,
-    about 130 KiB per outage and **about 6.6 MB** for 50 outages. This 6 KiB counts characters; it is not the worst case of the runs,
-    which is measured below for a command of 1,024 bytes (about 22.9 KiB) and has not been measured for the outage texts: the victims and
-    programs take the same runs path, so their share is to be restated with the commands' in
-    [#356](https://github.com/LarsLaskowski/Vandox/issues/356). The 10 consumers of the summary add 60 KB.
-  - The new listeners section: **up to about 82 MB** — at most 20 findings after an agent start, 20 found by the agent and 20 found by the
+    bytes with its runs. The worst case, a text whose plain and escaped characters alternate, takes up to 8 KiB (a bound pinned by a test
+    for a command of 1,024 bytes), so 1,100 texts of 50 outages take up to about 9 MB. The 10 consumers of the summary add 60 KB.
+  - The new listeners section: **up to about 36 MB** — at most 20 findings after an agent start, 20 found by the agent and 20 found by the
     agent with changes only, each with at most 64 listeners and up to 64 changed endpoints, and the head of at most 64 agent IDs of at most
     64 bytes each; the agent ID, each command and each user name are external text in code. A text's cost is set by its runs and is worst
-    when plain and escaped characters alternate: a command of 1,024 bytes takes up to about 22.9 KiB with its runs (measured), about
-    1.5 MB a finding and **about 60 MB** for the commands; each user name, cut to 32 bytes, takes up to about 3 KiB (a bound pinned by a
-    test), about 7.9 MB. The changed endpoints add no command: a changed line is three to four plain texts and one user code span, up to
-    about 3.6 KiB (the 3 KiB user bound plus about 0.6 KiB computed for the endpoint, PID, UID and before texts, not measured as a whole),
-    so 60 findings of 64 lines (3,840 lines) take up to about 14 MB, which brings the section from about 68 MB to about 82 MB. The earlier
-    figure of about 16 MB for this section understated the commands; bounding their share is the follow-up
-    [#356](https://github.com/LarsLaskowski/Vandox/issues/356).
+    when plain and escaped characters alternate: a command of 1,024 bytes takes up to 8 KiB with its runs (a bound pinned by a test), so
+    2,560 commands take up to about 21 MB; each user name, cut to 32 bytes, takes up to 2 KiB (a bound pinned by a test), about 5.2 MB. The
+    changed endpoints add no command: a changed line is three to four plain texts and one user code span, up to about 2.6 KiB (the 2 KiB
+    user bound plus about 0.6 KiB computed for the endpoint, PID, UID and before texts, not measured as a whole), so 60 findings of 64
+    lines (3,840 lines) take up to about 10 MB, which brings the section from about 26 MB to about 36 MB.
   - Plus the markup and the render tree (a typical outage holds a few hundred bytes of external text). This is **per circuit**; the number
     of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
 - **Memory of the run.** The run itself keeps up to about 60 MB plus about 20 MB for the listener section once across the whole service,
@@ -122,6 +120,8 @@ it to read the report in a browser without a shell. What the report says is in [
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the report shows the new listeners section.
 - [0149](../decisions/0149-new-listeners-section-capped-per-finding-kind-changed-endpoints-without-command.md) — how that section caps its
   findings.
+- [0193](../decisions/0193-report-page-shows-each-external-text-in-at-most-16-runs.md) — why the page shows each external text in at most
+  16 runs.
 
 ## Not here
 
