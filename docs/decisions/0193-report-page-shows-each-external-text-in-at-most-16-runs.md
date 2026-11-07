@@ -1,6 +1,6 @@
 # 0193: The report page shows each external text in at most 16 runs
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-07
 - **Area:** Report page
 - **Source:** Issue #356
