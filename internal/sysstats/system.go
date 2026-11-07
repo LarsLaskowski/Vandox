@@ -158,7 +158,7 @@ func (c *System) logPressure(was, now string) {
 	}
 }
 
-// records returns the records of the sample in the order of the Agent area; prev is the previous successful sample or nil.
+// records returns the records of the sample in the order of the Agent system metrics area; prev is the previous successful sample or nil.
 func (s *sample) records(run scheduler.Run, prev *sample) []model.Record {
 	r := &recorder{run: run}
 	dt := 0.0

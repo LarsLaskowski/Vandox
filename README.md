@@ -9,28 +9,37 @@ Vandox monitors a Linux server and keeps the evidence needed for forensics.
 It consists of two binaries: the agent, written in Go to stay small on the monitored server, and the
 backend, written in .NET 10 with a Blazor web UI. Both implement the same data model and wire format.
 
+What the software does, area by area — formats, limits, error behavior and guarantees — is written in the
+[area documents](docs/areas/README.md); this README is the user guide and links them.
+
 ## Binaries
 
 | Binary | Runs on | Purpose |
 |---|---|---|
-| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification), the system, process and connection collectors and the sender (live and throttled backfill) exist, and the backend's ingest endpoint accepts its batches; the other collectors do not yet |
+| `vandox-agent` (Go) | the monitored Linux server | collects metrics and logs and ships them to the backend (from v0.2.0; v0.1.0 ships the backend only; what is built so far: [Agent](docs/areas/agent.md)) |
 | `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI and ingest API |
 
-Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
-service; `-config <file>` names its configuration file (default `/etc/vandox/vandoxd.yaml`) and
-`-healthcheck` probes `/healthz` of a running service and exits 0 when it is healthy (the image's Docker
-`HEALTHCHECK` uses it). `vandoxd import <path>` imports a directory, an archive or a log file into the
-database, see *Import logs* below, `vandoxd incidents` rebuilds the outage incidents from the stored data, see
-*Reconstruct incidents* below, `vandoxd templates` rebuilds the log template statistics, see *Rebuild template
-statistics* below, and `vandoxd report` writes the forensics report as Markdown, see *Write the forensics report* below.
+Both support `--version`, which prints version, commit and build date. The commands of `vandoxd`:
+
+| Command | What it does |
+| ------- | ------------ |
+| `vandoxd [-config <file>]` | runs the service; the configuration file defaults to `/etc/vandox/vandoxd.yaml` |
+| `vandoxd -healthcheck` | probes `/healthz` of the running service and exits 0 when it is healthy (the image's Docker `HEALTHCHECK`) |
+| `vandoxd hash-password` | creates the hash of the web UI password, see *Run the backend with Docker Compose* |
+| `vandoxd import <path>` | imports a directory, an archive or a log file into the database, see *Import logs* |
+| `vandoxd incidents` | rebuilds the outage incidents from the stored data, see *Reconstruct incidents* |
+| `vandoxd templates` | rebuilds the log template statistics, see *Rebuild template statistics* |
+| `vandoxd report` | writes the forensics report as Markdown, see *Write the forensics report* |
+
+Flags, output and exit codes of every command: [Backend host](docs/areas/backend-host.md), *Command line and exit codes*.
 
 ## Layout
 
 ```
 cmd/vandox-agent/   entry point of the agent (Go)
-internal/           the agent's Go packages: agent (start-up, logging, watchdog), scheduler, selfstats, sdnotify, config, model, wire (batch encoder), cli, sender (HTTP transport, live and backfill sending), version
-src/Vandox.Backend/ the backend vandoxd: host, command line, Blazor web UI
-src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parser framework, log signatures
+internal/           the agent's Go packages: start-up, scheduler, collectors, log shipping, spool, sender, wire (batch encoder), model, config, cli, version
+src/Vandox.Backend/ the backend vandoxd: host, command line, ingest endpoint, web login, Blazor web UI
+src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parsers, log signatures and templates, incidents, forensics report
 src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search and exploration
 src/Vandox.Import/  log import: scanner, archives, resumable batches
 tests/              one test project per project under src/
@@ -38,77 +47,76 @@ tools/              console programs for developers, e.g. the storage write benc
 Vandox.slnx         the .NET solution
 deploy/agent/       deployment files for the agent
 deploy/backend/     deployment files for the backend
-docs/               documentation (docs/INSTALL.md: installation guide)
+docs/               documentation (docs/INSTALL.md: installation guide; docs/areas/: what the software does)
 docs/assets/        logo, icon and favicon, see docs/BRANDING.md
 testdata/           fixtures for tests, shared by both languages (testdata/wire: the golden batch of the wire format)
 ```
 
 ## Configuration
 
-Each binary reads one strict YAML file for its options (the agent from v0.2.0 on: the agent binary of v0.1.0 does not call its loader, later versions read the file at start-up, `-config <file>` names another path). The secrets come only from the environment (or
-from files named by `*_FILE` variables), never from the file
-([0032](docs/decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
+Each binary reads one strict YAML file for its options (the agent from v0.2.0 on; `-config <file>` names another path). The
+secrets come only from the environment (or from files named by `*_FILE` variables), never from the file
+([0032](docs/decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). A mistake in the file or the environment stops
+the binary at start-up with an error that names the file, the line and the key. The commented example files set every option.
+The form, range and error text of each option are in [Configuration options](docs/areas/configuration-options.md); the rules of
+the file and of the secrets in [Configuration and secrets](docs/areas/configuration-and-secrets.md).
 
 | Binary | File | Commented example |
 | ------ | ---- | ----------------- |
 | `vandox-agent` | `/etc/vandox/agent.yaml` | [`deploy/agent/agent.yaml`](deploy/agent/agent.yaml) |
 | `vandoxd` | `/etc/vandox/vandoxd.yaml` (mounted into the container) | [`deploy/backend/vandoxd.yaml`](deploy/backend/vandoxd.yaml) |
 
-An unknown key, an unknown `VANDOX_` variable, a duplicate key, a second document, an anchor, a custom
-tag or an invalid value is an error at start-up. Errors name the file, the line and the key, and never
-the value.
-
 **Agent options** (read from v0.2.0 on)
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
-| `agent_id` | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
-| `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
-| `backend.backfill_bandwidth` | `256KiB` | Bandwidth the agent may use to send spooled data after the backend was unreachable: a whole number followed by `KiB` or `MiB`, from `16KiB` to `1024MiB`, such as `256KiB` or `4MiB`. |
-| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. It holds the spooled records in segment files `segment-<number>.spool` and the spool's bookkeeping file `spool-meta.json`, besides the agent's state file `agent-state.json` (the boot, the position in the journal, the open backup run and the positions of the log shipping collector: a position per journal sequence number ID and per configured file, up to 64 KiB). The agent never creates the directory, `deploy/agent/install.sh` does, and it accepts only one directory directly below `/var/lib/vandox` (a root-owned directory the unit may write to); the directory must exist, be a real directory (not a link) and be writable for the agent. |
-| `spool.max_size` | `2GiB` | Size cap of all spool files: a whole number followed by `MiB` or `GiB`, from `64MiB` to `64GiB`. When the cap or `spool.min_free` leaves no room for new records, the agent drops the oldest spool data first and records the gap. |
-| `spool.min_free` | `1GiB` | Free space that stays available on the file system of the spool: a whole number followed by `MiB` or `GiB`, from `0MiB` to `1024GiB`. `0MiB` (or `0GiB`) switches the check off. |
+| `agent_id` | required | Name of this server, such as `web-1`; the backend's `ingest.agent_id` names it. |
+| `backend.url` | required | Base URL of the backend's ingest endpoint, such as `http://100.64.0.1:8081` (the backend's tailnet address). |
+| `backend.backfill_bandwidth` | `256KiB` | Bandwidth for sending spooled data after the backend was unreachable, such as `4MiB`. |
+| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool and the agent's state file; `deploy/agent/install.sh` creates it. |
+| `spool.max_size` | `2GiB` | Size cap of the spool; when it is full, the oldest data is dropped and the gap recorded. |
+| `spool.min_free` | `1GiB` | Free space kept on the spool's file system; `0MiB` turns the check off. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
-| `filesystem.mount_points` | `[/]` | Mount points whose size and inode use is recorded: a list of at most 16 absolute, clean paths of at most 1024 bytes each, every path listed once. A path that is not mounted is logged and left out; `[]` turns the file system metrics off. |
-| `processes.programs` | `[]` | Rules that name the program of a process, tried in order, at most 64, each a mapping with `program` (1 to 128 characters of `[A-Za-z0-9._:/@+-]`, starting with a letter or digit) and exactly one of `command` (the process command) and `cmdline_prefix` (a literal start of the command line), both 1 to 256 bytes; `append_next_word: true` (only with `cmdline_prefix`) appends the next word as `<program>/<word>`. Without a rule the program is the first word of the command, as in the legacy log. |
-| `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | Services whose state the `systemd` collector records, as unit names or patterns with `*` and `?`; an entry without a unit type suffix means `<entry>.service`. At most 64 entries of 1 to 255 bytes of `[A-Za-z0-9:_.@*?-]`, not starting with `.` or `-`; only service units, instances (not templates), each listed once. A unit that is not installed is logged once at start-up and recorded with `load_state` `not-found`; `[]` turns the collector off. |
-| `mariadb.enabled` | `true` | Whether the `mariadb` collector runs: it asks the local MariaDB server over its Unix socket for status, variables and, under load, the process list (statement texts can hold customer data and credentials; see `deploy/agent/README.md`). `false` turns it off completely. |
-| `mariadb.socket` | `/run/mysqld/mysqld.sock` | Path of the MariaDB Unix socket: an absolute, clean path of at most 107 bytes. The agent logs in as `vandox-agent`, created by `deploy/agent/mariadb-user.sql`. |
-| `backups.processes` | `[{command: pzstd}, {cmdline_prefix: "/opt/psa/admin/sbin/backup-archiver --pack "}, {cmdline_prefix: "/usr/lib/plesk-9.0/sw-tar --create "}]` | Rules that name the processes of a backup, tried in order, at most 64, each a mapping with exactly one of `command` (the process command) and `cmdline_prefix` (a literal start of the command line), as in `processes.programs`. The `backups` collector records the start and the end of a run while a matching process exists; `[]` turns the collector off. |
-| `log_shipping.journal` | `true` | Whether the `logs` collector ships the systemd journal: the system files and the user files (`user-<UID>.journal`, which hold the entries of users with a UID of 1000 or more) of `/var/log/journal`, else `/run/log/journal`. `false` leaves the journal alone. |
-| `log_shipping.min_priority` | `info` | `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info` or `debug`: a line with a known priority less severe than this is not shipped; a line without a priority (a traditional syslog file) is never dropped by it. |
-| `log_shipping.files` | `[]` | Log files shipped besides the journal: at most 16 mappings with `path` (an absolute, clean path of at most 1024 bytes, each listed once) and `format` (`syslog`, or an error log of Plesk and the web servers: `plesk-panel`, `nginx-error`, `sw-cp-server-error` or `apache-error`). The year-less times of `syslog` files, and the times of the error logs, which carry their year, are read in the time zone of `/etc/localtime`. A file that exists at the first start is shipped from its end, one that appears later from its first line; a rotation by rename and a truncation in place are followed. A file that holds what the journal ships (`/var/log/syslog` on a server whose rsyslog copies the journal) is shipped twice. See `deploy/agent/README.md` for the rights; the error logs need a read grant by hand. |
-| `log_shipping.drop` | `[]` | Rules for lines that are not shipped: at most 64 mappings, each with at least one of `log` (`journal` or a path of `log_shipping.files`), `program` (compared whole), `priority` (that priority or less severe) and `message` (an RE2 regular expression in Go syntax of at most 1024 bytes, searched anywhere in the message). A line that meets every condition of a rule is not shipped. One pattern may compile to at most 400 instructions and all patterns together to at most 400 (about a dozen ordinary patterns); the agent refuses a larger one at start-up. |
+| `filesystem.mount_points` | `[/]` | Mount points whose size and inode use is recorded; `[]` turns the file system metrics off. |
+| `processes.programs` | `[]` | Rules that name the program of a process by its command or the start of its command line. |
+| `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | Services (unit names or patterns) whose state the `systemd` collector records; `[]` turns it off. |
+| `mariadb.enabled` | `true` | Whether the `mariadb` collector asks the local MariaDB server for its status (see `deploy/agent/README.md`). |
+| `mariadb.socket` | `/run/mysqld/mysqld.sock` | MariaDB's Unix socket; the agent logs in as `vandox-agent`, created by `deploy/agent/mariadb-user.sql`. |
+| `backups.processes` | `[{command: pzstd}, {cmdline_prefix: "/opt/psa/admin/sbin/backup-archiver --pack "}, {cmdline_prefix: "/usr/lib/plesk-9.0/sw-tar --create "}]` | Rules that recognize the processes of a backup run; `[]` turns the `backups` collector off. |
+| `log_shipping.journal` | `true` | Whether the `logs` collector ships the systemd journal. |
+| `log_shipping.min_priority` | `info` | Least severe priority that is shipped, `emerg` to `debug`. |
+| `log_shipping.files` | `[]` | Log files shipped besides the journal, each with `path` and `format`; the error logs need a read grant (`deploy/agent/README.md`). |
+| `log_shipping.drop` | `[]` | Rules for lines that are not shipped, by log, program, priority and message pattern. |
 
 **Backend options**
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
 | `web.listen` | `:8080` | Address of the web UI as `[host]:port`. |
-| `web.trusted_proxies` | empty | Addresses or networks of the reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are trusted, comma-separated, at most 16 entries such as `172.18.0.1` or `172.18.0.0/16` (IPv4 prefix 8 to 32, IPv6 prefix 16 to 128, no host bits set). Without it, all clients behind a proxy share the proxy's address and its sign-in lockout (see *Run the backend with Docker Compose* and `docs/REVERSE_PROXY.md`). |
-| `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
-| `ingest.agent_id` | none | The `agent_id` of the one agent the token belongs to: 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit, compared exactly (case included). While it or `VANDOX_AGENT_TOKEN` is unset, ingest is disabled: the service logs `ingest disabled` at start and answers every batch `503`; the web UI and the import work as before. |
-| `ingest.min_free` | `1GiB` | Free space on the file system of `storage.directory` below which ingest writes nothing and answers `503` (the agent keeps its records and retries): a whole number followed by `MiB` or `GiB`, from `0MiB` to `1024GiB`; `0MiB` switches the check off. |
-| `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
+| `web.trusted_proxies` | empty | Reverse proxies whose forwarded headers are trusted, such as `172.18.0.1` (see *Run the backend with Docker Compose*). |
+| `ingest.listen` | `:8081` | Address of the ingest endpoint, on another port than `web.listen`. |
+| `ingest.agent_id` | none | The `agent_id` of the agent the token belongs to; without it ingest is disabled. |
+| `ingest.min_free` | `1GiB` | Free space on the data volume below which ingest stores nothing; `0MiB` turns the check off. |
+| `storage.directory` | `/data` | Directory of the backend's data. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
-| `import.plesk_panel_log` | `/var/log/plesk/panel.log` | Server path of the Plesk panel log; a file at this path is read as that log whatever it holds. An absolute, clean path of a file in a directory. The default is not verified against a Plesk server (see *Import logs*). |
-| `import.sw_cp_server_error_log` | `/var/log/sw-cp-server/error_log` | Server path of the error log of the Plesk panel web server `sw-cp-server`; recognized by this path only. Not verified against a Plesk server. |
-| `import.nginx_error_log` | `/var/log/nginx/error.log` | Server path of the nginx error log. |
-| `import.apache_error_log` | `/var/log/apache2/error.log` | Server path of the Apache error log (Debian and Ubuntu); on RHEL-family servers (AlmaLinux, Rocky Linux, CentOS) it is `/var/log/httpd/error_log`. |
-| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs, Dovecot log files, the Plesk panel, nginx and Apache error logs and the legacy `top`/`lsof` monitoring log (see *Import logs*). |
-| `incidents.window_before` | `1h` | How long before an OOM kill an incident starts: one to four digits and `m` (minutes) or `h` (hours), from `1m` to `24h`, such as `30m` or `1h` (see *Reconstruct incidents*); also the lookback of the forensics report (see *Write the forensics report*). |
-| `incidents.window_after` | `30m` | How long after an OOM kill an incident ends; same format and range. |
+| `import.plesk_panel_log` | `/var/log/plesk/panel.log` | Server path of the Plesk panel log, for the import. |
+| `import.sw_cp_server_error_log` | `/var/log/sw-cp-server/error_log` | Server path of the error log of the panel's web server `sw-cp-server`, for the import. |
+| `import.nginx_error_log` | `/var/log/nginx/error.log` | Server path of the nginx error log, for the import. |
+| `import.apache_error_log` | `/var/log/apache2/error.log` | Server path of the Apache error log, for the import (`/var/log/httpd/error_log` on RHEL-family servers). |
+| `import.time_zone` | none | IANA time zone of the server the imported logs come from, such as `Europe/Berlin` (see *Import logs*). |
+| `incidents.window_before` | `1h` | How long before an OOM kill an incident starts, such as `30m`; also the lookback of the forensics report. |
+| `incidents.window_after` | `30m` | How long after an OOM kill an incident ends. |
 
 **Secrets**
 
-| Variable | File variant | Binary | Required | Rule |
-| -------- | ------------ | ------ | -------- | ---- |
-| `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no (ingest is disabled without it) | At least 32 printable ASCII characters without spaces, e.g. `openssl rand -hex 32`. |
-| `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no at load, but the service refuses to start without it | The argon2id hash of the web UI password in the form `$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>`, created with `vandoxd hash-password` (see *Run the backend with Docker Compose* and `docs/areas/web-login.md`). |
-| `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. Read and validated, but unused until the Telegram notifier (planned). |
+| Variable | File variant | Binary | Required | Description |
+| -------- | ------------ | ------ | -------- | ----------- |
+| `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no (ingest is disabled without it) | The token the agent presents to the ingest endpoint; create it with `openssl rand -hex 32`. |
+| `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no at load, but the service refuses to start without it | The hash of the web UI password, created with `vandoxd hash-password` (see *Run the backend with Docker Compose*). |
+| `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | The token of the Telegram bot; read, but unused until the Telegram notifier (planned). |
 
-Set either the variable or its `_FILE` form, not both. The `_FILE` value is an absolute path to a regular
-file (for example a Docker secret) whose content is the secret, with at most one trailing line ending.
+Set either the variable or its `_FILE` form, not both; the `_FILE` form names a file that holds the secret, such as a Docker
+secret.
 
 ## Build
 
@@ -177,16 +185,18 @@ awk -v f="$f" '$2 == f' SHA256SUMS | sha256sum -c --strict - && tar -xzf "$f"
 "$d/vandox-agent-install-$v/install.sh" --agent-id web-1 --backend-url http://100.64.0.1:8081
 ```
 
-The variables live only in this shell; in a new shell, start again at step 1. The script first checks the other files of the bundle against `MANIFEST.sha256` and stops with `the bundle is incomplete or changed; extract it again in a new directory` if one is different or missing, for example after an interrupted unpacking; a missing `common.sh` or `MANIFEST.sha256` gets the same message.
+The variables live only in this shell; in a new shell, start again at step 1. If the script says
+`the bundle is incomplete or changed; extract it again in a new directory`, start again at step 5.
 
-The bundle does not contain the agent binary, only its SHA-256: the script downloads `vandox-agent-linux-amd64` from the GitHub
-release of the bundle's version, so the server needs HTTPS access to `github.com` and a working name server (turn off Tailscale's
-DNS on it, see [*Tailscale on the monitored server*](deploy/agent/README.md#tailscale-on-the-monitored-server)). The script asks
+The script downloads the agent binary `vandox-agent-linux-amd64` from the GitHub release of the bundle's version, so the server needs
+HTTPS access to `github.com` and a working name server (turn off Tailscale's DNS on it, see
+[*Tailscale on the monitored server*](deploy/agent/README.md#tailscale-on-the-monitored-server)). The script asks
 `Agent token:` and shows nothing while you type or paste; press Enter after the token. If your console cannot paste into a hidden
 prompt, see *The token prompt* in [`deploy/agent/README.md`](deploy/agent/README.md).
 
 To remove the agent, run the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade, offline install, the options and the checks are in [`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of
-[`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names the backend's tailnet address (MagicDNS names do not resolve once Tailscale's DNS is off on the server).
+[`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names the
+backend's tailnet address, not a MagicDNS name. What the scripts check and change: [Agent installation](docs/areas/agent-installation.md).
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
@@ -197,7 +207,8 @@ docker pull networlddev/vandox@sha256:<digest>
 ```
 
 To check that the image was built by this repository's release workflow, verify it by digest and then pull
-that same digest:
+that same digest (by digest, because a tag can be re-pointed between the check and the pull; see
+[*Verifying a release*](docs/CONTRIBUTING.md#verifying-a-release)):
 
 ```
 gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo LarsLaskowski/Vandox \
@@ -206,12 +217,9 @@ gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo 
 docker pull networlddev/vandox@sha256:<digest>
 ```
 
-The check names the digest and not the tag because a tag is resolved anew on every request and anyone with
-push rights to `networlddev/vandox` could re-point it between the check and the pull, while the digest names
-exactly the image that was verified. The attestation is stored on GitHub, not in Docker Hub, so
-`--bundle-from-oci` and registry-side tools do not find it.
-
-The image's SBOM is verified and saved the same way, again by digest:
+The attestations are stored on GitHub, not in Docker Hub, so `--bundle-from-oci` and registry-side tools do not find them.
+The image's SBOM (SPDX 2.3 JSON, stored on GitHub with the attestations, not published as a release asset) is verified and saved
+the same way, again by digest:
 
 ```
 gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo LarsLaskowski/Vandox \
@@ -221,25 +229,21 @@ gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo 
   --format json --jq '.[0].verificationResult.statement.predicate' > vandox-image.spdx.json
 ```
 
-The SBOMs are SPDX 2.3 JSON documents generated by syft at release time. They are stored on GitHub with the
-provenance attestations and are not published as release assets.
-
 Image tags: `X.Y.Z` for the release `vX.Y.Z`; `latest` is the highest stable release; a pre-release
-(`vX.Y.Z-rc.N`) is published only under its own tag `X.Y.Z-rc.N`. A published version tag is never
-overwritten. The image is built for `linux/amd64` only, so an ARM-based NAS cannot run it. It runs as UID/GID 65532 (non-root) on the
-chiseled ASP.NET runtime image (no shell, no package manager).
+(`vX.Y.Z-rc.N`) is published only under its own tag `X.Y.Z-rc.N`. The image is built for `linux/amd64` only, so an ARM-based NAS
+cannot run it. It runs as UID/GID 65532 (non-root) without a shell ([Backend host](docs/areas/backend-host.md), *Container image*).
 
 ### Run the backend with Docker Compose
 
 `deploy/backend/docker-compose.yml` starts the backend with a data volume, a read-only root file system and
-a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one directory on the Docker host
-(Synology Container Manager, QNAP Container Station or plain `docker compose`) and create:
+a memory limit of 512 MiB ([Backend host](docs/areas/backend-host.md), *Compose file*). Copy it and `deploy/backend/vandoxd.yaml`
+into one directory on the Docker host (Synology Container Manager, QNAP Container Station or plain `docker compose`) and create:
 
 - `vandoxd.yaml`, the configuration file (every key is optional). Its `web.listen` port must match the
   container side of the `ports` entry in the compose file (8080). For agents, set `ingest.agent_id` to the agent's `agent_id`
   (uncomment `agent_id: web-1` under `ingest:` and change the name).
-- `secrets/vandox_agent_token`, the token the agents present (at least 32 printable ASCII characters, for
-  example `openssl rand -hex 32 > secrets/vandox_agent_token`). Compose sets no owner or mode on file
+- `secrets/vandox_agent_token`, the token the agents present (for example
+  `openssl rand -hex 32 > secrets/vandox_agent_token`). Compose sets no owner or mode on file
   secrets outside Swarm, and the container sees the host file's owner and mode, so give the file to the
   container user and never leave it world-readable:
 
@@ -248,7 +252,7 @@ a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one di
   sudo chmod 0400 secrets/vandox_agent_token
   ```
 
-- `secrets/vandox_web_password_hash`, the argon2id hash of the web UI password. Create it with `vandoxd hash-password`, which
+- `secrets/vandox_web_password_hash`, the hash of the web UI password. Create it with `vandoxd hash-password`, which
   reads the password from the first line of standard input and prints the hash. The command does not switch off a terminal's echo, so
   read the password silently with `read -rs` and pipe it in; start the container with `-i` and **never with `-t`**, because a
   terminal shows what is typed:
@@ -261,13 +265,12 @@ a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one di
   sudo chmod 0400 secrets/vandox_web_password_hash
   ```
 
-  The password has 12 to 1024 characters and no control characters. The service refuses to start without a valid hash. To change the
-  password, create the file again and recreate the container.
+  To change the password, create the file again and recreate the container. The password rules are in
+  [Web login](docs/areas/web-login.md), *Creating the hash*.
 
 - `import/`, the directory for the log import (mounted read-only).
 - `.env` with `INGEST_BIND_ADDRESS=<this host's tailnet address>` (required, no default; `tailscale ip -4` prints it; `127.0.0.1`
-  for an import-only setup without agents) and optionally `WEB_BIND_ADDRESS=<address>` (default `127.0.0.1`). Without
-  `INGEST_BIND_ADDRESS`, `docker compose` refuses to start and names the variable.
+  for an import-only setup without agents) and optionally `WEB_BIND_ADDRESS=<address>` (default `127.0.0.1`).
 
 Then start it:
 
@@ -277,54 +280,48 @@ docker compose ps        # the container becomes "healthy"
 ```
 
 The web port is published on `127.0.0.1:8080` for a reverse proxy on the same host; point the proxy at
-`127.0.0.1:8080` and set `WEB_BIND_ADDRESS` for a proxy on another host. `/healthz` answers `ok` (200) while
-the database is reachable and `unavailable` (503) otherwise; use it through the proxy for monitoring. The
-loopback binding is defense in depth, not the access control: depending on the Docker Engine version and the
-host firewall, hosts on the LAN may reach a published container port directly. The login of the web UI is
-the access control (records 0060 and 0103).
+`127.0.0.1:8080` and set `WEB_BIND_ADDRESS` for a proxy on another host. Monitor `/healthz` through the proxy
+([Backend host](docs/areas/backend-host.md), *Health*). The loopback binding is defense in depth, not the access control: the
+login of the web UI is ([Backend host](docs/areas/backend-host.md), *Exposure and trust*).
 
-The web UI asks for the password at `/login` (one administrator, no user name) and ends a session after 1 hour without activity or
-12 hours after the sign-in. Five wrong passwords lock a client out for 15 minutes. TLS and the certificate are the reverse proxy's
-job: `docs/REVERSE_PROXY.md` explains the proxy settings, the certificate and the built-in proxies of Synology and QNAP. Set
-`web.trusted_proxies` in `vandoxd.yaml` to the proxy's address as the container sees it; without it, the cookies are never `Secure`
-and every client behind the proxy shares one lockout.
+The web UI asks for the administrator password at `/login`; sessions and the lockout after wrong passwords are described in
+[Web login](docs/areas/web-login.md). TLS and the certificate are the reverse proxy's job: `docs/REVERSE_PROXY.md` explains the
+proxy settings, the certificate and the built-in proxies of Synology and QNAP. Set `web.trusted_proxies` in `vandoxd.yaml` to the
+proxy's address as the container sees it; without it, the cookies are never `Secure` and every client behind the proxy shares one
+lockout.
 
 **Ingest port and Tailscale.** The ingest port 8081 is published on `INGEST_BIND_ADDRESS` only, the address the agents reach at
-`http://<tailnet address>:8081` (their `backend.url`). This needs **Tailscale in TUN mode** on the Docker host, where the tailnet
-address is a host interface Docker can bind. Userspace-networking mode is not supported: there the address is no host interface, and
-Tailscale forwards inbound tailnet connections to `127.0.0.1`, where the web port is published, which would leave only the Tailscale
-ACL between the tailnet and the web UI. The Synology package runs in userspace mode by default; `docs/INSTALL.md` shows how to
-switch it to TUN mode. What to look for (the Synology and userspace behavior below is reported, not verified on a host):
+`http://<tailnet address>:8081` (their `backend.url`). This needs **Tailscale in TUN mode** on the Docker host; userspace-networking
+mode is not supported ([Network and security model](docs/areas/network-and-security-model.md)). The Synology package runs in
+userspace mode by default; `docs/INSTALL.md` shows how to switch it to TUN mode. What to look for (the Synology and userspace
+behavior below is reported, not verified on a host):
 
 - `docker compose up` stops with `set INGEST_BIND_ADDRESS to this host's tailnet address ...`: the variable is missing from `.env`.
 - The container does not start and Docker reports a port binding error: the host does
   not have the address in `INGEST_BIND_ADDRESS`, because Tailscale is down or runs in userspace mode. Switch to TUN mode or fix the
   address, then `docker compose up -d`.
 - After a reboot the container is not running although Tailscale is up: Docker may have started it before Tailscale brought up its
-  address, and `unless-stopped` may not retry a failed binding. Run `docker compose up -d` once Tailscale is up.
-- The agent logs `token refused`: it got `401` (wrong token) or `403` (another agent ID). Check the backend's log first for
-  `ingest agent refused` (the presented `agent_id` differs from `ingest.agent_id`) and `ingest token refused`; `ingest disabled`
-  at start names what is missing.
+  address. Run `docker compose up -d` once Tailscale is up.
+- The agent logs `token refused`: check the backend's log for `ingest agent refused` (the presented `agent_id` differs from
+  `ingest.agent_id`) and `ingest token refused` (wrong token); `ingest disabled` at start names what is missing
+  ([Ingest endpoint](docs/areas/ingest-endpoint.md)).
 
-The binding is defense in depth, as for the web port: Docker matches only the destination address, so hosts on the LAN may reach
-the ingest port on the tailnet address too. The token is the boundary: the endpoint checks it before it reads the body, accepts only
-the agent named in `ingest.agent_id`, and stops writing while less than `ingest.min_free` is free (records 0126 and 0127).
+As for the web port, the binding is defense in depth: hosts on the LAN may reach the ingest port too, and the token is the boundary
+(records 0126 and 0127).
 
 The database lives in the named volume `vandox-data` (Docker lists it as `vandox_vandox-data`; `/data` in the container,
 owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well. To keep the files readable for
 a user of the host (on a NAS, for example), run the container as that user's IDs (`user:` in the compose file, `--user` for
 `docker run`) with a bind-mounted data directory, and give the secret and import files to that user instead of 65532;
 `docs/INSTALL.md` shows both, and a `docker run` command for setups without Compose.
-Put the data directory on fast storage, an SSD if the host has one: every committed batch waits for the disk, and on a hard disk
-writes take about 50 % longer in the measurement of 10,000 records per transaction (`docs/BENCHMARKS.md`); a hard disk works, too.
+Put the data directory on fast storage, an SSD if the host has one; a hard disk works, too, with slower writes (`docs/BENCHMARKS.md`).
 
 ### Import logs
 
-`vandoxd import <path>` reads logs the operator saved on the backend host and stores their records
-(origin `import`, never live, so the planned alerting will never raise an alert for them). The compose file mounts `./import` read-only at
-`/import`. Put the directory, archive or file into `import/` and run the import inside the running
-container; `-it` is needed so that Ctrl-C reaches the import (without a terminal the import keeps running
-when the client is closed):
+`vandoxd import <path>` reads logs the operator saved on the backend host and stores their records as imported, never
+live data, so they never raise an alert. The compose file mounts `./import` read-only at `/import`. Put the directory, archive or
+file into `import/` and run the import inside the running container; `-it` is needed so that Ctrl-C reaches the import (without a
+terminal the import keeps running when the client is closed):
 
 ```
 docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/<name>
@@ -342,37 +339,12 @@ sudo chown -R 65532:65532 import/<name> && sudo chmod -R u+rX import/<name>
 or, keeping the owner and with ACL support, `sudo setfacl -R -m u:65532:rX import/<name>`. The directory
 `import/` itself only needs to stay readable and searchable (as created, `0755`).
 
-What is read: a directory (recursively, in lexical order), a `.tar`, a gzip-compressed tar (`.tar.gz`,
-`.tgz`), a single gzip file (a rotated log) or a plain file. Compression and archives are recognized by their
-content, not by the file name; gzip files inside a directory or a tar archive are decompressed, and a tar
-archive in the directory is read as well, but an archive inside an archive is not opened. Nothing is
-extracted to disk, and symbolic links, FIFOs, sockets and devices are never followed or opened. Files are
-read as streams, so memory use does not grow with the file size; lines longer than 16 KiB are cut. A run
-handles at most 20,000 entries (files, subdirectories and archive entries); a larger input is refused before
-anything is stored and has to be split. There is no size limit: a gzip bomb of valid lines is decompressed
-and its records fill `storage.directory` until the import is stopped, so watch the
-progress lines and press Ctrl-C.
-
-Every file is read twice, first to detect its type and compute the SHA-256 of its decompressed content, then
-to import it. A file no parser claims is listed as not recognized with the reason (no parser, empty,
-unsupported compression such as bzip2, xz, zstd or zip, nested archive, symbolic link, not a regular file);
-nothing is skipped silently. Progress is logged as JSON lines on standard error (what was found, each file,
-progress every 64 MiB hashed and every 100,000 lines), and a summary on standard output lists the files
-imported, continued, contained, already imported, not recognized and failed, the lines read, records stored, lines skipped and lines kept raw, the
-time range of the stored records and the reasons. Names from the input are printed quoted. The exit code is 0
-when every file was imported, continued, contained, already imported or not recognized, 1 when a file failed, the import was
-interrupted or the configuration, the database or the input could not be opened, and 2 for a usage error.
-
-Importing is repeatable: a file whose content was imported completely is not imported again, also under
-another name or compressed differently (`syslog.1` and the later `syslog.2.gz`). An import that was stopped
-(Ctrl-C, a database error) continues where it stopped when the same content is imported again, and no record
-is stored twice. Stopping or restarting the container kills a running import; nothing committed is lost, and
-the next import resumes. Limits: a syslog, MariaDB error log, Dovecot log, Plesk or web server error log or legacy monitoring log that grew since it was imported (the same log with more lines, as in
-a newer copy of `/var/log`) is continued after the part imported before (a journal export that grew is imported as a whole), an older copy
-of a log imported after a newer one stores nothing (it is listed as contained), except one that ends inside a
-line, one whose newer copy was imported by an earlier version (before database schema 7), and one whose newer copy is not among the 64 largest
-candidates (those are imported as a whole), and lines appended to a log while it is imported
-come with a later import as a continuation.
+The input is a directory, a `.tar` or `.tar.gz` archive, a gzip file (a rotated log) or a plain file; formats are recognized by
+their content. The import has no size limit, so watch its progress lines and press Ctrl-C if an archive decompresses into more
+than the disk holds. Importing is repeatable: a content imported before is not stored again, a stopped import continues where it
+stopped, and a log that grew since its last import is continued. Progress goes to standard error, a summary of every file and its
+outcome to standard output. What is read and refused, the limits, the repeatable import, the summary and the exit codes:
+[Log import](docs/areas/log-import.md).
 
 Supported sources:
 
@@ -380,106 +352,39 @@ Supported sources:
   journal on the server with `journalctl -o export > journal.export` (add `--since`, `--until` or `-u` to limit
   it); the binary journal files themselves are not read.
 - rsyslog files (source type `syslog`): `syslog`, `kern.log`, `mail.log` and their rotations (`syslog.1`, `syslog.2.gz`,
-  `kern.log-20260301`), in the traditional format (`Mar  1 12:00:00 host program[pid]: message`) and in the RFC
-  3339 format (`2026-03-01T12:00:00.123456+01:00 host program[pid]: message`), with or without `<PRI>`. The
-  detection also claims any other file whose first line has such a header (so `mail.log`, `mail.err` and `maillog`
-  are recognized by their first line). RFC 5424 files are not read. Lines of Postfix (`postfix/<daemon>`) and Dovecot
-  (`dovecot`) in any rsyslog file or journal export get the priority of their severity (Postfix `warning:` 4, `error:` 3,
-  `fatal:` and `panic:` 2; Dovecot `Debug:` 7, `Warning:` 4, `Error:` 3, `Fatal:` and `Panic:` 2) and the events `postfix.fatal`, `postfix.panic`, `dovecot.fatal`,
-  `dovecot.panic`, and `postfix.database_unavailable` or `dovecot.database_unavailable` for a failed or lost
-  MySQL/MariaDB connection.
-- The MariaDB error log (source type `mariadb`), recognized by its content under any name (`mysql/error.log`,
-  `error.log.1`, `<host>.err`, inside an archive): the first non-empty line of the file is an entry header such as
-  `2026-03-01 12:30:15 0 [Note] ...`, and the file is not named `syslog` or `kern.log` (these stay with the syslog
-  parser). Every entry, a header line with the lines without a header after it (a crash report with its stack trace),
-  becomes one record; a very long entry keeps its beginning and says how many lines were left out. Warnings and errors
-  get the priorities 4 and 3 and notes 6, and the lifecycle entries (start, ready for connections, normal shutdown,
-  shutdown complete, abort by a signal, crash recovery start and end) get an event such as `mariadb.start` in the
-  record field `event`. The formats of MariaDB 10.x are read. A copy that starts in the middle of an entry (the
-  output of `tail`) is not recognized. MariaDB sends its error log to the journal by default under systemd. In a journal export or a syslog file,
-  lines of `mariadbd` and `mysqld` that start with MariaDB's time stamp are read with the same rules. An entry with
-  its crash report becomes one record of at most 16,384 bytes with the priority and event of its header; lines beyond
-  that are stored as plain lines, not cut. Time, host and process ID come from the journal or syslog line, and the
-  source type stays `journal` or `syslog`. A journal export needs no `import.time_zone`.
-- Dovecot's own log file (source type `dovecot`), when `log_path` (or `info_log_path`, `debug_log_path`) points to a
-  file: recognized by its first line (`Oct 09 03:12:13 imap-login: Info: Login: ...`, Dovecot's default
-  `log_timestamp`) under any name except `syslog` and `kern.log`, including their rotation suffixes (`.N`,
-  `-YYYYMMDD`), which stay with the syslog parser. Lines get the priority of their label (`Debug:` 7, `Info:` 6,
-  `Warning:` 4, `Error:` 3, `Fatal:` and `Panic:` 2) and the events `dovecot.fatal`, `dovecot.panic` and
-  `dovecot.database_unavailable` as above; host and program are empty. Times are read in `import.time_zone` like the
-  traditional syslog format. Lines without a time stamp and a Dovecot label are skipped.
-- The Plesk panel log (source type `plesk-panel`) and the error logs of the web servers: `sw-cp-server-error`
-  (the panel's web server), `nginx-error` and `apache-error`. Each has a path option in `vandoxd.yaml`
-  (`import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log`,
-  `import.apache_error_log`; the defaults are the usual server paths, and on a RHEL-family server Apache writes
-  `/var/log/httpd/error_log`). A file is at such a path when its parent directory and its name equal those of the
-  option (the rest of the path does not matter, so a copy such as `server-1/nginx/error.log` works), also with a
-  rotation suffix (`error.log.1`, `error.log-20261010`); the paths are compared as text and never opened. A file at
-  a path is read as that log whatever it holds. Besides, `plesk-panel`, `nginx-error` and `apache-error` claim any
-  file, under any name but a syslog name, whose first line has their format (so the per-domain logs of Plesk are
-  found); `sw-cp-server-error` is claimed by its path only. If two path options match the same file, the source type
-  listed first above gets it. Lines get the priority of their level (`emerg` 0 to `debug` 7; Plesk's `EMERG` to
-  `DEBUG`; Apache's `trace1` to `trace8` 7) and keep the text after the time stamp as message; the times are local
-  times, read in `import.time_zone` (without it the first such line fails the file as above; the lines before it are
-  stored). A line that is not of the format (for example the continuation lines of a PHP error in nginx's log, or
-  Apache's startup messages) is not dropped: it is stored as a record without priority, with the time of the
-  record before it (for the first lines of a file the modification time of the file, when it lies in the storable
-  range, else the line is skipped), and is counted in the summary as a line kept raw with its reason, and logged as a
-  warning. These logs contain text of clients and web applications, so a line written by a web application can
-  imitate a line of the format with any time and level; the priority classifies text and does not prove which
-  program wrote it. The format of the Plesk panel log, that it is written in the server's local time, that
-  `sw-cp-server` writes nginx's format and the default Plesk paths are not verified against a Plesk server; a file in
-  another format is kept as raw lines, and the path options name the real files.
-- The legacy monitoring log of the shell script that ran before the agent (source type `legacy-monitor`), recognized by
-  its first line, a snapshot header such as `===== Fri Oct  2 09:15:01 CEST 2026 =====` (the output of `date`), under any
-  name except `syslog` and `kern.log`, including their rotation suffixes (`.N`, `-YYYYMMDD`). Each snapshot holds the output of `top -b -n 1` and, in the newer format, the
-  sections `meminfo`, `pressure`, `vmstat` and `lsof -ni`. A snapshot becomes metrics (load, CPU, memory, swap and, in the
-  newer format, `/proc` values with the vmstat counters and their rates), a process snapshot with the sums per program and,
-  with `lsof`, a connection snapshot. The header time is read in `import.time_zone` with the zone abbreviation of the header
-  (`CEST`, `CET`), which tells the two passes of the repeated hour apart, and the option must be set: without it the file
-  fails with "import.time_zone is not set"; a first header whose abbreviation does not belong to the zone fails the file
-  too. A snapshot that is cut or mixed with other output is skipped with a reason, a single unreadable row is left out
-  and marks the snapshot incomplete, and the last snapshot of a copy is marked incomplete because the log has no end marker.
-  The formats were built from the description of the script, not from the real file.
+  `kern.log-20260301`) in the traditional and the RFC 3339 format, also under other names; lines of Postfix and Dovecot get their
+  priority and events. Ubuntu's rsyslog writes every kernel line to both `syslog` and `kern.log`, so importing both stores the
+  kernel lines twice. See [System and mail log parsers](docs/areas/log-parsers-system.md).
+- Dovecot's own log file (source type `dovecot`), when Dovecot's `log_path` points to a file. See
+  [System and mail log parsers](docs/areas/log-parsers-system.md).
+- The MariaDB error log (source type `mariadb`) under any name, and MariaDB's lines in a journal export or a syslog file. See
+  [MariaDB error log parser](docs/areas/log-parsers-mariadb.md).
+- The Plesk panel log (source type `plesk-panel`) and the error logs of the web servers (`sw-cp-server-error`, `nginx-error`,
+  `apache-error`), found by the path options `import.*_log` and by their first line. Their format, the server's local time and the
+  default Plesk paths are not verified against a Plesk server. See
+  [Plesk and web server error log parsers](docs/areas/log-parsers-web.md).
+- The legacy monitoring log of the shell script that ran before the agent (source type `legacy-monitor`: `top`, `meminfo`,
+  `pressure`, `vmstat` and `lsof -ni` snapshots). Its formats were built from the description of the script, not from the real
+  file. See [Legacy monitoring log parser](docs/areas/log-parsers-legacy-monitoring.md).
 
-The file name of a rotated log must stay as the server wrote it (`syslog.1`, `kern.log-20260301`), and the
-modification time of the files matters: the traditional format has no year, and the backend takes it from a
-`-YYYYMMDD` date in the file name, else from the modification time of the file, and follows the order of the lines
-from there. Copy the logs with their times preserved (`cp -a`, `rsync -a` or `tar`); after a plain `cp` the
-modification time is the time of the copy, and the years of the lines are wrong.
+Keep the file names of rotated logs as the server wrote them (`syslog.1`, `kern.log-20260301`) and copy the logs with their times
+preserved (`cp -a`, `rsync -a` or `tar`): the traditional syslog format has no year, and the import takes it from a `-YYYYMMDD`
+date in the file name, else from the modification time of the file.
 
-The traditional format also has no time zone. Set `import.time_zone` in `vandoxd.yaml` to the IANA time zone of the
-server the logs come from (for example `Europe/Berlin`); there is no default, because a wrong zone would shift every
-time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
-"import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
-Set the option and run the import again: the file is completed. Files in RFC 3339 form and journal exports carry their
-offset and need no option. MariaDB error logs, Dovecot's log file, the Plesk panel, nginx and Apache error logs and the legacy monitoring log also write local time without a zone and are read in the same zone;
-without the option such a file fails at its first entry with the same reason.
-
-Times outside 1677-09-21 to 2262-04-11 and dates that do not exist (31 November, 29 February in a year that is not a
-leap year) are skipped with a reason, as is a year-less line in a file without a usable date. A multi-line kernel
-report (an OOM kill, a `cut here` warning) becomes one record. Ubuntu's rsyslog writes every kernel line to both
-`syslog` and `kern.log`, so importing both stores the kernel lines twice.
+Set `import.time_zone` in `vandoxd.yaml` to the IANA time zone of the server the logs come from (for example `Europe/Berlin`)
+before importing traditional syslog files, MariaDB error logs, Dovecot's log file, the Plesk and web server error logs or the
+legacy monitoring log, which all write local time without a zone. There is no default, because a wrong zone shifts every time
+stamp and an import cannot be redone. Without it such a file fails with "import.time_zone is not set"; set the option and run the
+import again, and the file is completed. Journal exports and RFC 3339 files carry their offset and need no option.
 
 ### Explore the logs
 
-The web UI shows the stored log lines under *Logs* (`/logs`) and the log templates under *Templates* (`/logs/templates`). All times are
-**UTC**, in the filters and in the lists.
-
-- **Search** (`/logs`): the lines come oldest first, 100 per page. Filter by text (all words must occur; words are literal, no
-  operators), source, program, severity (a line with that priority or a more severe one) and a time range (`from` inclusive, `to`
-  exclusive). *Next page* shows the next 100 lines. A search over a large range that finds few matches may stop after examining
-  8,000 lines and say `Searched up to <time>.`; *Continue* searches on from there. A search of very common words may say that it goes through the time range step by step: narrow the time range for a complete answer. A search that takes longer than 10 seconds is
-  stopped: narrow the range or add filters. *Context* on a line shows the 5 lines before and after it from the same log.
-- **Templates** (`/logs/templates`): the message patterns of a range with their first and last seen time, their lines in total and
-  their lines in the range (counted in whole hours), most lines first, optionally of one source and program. *Chart* shows a template's
-  lines per hour (gaps where the source logged nothing); *Show lines* opens the search for the lines of the template.
-- **The address is the view.** Every filter is in the address (`logs?q=oom&source=journal&severity=err&from=2026-10-01T00:00&to=2026-10-02T00:00`
-  and `logs?template=12`), so a search can be bookmarked and shared. The page position is not part of it: a shared address opens the
-  first page.
-- Template numbers change when the template statistics are rebuilt (*Rebuild template statistics* below); a link to a template then
-  shows another template or says that the template does not exist.
-- The log pages need the web login like every page; a signed-in user can read every stored log line.
+The web UI shows the stored log lines under *Logs* (`/logs`) and the log templates under *Templates* (`/logs/templates`). All
+times are **UTC**. The search filters by text, source, program, severity and a time range and lists the lines oldest first;
+*Context* on a line shows the lines around it from the same log. The template page lists the message patterns of a range with
+their counts and charts a template's lines per hour. Every filter is in the address, so a search can be bookmarked and shared.
+Template numbers change when the template statistics are rebuilt (*Rebuild template statistics* below). The pages, their limits
+and their messages: [Logs view](docs/areas/web-ui-logs-view.md).
 
 ### Reconstruct incidents
 
@@ -490,17 +395,10 @@ argument; run it in the container like the import):
 docker exec -it vandoxd dotnet /app/vandoxd.dll incidents
 ```
 
-An incident is built from the OOM kills in the stored log lines: kills whose windows (`incidents.window_before` before
-to `incidents.window_after` after each kill) overlap form one incident. Each incident gets a timeline of the events of its
-window (boots, service starts, stops and failures, the kills, a running backup), a cause hypothesis from fixed rules (the
-three programs whose memory grew most since the last boot, the three largest memory users, whether a backup ran, the last
-boot, the number of service events), the extremes of the memory, swap, pressure and load metrics, the peak of the
-connections and the new and unusually frequent log templates. Where the data is missing, the incident says unknown
-instead of none. A backup is recognized by the program name `pzstd` only.
-
-Incidents are stored. A re-run updates the incident of the same outage instead of adding another: the oldest number is
-kept, incidents that now overlap are merged into it, an unchanged incident is left untouched, and a stored incident that
-no rebuilt one overlaps is kept. The command prints one line per saved incident and then the counts:
+An incident is built from the OOM kills in the stored log lines, within `incidents.window_before` and
+`incidents.window_after` around each kill: a timeline, a cause hypothesis, metric extremes, the connection peak and the new and
+unusually frequent log templates. Where the data is missing, the incident says unknown instead of none. A re-run updates the
+stored incidents instead of adding new ones. The command prints one line per saved incident and then the counts:
 
 ```
 #1 created 2026-10-02T04:59:00Z kills=1 victim="mariadbd"
@@ -515,100 +413,57 @@ OOM kills:           1
 Log lines read:      1
 ```
 
-`merged=<n>` follows the line of an incident that took over `n` others, and `skipped` counts incidents the database
-refused (each is logged as a warning on standard error). Exit code 0 when the run completed, 1 when the configuration is
-invalid, the database cannot be opened, the store failed or the run was interrupted (run it again to complete it), 2 for a
-usage error. The log goes to standard error as JSON lines. The command reads every stored log line, so it takes a while on
-a large database; details and limits are in `docs/areas/detection-and-reports.md`.
+`merged=<n>` follows the line of an incident that took over `n` others. An interrupted run is completed by running it again. The
+command reads every stored log line, so it takes a while on a large database. What an incident holds, its rules and limits:
+[Incidents](docs/areas/incidents.md).
 
 ### Look at incidents
 
-After `vandoxd incidents` the web UI shows the stored incidents under *Incidents* (`/incidents`). All times are **UTC**.
-
-- **The list** (`/incidents`) shows the incidents newest first, 20 per page: the number, the time of the first kill, the duration from
-  the first to the last kill, the number of kills, the victim, the programs that grew most (or `unknown` / `none`), whether a backup ran
-  and a marker for an incident with a note. *Older incidents* shows the next 20, *Newest incidents* goes back to the first page.
-- **An incident** (`/incidents/<number>`) shows its window, its kills, the hypothesis, the timeline (a kill, a boot and the backup
-  start and end are marked), the connection peak, the metric extremes and the new and unusually frequent log templates. Three charts
-  show the memory per program (stacked, the five largest programs and the rest), the available memory and swap, and the number of
-  connections over the window. A chart holds at most 300 snapshots and says where it stops; a window without stored snapshots or metrics shows
-  no chart. An incident that does not exist (for example one that a re-run merged into another) says so.
-- **Every time links to the logs of that moment**: a time on the incident page opens *Logs* with the range from 30 seconds before to
-  5 minutes after it, so the moment is at the top of the first page.
-- **A note per incident** (up to 1,800 characters): write it in the text area and press *Save note*; saving an empty text removes it.
-  A note stays with its incident when `vandoxd incidents` runs again, and when incidents are merged the notes of the merged ones are
-  shown on the incident that remains, each marked `Written for incident #<n>`.
-- The incident pages need the web login like every page, and saving a note needs the session and the form's token, as signing out does.
+After `vandoxd incidents` the web UI shows the stored incidents under *Incidents* (`/incidents`), newest first. All times are
+**UTC**. An incident's page (`/incidents/<number>`) shows its window, its kills, the hypothesis, the timeline, the connection peak,
+the metric extremes, the log templates and charts of memory and connections over the window. Every time on it opens *Logs* at
+that moment. A note per incident is saved with *Save note* and stays with its incident when `vandoxd incidents` runs again. The
+pages and their limits: [Incidents view](docs/areas/web-ui-incidents-view.md).
 
 ### Write the forensics report
 
 `vandoxd report` writes a forensics report over the whole stored period as Markdown to standard output. Run it after
 `vandoxd incidents`, and run `vandoxd incidents` again after every import: the report lists the incidents as they were
-last stored and cannot tell that log lines were imported since. Run it in the container without `-t` (a terminal turns
-the line feeds into CR LF) and redirect the output:
+last stored. Run it in the container without `-t` (a terminal turns the line feeds into CR LF) and redirect the output:
 
 ```
 docker exec vandoxd dotnet /app/vandoxd.dll report > forensics.md
 docker exec vandoxd dotnet /app/vandoxd.dll report -lang de > forensics.md
 ```
 
-The report is in English; `-lang de` writes it in German (`-lang en|de`, anything else is a usage error). It holds:
-
-- the head: when it was made, the number of log lines and process snapshots with their first and last time, and the
-  lookback (`incidents.window_before`);
-- the summary: the number of outages and OOM kills, the first and last outage, one line for each recurring pattern found
-  and the rules that could not be decided;
-- the recurring patterns: whether outages cluster in one hour of the day, and whether they follow a running backup
-  (`pzstd`), a boot or high memory use of the Plesk panel (`sw-engine`), each compared with how often that was the case in
-  the hours the system log was observed;
-- the memory consumers: the programs that are in at least 90 % of the process snapshots and the largest others;
-- every outage with its victims and its hypothesis (growth candidates, largest consumers, backup, boot, panel memory).
-
-All times are UTC. "Unknown" is never "no": a rule or an activity without enough data, such as fewer than three outages
-or hours without a system log, is written as unknown with its reason, and "no recurring pattern" is stated only when
-every rule was decided. Program names and victim commands are written as Markdown code spans, so they show literally.
-The text is UTF-8 without a byte order mark whatever the locale of the container is.
-
-The command reads every stored log line (one query per page of 1,000 lines) and every stored process snapshot (one query per snapshot) and the
-incidents twice, so on a large database it can take minutes; its memory does not grow with the database: it keeps about 60 MB at most across the
-run, plus about 20 MB for the listener section, plus the one log page, process snapshot or incident it is reading. The log goes to standard error as JSON lines (`report started`, and `report failed` or `report interrupted`); the command logs no progress while it reads. Exit code 0 when the report is written, 1 when the
-configuration is invalid, the database cannot be opened, the store failed or the run was interrupted (standard output
-then holds an incomplete report: discard it), 2 for a usage error. Details, rules and limits are in
-`docs/areas/detection-and-reports.md`.
+The report is in English; `-lang de` writes it in German. It holds a summary of the outages, recurring patterns (time of day, a
+running backup, a boot, high memory use of the Plesk panel), the memory consumers, new listeners and every outage with its victims
+and hypothesis. All times are UTC, and "unknown" is never "no": a rule without enough data is written as unknown with its reason.
+On a large database the command can take minutes, and it logs no progress while it reads. If it exits with 1, standard output holds an incomplete report: discard it. The
+rules, the content and the limits: [Forensics report](docs/areas/forensics-report.md) and
+[Listener changes](docs/areas/listener-changes.md).
 
 ### Read the forensics report in the web UI
 
-The web UI shows the same report under *Report* (`/report`), behind the web login. All times are **UTC**.
-
-- **English or German**: the page is English; *Deutsch* (`report?lang=de`) shows the report in German and *English* (`report?lang=en`) goes back. The language is
-  in the address only, so it can be bookmarked; any other value in the address shows an error text and makes no report.
-- **The report is made when the page opens**: it reads every stored log line, so on a large database it takes a while (the page says
-  `Making the report…`). A run is stopped after **2 minutes**, and **one report runs at a time**: a second page, or a download started meanwhile, waits for the running
-  one within its own 2 minutes. On a very large archive that does not fit, use `vandoxd report` (above), which has no limit. Like the command, the page shows the incidents as
-  `vandoxd incidents` last stored them.
-- **Outages 50 at a time**: with more than 50 outages the page shows `Outages 1 to 50 of 51.`, and *Next outages* makes the report again and shows the following 50 (*First
-  outages* goes back). The summary, the patterns, the consumers and the notes are those of the whole period on every page.
-- **Download Markdown** (`report/markdown?lang=<language>`) saves the whole report as `vandox-report-<language>.md`: the same bytes as `vandoxd report -lang <language>` writes,
-  all outages, UTF-8 without a byte order mark. It needs the web login too and has the same limit of 2 minutes; a report that cannot be made is answered with an error status, and
-  one that fails after it has started breaks the connection, so a truncated file is never saved as if it were complete.
-- Program names and victim commands are shown as plain text in a `code` element, with invisible characters written out and very long texts cut.
+The web UI shows the same report under *Report* (`/report`); *Deutsch* (`report?lang=de`) shows it in German. The report is made
+when the page opens and lists the outages 50 at a time; *Download Markdown* saves the whole report, the same bytes as
+`vandoxd report` writes. The page stops a run after 2 minutes; on a very large database use `vandoxd report`, which has no limit.
+The page and its limits: [Report page](docs/areas/web-ui-report-page.md).
 
 ### Rebuild template statistics
 
-The log template statistics count every stored log line under its template per hour. The service keeps them while it
-stores lines, so lines stored before the statistics existed (a database upgraded from before schema version 8) and lines
-counted under older normalization rules are missing or outdated. `vandoxd templates` empties the statistics and counts
-every stored log line again under the current rules. Run it after upgrading such a database and after a release that changes
-the normalization rules, then run `vandoxd incidents` again. The template numbers that the web UI shows (and the `template`
-parameter of a saved link) belong to the statistics: after a rebuild they identify other templates, so links saved before it
-may show another template or none:
+The log template statistics count every stored log line under its template per hour. The service keeps them while it stores
+lines, but lines stored before the statistics existed (a database upgraded from before schema version 8) and lines counted under
+older normalization rules are missing or outdated. `vandoxd templates` counts every stored log line again under the current
+rules. Run it after upgrading such a database and after a release that changes the normalization rules, then run
+`vandoxd incidents` again. Template numbers belong to the statistics: after a rebuild, saved links to a template may show
+another template or none.
 
 ```
 docker exec -it vandoxd dotnet /app/vandoxd.dll templates
 ```
 
-The command counts the lines in batches of 10,000, each in its own transaction, logs the progress to standard error as JSON
-lines and then prints the summary:
+The command logs its progress to standard error and then prints the summary:
 
 ```
 Log lines:           3
@@ -616,7 +471,5 @@ Batches:             1
 Templates:           2
 ```
 
-Best run while no import runs. Start it once: a second run started meanwhile makes the first one stop with `superseded by
-another rebuild` (exit 1) and itself counts everything. Exit code 0 when the run completed, 1 when the configuration is
-invalid, the database cannot be opened, the store failed, the run was superseded or interrupted, 2 for a usage error. After
-an exit 1 of any kind, run it again until it exits 0: it starts over, and until a run completes the statistics are incomplete.
+Best run while no import runs, and start it once. Until a run exits 0 the statistics are incomplete: after an exit 1, run it
+again. The rules: [Log templates](docs/areas/log-templates.md) and [Storage](docs/areas/storage.md).

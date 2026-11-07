@@ -25,6 +25,21 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
 - Go: colocated `_test.go` files, one per source file under test (`foo.go` → `foo_test.go`), in the same
   package (white-box) unless the test exercises only the exported API (`package foo_test`).
 
+## Test doubles
+
+The reusable fakes and stubs are listed in `.squad/project.md` (*Test doubles*); reuse them before writing a new
+one, and add a new one there.
+
+- A double of an ASP.NET Core request or response stream behaves as Kestrel does: it refuses synchronous I/O, and a
+  response stream starts the response on any flush, not only when a byte is written (`StartingResponseBody` is the
+  reference). The ingest tests' `CountingBodyStream` is the one exception: it accepts synchronous reads, because the
+  endpoint reads only asynchronously and answers with a status and headers only.
+- Any other claim about server behavior that a double encodes is checked once against real Kestrel
+  (`.squad/team.md`, *Test doubles that model a real component*): the header handling the ingest doubles encode
+  (whitespace and duplicates, invalid bytes, `Content-Length`) is checked against the running service by
+  `ServeTests.ServeIngestHeaderWhitespaceAndDuplicates`.
+  A double once started the response only on a written byte, and only a review with a Kestrel probe found it.
+
 ## Deploy scripts (Go tests of shell scripts)
 
 `deploy/agent` is a test-only Go package: its `_test.go` files test the shell scripts `common.sh`, `install.sh`
@@ -121,7 +136,7 @@ criteria carries each id. The test name follows *Naming* unchanged.
   asserts no elapsed time. At most one test per timer may measure it, waiting at
   most twice the configured value and bounding the ratio of the measured to the configured duration to 0.9 to 2. This
   is a timer the code under test needs to fire, not a wait for a result, which stays forbidden
-  ([0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md)).
+  ([0179](decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md)).
 
 ## Tests that read repository documents
 

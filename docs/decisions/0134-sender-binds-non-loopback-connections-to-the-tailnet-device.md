@@ -10,7 +10,7 @@
 
 The agent sends its token and its batches in plain `http` to the backend's tailnet address. Tailscale's routes exist only while it
 runs; while it is down, a connection to a `100.x` address follows the server's default route onto the hosting provider's network, and
-the unit's `IPAddressAllow=` cannot stop it because it filters by address, not by interface (record 0131). Whoever answers there gets
+the unit's `IPAddressAllow=` cannot stop it because it filters by address, not by interface (record 0183). Whoever answers there gets
 the token and the batch and can make the agent drop or give up those records. Record 0132 split this exposure off into issue #337.
 The monitored server runs systemd 249 with `systemd-networkd`, which removes foreign routes on every link configure, reconfigure and
 carrier loss, and `RestrictNetworkInterfaces=` needs systemd 250. The provider's network configuration is not ours to change
@@ -38,7 +38,7 @@ carrier loss, and `RestrictNetworkInterfaces=` needs systemd 250. The provider's
 
 Option 1: `HTTPTransport` binds every connection whose resolved address is not a loopback address to `tailscale0` before it connects,
 and the unit's address allow-list stays as a second layer. The behavior, the failure modes and the server checks are in the
-[Network and security model](../areas/network-and-security-model.md) area and the [Agent](../areas/agent.md) area (*Connection*).
+[Network and security model](../areas/network-and-security-model.md) area and in [Agent sending](../areas/agent-sending.md).
 
 ## Consequences
 

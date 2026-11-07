@@ -65,7 +65,7 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   blocks (the sign-in would happen, but the browser would stay on the login page). A `Location` of another scheme, host or port
   and one whose path starts with `//` or `/\` are left as they are.
 - The login page is rendered on the server without a live connection and without the framework script: a plain HTML form that posts
-  to `/login`. A live connection (Interactive Server) is only ever opened by a signed-in user.
+  to `/login`. A live connection is only ever opened by a signed-in user.
 - The ingest listener answers `404` to everything before any of this is looked at ([Backend host](backend-host.md), *Listeners and
   routing*).
 
@@ -87,9 +87,10 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   server, deletes the cookie and answers `303` with `Location: /login`; without a session it only redirects.
 - A live connection belongs to the session that opened it. Every event, interop call and navigation it sends is checked against the
   session first; once the session has ended, an event, interop call or navigation it sends ends the connection and is not processed.
-  Not checked: the acknowledgement of a render (the framework discards the handler's result, so it is only dropped), calls that
-  update root components (they bypass the inbound-activity handlers; the pages do not send them with global interactive routing)
-  and the data of a transfer from the server to the browser that had already started (no page uses such transfers). A page also
+  Not checked: the acknowledgement of a render (the framework discards the result of the check, so it is only dropped), calls that
+  update root components (the framework does not pass them through the check; the pages do not send them, since routing is
+  interactive for the whole application) and the data of a transfer from the server to the browser that had already started (no page
+  uses such transfers). A page also
   checks its session every 30 seconds and goes to `/login` when it has ended, which bounds that window.
 
 ### Cross-site requests
@@ -101,11 +102,10 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 - A form post whose body cannot be read as a form is refused with `400` like a post without a token, before the password is looked at
   and without signing out: a value of more than 16 KiB, more than 64 values, a multipart body of more than 64 KiB (file parts
   included), a malformed body, or a body the client breaks off. No part of a form is buffered in a file.
-- **The note form of the incidents view** ([Web UI](web-ui.md), *Incidents view*) is a form post under this rule: `POST /incidents/<number>/notes`
-  carries the token, needs a session like every endpoint that is not listed under *Access* (so there is no new exception there: anonymous is
-  `401`) and is answered `400` without a valid token. The endpoint checks the result of the token validation first, and only then reads the
-  form, taking its two fields from the form and never from the query string or the route. The post of a note is the only form post besides
-  sign-in and sign-out; it writes a note to the store and nothing else.
+- The only form post besides sign-in and sign-out is the note form of the [Incidents view](web-ui-incidents-view.md)
+  (`POST /incidents/<number>/notes`). It falls under this rule and needs a session like every endpoint not listed under *Access* (so
+  there is no further exception: anonymous is `401`); it writes a note to the store and nothing else. Its order of checks (the token
+  validation result first, then the form) is stated there.
 - The live connection's endpoints take no form posts and need a session. A page of another site (another registrable domain) does not
   get the session cookie sent along (`SameSite=Lax`). A page of the same site does: another service on the same host name or IP
   address, on any port, is the same site. What keeps such a page out is that a live connection renders only the components named in
@@ -173,13 +173,10 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   the form check above applies after the secret rules.
 - A password check needs as much memory as the hash's memory parameter (at most 256 MiB); one check at a time keeps it within the
   container's limit.
-- **The note text is never logged.** A failed save of a note is logged with its exception only (`incidents view: saving a note failed`), never the
-  text of the note, a value of the form or the number the note was written for; the same holds for a refused post, which is answered with a bare
-  status and no log line of its content.
-- **Memory per circuit.** Every page the signed-in user opens holds one live connection (a circuit) with the data it shows, as the incident page
-  does for one incident (at most about 10 MB while its charts are built, [Web UI](web-ui.md), *Limits and errors*). These amounts are per circuit,
-  not across the service, and the number of circuits is not bounded; only a client with a session can open one, so exhausting the memory needs the
-  password or a session.
+- The note text is never logged ([Incidents view](web-ui-incidents-view.md), *The note endpoint (`POST /incidents/<number>/notes`)*).
+- **Circuits.** Every page the signed-in user opens holds one live connection (a circuit) with the data it shows, and the number of circuits is
+  not bounded ([Web UI](web-ui.md), *Limits and errors*); only a client with a session can open one, so exhausting the memory needs the password
+  or a session.
 - Limits that are constants, not options: the timeouts and counts above, the 5-second wait for a check, the 30-second check of a live
   connection, 16 sessions, 4,096 tracked clients, 16 entries in `web.trusted_proxies`, and the form limits (16 KiB per value, 64
   values, 64 KiB per multipart body).
@@ -196,7 +193,8 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 
 ## Not here
 
-- The pages, layout, static files and security headers: [Web UI](web-ui.md).
+- The pages, layout, static files and security headers: [Web UI](web-ui.md); the note form and its endpoint:
+  [Incidents view](web-ui-incidents-view.md).
 - Listeners, port routing, `/healthz`, the compose file and the container: [Backend host](backend-host.md).
 - The secret rules and the option format: [Configuration and secrets](configuration-and-secrets.md).
 - How to set up nginx, Caddy, Synology's or QNAP's reverse proxy and the certificate: [REVERSE_PROXY.md](../REVERSE_PROXY.md).

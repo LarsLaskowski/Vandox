@@ -375,7 +375,7 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
   `--version`: the version is the first line of the bundle's `VERSION` (a file that is missing, a link, over 64 bytes or not one `vX.Y.Z` or `vX.Y.Z-rc.N` line
   gives `install.sh: no valid VERSION file next to install.sh; use the install bundle of a release`, exit 2). The token is read from the terminal without echo, or
   from one line of standard input; `--token` is refused. It is asked for only when `/etc/vandox/agent-token` is missing.
-- **What it does, in order,** and every message and exit code: the Agent area, *Installation* (`docs/areas/agent.md`). In short: it runs the entry
+- **What it does, in order,** and every message and exit code: the Agent installation area (`docs/areas/agent-installation.md`). In short: it runs the entry
   check, reads `VERSION`, checks root, systemd and `x86_64`, validates the configuration values and the spool directory, downloads only the binary
   over HTTPS (`curl --proto =https --proto-redir =https --fail`) into a private temporary directory, requires the bundle's `vandox-agent-linux-amd64.sha256` (a regular
   file, no link, one line, at most 4096 bytes) to match the binary (a link, a non-regular file or more than 64 MiB is refused), runs the verified binary once as
@@ -415,8 +415,8 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
 ## Rights per collector
 
 `vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are
-listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent area names (*Rights*: `CAP_SYS_PTRACE` and the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent area
-(`docs/areas/agent.md`, *Rights*) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
+listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent rights area names (`CAP_SYS_PTRACE` and the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent rights area
+(`docs/areas/agent-rights.md`) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
 `security`-tier change. The example configuration is `agent.yaml` in this folder; the unit is `vandox-agent.service`, installed by
 `install.sh` and removed by `uninstall.sh` (both in this folder, with `common.sh`); see *Install the agent*, *Install reference* and *Unit*.
 
@@ -454,7 +454,7 @@ write-side DAC capability too. (b) The system-call filter, for `ptrace`, `proces
 kernel refuses destructive advice on another process; the accepted advice set is version-dependent, so this is defence in depth only.
 A compromised agent cannot use its capability to write into another user's process or file, or to run code as another user, except through a file
 whose own mode grants the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, record 0122).
-Measurement and reasoning: record 0122 and the Agent area.
+Measurement and reasoning: record 0122 and the Agent rights area (`docs/areas/agent-rights.md`).
 
 **Accepted residual.** With `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
 `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, and the `/proc/<pid>/exe` and `/proc/<pid>/task/<tid>/exe` links, so a file whose own mode grants the agent's user, its groups or others read or write is
@@ -578,7 +578,7 @@ shipped to the backend as written. Grant the agent only the logs whose content m
 - `/proc/<pid>/fdinfo/<n>` of **another user's** process needs `CAP_SYS_PTRACE`: the kernel checks ptrace access when the directory is listed
   and the file opened. The links `/proc/<pid>/fd/<n>` (`socket:[N]`) would need `CAP_DAC_READ_SEARCH` to list and both capabilities to read,
   and `CAP_DAC_READ_SEARCH` lets the agent read every file on the server (`/etc/shadow`, Plesk's credentials) and, with `CAP_SYS_PTRACE`, open
-  other processes' open files, memfds included, for writing (record 0122), so the collector does not read them (record 0115) and the agent does not hold it
+  other processes' open files, memfds included, for writing (record 0122), so the collector does not read them (record 0144) and the agent does not hold it
   (record 0122). Measured on the development host (kernel 6.18.44, no Yama restriction, no `hidepid`), as user 65534 against a process of root:
 
   | Capabilities | list `fd/` | readlink `fd/3` | list `fdinfo/` | read `fdinfo/3` | read `/etc/shadow` |
@@ -694,7 +694,7 @@ Not set, on purpose (the *Unit settings that must stay as they are* section): `P
 a `ProtectProc=` other than `default`, `PrivateUsers`, `TemporaryFileSystem`, `DynamicUser`, any specifier, `VANDOX_AGENT_TOKEN=`, and any
 `InaccessiblePaths=` over `/run/dbus`, `/run/mysqld`, `/var/log/journal` or `/run/log/journal`.
 
-**`systemd-analyze security vandox-agent`.** Required: the overall exposure level `OK` or better (record 0131). A draft with these settings scored 2.2
+**`systemd-analyze security vandox-agent`.** Required: the overall exposure level `OK` or better (record 0188). A draft with these settings scored 2.2
 `OK` offline on systemd 255 in a development session; the shipped unit was measured on 249 as below.
 
 | Where | systemd | Overall exposure level |
@@ -713,8 +713,8 @@ Items the CI run and the server run both still flag (the same 15 items; the expo
 | `ProtectClock=` | 0.2 | The `clock` collector calls `adjtimex` (record 0111), which `ProtectClock=` would deny. |
 | `ProtectProc=` | 0.2 | Must stay `default`: a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`. |
 | `SystemCallFilter=~@clock` | 0.2 | The `clock` collector calls `adjtimex`, which `@clock` holds. |
-| `SystemCallFilter=~@privileged` | 0.2 | `@privileged` holds `@clock`, so `adjtimex` (record 0131, option 9). |
-| `SystemCallFilter=~@resources` | 0.2 | `@resources` holds calls the Go runtime may make at start (record 0131, option 9). |
+| `SystemCallFilter=~@privileged` | 0.2 | `@privileged` holds `@clock`, so `adjtimex` (record 0185, option 1). |
+| `SystemCallFilter=~@resources` | 0.2 | `@resources` holds calls the Go runtime may make at start (record 0185, option 1). |
 | `IPAddressDeny=` | 0.1 | Flagged because the allow-list has entries other than localhost: the tailnet ranges are the point of the setting. |
 | `AmbientCapabilities=` | 0.1 | The unprivileged process holds `CAP_SYS_PTRACE` through it. |
 | `RootDirectory=` / `RootImage=` | 0.1 | Not applicable to this unit: the agent reads the host's `/proc`, journal and sockets. |
@@ -769,7 +769,7 @@ The results are in the last column; they are the first run's, with a note where 
 | Files and modes | `stat -c '%U:%G %a %n' /etc/vandox/agent-token /etc/vandox/agent.yaml /var/lib/vandox/spool` | `root:root 600`, `root:vandox-agent 640`, `vandox-agent:vandox-agent 700` | as expected |
 | Transmission to the backend | the agent's log (`journalctl -u vandox-agent`) after the start; the fourth line of *Tailscale on the monitored server*, step 4 | the line prints `401`; the agent logs no `backend not accepting batches`, and the backend stores its batches | not part of this run (part of the v0.2.0 release check): the backend was `vandoxd` v0.1.0, which has no ingest API (it came with PR #316 and will first be released in v0.2.0), so the agent logged `backend not accepting batches reason=status status=404` and kept its records in the spool. The other log lines seen in the run were `mariadb down`, then `mariadb answering again`, and `socket owners partly unknown`. |
 | Error logs readable by the agent | for each error log in `log_shipping.files`: `sudo -u vandox-agent head -c 0 <dir>/<file>` after the grant of *Error logs of Plesk and the web servers* | no output; the agent logs no `log file not readable` for it | not yet run: no Plesk server was available; the grant was tried only in a stand-in on Ubuntu 24.04 |
-| rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent area, *Log shipping*) | to be measured |
+| rsyslog's logrotate | manual: the configuration renames the log before its single `HUP` | the `logs` collector reads the renamed file until the writer has moved on (Agent log shipping from files area, *Rotation*) | to be measured |
 | Peak memory | `VmHWM` in `/proc/<pid>/status` of the running agent after 24 hours (BENCHMARKS, *Agent footprint*); under memory pressure the agent's own RSS self-metric during the #45 parallel run | below `GOMEMLIMIT=192MiB` | 20.4 MB peak RSS (`VmHWM`) over 24 h in normal mode (BENCHMARKS, *Agent footprint*); under memory pressure to be measured (#45) |
 | Tailscale policy settings | the access controls in the admin console (step 2 of *Tailscale on the monitored server*) | both tags owned by `autogroup:admin`; the agent's only rule TCP `8081` to `tag:vandox-backend`; `autogroup:member` to `autogroup:self`; no default rule | in place on the production tailnet; the probes of step 4 show their effect |
 | Tailscale checks | the probes of step 4 of *Tailscale on the monitored server*, with `tailscale status` and `tailscale exit-node list` | `404` and `401` from the ingest port; every other probe blocked; the backend host the only peer; no exit node | the pong, the `404` of the first `curl`, all five blocked probes (`124`, IPv4 and IPv6), `tailscale status` with the backend host as the only peer and `No exit nodes found` as expected; the second `curl` printed `404` instead of `401`, because the backend has no ingest API yet (as in *Transmission to the backend*), so the `401` is checked when the backend is upgraded to v0.2.0 |

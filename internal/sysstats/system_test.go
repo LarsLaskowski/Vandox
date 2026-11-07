@@ -116,7 +116,7 @@ var fixturePressure = []psiValues{
 	{"io", "full", [3]float64{0, 0, 0}, 1671808},
 }
 
-// wantSystem returns the records of a system sample of the fixture tree, varied by s, in the order of the Agent area.
+// wantSystem returns the records of a system sample of the fixture tree, varied by s, in the order of the Agent system metrics area.
 func wantSystem(t *testing.T, s sampleSpec) []wantRec {
 	t.Helper()
 

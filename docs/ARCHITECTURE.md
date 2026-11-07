@@ -38,50 +38,75 @@ way, and agents of the hosting provider are never disabled or changed
   collector at its own fixed rate, starts an extra run of a collector on request (never beside a run still out), records a gap for every sample it misses (timeout, skip, panic, error, refused record,
   late start) and offers a memory pressure mode with shorter intervals, which the system collector (`internal/sysstats`) switches
   on low available memory or memory pressure stall and in which the process collector (`internal/procstats`) lists every process
-  instead of the top ones ([0113](decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md)),
+  instead of the top ones ([0113](decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md),
+  [0141](decisions/0141-memory-pressure-mode-switched-by-the-system-collector-with-fixed-hysteretic-thresholds.md)),
   and the connection collector (`internal/connstats`) reads the socket tables of `/proc/net` with their owners from `/proc/<pid>/fdinfo`,
   records the counts and the listener inventory every run and every connection on its first run, under memory pressure and when a
-  new listener appears or the socket UID of a known listener changes ([0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md)),
+  new listener appears or the socket UID of a known listener changes ([0115](decisions/0115-connection-collector-proc-net-tables-regular-and-full-snapshots-in-one-record-kind.md),
+  [0144](decisions/0144-socket-owners-from-fdinfo-on-the-socket-mount-the-agent-learns-at-its-start.md),
+  [0143](decisions/0143-new-listener-check-against-the-last-inventory-bounded-privileged-ports-first.md),
+  [0147](decisions/0147-a-known-endpoint-whose-socket-uid-changes-is-reported-as-a-changed-listener.md)),
   and the systemd collector (`internal/svcstats`) asks systemd for the state of the configured services over the system bus with a minimal
   D-Bus client of its own (`internal/sdbus`) and records a unit's state on a change, after a start or a lost sample and hourly
-  ([0117](decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md)),
+  ([0117](decisions/0117-systemd-collector-hand-written-d-bus-client-one-connection-per-run.md),
+  [0150](decisions/0150-unit-states-polled-and-recorded-on-change-after-a-lost-sample-and-hourly.md)),
   and the MariaDB collector (`internal/mariadb`) asks the local MariaDB server over its Unix socket, as the `unix_socket` user
   `vandox-agent` with a minimal protocol client of its own and fixed read-only statements, for its availability, status, variables and,
   under load or memory pressure, its process list, records a refused login as `not_answering` with the error number, and derives the
   theoretical memory maximum, rates and the number of non-loopback listeners on its ports
-  ([0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md)),
+  ([0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements.md),
+  [0151](decisions/0151-a-refused-mariadb-login-is-recorded-as-not-answering-with-its-error-code.md),
+  [0152](decisions/0152-mariadb-exposure-counted-from-the-kernels-tcp-tables-not-from-bind-address.md)),
   and the kernel event collector (`internal/kernevents`) reads the binary journal files itself with a bounded reader of the two
   layouts journald writes (`internal/journal`), records each OOM kill of the kernel transport with facility 0 with an identity and its drift-corrected
   time, gaps for what it cannot read, and a boot event when the boot ID differs from the saved one; for a live kill it asks the
   scheduler for an extra full run of the process and the connection collector, at most one per collector per 15 seconds, whose
-  snapshots name the kills ([0119](decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md)),
+  snapshots name the kills ([0119](decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md),
+  [0154](decisions/0154-the-journal-reader-reads-the-compact-layout-chosen-per-file-from-the-headers-flag.md),
+  [0153](decisions/0153-a-kill-is-timed-by-its-receipt-corrected-for-the-kernel-clocks-drift.md),
+  [0157](decisions/0157-boots-recognized-from-the-saved-boot-id-previous-uptime-from-the-saved-uptime.md),
+  [0120](decisions/0120-oom-kill-triggers-extra-process-and-connection-snapshots.md)),
   and the log shipping collector (`internal/logship`) ships every entry of the system and user journal files, decoding zstd items with a
   bounded decoder (`internal/zstdfield`), and the lines of the configured `syslog` files (`internal/syslogline`) and error log files of Plesk, nginx, `sw-cp-server` and Apache (`internal/errorlogline`), which it opens only
   through a walk that follows no link, with a position per journal sequence-number ID and per file; it commits a run's positions as soon
   as the scheduler reports the run's records kept, classifies its lines with the import's mail, MariaDB and kernel report stages in Go,
   sends the groups it still holds when the agent stops, and records a gap for every span it cannot ship
-  ([0121](decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)),
+  ([0121](decisions/0121-log-shipping-decodes-zstd-journal-items-with-a-bounded-library-decoder.md),
+  [0160](decisions/0160-log-shipping-keeps-a-journal-position-per-seqnum-id.md),
+  [0162](decisions/0162-configured-log-files-are-opened-through-a-link-free-walk.md),
+  [0164](decisions/0164-error-logs-are-shipped-with-an-operator-named-format-and-a-go-port-of-the-imports-grammars.md),
+  [0161](decisions/0161-log-shipping-commits-its-positions-when-the-scheduler-keeps-a-run.md),
+  [0167](decisions/0167-live-log-lines-are-classified-by-a-go-port-of-the-imports-stages-in-the-agent.md),
+  [0168](decisions/0168-open-log-groups-are-sent-at-a-clean-stop-and-a-holding-source-is-saved-at-its-oldest-held-line.md)),
   and the backup check (`internal/backups`) records the start and the end of a backup run from the processes a configured rule names;
   the journal position, the last boot, the open backup run and the log positions survive restarts in one state file in the spool
   directory, saved by a `state` job and once more when the agent stops (`internal/agentstate`); the kernel
   collector's journal position is committed only after a run whose result was
-  kept, and the boot and the open backup run are written to the state only once the scheduler reports the run's records kept ([0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md));
+  kept, and the boot and the open backup run are written to the state only once the scheduler reports the run's records kept ([0158](decisions/0158-backup-runs-as-a-record-kind-of-their-own-recognized-by-process-rules.md),
+  [0156](decisions/0156-one-agent-state-file-in-the-spool-directory-written-by-a-state-job.md),
+  [0155](decisions/0155-the-kernel-journal-position-is-committed-only-after-a-kept-run-with-a-re-read-cap.md),
+  [0159](decisions/0159-boot-and-backup-run-changes-reach-the-state-only-once-their-run-is-kept.md));
   the scheduler hands every run's records to the on-disk spool (`internal/spool`), which numbers them, keeps them in checksummed
   segment files in the same directory within `spool.max_size` and `spool.min_free`, drops its oldest records with a recorded gap when
   full, offers reading from any number and acknowledgement of ranges for the sender, and takes a fresh spool's numbers from the clock
   bound; the state file and the spool's files are the agent's only file writes, and every state save first makes the spool durable, so
   no saved position covers a record a crash can still lose
-  ([0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md));
+  ([0123](decisions/0123-agent-spool-in-uncompressed-segment-files-with-checksummed-frames-and-a-bounded-file-count.md),
+  [0171](decisions/0171-a-fresh-spool-starts-its-sequence-numbers-above-a-clock-bound.md),
+  [0172](decisions/0172-the-spool-keeps-a-bounded-number-of-acknowledged-ranges.md),
+  [0175](decisions/0175-the-state-file-syncs-the-spool-before-every-save.md));
   the sender (`internal/sender`) reads the spool in a live and a throttled backfill stream that share one backoff, posts one gzip
   batch per request to the ingest endpoint under `backend.url` with the agent token as a bearer token, through a client that uses no
   proxy and follows no redirect, acknowledges records in the spool only after a `2xx` answer, and gives a record the backend refuses
   on its own up only with a recorded gap
   ([0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
-  [0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md));
+  [0125](decisions/0125-sender-with-a-live-and-a-backfill-stream-over-one-shared-backoff.md),
+  [0176](decisions/0176-the-sender-gives-up-refused-records-one-by-one-with-a-recorded-gap-at-a-bounded-rate.md));
   the agent records its own resource use as metrics
   (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
   time) and stopping (`internal/sdnotify`, `internal/agent`)
-  ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md),
+  ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample.md),
+  [0136](decisions/0136-systemd-notification-by-hand-and-a-watchdog-gated-on-the-collector-runners.md),
   [0111](decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md)).
 - `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
@@ -99,9 +124,10 @@ way, and agents of the hosting provider are never disabled or changed
   header's agent ID against `ingest.agent_id`, decodes the batch with the C# decoder (which reads the gzip framing itself, as the Go
   decoder does), holds one of two slots from the body read through the commit, writes nothing below the free-space floor
   `ingest.min_free`, and answers `204` only after the commit; at shutdown no write starts after the stop signal and the store closes
-  only after the started writes ended ([0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md),
-  [0128](decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md); rules: [Backend host](areas/backend-host.md),
-  *Ingest endpoint*). The web UI loads only its own
+  only after the started writes ended ([0126](decisions/0126-the-ingest-token-is-bound-to-one-configured-agent-id.md),
+  [0177](decisions/0177-ingest-is-bounded-by-two-slots-through-the-commit-and-a-free-space-floor-not-a-rate-cap.md),
+  [0179](decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md),
+  [0128](decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md); rules: [Ingest endpoint](areas/ingest-endpoint.md)). The web UI loads only its own
   static assets and sends one self-only Content-Security-Policy ([0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md),
   [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)). The logs view (`/logs`, `/logs/templates`) searches the
   stored log lines, shows the context of a hit and the templates with their hourly chart, takes every filter from the address and reads
@@ -173,17 +199,55 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0043](decisions/0043-wire-format-major-minor-versioning.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
 [0084](decisions/0084-log-line-record-gets-an-optional-host-field.md),
-[0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md),
-[0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md),
-[0117](decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md),
-[0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md),
+[0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample.md),
+[0136](decisions/0136-systemd-notification-by-hand-and-a-watchdog-gated-on-the-collector-runners.md),
+[0137](decisions/0137-agent-log-as-text-lines-on-standard-error-with-the-journals-priority-prefix.md),
+[0115](decisions/0115-connection-collector-proc-net-tables-regular-and-full-snapshots-in-one-record-kind.md),
+[0143](decisions/0143-new-listener-check-against-the-last-inventory-bounded-privileged-ports-first.md),
+[0144](decisions/0144-socket-owners-from-fdinfo-on-the-socket-mount-the-agent-learns-at-its-start.md),
+[0145](decisions/0145-fdinfo-lines-accepted-in-the-range-the-kernel-prints-them.md),
+[0146](decisions/0146-socket-uid-from-the-tables-uid-column-lowest-uid-and-mixed-uids-per-endpoint.md),
+[0147](decisions/0147-a-known-endpoint-whose-socket-uid-changes-is-reported-as-a-changed-listener.md),
+[0148](decisions/0148-agent-marks-its-first-snapshot-after-a-start-and-what-its-listener-list-holds.md),
+[0117](decisions/0117-systemd-collector-hand-written-d-bus-client-one-connection-per-run.md),
+[0150](decisions/0150-unit-states-polled-and-recorded-on-change-after-a-lost-sample-and-hourly.md),
+[0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements.md),
+[0151](decisions/0151-a-refused-mariadb-login-is-recorded-as-not-answering-with-its-error-code.md),
+[0152](decisions/0152-mariadb-exposure-counted-from-the-kernels-tcp-tables-not-from-bind-address.md),
 [0119](decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md),
-[0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md),
-[0121](decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md),
-[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md),
+[0153](decisions/0153-a-kill-is-timed-by-its-receipt-corrected-for-the-kernel-clocks-drift.md),
+[0154](decisions/0154-the-journal-reader-reads-the-compact-layout-chosen-per-file-from-the-headers-flag.md),
+[0120](decisions/0120-oom-kill-triggers-extra-process-and-connection-snapshots.md),
+[0155](decisions/0155-the-kernel-journal-position-is-committed-only-after-a-kept-run-with-a-re-read-cap.md),
+[0156](decisions/0156-one-agent-state-file-in-the-spool-directory-written-by-a-state-job.md),
+[0157](decisions/0157-boots-recognized-from-the-saved-boot-id-previous-uptime-from-the-saved-uptime.md),
+[0158](decisions/0158-backup-runs-as-a-record-kind-of-their-own-recognized-by-process-rules.md),
+[0159](decisions/0159-boot-and-backup-run-changes-reach-the-state-only-once-their-run-is-kept.md),
+[0121](decisions/0121-log-shipping-decodes-zstd-journal-items-with-a-bounded-library-decoder.md),
+[0160](decisions/0160-log-shipping-keeps-a-journal-position-per-seqnum-id.md),
+[0161](decisions/0161-log-shipping-commits-its-positions-when-the-scheduler-keeps-a-run.md),
+[0162](decisions/0162-configured-log-files-are-opened-through-a-link-free-walk.md),
+[0163](decisions/0163-the-state-file-keys-a-configured-log-file-by-the-sha-256-of-its-path.md),
+[0164](decisions/0164-error-logs-are-shipped-with-an-operator-named-format-and-a-go-port-of-the-imports-grammars.md),
+[0165](decisions/0165-error-logs-the-agent-cannot-read-get-a-documented-grant-by-hand-not-a-new-right.md),
+[0166](decisions/0166-a-log-line-dated-after-its-runs-start-never-moves-the-files-bookkeeping-times.md),
+[0167](decisions/0167-live-log-lines-are-classified-by-a-go-port-of-the-imports-stages-in-the-agent.md),
+[0168](decisions/0168-open-log-groups-are-sent-at-a-clean-stop-and-a-holding-source-is-saved-at-its-oldest-held-line.md),
+[0169](decisions/0169-a-renamed-log-file-whose-read-keeps-failing-is-given-up-after-150-kept-runs.md),
+[0170](decisions/0170-log-shipping-drop-patterns-are-bounded-by-their-compiled-size.md),
+[0123](decisions/0123-agent-spool-in-uncompressed-segment-files-with-checksummed-frames-and-a-bounded-file-count.md),
+[0171](decisions/0171-a-fresh-spool-starts-its-sequence-numbers-above-a-clock-bound.md),
+[0172](decisions/0172-the-spool-keeps-a-bounded-number-of-acknowledged-ranges.md),
+[0173](decisions/0173-the-spool-opens-its-files-relative-to-its-directorys-descriptor.md),
+[0174](decisions/0174-spool-file-sizes-add-up-saturating-and-a-saturated-sum-is-no-room.md),
+[0175](decisions/0175-the-state-file-syncs-the-spool-before-every-save.md),
 [0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
-[0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md),
-[0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md),
+[0125](decisions/0125-sender-with-a-live-and-a-backfill-stream-over-one-shared-backoff.md),
+[0176](decisions/0176-the-sender-gives-up-refused-records-one-by-one-with-a-recorded-gap-at-a-bounded-rate.md),
+[0126](decisions/0126-the-ingest-token-is-bound-to-one-configured-agent-id.md),
+[0177](decisions/0177-ingest-is-bounded-by-two-slots-through-the-commit-and-a-free-space-floor-not-a-rate-cap.md),
+[0178](decisions/0178-a-full-ingest-listener-evicts-the-oldest-connection-that-has-not-passed-the-token-check.md),
+[0179](decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md),
 [0127](decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md),
 [0128](decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md).
 
@@ -192,7 +256,7 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 The agent collects data and writes it to its spool, then sends it in batches over Tailscale to the ingest
 API. The backend stores the batches in SQLite; when it stores an agent's connection snapshots it also compares the first one after
 an agent start with the agent's previous one, so a listener that opened while the agent was stopped is found
-([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)). Analysis, rules, the web UI and Telegram work from the stored
+([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored.md)). Analysis, rules, the web UI and Telegram work from the stored
 data. Detection, incident reconstruction and alerting are deterministic (rules, thresholds, log signatures);
 AI is optional and only used to write the nightly report, which is sent at 06:00, or as soon as the backfill
 has completed if the backend host was off at that time. The first release (v0.1.0) is the forensics release:
@@ -221,7 +285,7 @@ Incident reconstruction works on the stored data. `vandoxd incidents` runs the s
 line, merges OOM kills whose windows (configurable before and after a kill) overlap into one incident, builds each
 incident's timeline and structured cause hypothesis from the records of its window and stores it in its own transaction,
 matched to the stored incidents by overlapping windows, so a re-run after a further import updates incidents instead of
-duplicating them. The rules are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Incidents*)
+duplicating them. The rules are in [Incidents](areas/incidents.md)
 ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)).
 
 The forensics report works on the stored data as well and stores nothing. `vandoxd report` reads every stored log line (observed
@@ -230,12 +294,13 @@ and reads the stored listener comparisons (the new and changed listeners after a
 keeps only capped series, compares the share of outages with a time of day, a backup, a boot or high panel memory against the share
 of observed hours with it, and writes the result in English or German as Markdown to standard output, all times in UTC; the web UI's
 report page runs the same passes and shows the same content. The rules
-are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Forensics report*)
+are in [Forensics report](areas/forensics-report.md) and [Listener changes](areas/listener-changes.md)
 ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md),
 [0101](decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
 [0102](decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md),
 [0108](decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md),
-[0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)).
+[0116](decisions/0116-listeners-across-agent-starts-compared-when-stored.md),
+[0149](decisions/0149-new-listeners-section-capped-per-finding-kind-changed-endpoints-without-command.md)).
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
@@ -318,8 +383,8 @@ The backend host runs 24/7 but is sometimes switched off at night (typically 22:
 the backend is unreachable the agent keeps collecting and spools at least 7 days on disk. When the backend
 is reachable again it sends current data first, then backfills the spool chronologically and throttled: a live and a backfill
 stream share one backoff, so current data never waits behind the backlog, and only the backfill is limited to
-`backend.backfill_bandwidth` ([Agent](areas/agent.md), *Sending*). The spool counts a record as delivered only after a `2xx` answer,
-which the backend sends after its commit ([Backend host](areas/backend-host.md), *Ingest endpoint*), or once a record the backend
+`backend.backfill_bandwidth` ([Agent sending](areas/agent-sending.md)). The spool counts a record as delivered only after a `2xx` answer,
+which the backend sends after its commit ([Ingest endpoint](areas/ingest-endpoint.md)), or once a record the backend
 refused on its own was replaced by a recorded gap.
 Every agent record carries a sequence number from a persistent per-agent counter, and every batch the
 agent's ID; a batch is identified by the agent ID and the sequence numbers of its records, so a resend is
@@ -332,15 +397,20 @@ nevertheless lost (agent stopped, spool full, collector timed out) is recorded a
 data gaps unless explicitly recorded.
 
 Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
-[0130](decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md),
+[0130](decisions/0130-live-or-backfilled-is-decided-at-write-time.md),
+[0180](decisions/0180-sequence-and-time-gaps-are-stateful-rows-that-become-final-after-a-quiet-wait.md),
+[0181](decisions/0181-the-agents-clock-offset-is-measured-from-caught-up-self-samples.md),
 [0024](decisions/0024-nightly-report-timing.md),
 [0028](decisions/0028-data-gaps-are-always-recorded.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
 [0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md),
 [0046](decisions/0046-batch-header-describes-the-capture-context.md),
-[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md),
+[0123](decisions/0123-agent-spool-in-uncompressed-segment-files-with-checksummed-frames-and-a-bounded-file-count.md),
+[0171](decisions/0171-a-fresh-spool-starts-its-sequence-numbers-above-a-clock-bound.md),
+[0172](decisions/0172-the-spool-keeps-a-bounded-number-of-acknowledged-ranges.md),
 [0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
-[0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md).
+[0125](decisions/0125-sender-with-a-live-and-a-backfill-stream-over-one-shared-backoff.md),
+[0176](decisions/0176-the-sender-gives-up-refused-records-one-by-one-with-a-recorded-gap-at-a-bounded-rate.md).
 
 ## Storage and retention
 
@@ -381,13 +451,13 @@ Implemented by `src/Vandox.Storage`:
   the templates new in a range and the hours above a template's usual level, taken only from hours in which the source logged. After an
   upgrade from schema version 7 or a change of the normalization rules, `vandoxd templates` replaces the statistics with ones counted
   from the stored lines, in bounded transactions next to the write path. The rules are in
-  [Detection, alerts and reports](areas/detection-and-reports.md) (*Log templates*), the rebuild in [Storage](areas/storage.md).
+  [Log templates](areas/log-templates.md), the rebuild in [Storage writing](areas/storage-writing.md).
 - **Incidents** ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)):
   one row per incident with its window, its first kill, its number of kills and the incident itself as a JSON document; numbers
   are never reused. Saving an incident takes over the oldest stored incident whose window overlaps it, merges the other
   overlapping ones into it and leaves an unchanged one untouched. The notes of incidents are rows of their own, one per incident
   number they were written for; a merge moves the notes of the merged incidents to the kept one in its transaction
-  ([0107](decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md)). The rules are in [Storage](areas/storage.md).
+  ([0107](decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md)). The rules are in [Storage writing](areas/storage-writing.md).
 - **Connections** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): one writer connection (immediate transactions, one batch per transaction) and a pool
   of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
   `/healthz`) do not wait for a write.
@@ -399,7 +469,7 @@ Implemented by `src/Vandox.Storage`:
   The logs view does not use this search directly: it searches in bounded pages, from the full-text index when the words match fewer
   than a cap of rows and otherwise by a time-ordered scan of at most a fixed number of lines, and finds a template's lines by
   normalizing the candidates its words select ([0106](decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md);
-  rules in [Storage](areas/storage.md), *Log exploration*).
+  rules in [Storage reading and log exploration](areas/storage-reading.md), *Log exploration*).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogExplorer` (the logs view), `ILogTemplateReader`,
   `IImportTracker`, `IIncidentStore` and `IIncidentBrowser` (the incidents view: summaries, one incident, notes); a consumer that depends on the store's semantics is tested against the real store.
@@ -441,7 +511,8 @@ Both binaries are configured through one strictly parsed YAML file each (`/etc/v
 `internal/config` (Go) for the agent and `Vandox.Core.Configuration` (C#) for the backend
 ([0078](decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md)). `vandoxd` loads its
 configuration at start-up, and so does the agent (`LoadAgent`). The rules, the options and the
-error behavior are in [Configuration and secrets](areas/configuration-and-secrets.md).
+error behavior are in [Configuration and secrets](areas/configuration-and-secrets.md) and
+[Configuration options](areas/configuration-options.md).
 
 ## Security model
 
@@ -450,12 +521,12 @@ only and never listens on a port, and the Tailscale ACL lets the monitored serve
 on the backend host. The ingest endpoint accepts only the agent token, compared in constant time, for the one agent ID in
 `ingest.agent_id`; it bounds what one request costs in memory and time and stops writing below the free-space floor, so a token holder
 cannot exhaust the backend's memory or fill its data volume
-([0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md)). The web UI is protected by a login (argon2id password hash, server-side sessions, antiforgery tokens, limited
+([0126](decisions/0126-the-ingest-token-is-bound-to-one-configured-agent-id.md), [0177](decisions/0177-ingest-is-bounded-by-two-slots-through-the-commit-and-a-free-space-floor-not-a-rate-cap.md)). The web UI is protected by a login (argon2id password hash, server-side sessions, antiforgery tokens, limited
 failed sign-ins) and runs behind a reverse proxy whose forwarded headers are trusted only from `web.trusted_proxies`
 ([Web login](areas/web-login.md)). The Telegram token
 exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
 via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. The agent runs as the
-dedicated user `vandox-agent`, never as root, with only the groups and capabilities that its installation files under `deploy/agent/` list: the unit `vandox-agent.service` and the scripts `install.sh` and `uninstall.sh`, which also limit the unit to tailnet addresses and localhost with `IPAddressAllow=` ([record 0131](decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md)); the agent's sender also binds every non-loopback connection to the interface `tailscale0`, so nothing leaves through another interface while Tailscale is down ([record 0134](decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md))
+dedicated user `vandox-agent`, never as root, with only the groups and capabilities that its installation files under `deploy/agent/` list: the unit `vandox-agent.service` and the scripts `install.sh` and `uninstall.sh`, which also limit the unit to tailnet addresses and localhost with `IPAddressAllow=` ([record 0183](decisions/0183-the-agent-unit-allows-only-localhost-and-the-tailnet-ranges-as-addresses.md)); the agent's sender also binds every non-loopback connection to the interface `tailscale0`, so nothing leaves through another interface while Tailscale is down ([record 0134](decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md))
 and, from v0.6.0, a polkit rule that allows restarting only the configured units. The one capability it
 needs to read other users' processes (`CAP_SYS_PTRACE`) is the only one in its bounding set, so its systemd unit denies the process-attach
 system calls and `process_madvise`, grants no write-side capability and keeps every other capability out of the bounding set. Three barriers
@@ -497,7 +568,7 @@ The agent is released as a binary for the monitored server, the backend as a Doc
 Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docker-image.md)). See the
 *Versioning and releases* section in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-- The agent binary `vandox-agent-linux-amd64`, the install bundle `vandox-agent-install-<version>.tar.gz` (the install and uninstall scripts, the unit, the example configuration, the MariaDB scripts, `VERSION` and the binary's checksum; built reproducibly and attested, [record 0131](decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md)) and `SHA256SUMS` (the bundle's and the binary's line) are GitHub release assets.
+- The agent binary `vandox-agent-linux-amd64`, the install bundle `vandox-agent-install-<version>.tar.gz` (the install and uninstall scripts, the unit, the example configuration, the MariaDB scripts, `VERSION` and the binary's checksum; built reproducibly and attested, [record 0131](decisions/0131-the-agents-install-scripts-unit-and-files-reach-the-server-as-an-install-bundle-released-with-the-binary.md)) and `SHA256SUMS` (the bundle's and the binary's line) are GitHub release assets.
 - The image is built from `deploy/backend/Dockerfile` (the .NET SDK image publishes the application onto the
   chiseled ASP.NET runtime image, [0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md)) and runs as UID 65532.
   The builder and runtime base images are pinned by digest: each `FROM` names an image and a digest from

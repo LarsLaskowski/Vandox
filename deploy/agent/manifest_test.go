@@ -13,7 +13,7 @@ const (
 	// entryStubCommon is a common.sh stand-in with two functions and a last line that prints "sourced".
 	entryStubCommon = "first_function() { :; }\nsecond_function() { :; }\necho sourced\nexit 0\n"
 
-	// manifestBound is the size the entry check allows the manifest (record 0131, option 34).
+	// manifestBound is the size the entry check allows the manifest (record 0190, option 3).
 	manifestBound = 4096
 )
 

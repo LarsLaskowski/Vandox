@@ -70,7 +70,7 @@ first batch is about 250 ms slower than the later ones on the SSD (fresh file, s
 made no difference on the development host. The FTS5 remedy of record 0063 (option c) does not apply, because this measurement writes no log lines.
 The development-host rows are not the reference host.
 
-**Listener marks** ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)). The write path
+**Listener marks** ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored.md)). The write path
 also inserts a row of `connection_marks` for each usable agent connection snapshot and, once per batch, computes the comparison of each agent start
 it affected. Measured on the development host (4 vCPU Intel Xeon 2.10 GHz, .NET 10, Debug build) through `SqliteStore.WriteBatchAsync` with the
 same five batches of 10,000 records, three runs before and after the change (ms per batch, run 1 / run 2 / run 3):
@@ -87,9 +87,9 @@ for each of them. A start stored before a backlog of its predecessors is not dec
 for the start (`ListenerMarkWriter.PayloadDecodes`, checked by a test). The programs of these runs were not kept in the repository; the first case is
 `WriteThroughputOfTenThousandMetricsPerBatch`. The reference host is not measured.
 
-**Agent timeline** ([0130](decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md)).
+**Agent timeline** ([0130](decisions/0130-live-or-backfilled-is-decided-at-write-time.md), [0180](decisions/0180-sequence-and-time-gaps-are-stateful-rows-that-become-final-after-a-quiet-wait.md), [0181](decisions/0181-the-agents-clock-offset-is-measured-from-caught-up-self-samples.md)).
 The write path of a batch with an agent ID also classifies each record and keeps the agent's gaps, clock samples, sample times and stream row in
-the same transaction (storage area, *Writing*). Measured on the development host (4 vCPU Intel Xeon 2.10 GHz, .NET 10.0, Release build of the
+the same transaction ([Storage writing](areas/storage-writing.md), *Agent timeline*). Measured on the development host (4 vCPU Intel Xeon 2.10 GHz, .NET 10.0, Release build of the
 tool, no flush cost: a 4 KiB write reaches the disk in 0.2-0.3 ms) with the contiguous scenario above, `tools/Vandox.StorageBenchmark` of
 `origin/main` (before) and of this change (after), alternating, three runs each (ms per batch, batches 1 to 5; its metric points carry
 capture times that repeat every hour, so the first batch inserts about 3,600 sample times and the later batches find them):
@@ -126,7 +126,7 @@ removes its database afterwards and asserts nothing.
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):
 **1,000,000 log lines are written with their templates in under 10 minutes on the reference host**, in batches of 10,000 lines, one
 transaction each. Writing a log line normalizes its message into a template and counts it under the template, the template's hour and the
-source's hour in the same transaction (storage area, *Log templates*), so this is the write cost on top of the log line and its full-text entry.
+source's hour in the same transaction ([Storage writing](areas/storage-writing.md), *Template statistics*), so this is the write cost on top of the log line and its full-text entry.
 The same program measures the three template queries on the written database. Only a run on the reference host counts against the criterion.
 
 ### Procedure
@@ -187,7 +187,7 @@ holds 100,000 candidates with a baseline of 2,160 covered hours; the statement m
 counted once for that source-hour and not once per candidate (without it SQLite flattens the statement and counts per candidate, which took
 22.4 s on this shape). Writing took 5.1 s (20,071 lines per second) on the development host and 21.0 s (4,870 lines per second) on the reference host. The generated lines have no spikes (the counts per hour are even), so the default
 query reports nothing; its time is the cost of the candidates. The reference host is about three to four times slower on the metric write (783 ms against 272 ms for a batch of 10,000) and 3.7 times on the
-log write; the usual-level query time is not bounded by the range or the limit (detection area, *Limits of templates*), so a caller that serves a
+log write; the usual-level query time is not bounded by the range or the limit ([Log templates](areas/log-templates.md), *Limits and errors*), so a caller that serves a
 user still narrows the range and runs it off the request path.
 
 ## Log search
@@ -365,7 +365,7 @@ The ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273
 allowed reading `smaps_rollup`, while most of the sandbox's own processes (another user namespace) refused it, so the figure is for a
 mix of processes with and without PSS; a host where all of them are readable costs somewhat more. The time of one snapshot on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**; the agent's total CPU there is 0.42 % of one
 core over 24 hours (*Agent footprint*). The cost of reading `smaps_rollup` of every process every 15 seconds under memory pressure is an
-open point of #45 and #342 (Agent area, *Processes*).
+open point of #45 and #342 ([Agent system metrics](areas/agent-system-metrics.md), *Processes*).
 
 ## Connection snapshot
 
@@ -389,14 +389,14 @@ go test ./internal/connstats -run '^$' -bench Collect -benchmem
 Median of six runs of the benchmark's own report (56.4 to 62.4 ms) since a run also reads the user names (`/etc/passwd`, a captured file of 18 lines,
 issue #279). The tree before that change, measured the same day on the same host: median 57.3 ms (55.3 to 59.2 ms), 1.99 MB and 26,310 allocations per run, so the read
 adds about 0.03 MB and 174 allocations and its time is within the noise. A passwd of the largest size the agent reads (1 MiB, 115,968 users) costs one run about
-20 MB of garbage and 4.6 MB of live data more (Agent area, *Connections*, **Bounded memory**). The file system is in memory, so the figure leaves out the kernel's cost to
+20 MB of garbage and 4.6 MB of live data more ([Agent connections](areas/agent-connections.md), *Memory and speed*). The file system is in memory, so the figure leaves out the kernel's cost to
 produce `fdinfo` files and to resolve a path in `/proc`; the time of one snapshot on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**; the agent's total CPU there is 0.42 % of one
 core over 24 hours (*Agent footprint*).
-The memory figures of a run (live data, garbage per line and per descriptor) are in the Agent area (*Connections*, **Bounded memory**).
+The memory figures of a run (live data, garbage per line and per descriptor) are in [Agent connections](areas/agent-connections.md), *Memory and speed*.
 
 ## Listener reads
 
-Criterion ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md), issue #278): the section *New
+Criterion ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored.md), issue #278): the section *New
 listeners* of the forensics report adds at most **5 seconds** to a run over a database with one more year of connection snapshots. It reads three
 queries of the derived tables (`SqliteStore.ListenerTalliesAsync` and `ListenerFindingsAsync` for each kind, limit 20) and decodes no payload.
 
