@@ -21,26 +21,13 @@ internal static class WireShapes
 
     /// <summary>
     /// Returns the first keys that are distinct ignoring ASCII case and as short as possible: the printable ASCII characters other
-    /// than the quote and the backslash, then pairs, then triples of them.
+    /// than the quote and the backslash, then pairs, triples and quadruples of them.
     /// </summary>
     /// <param name="count">The number of keys</param>
     /// <returns>The keys</returns>
     internal static List<string> ShortKeys(int count)
     {
-        var alphabet = new List<string>();
-        var seen = new HashSet<char>();
-
-        for (var code = 0x20; code <= 0x7E; code++)
-        {
-            var character = (char)code;
-
-            if (character != '"' && character != '\\' && seen.Add(char.ToLowerInvariant(character)))
-            {
-                alphabet.Add(character.ToString());
-            }
-        }
-
-        return Enumerate(alphabet).Take(count).ToList();
+        return Enumerate(Alphabet()).Take(count).ToList();
     }
 
     /// <summary>
@@ -60,17 +47,21 @@ internal static class WireShapes
     /// <returns>The JSON text</returns>
     internal static string ObjectFillingBytes(int size)
     {
-        var keys = ShortKeys(300_000);
+        var keys = new List<string>();
         var length = 2;
-        var count = 0;
 
-        while (length < size)
+        foreach (var key in Enumerate(Alphabet()))
         {
-            length += keys[count].Length + 5;
-            count++;
+            if (length >= size)
+            {
+                break;
+            }
+
+            keys.Add(key);
+            length += key.Length + 5;
         }
 
-        return ObjectOfKeys(keys.Take(count));
+        return ObjectOfKeys(keys);
     }
 
     /// <summary>
@@ -178,34 +169,44 @@ internal static class WireShapes
     }
 
     /// <summary>
-    /// Lists the single keys, then the pairs, then the triples of an alphabet.
+    /// Returns the printable ASCII characters other than the quote and the backslash, distinct ignoring case.
+    /// </summary>
+    /// <returns>The characters as texts</returns>
+    private static List<string> Alphabet()
+    {
+        var alphabet = new List<string>();
+        var seen = new HashSet<char>();
+
+        for (var code = 0x20; code <= 0x7E; code++)
+        {
+            var character = (char)code;
+
+            if (character != '"' && character != '\\' && seen.Add(char.ToLowerInvariant(character)))
+            {
+                alphabet.Add(character.ToString());
+            }
+        }
+
+        return alphabet;
+    }
+
+    /// <summary>
+    /// Lists the single keys, then the pairs, then the triples, then the quadruples of an alphabet.
     /// </summary>
     /// <param name="alphabet">The characters</param>
     /// <returns>The keys</returns>
     private static IEnumerable<string> Enumerate(List<string> alphabet)
     {
-        foreach (var first in alphabet)
-        {
-            yield return first;
-        }
+        IEnumerable<string> keys = alphabet;
 
-        foreach (var first in alphabet)
+        for (var length = 1; length <= 4; length++)
         {
-            foreach (var second in alphabet)
+            foreach (var key in keys)
             {
-                yield return $"{first}{second}";
+                yield return key;
             }
-        }
 
-        foreach (var first in alphabet)
-        {
-            foreach (var second in alphabet)
-            {
-                foreach (var third in alphabet)
-                {
-                    yield return $"{first}{second}{third}";
-                }
-            }
+            keys = keys.SelectMany(_ => alphabet, (prefix, character) => prefix + character);
         }
     }
 
