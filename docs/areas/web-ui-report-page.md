@@ -93,7 +93,7 @@ it to read the report in a browser without a shell. What the report says is in [
     stay those of the 2,048-character cap.
   - Outages: at most 22 external texts per outage (16 victims, 3 growth candidates, 3 consumers), each a stored text of at most 1,024
     bytes with its runs. The worst case, a text whose plain and escaped characters alternate, takes up to 8 KiB (a bound pinned by a test
-    for a command of 1,024 bytes), so 1,100 texts of 50 outages take up to about 9 MB. The 10 consumers of the summary add 60 KB.
+    for a command of 1,024 bytes), so 1,100 texts of 50 outages take up to about 9 MB. The 10 consumers of the summary add up to about 80 KB.
   - The new listeners section: **up to about 36 MB** — at most 20 findings after an agent start, 20 found by the agent and 20 found by the
     agent with changes only, each with at most 64 listeners and up to 64 changed endpoints, and the head of at most 64 agent IDs of at most
     64 bytes each; the agent ID, each command and each user name are external text in code. A text's cost is set by its runs and is worst
