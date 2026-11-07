@@ -669,6 +669,8 @@ var documentsOfAC11 = []string{
 	"docs/INSTALL.md",
 	"docs/ARCHITECTURE.md",
 	"docs/areas/agent.md",
+	"docs/areas/agent-installation.md",
+	"docs/areas/agent-rights.md",
 	"docs/areas/configuration-and-secrets.md",
 	"docs/areas/network-and-security-model.md",
 	"deploy/agent/README.md",

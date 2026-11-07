@@ -1,4 +1,4 @@
-# Signatures of known events: decision record 0094, rules in docs/areas/detection-and-reports.md (Log signatures).
+# Signatures of known events: decision record 0094, rules in docs/areas/log-signatures.md.
 # A signature matches one log line: every given condition must hold. program and source together are one condition
 # (the line's program or its record source is listed); event and message are one condition each.
 # Patterns run with RegexOptions NonBacktracking, Multiline, CultureInvariant and ExplicitCapture; write [0-9], never

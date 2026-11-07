@@ -36,7 +36,7 @@ an omitted measurement as unknown.
 A file of the system collectors that cannot be read or breaks its grammar fails the whole sample as a gap, while a measurement
 the host does not offer (PSI, a configured path that is not mounted, the PLL offset under chrony) is omitted, logged once when
 its availability changes and never recorded as zero or as a gap. The rules are in
-[Agent system metrics](../areas/agent-system-metrics.md) (*System metrics*, **Absent is not zero**, **Errors**).
+[Agent system metrics](../areas/agent-system-metrics.md) (*Absent values and errors*).
 
 ## Consequences
 

@@ -3,7 +3,7 @@ using System.Buffers;
 namespace Vandox.Core.Templates;
 
 /// <summary>
-/// The token rules a to j of the template normalization (<c>docs/areas/detection-and-reports.md</c>, <em>Log templates</em>): each
+/// The token rules a to j of the template normalization (<c>docs/areas/log-templates.md</c>, <em>Normalization</em>): each
 /// rule is one scan of the token that stops at its length, and only ordinal ASCII comparisons are made.
 /// </summary>
 internal static class TokenRules

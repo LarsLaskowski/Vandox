@@ -27,7 +27,7 @@ of `pzstd` and then of `mariadbd`.
 
 A kill's capture time is its receipt time minus its delay, where the delay is its lag behind the kernel's stamp less the drift seen
 on the recent kernel lines of the same boot. The rules are in [Agent kernel events and boots](../areas/agent-kernel-events.md)
-(*Kernel events*, **Capture time**).
+(*Capture time*).
 
 ## Consequences
 

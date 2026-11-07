@@ -217,6 +217,7 @@ gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo 
 docker pull networlddev/vandox@sha256:<digest>
 ```
 
+The attestations are stored on GitHub, not in Docker Hub, so `--bundle-from-oci` and registry-side tools do not find them.
 The image's SBOM (SPDX 2.3 JSON, stored on GitHub with the attestations, not published as a release asset) is verified and saved
 the same way, again by digest:
 

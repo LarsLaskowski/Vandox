@@ -47,8 +47,7 @@ a reader connection and is interrupted by a cancelled token or a passed deadline
 
 The template statistics are read by the queries of [Log templates](log-templates.md) (template of a line, hourly counts, new templates,
 templates above their usual level), with the same time range and limit rules, on a reader connection. The cost of the usual-level query is
-not bounded by its range or limit; a cancelled token or deadline interrupts it ([Log templates](log-templates.md), *Limits of
-templates*).
+not bounded by its range or limit; a cancelled token or deadline interrupts it ([Log templates](log-templates.md), *Limits and errors*).
 
 ### Listener history
 
