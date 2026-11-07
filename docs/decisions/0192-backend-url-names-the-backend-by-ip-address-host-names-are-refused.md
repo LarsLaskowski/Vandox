@@ -34,8 +34,8 @@ sends: v0.1.0 has no sender, so no deployed configuration relies on a name reach
 
 ## Decision
 
-Option 1. The configuration loader refuses a `backend.url` whose host is not an IP address, the sender's transport refuses to be
-built from one, and `install.sh` refuses one in `--backend-url`; a loopback address stays exempt from the binding only as such a
+Option 1. The configuration loader refuses a `backend.url` whose host is not an IP address without a zone, the sender's transport
+refuses to be built from one, and `install.sh` refuses one in `--backend-url` (accepting only forms the loader accepts); a loopback address stays exempt from the binding only as such a
 literal. The rule and its error texts are in [Configuration options](../areas/configuration-options.md) and
 [Agent installation](../areas/agent-installation.md), what it guarantees in [Network and security model](../areas/network-and-security-model.md).
 
@@ -44,6 +44,9 @@ literal. The rule and its error texts are in [Configuration options](../areas/co
 - The token goes to the configured address only: no name server is asked, so the agent no longer needs one (port 53), and the
   install script's name-server warning goes away.
 - A configuration with a host name no longer loads: the agent exits at start with a configuration error naming `backend.url`.
+- An `https` backend needs a certificate that names its IP address; a certificate for a `*.ts.net` name fails verification.
+- A zoned IPv6 address is refused too: the transport cannot rebuild a request URL from it, and a link-local backend is no tailnet
+  address.
 - The guard is the same parser the Go dialer uses to decide that a host is a literal (`netip.ParseAddr`), so every form the
   configuration accepts is dialed without a lookup.
 - Revisiting this means trusting a name server for the destination of the token: a tailnet-only resolver would have to be reachable
