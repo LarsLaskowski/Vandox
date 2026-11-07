@@ -206,3 +206,9 @@ Minor objections of the Devil's Advocate, verbatim:
 
 1. minor — AC1 is worded too broadly ("the runs after the 15th form one escaped run"). `Build` flags the rest as escaped only when its output differs in length from the remaining text (LogText.cs:92). Tester and Dev: read AC1 as "the runs after the 15th form one run, escaped unless the rest is plain text shown whole". Docs: the record 0193 consequence and the `web-ui.md` sentence must not claim the rest is always in the escape style.
 2. minor — The AC1 case says the decoded command "ends with the marker `[cut: `". That text sits at the start of the marker, not the end. Tester: assert the decoded text ends with `[cut: 439 more characters]`, or that it contains `[cut: ` and ends with ` more characters]`.
+
+## Security notes
+
+Non-blocking finding of Security's `APPROVED` plan review, verbatim. Tester and Dev follow it:
+
+AC5's plain-rest case does not reach the rest path as written. The plan says "15 runs of alternating `'a'` and `(char)1`, then 100 `'a'`" and expects "the last run is the 100 `'a'` and not escaped". It starts with `'a'`, so the 15th run is plain and the 100 `'a'` join it. That gives 15 runs. Starting with `(char)1` gives 16 runs and a plain rest of exactly 100 `'a'`. Replace the case word for word with: "A plain rest: 15 runs alternating `(char)1` and `'a'`, starting with `(char)1` so that the 15th run is escaped, then 100 `'a'`, with `maxRuns` 16 and cap 2,048: 16 runs, the last run is the 100 `'a'` and not escaped."
