@@ -193,7 +193,7 @@ section, keeps the defaults, which ship the journal at `info` and more severe an
   expression in Go syntax, searched anywhere in the message unless anchored). An empty value is "not set". A line that meets every
   condition of a rule is not shipped. A pattern is at most 1,024 bytes and its compiled program at most 400 instructions, and the
   programs of all patterns together at most 400 (about a dozen ordinary patterns; a rule without `message` costs nothing): the count is
-  that of the program an RE2 engine builds from the pattern (Perl syntax, simplified), taken before any expression is built, because
+  that of the program Go's RE2 engine builds from the pattern (Perl syntax, simplified), taken before any expression is built, because
   matching costs about as much per line as the program is long (about 90 ms for a 16 KiB line at the bound on the measured host).
 
 | Key | Reason |

@@ -88,7 +88,7 @@ IDs) is shown only through one display that writes it as text, never as markup, 
 
 - Every character of category Cc other than line feed and tab, every format character (Cf, among them the direction controls such as
   U+202E and U+200B), the line and paragraph separators (Zl, Zp), private-use characters (Co), unassigned code points (Cn) and U+FFFD is
-  written as a visible escape (`‮`, `\U000e0001` above U+FFFF, lower-case hex), styled apart from the text; consecutive escapes
+  written as a visible escape (`\u202e`, `\U000e0001` above U+FFFF, lower-case hex), styled apart from the text; consecutive escapes
   share one element.
 - A field holds at most 256 runs; the rest of the field is written as one escaped text in the last run.
 - A field is capped at a number of characters set by the view, counted in UTF-16 characters of the displayed text, an escape counting as
