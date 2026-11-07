@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Encodings.Web;
 
 using Microsoft.AspNetCore.Components;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Components.Reports;
+using Vandox.Backend.Logs;
 using Vandox.Backend.Reports;
 using Vandox.Core.Model;
 using Vandox.Core.Reports;
@@ -23,6 +25,8 @@ public class ReportContentTests
     #region Constants
 
     private const char Backslash = '\\';
+
+    private const string EscapeStart = "<span class=\"escape\">";
 
     #endregion // Constants
 
@@ -277,6 +281,82 @@ public class ReportContentTests
     }
 
     /// <summary>
+    /// A command whose plain and escaped characters alternate is shown in at most 16 runs: 15 runs and its rest in one escaped run, with the same characters as its escaped text and
+    /// the whole marker of the cut; a short command with one escape is shown as before.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public async Task ReportContentCapsTheRunsOfExternalText()
+    {
+        // Arrange
+        const string agent = "web1";
+
+        var command = Alternating(1024);
+        var shortCommand = string.Concat("a", (char)1, "a");
+        var at = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        var summary = ListenerSummary(Section(Tally(agent, 3, at.AddDays(-1), at.AddDays(1), 1, 1, 0, 0),
+                                              [StartFinding(agent, 2, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 7, command), Entry(Proto.Tcp, "0.0.0.0", 24, 8, shortCommand))],
+                                              []));
+        var builder = new ReportViewBuilder(ReportText.English, 0, ReportsView.PageOutages);
+
+        Assert.AreEqual((char)1, command[1], "the command holds the control character, so the escape survived");
+        Assert.AreEqual((char)1, shortCommand[1], "the short command holds the control character, so the escape survived");
+
+        await WriteAsync(builder, summary, []);
+
+        // Act
+        var html = await RenderAsync(builder.Document);
+
+        // Assert
+        var spans = ExternalSpans(html).Where(span => span.Contains("[cut: ", StringComparison.Ordinal)).ToList();
+
+        Assert.HasCount(1, spans, "one external text is cut: the long command");
+        Assert.AreEqual(8, Count(spans[0], "class=\"escape\""), "16 runs: 8 plain, 7 escaped and one escaped rest");
+        Assert.AreEqual(LogText.Escape(command, LogText.MaxShortChars), Decode(spans[0]), "the shown characters are those of the escaped text");
+        Assert.EndsWith("[cut: 439 more characters]", Decode(spans[0]), "the shown text ends with the whole marker of the cut");
+        Assert.Contains($"<code><span class=\"external\">a<span class=\"escape\">{Backslash}u0001</span>a</span></code>", html, "the short command with one escape is shown as before");
+    }
+
+    /// <summary>
+    /// The rest of an external text whose escapes and cut leave it as long as its source text is shown in the escape style on the page.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [TestCategory("AC5")]
+    public async Task ReportContentShowsARestOfEqualLengthAsEscape()
+    {
+        // Arrange
+        var text = Alternating(16) + new string('a', 2022);
+        var document = new ReportDocument
+                       {
+                           Language = "en",
+                           Summary = [
+                                         Heading("Head"),
+                                         Item("Rest: ", ReportPiece.Code(text))
+                                     ]
+                       };
+
+        Assert.AreEqual((char)1, text[15], "the text holds the control character, so the escape survived");
+
+        // Act
+        var html = await RenderAsync(document);
+
+        // Assert
+        var spans = ExternalSpans(html);
+
+        Assert.HasCount(1, spans, "one external text");
+
+        var lastEscape = spans[0][(spans[0].LastIndexOf(EscapeStart, StringComparison.Ordinal) + EscapeStart.Length)..];
+
+        lastEscape = lastEscape[..lastEscape.IndexOf("</span>", StringComparison.Ordinal)];
+
+        Assert.AreEqual(LogText.Escape(text[15..], 1998), WebUtility.HtmlDecode(lastEscape), "the last escape span holds the whole rest");
+        Assert.EndsWith("[cut: 30 more characters]", WebUtility.HtmlDecode(lastEscape), "the rest ends with the whole marker of the cut");
+    }
+
+    /// <summary>
     /// Renders the content of a document the way the page does and returns the markup.
     /// </summary>
     /// <param name="document">The document</param>
@@ -322,6 +402,59 @@ public class ReportContentTests
                    Kind = ReportBlockKind.Item,
                    Pieces = [ReportPiece.Plain(label), value]
                };
+    }
+
+    /// <summary>
+    /// Builds a text whose plain character <c>a</c> and control character U+0001 alternate, starting with the plain one.
+    /// </summary>
+    /// <param name="length">The length in characters</param>
+    /// <returns>The text</returns>
+    private static string Alternating(int length)
+    {
+        var characters = new char[length];
+
+        for (var position = 0; position < length; position++)
+        {
+            characters[position] = position % 2 == 0 ? 'a' : (char)1;
+        }
+
+        return new string(characters);
+    }
+
+    /// <summary>
+    /// Finds the markup inside every external element, the escape elements included.
+    /// </summary>
+    /// <param name="html">The markup of the page</param>
+    /// <returns>The inner markup of each external element, in order</returns>
+    private static List<string> ExternalSpans(string html)
+    {
+        const string start = "<code><span class=\"external\">";
+        const string end = "</span></code>";
+
+        var spans = new List<string>();
+        var index = html.IndexOf(start, StringComparison.Ordinal);
+
+        while (index >= 0)
+        {
+            var from = index + start.Length;
+            var to = html.IndexOf(end, from, StringComparison.Ordinal);
+
+            spans.Add(html[from..to]);
+
+            index = html.IndexOf(start, to, StringComparison.Ordinal);
+        }
+
+        return spans;
+    }
+
+    /// <summary>
+    /// Turns the inner markup of an external element into the text it shows.
+    /// </summary>
+    /// <param name="markup">The inner markup</param>
+    /// <returns>The shown text</returns>
+    private static string Decode(string markup)
+    {
+        return WebUtility.HtmlDecode(markup.Replace(EscapeStart, string.Empty, StringComparison.Ordinal).Replace("</span>", string.Empty, StringComparison.Ordinal));
     }
 
     /// <summary>
