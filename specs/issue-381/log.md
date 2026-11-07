@@ -8,3 +8,5 @@ are quoted in full.
 | 2026-11-07 14:29 | 1 Intake | Orchestrator | Issue 381 read: bug (flaky time-ratio test under coverage); branch claude/blissful-mccarthy-lu12on off main bf7a808 |
 | 2026-11-07 14:51 | 2 Plan | Lead | RESULT: DONE, tier tests; raise MaxTimeFactor, 8 MiB line, WireShapes keys, UNIT_TESTS.md (opus/medium · 101,611 tokens · 39 tool uses · 1305 s · 66 in · 32,591 out · 2,085,437 cache read · 99,949 cache write · 784,458 weighted) |
 | 2026-11-07 14:51 | 2 Challenge skipped | Orchestrator | challenge skipped — tier tests is never challenged |
+| 2026-11-07 15:15 | 6 Coverage | Tester | Test changes done: 8 MiB line, bound 170; correct max 41.2 (full coverage), quadratic 488-654 in all 3 configs (sonnet/medium · 98,594 tokens · 25 tool uses · 1246 s · 44 in · 10,503 out · 1,746,362 cache read · 190,314 cache write · 465,088 weighted) |
+| 2026-11-07 15:15 | 6 Coverage | Tester | Doc comments for 8 MiB and bound added (sonnet/medium · 87,763 tokens · 26 tool uses · 205 s · 50 in · 4,336 out · 1,877,680 cache read · 34,024 cache write · 252,028 weighted) |
