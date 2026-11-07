@@ -45,7 +45,8 @@ systemd unit in short (security areas 2, 6 and 9). The operator relies on it; ev
   ID`, exit 2.
 - `--backend-url` must be `http` or `https`, `://`, a host, an optional port of 1 to 65535 without a leading zero and an optional `/`;
   the host is an IPv4 literal (four parts of 0 to 255 without a leading zero, `0` alone stays valid; a host of digits and dots that is no IPv4
-  literal is refused) or a bracketed IPv6 literal without a zone; a host name is refused: else
+  literal is refused) or a bracketed IPv6 literal the agent's parser takes (eight groups of one to four hex digits, or one `::` standing for at least one group)
+  without a zone or an embedded IPv4 part; a host name is refused: else
   `install.sh: --backend-url is not http(s)://ip-address[:port]`, exit 2. The values are never echoed.
 
 **The `VERSION` file.** `VERSION` next to `install.sh` must be a regular file, not a link, of at most 64 bytes (checked by size before

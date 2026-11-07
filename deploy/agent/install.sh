@@ -238,6 +238,38 @@ _is_ipv4() {
     done
 }
 
+# _is_ipv6 VALUE: eight groups of 1 to 4 hex digits, or one "::" standing for at least one group (no zone, no IPv4 tail).
+_is_ipv6() {
+    local value=$1
+    local re_groups='^[0-9A-Fa-f]{1,4}(:[0-9A-Fa-f]{1,4})*$'
+    local left right colons
+    local count=0
+
+    if [[ $value != *::* ]]; then
+        [[ $value =~ $re_groups ]] || return 1
+        colons=${value//[^:]/}
+        ((${#colons} == 7))
+        return
+    fi
+
+    left=${value%%::*}
+    right=${value#*::}
+
+    if [[ -n $left ]]; then
+        [[ $left =~ $re_groups ]] || return 1
+        colons=${left//[^:]/}
+        count=$((count + ${#colons} + 1))
+    fi
+
+    if [[ -n $right ]]; then
+        [[ $right =~ $re_groups ]] || return 1
+        colons=${right//[^:]/}
+        count=$((count + ${#colons} + 1))
+    fi
+
+    ((count <= 7))
+}
+
 # validate_backend_url VALUE: http(s)://ip-address[:port][/]; status 2 with the message.
 validate_backend_url() {
     local value=$1
@@ -256,7 +288,7 @@ validate_backend_url() {
         if [[ $hostport =~ $re_v6 ]]; then
             host=${BASH_REMATCH[1]}
             port=${BASH_REMATCH[3]}
-            [[ $host == *:*:* ]] || host=""
+            _is_ipv6 "$host" || host=""
         elif [[ $hostport =~ $re_host ]]; then
             host=${BASH_REMATCH[1]}
             port=${BASH_REMATCH[3]}
