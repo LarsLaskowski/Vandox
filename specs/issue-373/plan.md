@@ -104,7 +104,7 @@ outside an IPv6 zone (`http://127%2E0.0.1:8081`). The refused and accepted lists
 
 ## Signatures (for the Dev's skeleton)
 
-None: no member is added or changes its signature; `validHost(host string) bool` is deleted.
+None. No member is added or changes its signature; the function validHost is deleted.
 
 ## Test files
 
