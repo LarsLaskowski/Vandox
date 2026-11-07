@@ -92,7 +92,7 @@ internal sealed class BackendFixture : IDisposable
     /// <summary>
     /// Gets what the run wrote to standard error.
     /// </summary>
-    internal StringWriter Error { get; } = new();
+    internal LockedTextWriter Error { get; } = new();
 
     #endregion // Properties
 

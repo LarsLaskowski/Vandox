@@ -429,7 +429,7 @@ public class ImportCommandTests
         var help = await BackendApp.RunAsync(["-h"], [], fixture.Out, fixture.Error, new ServeHooks(), TestContext.CancellationToken);
         var helpText = fixture.Error.ToString();
 
-        fixture.Error.GetStringBuilder().Clear();
+        fixture.Error.Clear();
 
         var subHelp = await BackendApp.RunAsync(["import", "-h"], [], fixture.Out, fixture.Error, new ServeHooks(), TestContext.CancellationToken);
         var bad = await BackendApp.RunAsync(["-nope"], [], fixture.Out, fixture.Error, new ServeHooks(), TestContext.CancellationToken);
