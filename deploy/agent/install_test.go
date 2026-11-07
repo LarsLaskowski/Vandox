@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/user"
@@ -1627,6 +1628,77 @@ func TestValidateBackendURL_RefusesHostNames(t *testing.T) {
 			h := newHarness(t)
 			got := h.run(`validate_backend_url "$1"`, "", v)
 			expectResult(t, fmt.Sprintf("validate_backend_url %q", v), got, 0, "", "")
+		})
+	}
+}
+
+// TestValidateBackendURL_RefusesIPv6TheAgentRefuses checks that a bracketed host passes only when the agent's
+// parser (netip.ParseAddr) takes it as hex groups: AC1 refuses malformed literals, AC2 keeps the well-formed ones,
+// AC3 keeps refusing an embedded IPv4 tail, the one deliberate difference.
+func TestValidateBackendURL_RefusesIPv6TheAgentRefuses(t *testing.T) {
+	t.Parallel()
+
+	inner := func(host string) string { return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]") }
+
+	refused := []string{
+		"[1:::2]", "[:::]", "[::1::]", "[1::2::3]", "[12345::1]", "[00001::1]", "[:1::2]", "[1::2:]",
+		"[:1:2:3:4:5:6:7:8]", "[1:2:3:4:5:6:7:8:]", "[1:2:3]", "[1:2:3:4:5:6:7]", "[1:2:3:4:5:6:7:8:9]",
+		"[1:2:3:4:5:6:7:8::]", "[::1:2:3:4:5:6:7:8]", "[1::2:3:4:5:6:7:8]",
+	}
+	accepted := []string{
+		"[::]", "[::1]", "[1::]", "[fd7a:115c:a1e0::1]", "[1:2:3:4:5:6:7:8]", "[FD7A:115C:A1E0:0:0:0:0:1]",
+		"[0001::00fF]", "[1:2:3:4:5:6:7::]", "[::2:3:4:5:6:7:8]", "[1::3:4:5:6:7:8]",
+	}
+	embedded := []string{"[::ffff:100.64.0.1]", "[::100.64.0.1]"}
+
+	for _, host := range refused {
+		url := "http://" + host + ":8081"
+
+		t.Run("AC1 refuses "+url, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := netip.ParseAddr(inner(host)); err == nil {
+				t.Fatalf("netip.ParseAddr(%q) accepts the host, want the agent to refuse it", inner(host))
+			}
+
+			h := newHarness(t)
+			got := h.run(`validate_backend_url "$1"`, "", url)
+			expectResult(t, fmt.Sprintf("validate_backend_url %q", url), got, 2, "", backendURLLine+"\n")
+		})
+	}
+
+	for _, host := range accepted {
+		for _, suffix := range []string{"", ":8081", "/", ":8081/"} {
+			url := "http://" + host + suffix
+
+			t.Run("AC2 accepts "+url, func(t *testing.T) {
+				t.Parallel()
+
+				addr, err := netip.ParseAddr(inner(host))
+				if err != nil || addr.Zone() != "" {
+					t.Fatalf("netip.ParseAddr(%q) = %v, %v, want an address without zone", inner(host), addr, err)
+				}
+
+				h := newHarness(t)
+				got := h.run(`validate_backend_url "$1"`, "", url)
+				expectResult(t, fmt.Sprintf("validate_backend_url %q", url), got, 0, "", "")
+			})
+		}
+	}
+
+	for _, host := range embedded {
+		url := "http://" + host + ":8081"
+
+		t.Run("AC3 refuses "+url, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := netip.ParseAddr(inner(host)); err != nil {
+				t.Fatalf("netip.ParseAddr(%q) refuses the host: %v, want the agent to accept it", inner(host), err)
+			}
+
+			h := newHarness(t)
+			got := h.run(`validate_backend_url "$1"`, "", url)
+			expectResult(t, fmt.Sprintf("validate_backend_url %q", url), got, 2, "", backendURLLine+"\n")
 		})
 	}
 }
