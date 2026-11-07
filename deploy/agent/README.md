@@ -26,9 +26,7 @@ follow, and neither reaches the provider's network (records 0134, 0132):
 
 Either way the records stay in the spool until the tailnet is up, and the agent sends them then. The unit's `IPAddressAllow=` stays as
 the second layer. This holds only with the backend's tailnet **address** in `backend.url`, as step 4 and *What you need* ask: a host
-name is resolved through the server's local name-server stub (which the unit allows as localhost), unbound, by the hosting provider's
-name servers, and a forged answer of `127.0.0.1` or `::1` meets the loopback exemption and sends the token unbound to whatever listens
-on that local port (issue #373). The server needs Tailscale in TUN mode with the default interface name `tailscale0`; with Tailscale's
+name is refused by the agent and by `install.sh`, so no name server can choose where the token goes (record 0192). The server needs Tailscale in TUN mode with the default interface name `tailscale0`; with Tailscale's
 userspace networking or another name no send gets through (`connection failed`). A user who can create an interface named `tailscale0` is
 root, who reads the token anyway. The checks of this binding on the production server have **not yet run** (issue #372).
 
@@ -213,8 +211,7 @@ root, who reads the token anyway. The checks of this binding on the production s
 
      `RouteAll` must be false again. If it is true, run `tailscale set --accept-routes=false` yourself.
 
-   Use the backend's tailnet address, not its MagicDNS name: with Tailscale's DNS turned off (step 3), MagicDNS names do not
-   resolve on this server.
+   Use the backend's tailnet IP address: the agent and `install.sh` refuse a host name, a MagicDNS name included.
 5. **Check the route and the egress, after the agent is installed.**
 
    - `ip route get 100.64.0.1` names `dev tailscale0` while Tailscale is up. The egress check below shows that the agent sends no packet
@@ -240,8 +237,8 @@ root, who reads the token anyway. The checks of this binding on the production s
 - The monitored server: Ubuntu 22.04 with systemd on `x86_64`, `root` access (`sudo`), and `curl`, `sha256sum`, `tar` and `gzip` (no `git`).
 - Tailscale on this server, logged in to the same tailnet as the backend host (see *Tailscale on the monitored server* below).
 - The backend, already running with its ingest port on its tailnet address (step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)): you
-  need that address and port, for example `http://100.64.0.1:8081`. Use the address, not a host name: the binding to `tailscale0` holds only for an address, and with Tailscale's DNS turned off on
-this server (*Tailscale on the monitored server*, step 3) MagicDNS names do not resolve.
+  need that address and port, for example `http://100.64.0.1:8081`. Use the IP address, not a host name: the agent and `install.sh` refuse a host name (a MagicDNS name included), so no name server
+can choose where the token goes.
 - A backend with the ingest API: `vandoxd` v0.2.0 or later. v0.1.0 has no ingest endpoint and answers `404`; until v0.2.0 is
   released, use an image built from `main` since PR #316. Ingest must also be enabled: `ingest.agent_id` and the agent token set
   on the backend (`deploy/backend/vandoxd.yaml`, step 10 of [`docs/INSTALL.md`](../../docs/INSTALL.md)). Until both are set, it
@@ -399,11 +396,8 @@ It is byte-reproducible from the tagged source. The commands are in *Install the
   because the bundle holds the binary's checksum, verifying the bundle also covers the binary:
   `gh attestation verify vandox-agent-install-vX.Y.Z.tar.gz --repo LarsLaskowski/Vandox` (and the same for `vandox-agent-linux-amd64`).
 - **The name server.** With Tailscale's DNS turned off (*Tailscale on the monitored server*, step 3), the server keeps its own name
-  server and MagicDNS names do not resolve, so `backend.url` uses the backend's tailnet address. A host name would be resolved through
-  the name server of `/etc/resolv.conf`; the unit blocks every name server outside localhost and the tailnet (`install.sh:
-  WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`), but the local stub `127.0.0.53` is
-  localhost, so a lookup through it is not blocked: it asks the provider's name servers unbound, and a forged answer of
-  `127.0.0.1` or `::1` meets the loopback exemption of the binding (issue #373). Use the tailnet address.
+  server and MagicDNS names do not resolve. `backend.url` holds the backend's tailnet IP address and the agent looks up no name; a
+  host name is refused (record 0192).
 - **The server run from the CI artifact.** For the Product Manager's run of a pull request's head, download the artifact
   `agent-install-files` of the `agent-install` run of the approved head SHA (the run ID and the SHA are given with the request).
   Put its three files into `/root/vandox-files`, check their names as in the offline variant, and run
@@ -600,7 +594,7 @@ shipped to the backend as written. Grant the agent only the logs whose content m
 
 ### Unit settings that must stay as they are
 
-- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector) and **`AF_INET`** and **`AF_INET6`** (the sender's connection to the backend; the unit's `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent reach only localhost and the tailnet, so `backend.url` names the tailnet address; the sender binds its non-loopback connections to `tailscale0`, and a host name is resolved through the local stub, which the unit allows, so a lookup is not blocked and a forged loopback answer reaches the loopback exemption, issue #373; a host name resolved directly by a name server outside localhost and the tailnet fails as `connection failed`, and `install.sh` warns about such a name server).
+- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector) and **`AF_INET`** and **`AF_INET6`** (the sender's connection to the backend; the unit's `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent reach only localhost and the tailnet, so `backend.url` names the tailnet IP address; the sender binds its non-loopback connections to `tailscale0`, and a host name is refused, so no name is looked up).
 - No own network namespace: no `PrivateNetwork=` and no `NetworkNamespacePath=`, or `/proc/net` shows another namespace's sockets.
 - `/run/dbus/system_bus_socket` stays reachable: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`.
 - No `ProcSubset=pid`: it hides `/proc/net`.

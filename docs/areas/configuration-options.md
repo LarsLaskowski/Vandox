@@ -33,7 +33,7 @@ secrets](configuration-and-secrets.md); what an option does at run time is in th
 | Key | Default | Rule |
 | --- | ------- | ---- |
 | `agent_id` | none, required | 1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit (the rule of the [wire format](wire-format.md) for agent IDs) |
-| `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address or a name of letters, digits, `.` and `-` (checked after percent-decoding); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
+| `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address without a zone (a host name, a short or numeric IPv4 form such as `127.1` and an IPv6 zone are refused with `host must be an IP address without a zone, not a name`); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
 | `backend.backfill_bandwidth` | `256KiB` | a whole number of one to five digits without a leading zero, then `KiB` or `MiB`, from `16KiB` to `1024MiB`; error text `must be a whole number of KiB or MiB from 16KiB to 1024MiB, such as 256KiB or 4MiB` |
 | `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path |
 | `spool.max_size` | `2GiB` | a whole number of MiB or GiB from `64MiB` to `64GiB` |
@@ -54,8 +54,9 @@ secrets](configuration-and-secrets.md); what an option does at run time is in th
 
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether the host is a
   tailnet address is not checked; the network ACL is the boundary ([Network and security model](network-and-security-model.md)).
-  `http` is meant only for the backend host's tailnet address (MagicDNS names do not resolve once Tailscale's DNS is off on the
-  server), and the scheme must match the listener ([Agent sending](agent-sending.md)).
+  `http` is meant only for the backend host's tailnet address, and the scheme must match the listener ([Agent sending](agent-sending.md)).
+  The host is always an IP address, so no MagicDNS name is accepted and no name is looked up (record 0192); with `https` the backend's
+  certificate must name that IP address as a subject alternative name, else a `*.ts.net` certificate fails as `tls failed`.
 - `backend.backfill_bandwidth` is the bandwidth of the agent's backfill: the bytes a second of compressed request body it sends while
   it catches up on the spool after an outage ([Agent sending](agent-sending.md); the live stream is not limited). It is checked right
   after `backend.url`; the value is written as `256KiB`, not as a number of bytes, and a decimal point, a unit other than `KiB` or `MiB`,

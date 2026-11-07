@@ -63,7 +63,8 @@ protected, where, and the area documents that state its rules.
     [storage-reading](../docs/areas/storage-reading.md), the `web-ui-*.md` views,
     [ingest-endpoint](../docs/areas/ingest-endpoint.md).
 11. **Outbound calls** — each call has a timeout and reaches only its destination, encrypted to a verified peer.
-    `internal/sender`, `internal/sdnotify`, `internal/sdbus`, `internal/mariadb`, `deploy/agent/vandox-agent.service`,
+    `internal/sender` (the token goes only to the IP literal in `backend.url`; no name is looked up: the `backend.url` rule in
+    `internal/config/agent.go`, `validate_backend_url` in `deploy/agent/install.sh`), `internal/sdnotify`, `internal/sdbus`, `internal/mariadb`, `deploy/agent/vandox-agent.service`,
     the download in `install.sh`, the health check in `src/Vandox.Backend/Cli/`; Telegram, external checks, AI service planned —
     [agent-sending](../docs/areas/agent-sending.md),
     [network-and-security-model](../docs/areas/network-and-security-model.md),

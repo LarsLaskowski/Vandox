@@ -28,8 +28,8 @@ systemd unit in short (security areas 2, 6 and 9). The operator relies on it; ev
   `fd7a:115c:a1e0::/48`, by address, not by interface; the interface is the sender's binding to `tailscale0`; what the allow-list
   lets through and what fails is in [Agent sending](agent-sending.md) (*The request*, the second layer). While Tailscale is not up, a send fails at once as `connection failed` (no
   `tailscale0`) or ends as a timeout (the interface without routes), never through the provider's network, and the agent keeps spooling
-  and retrying. The guarantee holds with the tailnet address in `backend.url` (the host-name residual in
-  [Network and security model](network-and-security-model.md), issue #373; record 0134). The unit has no ordering on `tailscaled`,
+  and retrying. The guarantee holds with the tailnet address in `backend.url` (a host name is refused, record 0192;
+  [Network and security model](network-and-security-model.md); record 0134). The unit has no ordering on `tailscaled`,
   because the sender retries until the tailnet is up.
 
 ## Command
@@ -44,9 +44,9 @@ systemd unit in short (security areas 2, 6 and 9). The operator relies on it; ev
 - `--agent-id` must be an agent ID ([Agent](agent.md), *Command line and start-up*): else `install.sh: --agent-id is not a valid agent
   ID`, exit 2.
 - `--backend-url` must be `http` or `https`, `://`, a host, an optional port of 1 to 65535 without a leading zero and an optional `/`;
-  the host is an IPv4 literal (four parts of 0 to 255; a host of digits and dots that is no IPv4 literal is refused), a bracketed IPv6
-  literal, or a name of labels of letters, digits and `-` (1 to 63 bytes, not starting or ending with `-`) of at most 253 bytes: else
-  `install.sh: --backend-url is not http(s)://host[:port]`, exit 2. The values are never echoed.
+  the host is an IPv4 literal (four parts of 0 to 255 without a leading zero, `0` alone stays valid; a host of digits and dots that is no IPv4
+  literal is refused) or a bracketed IPv6 literal without a zone; a host name is refused: else
+  `install.sh: --backend-url is not http(s)://ip-address[:port]`, exit 2. The values are never echoed.
 
 **The `VERSION` file.** `VERSION` next to `install.sh` must be a regular file, not a link, of at most 64 bytes (checked by size before
 it is read), with exactly one line that ends in a line feed and is `vX.Y.Z` or `vX.Y.Z-rc.N`; else `install.sh: no valid VERSION file
@@ -93,9 +93,8 @@ Nothing changes before the files are verified.
 2. Configuration and the early checks: an existing `/etc/vandox/agent.yaml` is kept (`install.sh: keeping existing
    /etc/vandox/agent.yaml`) and its `spool.directory` is read (*`spool.directory` of a kept configuration*); without one the spool is
    `/var/lib/vandox/spool`, and an IP literal outside localhost and the tailnet ranges gets `install.sh: WARNING <host> is not a tailnet
-   address; the unit blocks it`. For a host name, each `nameserver` of `/etc/resolv.conf` that is an IP literal outside localhost and
-   the tailnet gets `install.sh: WARNING name server <ip> is blocked by the unit; use the tailnet address or MagicDNS`; any other
-   `nameserver` value is skipped without output. Then, read-only and before the token prompt and any change, the spool directory is
+   address; the unit blocks it`.
+   Then, read-only and before the token prompt and any change, the spool directory is
    checked (`/var/lib/vandox` and the spool, when they exist, must be real directories, the first owned by root and not group- or
    other-writable, the second owned by `vandox-agent`, which an existing spool cannot be while the user does not exist; missing entries
    pass) and an existing `/etc/vandox` that is a link or not a directory is refused, so every check of the steps above precedes the

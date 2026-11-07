@@ -60,10 +60,10 @@ on the address in `INGEST_BIND_ADDRESS`, the backend host's tailnet address. The
   the provider's network, and the records stay in the spool until the tailnet is up. The server must run Tailscale in TUN mode with the
   default interface name; otherwise every send fails. Binding a socket to a device needs no capability on Linux 5.7 and later. The
   server's checks (the route while up, the egress while `tailscaled` is stopped) have not yet run (issue #372). Record 0134.
-- **Residual: a host name in `backend.url`.** The guarantee holds only with the backend's tailnet address. A host name is resolved
-  through the local `systemd-resolved` stub, which the unit's `localhost` allows and which asks the provider's name servers (Tailscale's
-  DNS is off); the lookup is unbound, and a forged answer of `127.0.0.1` or `::1` meets the loopback exemption and sends the token
-  unbound to whatever listens on that local port. This predates the binding; issue #373 proposes closing it. A root user can create an
+- **`backend.url` holds an IP address, so no name answer chooses where the token goes.** The loader, the transport and `install.sh`
+  refuse a host name, a short or numeric IPv4 form and an IPv6 zone, so the dialed address is the configured literal and nothing is looked
+  up: a name server, forged or not, cannot send the token unbound to a local listener through the loopback exemption (record 0192, which
+  closes issue #373). A configured literal that is the server's own address is the operator's configuration. A root user can create an
   interface named `tailscale0`, which changes nothing, as root already reads the token.
 - There is no inbound port on the home router. Transport encryption comes from Tailscale; the ingest endpoint still authenticates every
   request with the agent token, because the network binding is not a security boundary.
@@ -71,9 +71,7 @@ on the address in `INGEST_BIND_ADDRESS`, the backend host's tailnet address. The
 - **The agent's unit enforces this on the server, as the second layer.** The first is the binding to `tailscale0` above.
   `IPAddressDeny=any` with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` lets the agent's process reach only localhost
   and the tailnet ranges, so a `backend.url` elsewhere fails as `connection failed`; the install script warns about it. The allow-list
-  does not stop a host name: the local name-server stub is localhost, so a lookup through it is not blocked (the residual above), and
-  only a name server outside localhost and the tailnet fails. Use the tailnet address: the documented setup turns Tailscale's DNS off on the monitored server (`tailscale set --accept-dns=false`),
-  because its policy lets the server reach only the ingest port, so Tailscale's name servers can be out of reach and lookups can fail; MagicDNS names then do not resolve there
+  has no host name to judge, because `backend.url` holds an IP address and the agent looks up no name
   ([Agent installation](agent-installation.md), [record 0183](../decisions/0183-the-agent-unit-allows-only-localhost-and-the-tailnet-ranges-as-addresses.md), [record 0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md)).
 - The agent sends its token only to `backend.url`, uses no proxy and follows no redirect, never switches certificate verification
   off, uses plain `http` only to the backend host's tailnet address, where Tailscale encrypts and authenticates the transport, and

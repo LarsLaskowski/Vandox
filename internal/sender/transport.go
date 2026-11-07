@@ -102,6 +102,9 @@ func NewHTTPTransport(baseURL string, token config.Secret) (*HTTPTransport, erro
 		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errBackendURL
 	}
+	if addr, err := netip.ParseAddr(u.Hostname()); err != nil || addr.Zone() != "" {
+		return nil, errBackendURL
+	}
 	t := &HTTPTransport{url: u.Scheme + "://" + u.Host + IngestPath, token: token, device: tailnetDevice}
 	t.client = &http.Client{
 		Transport: &http.Transport{

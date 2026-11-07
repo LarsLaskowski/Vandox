@@ -506,8 +506,8 @@ var urlRules = []func(u *url.URL) string{
 		return ""
 	},
 	func(u *url.URL) string {
-		if !validHost(u.Hostname()) {
-			return "host must be an IP address or a name of [A-Za-z0-9.-]"
+		if addr, err := netip.ParseAddr(u.Hostname()); err != nil || addr.Zone() != "" {
+			return "host must be an IP address without a zone, not a name"
 		}
 		return ""
 	},
@@ -544,21 +544,4 @@ func urlProblem(raw string) string {
 		}
 	}
 	return ""
-}
-
-// validHost reports whether host is an IP address or 1 to 253 bytes of [A-Za-z0-9.-].
-func validHost(host string) bool {
-	if _, err := netip.ParseAddr(host); err == nil {
-		return true
-	}
-	if len(host) < 1 || len(host) > 253 {
-		return false
-	}
-	for i := 0; i < len(host); i++ {
-		c := host[i]
-		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '.' && c != '-' {
-			return false
-		}
-	}
-	return true
 }

@@ -196,7 +196,7 @@ prompt, see *The token prompt* in [`deploy/agent/README.md`](deploy/agent/README
 
 To remove the agent, run the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade, offline install, the options and the checks are in [`deploy/agent/README.md`](deploy/agent/README.md); the step-by-step path is step 11 of
 [`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names the
-backend's tailnet address, not a MagicDNS name. What the scripts check and change: [Agent installation](docs/areas/agent-installation.md).
+backend's tailnet **IP address**; the agent and the script refuse a host name, a MagicDNS name included. What the scripts check and change: [Agent installation](docs/areas/agent-installation.md).
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
