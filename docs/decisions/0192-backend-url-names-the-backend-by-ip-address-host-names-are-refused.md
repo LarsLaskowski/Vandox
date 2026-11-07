@@ -1,6 +1,6 @@
 # 0192: backend.url names the backend by IP address; host names are refused
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-07
 - **Area:** Network and security model
 - **Source:** Issue #373
