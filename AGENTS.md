@@ -109,10 +109,10 @@ All commands, with what each one checks, are listed in [`.squad/stack.md`](/.squ
 
 <!-- project:begin architecture -->
 - `cmd/vandox-agent` (Go) — the agent for the monitored server (collectors, log shipping, local spool).
-- `internal/` (Go) — the agent's packages: data model, wire encoder, configuration, CLI helpers, version information.
-- `src/Vandox.Backend` (.NET) — the backend `vandoxd`: host, CLI, Blazor web UI (ingest, analysis and alerting are added here).
-- `src/Vandox.Core`, `src/Vandox.Storage`, `src/Vandox.Import` (.NET) — data model, wire decoder, configuration, log parsing, SQLite storage, log import; tests in `tests/`.
-- `deploy/agent`, `deploy/backend` — installation and container files; `docs/` — documentation; `testdata/` — test fixtures shared by both languages (the golden wire batch pins the Go encoder against the C# decoder).
+- `internal/` (Go) — the agent's packages: collectors, log shipping, spool, sender, wire encoder, data model, configuration, CLI helpers, version information.
+- `src/Vandox.Backend` (.NET) — the backend `vandoxd`: host, CLI, ingest endpoint, web login, Blazor web UI (alerting is added here).
+- `src/Vandox.Core`, `src/Vandox.Storage`, `src/Vandox.Import` (.NET) — data model, wire decoder, configuration, log parsing, log signatures and templates, incidents, forensics report, SQLite storage, log import; tests in `tests/`.
+- `deploy/agent`, `deploy/backend` — installation and container files; `docs/` — documentation (what the software does: `docs/areas/`); `testdata/` — test fixtures shared by both languages (the golden wire batch pins the Go encoder against the C# decoder); `tools/` — console programs for developers (the storage benchmark).
 <!-- project:end architecture -->
 
 ## Project configuration
