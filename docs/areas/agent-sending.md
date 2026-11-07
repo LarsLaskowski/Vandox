@@ -26,8 +26,9 @@ in outline are in [Agent](agent.md) (*Connection*).
   up to 16 KiB and at most 4,096 bytes of its body, which it discards; once 4,096 bytes of a body were read the agent closes the
   connection itself and cancels the request, so the transport does not read on. The transport's results hold a fixed reason, never an
   error text.
-- Plain `http` is meant only for the backend host's tailnet address, because the tailnet encrypts and authenticates the transport
-  every other address is `https`. With `https` the backend's certificate must name the IP address of `backend.url` as a subject alternative name, so a `*.ts.net` certificate fails as `tls failed`.
+- Plain `http` is meant only for the backend host's tailnet address, because the tailnet encrypts and authenticates the transport;
+  every other address is `https`. With `https` the backend's certificate must name the IP address of `backend.url` as a subject
+  alternative name, so a `*.ts.net` certificate fails as `tls failed`.
 - Every connection to an address that is not a loopback address (`127.0.0.0/8`, `::1`, an IPv4-mapped loopback) is bound to the
   interface `tailscale0` (`SO_BINDTODEVICE`) before it connects; an address that cannot be parsed is bound, and a connection to a
   loopback address is not, which a backend on the same host needs. While Tailscale is down a send therefore never leaves through another
