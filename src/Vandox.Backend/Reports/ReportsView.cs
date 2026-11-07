@@ -13,6 +13,11 @@ public static class ReportsView
     public const int PageOutages = 50;
 
     /// <summary>
+    /// The most runs the page shows of one text.
+    /// </summary>
+    public const int MaxTextRuns = 16;
+
+    /// <summary>
     /// The title of the page.
     /// </summary>
     public const string Title = "Forensics report";
