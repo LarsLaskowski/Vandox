@@ -12,7 +12,7 @@ its sequence numbers and gaps to tell what is missing.
 - The agent keeps collecting while the backend is unreachable and keeps **at least 7 days** of records in the spool (*Capacity*); the
   sender then sends current data first and backfills the spool oldest first ([Agent sending](agent-sending.md)).
 - Every record carries a sequence number from one counter per agent that increases strictly, survives restarts and reboots and is
-  never reused (*Sequence numbers*). A batch has no identity of its own ([Wire format](wire-format.md), *Batch identity*).
+  never reused (*Sequence numbers*). A batch has no identity of its own ([Wire format](wire-format.md), *Batch identity (0045)*).
 - The boot ID and the clock offset are kept with each record, and one read never mixes two capture contexts, so a batch holds only
   records of one boot ID and offset.
 - The spool is a file-write area of the agent (security area 9): it has a size bound and defined behavior when full (oldest data
@@ -104,7 +104,7 @@ loss may have rolled the counter back) and when the newest data file ends in dam
 is taken as well: the wall clock's microseconds since the Unix epoch plus 1,000,000. The agent issues far fewer than 1,000,000 numbers a
 second, so a number is never more than 1,000,000 ahead of the clock's microseconds when it is issued, and a later fresh start lies above
 it. After a clean stop and after a `kill -9` in the same boot the numbers go on directly after the last one issued; an agent's first
-number is large, and a fresh start or a crash leaves a jump ([Wire format](wire-format.md), *Batch identity*). The gaps the spool
+number is large, and a fresh start or a crash leaves a jump ([Wire format](wire-format.md), *Batch identity (0045)*). The gaps the spool
 writes take numbers too, before the records of the hand-over that carries them. A hand-over whose numbers would reach 2^63 - 1, the
 largest the backend stores, is refused with `spool: sequence numbers exhausted` as a write failure (*Write failures*). Stated residual:
 a clock set back by more than the time between a lost spool and a fresh one can make new numbers collide with stored ones.
@@ -269,9 +269,15 @@ agent dropped`; warning `spool not closed`.
 
 - [0045](../decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) — why a spool of at least 7 days and
   per-record sequence numbers.
-- [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why uncompressed segment
-  files of checksummed frames, a fresh spool's numbers from the clock bound, at most 64 acknowledged ranges, bounded file size and
-  count, files reached only relative to the directory's descriptor, and the state file waiting for the spool's sync.
+- [0123](../decisions/0123-agent-spool-in-uncompressed-segment-files-with-checksummed-frames-and-a-bounded-file-count.md) — why uncompressed
+  segment files of checksummed frames, bounded file size and count.
+- [0171](../decisions/0171-a-fresh-spool-starts-its-sequence-numbers-above-a-clock-bound.md) — why a fresh spool's numbers start from the
+  clock bound.
+- [0172](../decisions/0172-the-spool-keeps-a-bounded-number-of-acknowledged-ranges.md) — why at most 64 acknowledged ranges.
+- [0173](../decisions/0173-the-spool-opens-its-files-relative-to-its-directorys-descriptor.md) — why files are reached only relative to the
+  directory's descriptor.
+- [0174](../decisions/0174-spool-file-sizes-add-up-saturating-and-a-saturated-sum-is-no-room.md) — why file sizes add up saturating.
+- [0175](../decisions/0175-the-state-file-syncs-the-spool-before-every-save.md) — why the state file waits for the spool's sync.
 - [0028](../decisions/0028-data-gaps-are-always-recorded.md) — why every drop and refusal is a recorded gap.
 
 ## Not here

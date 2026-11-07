@@ -176,7 +176,7 @@ the agent's gaps, clock samples, sample times and stream row.
   `length()` ends at it, so a character check of the table would let a NUL hide characters; the table checks the bytes whatever the text
   holds. A database error is `store: saving note: …`.
 - A note of an incident survives every re-run of `vandoxd incidents` that updates or keeps the incident, and follows it when it is merged.
-  Retention must move or keep notes, as an incident with notes cannot be deleted ([Storage](storage.md), *Retention*).
+  Retention must move or keep notes, as an incident with notes cannot be deleted ([Storage](storage.md), *Retention (planned)*).
 
 ## Limits and errors
 
@@ -189,8 +189,12 @@ The limits and exact error texts are stated with each rule above. A refused batc
 - [0095](../decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) — why the write path keeps the template statistics in the batch's transaction.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are matched by overlapping windows, kept per number and saved one transaction each.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes are rows per incident number moved in the merge.
-- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the write path stores a mark per agent connection snapshot and the comparison of each agent start, computed once per batch.
-- [0130](../decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) — why the write path classifies each agent record, keeps gaps as stateful rows and measures the clock offset.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the write path stores a mark per agent connection
+  snapshot and the comparison of each agent start, computed once per batch.
+- [0130](../decisions/0130-live-or-backfilled-is-decided-at-write-time.md) — why the write path classifies each agent record.
+- [0180](../decisions/0180-sequence-and-time-gaps-are-stateful-rows-that-become-final-after-a-quiet-wait.md) — why it keeps gaps as stateful
+  rows.
+- [0181](../decisions/0181-the-agents-clock-offset-is-measured-from-caught-up-self-samples.md) — why it measures the clock offset.
 
 ## Not here
 

@@ -119,7 +119,8 @@ its next due time from the extra run's start, so the extra run takes the place o
 ### Records and gaps
 
 - Every record of a successful run is stamped as an agent record (origin `agent`, the capture time of the run's start where the collector
-  set none) and checked against the [wire format](wire-format.md), size included (*Producer size contract*). A record that fails is
+  set none) and checked against the [wire format](wire-format.md), size included (*Producer size contract*). The size is checked as if the record
+  carried the largest storable sequence number, so the check is an upper bound for any number the spool assigns. A record that fails is
   dropped, the sample gets one gap with cause `unknown`, and the run's other records are kept.
 - The gap of a missed sample covers the slot the sample stands for, from its due time to one interval later, so consecutive missed samples'
   gaps join; its `collector` names the collector and its source is `agent`. A late start's gap covers the span from the missed due time to
@@ -266,19 +267,27 @@ stops, the collectors' flush (at most 5 seconds), this last save (which makes th
 - [0019](../decisions/0019-agent-reads-proc-instead-of-top-lsof.md) — why `/proc` is read directly.
 - [0028](../decisions/0028-data-gaps-are-always-recorded.md) — why gaps are always recorded.
 - [0029](../decisions/0029-hanging-collector-never-blocks-the-agent.md) — why collectors are isolated and abandoned at their deadline.
-- [0110](../decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md) — one runner
-  per collector at a fixed rate, a gap for every missed sample, the notification without a library, the watchdog gated on the runners,
-  the log format.
-- [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — the memory
-  pressure mode switched by the `system` collector with fixed hysteretic thresholds (option 4).
-- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — boots and backup runs from a
-  saved state file, reaching it only once a run is kept.
-- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — log positions in the
-  state file by the hash of the path, committed when kept, saved once more at the stop after the flush.
-- [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — the state file waits for
-  the spool's sync.
-- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — the unit's restart
-  policy, resource limits and `GOMEMLIMIT=`.
+- [0110](../decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample.md) — one runner per collector at a fixed
+  rate, a gap for every missed sample.
+- [0136](../decisions/0136-systemd-notification-by-hand-and-a-watchdog-gated-on-the-collector-runners.md) — the systemd notification without
+  a library, the watchdog gated on the runners.
+- [0137](../decisions/0137-agent-log-as-text-lines-on-standard-error-with-the-journals-priority-prefix.md) — the log format: text lines on
+  standard error with the journal's priority prefix.
+- [0141](../decisions/0141-memory-pressure-mode-switched-by-the-system-collector-with-fixed-hysteretic-thresholds.md) — the memory pressure
+  mode switched by the `system` collector with fixed hysteretic thresholds.
+- [0156](../decisions/0156-one-agent-state-file-in-the-spool-directory-written-by-a-state-job.md) — one state file in `spool.directory`,
+  written by a `state` job.
+- [0159](../decisions/0159-boot-and-backup-run-changes-reach-the-state-only-once-their-run-is-kept.md) — boots and backup runs reaching the
+  state only once their run is kept.
+- [0163](../decisions/0163-the-state-file-keys-a-configured-log-file-by-the-sha-256-of-its-path.md) — log file positions in the state file
+  keyed by the hash of the path.
+- [0161](../decisions/0161-log-shipping-commits-its-positions-when-the-scheduler-keeps-a-run.md) — log positions committed when the
+  scheduler keeps a run.
+- [0168](../decisions/0168-open-log-groups-are-sent-at-a-clean-stop-and-a-holding-source-is-saved-at-its-oldest-held-line.md) — log
+  positions saved once more at the stop after the flush.
+- [0175](../decisions/0175-the-state-file-syncs-the-spool-before-every-save.md) — the state file waits for the spool's sync.
+- [0184](../decisions/0184-the-agent-unit-sets-a-hard-memory-limit-with-gomemlimit-below-it.md) — the unit's restart policy, resource limits
+  and `GOMEMLIMIT=`.
 
 ## Not here
 

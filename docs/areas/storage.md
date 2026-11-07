@@ -158,10 +158,14 @@ stored once") is tested against the real store; fakes for other consumers only r
 - [0077](../decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md) — why the same schema on Microsoft.Data.Sqlite, one writer, `synchronous=FULL` and migrations in code.
 - [0083](../decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) — why the criterion is the median of five batches on the data volume.
 - [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a progress handler interrupts reader statements and why the interruption is a cancellation.
-- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the tables of listener marks and comparisons exist.
-- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
-  connections set the library's command timeout to the busy timeout and why the ingest write is cancelled only by the shutdown deadline.
-- [0130](../decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) — why the `live` column, the gap rows and the stream rows exist.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the tables of listener marks and comparisons exist.
+- [0179](../decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md) — why the connections
+  set the library's command timeout to the busy timeout and why the ingest write is cancelled only by the shutdown deadline.
+- [0130](../decisions/0130-live-or-backfilled-is-decided-at-write-time.md) — why the `live` column exists.
+- [0180](../decisions/0180-sequence-and-time-gaps-are-stateful-rows-that-become-final-after-a-quiet-wait.md) — why the gap rows and the
+  stream rows exist.
+- [0181](../decisions/0181-the-agents-clock-offset-is-measured-from-caught-up-self-samples.md) — why the stream row and the clock samples
+  hold the measured clock offset.
 
 ## Not here
 

@@ -136,7 +136,7 @@ criteria carries each id. The test name follows *Naming* unchanged.
   asserts no elapsed time. At most one test per timer may measure it, waiting at
   most twice the configured value and bounding the ratio of the measured to the configured duration to 0.9 to 2. This
   is a timer the code under test needs to fire, not a wait for a result, which stays forbidden
-  ([0126](decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md)).
+  ([0179](decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md)).
 
 ## Tests that read repository documents
 

@@ -173,7 +173,7 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   the form check above applies after the secret rules.
 - A password check needs as much memory as the hash's memory parameter (at most 256 MiB); one check at a time keeps it within the
   container's limit.
-- The note text is never logged ([Incidents view](web-ui-incidents-view.md), *The note endpoint*).
+- The note text is never logged ([Incidents view](web-ui-incidents-view.md), *The note endpoint (`POST /incidents/<number>/notes`)*).
 - **Circuits.** Every page the signed-in user opens holds one live connection (a circuit) with the data it shows, and the number of circuits is
   not bounded ([Web UI](web-ui.md), *Limits and errors*); only a client with a session can open one, so exhausting the memory needs the password
   or a session.

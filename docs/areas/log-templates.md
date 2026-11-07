@@ -5,8 +5,8 @@
 A **template** is the message of a log line with its variable parts replaced by placeholders, so that lines which differ only in
 numbers, IDs, addresses or paths share one template. The backend keeps, per template, when it was first and last seen and how many
 lines it had in each hour, and answers two questions from that: which templates are **new** in a time range, and which hours of a
-template are **above its usual level**. The logs view shows them ([Logs view](web-ui-logs-view.md), *Templates of a range*, *Lines of a
-template*), the incidents list the new templates and spikes of their window ([Incidents](incidents.md)); no command shows the new
+template are **above its usual level**. The logs view shows them ([Logs view](web-ui-logs-view.md), *Template page*, *Search page*), the
+incidents list the new templates and spikes of their window ([Incidents](incidents.md)); no command shows the new
 templates or the usual-level hours yet.
 
 ## Normalization
@@ -120,7 +120,7 @@ covered hours than the minimum no usual level is known and nothing is reported.
 - Templates are **external text**: the normalizer removes control characters of category Cc, but keeps format characters (Cf, such as
   U+202E, which reverses the display direction, and U+200B), `<`, `&` and any other markup; whoever shows a template, or the template of
   a spike, escapes it like any log line and handles format characters (security area 12 of `.squad/project.md`).
-- With the planned retention ([Storage](storage.md), *Retention*), the template statistics are kept as hourly rollups (3 years) and
+- With the planned retention ([Storage](storage.md), *Retention (planned)*), the template statistics are kept as hourly rollups (3 years) and
   outlive the log lines (90 days): after the lines have expired, a template's text is the only trace of them. Until retention exists
   nothing expires.
 - A change of these rules changes only the templates of lines stored afterwards until the statistics are rebuilt: after a rule change
@@ -156,7 +156,7 @@ covered hours than the minimum no usual level is known and nothing is reported.
 ## Not here
 
 - The tables of the statistics: [Storage](storage.md), *Schema*; how the write path counts a batch's lines and the rebuild by
-  `vandoxd templates`: [Storage writing](storage-writing.md), *Log templates* and *Template rebuild*; the command line of `vandoxd
+  `vandoxd templates`: [Storage writing](storage-writing.md), *Template statistics* and *Template rebuild*; the command line of `vandoxd
   templates`: [Backend host](backend-host.md), *Command line and exit codes*.
 - The search for the lines of a template and the rules of the logs view's queries: [Storage reading and log
   exploration](storage-reading.md), *Log exploration*; their display: [Logs view](web-ui-logs-view.md).

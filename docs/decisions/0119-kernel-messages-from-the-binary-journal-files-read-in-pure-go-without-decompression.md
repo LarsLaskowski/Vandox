@@ -43,7 +43,7 @@ in [0154](0154-the-journal-reader-reads-the-compact-layout-chosen-per-file-from-
 
 The agent reads the system journal files itself, set-aside files included, counts only entries of the kernel transport with
 facility 0 as kills and decompresses nothing: an entry it cannot read that way is a recorded gap, never a kill. The rules are in
-[Agent kernel events and boots](../areas/agent-kernel-events.md) (*Kernel events*).
+[Agent kernel events and boots](../areas/agent-kernel-events.md).
 
 ## Consequences
 

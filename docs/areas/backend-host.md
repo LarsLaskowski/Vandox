@@ -195,8 +195,8 @@ finish, the database is closed, the service logs `vandoxd stopped` and exits 0.
 - [0060](../decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md) — why these port bindings, volumes and limits.
 - [0072](../decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md) — why no arguments run the service and a JSON log handler.
 - [0081](../decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md) — why two labelled listeners, JSON logs and Blazor Interactive Server.
-- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — how the
-  shutdown bounds an ingest write (the endpoint's rules are in [Ingest endpoint](ingest-endpoint.md)).
+- [0179](../decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md) — how the shutdown
+  bounds an ingest write (the endpoint's rules are in [Ingest endpoint](ingest-endpoint.md)).
 - [0127](../decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) — why TUN mode and a
   required `INGEST_BIND_ADDRESS`.
 - [0103](../decisions/0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md), [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — the login, the password hash and the proxy trust.

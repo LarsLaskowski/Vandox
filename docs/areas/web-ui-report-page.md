@@ -107,7 +107,7 @@ it to read the report in a browser without a shell. What the report says is in [
   - Plus the markup and the render tree (a typical outage holds a few hundred bytes of external text). This is **per circuit**; the number
     of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
 - **Memory of the run.** The run itself keeps up to about 60 MB plus about 20 MB for the listener section once across the whole service,
-  because only one run goes at a time ([Forensics report](forensics-report.md), *Limits of the report*).
+  because only one run goes at a time ([Forensics report](forensics-report.md), *Limits and errors*).
 - **Cross-site opening.** The session cookie is `SameSite=Lax`, so another site can make a signed-in browser open `/report` or
   `/report/markdown` and so start a run. It changes nothing and reveals nothing: the other site cannot read the response of a top-level
   navigation, the page cannot be framed, and the cost is bounded by the one run slot and the deadline of 2 minutes. A site that keeps
@@ -119,7 +119,9 @@ it to read the report in a browser without a shell. What the report says is in [
 ## Related decisions
 
 - [0108](../decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md) — why the report page renders the blocks the Markdown is written from, lists the outages in pages of 50 by a new run, takes the language from the address and runs one report at a time under 2 minutes.
-- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the report shows the new listeners section.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the report shows the new listeners section.
+- [0149](../decisions/0149-new-listeners-section-capped-per-finding-kind-changed-endpoints-without-command.md) — how that section caps its
+  findings.
 
 ## Not here
 

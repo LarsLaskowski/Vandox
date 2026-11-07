@@ -120,11 +120,11 @@ a secret under the same rules, held only on the backend host.
 - [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) — why the hash form is checked on top of the secret rules.
 - [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the agent token travels only as a
   bearer token in the ingest request.
-- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
-  backend runs without ingest while the token or `ingest.agent_id` is unset.
+- [0126](../decisions/0126-the-ingest-token-is-bound-to-one-configured-agent-id.md) — why the backend runs without ingest while the token or
+  `ingest.agent_id` is unset.
 - [0129](../decisions/0129-configuration-and-secret-files-opened-without-blocking.md) — why the configuration file and a `_FILE` secret file are opened without blocking and their type is checked on the opened file.
-- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the agent token
-  reaches the agent as a systemd credential and not as an environment value or a file the agent's group reads.
+- [0182](../decisions/0182-the-agent-token-reaches-the-agent-as-a-systemd-credential.md) — why the agent token reaches the agent as a
+  systemd credential and not as an environment value or a file the agent's group reads.
 
 ## Not here
 

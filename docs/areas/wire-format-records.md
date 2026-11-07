@@ -104,7 +104,7 @@ empty snapshot is valid. `proto` is `tcp`, `tcp6`, `udp` or `udp6`; `state` is r
 LISTEN CLOSING NEW_SYN_RECV`; `count` >= 1; `pid` >= 0. `trigger` (optional, since format 1.1) names the kills a snapshot was taken
 for (*Snapshot trigger*).
 
-**Socket UID (since format 1.1, record 0115).** A listener entry (`listeners`, `new_listeners`, `changed_listeners`) and a connection
+**Socket UID (since format 1.1, record 0146).** A listener entry (`listeners`, `new_listeners`, `changed_listeners`) and a connection
 entry carry the optional `uid` (an integer from 0 to 4294967295: the socket's UID from the kernel's table, not the UID of a process
 that holds it) and `user` (short text: the name of that UID, or the UID in decimal when the producer knows no name); a listener entry
 also the optional `mixed_uids` (true: the endpoint's sockets have more than one UID, and `uid` is the lowest of them). An **absent
@@ -129,13 +129,13 @@ when false, zero or absent):
 - `listener_check` (`all`, `privileged`, `none`, `start`): the comparison of the listener inventory with the last successful run's that
   the producer made for this snapshot: the whole inventory; only the listeners on ports 1 to 1023, because an inventory was cut at
   4,096; none; or `start`, the first run after the producer started, which has no earlier inventory (nothing is compared, like `none`;
-  record 0116).
+  record 0148).
 - `new_listeners` (listener entries, at most 4,096): the listeners the producer found new in the run, with the owner's `pid` and `command`
   when known and the socket UID fields as the endpoint's `listeners` entry has them. Requires `listener_check` `all` or `privileged`.
 - `new_listeners_omitted` (>= 1): how many more new listeners were found than `new_listeners` holds. Requires `listener_check` `all` or
   `privileged`.
 - `changed_listeners` (changed-listener entries, at most 4,096): the known listener endpoints whose socket UID changed since the
-  producer's previous run (record 0115, issue #305). An entry is a listener entry (`proto`, `local`, `pid`, `command`, `uid`, `user`,
+  producer's previous run (record 0147, issue #305). An entry is a listener entry (`proto`, `local`, `pid`, `command`, `uid`, `user`,
   `mixed_uids`: the endpoint as it is now) plus `previous_uid` (0 to 4294967295, required) and `previous_mixed_uids` (true when the
   endpoint's sockets had several UIDs before; left out when false). Its `uid` is required too. Requires `listener_check` `all` or
   `privileged`. The list counts toward the item limit as `new_listeners` does.
@@ -185,7 +185,7 @@ every entry the producer read; false for a configured subset or a reduction for 
 
 `error_code` is MariaDB's error number when the server refused the producer with an error packet in place of its greeting or as the
 answer to the login (for example 1040 too many connections, 1698 or 1045 access denied): the server answered, but would not serve. It
-was added in format 1.1 (record 0118); a decoder that does not know it ignores it and reads a true `not_answering`. Field errors:
+was added in format 1.1 (record 0151); a decoder that does not know it ignores it and reads a true `not_answering`. Field errors:
 `data.error_code`: `must be 1 to 65535` (the value 0) and `only with not_answering`; a value outside 0 to 65535 is malformed like every
 integer out of its field's range ([Wire format](wire-format.md), *Accepted forms*), and `null` reads as absent (0089).
 
@@ -279,15 +279,20 @@ legacy `lsof -ni` parser):
 - [0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md) — why `log_line` gets an optional `host`.
 - [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why `log_line` gets an optional `event`.
 - [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md) — why a JSON `null` reads as an absent key, also in payloads.
-- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why a
-  regular and a full snapshot are one record kind with additive fields, and format 1.1; why entries carry the socket's `uid` beside a
-  `user` name, absent meaning unknown, and an endpoint's lowest UID with `mixed_uids`.
-- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why `listener_check` gains
+- [0115](../decisions/0115-connection-collector-proc-net-tables-regular-and-full-snapshots-in-one-record-kind.md) — why a regular and a full
+  snapshot are one record kind with additive fields, and format 1.1.
+- [0146](../decisions/0146-socket-uid-from-the-tables-uid-column-lowest-uid-and-mixed-uids-per-endpoint.md) — why entries carry the socket's
+  `uid` beside a `user` name, absent meaning unknown, and an endpoint's lowest UID with `mixed_uids`.
+- [0147](../decisions/0147-a-known-endpoint-whose-socket-uid-changes-is-reported-as-a-changed-listener.md) — why changed listeners are
+  reported when a known endpoint's socket UID changes.
+- [0148](../decisions/0148-agent-marks-its-first-snapshot-after-a-start-and-what-its-listener-list-holds.md) — why `listener_check` gains
   `start` and a snapshot says what its listener list holds (`inventory`, `tables`).
-- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why a
-  refused login is `not_answering` with the optional `error_code` instead of a gap or a new availability.
-- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why a kill carries its own
-  identity, a snapshot names the kills it was taken for, and a backup run is a kind of its own.
+- [0151](../decisions/0151-a-refused-mariadb-login-is-recorded-as-not-answering-with-its-error-code.md) — why a refused login is
+  `not_answering` with the optional `error_code` instead of a gap or a new availability.
+- [0120](../decisions/0120-oom-kill-triggers-extra-process-and-connection-snapshots.md) — why a kill carries its own identity and a snapshot
+  names the kills it was taken for.
+- [0158](../decisions/0158-backup-runs-as-a-record-kind-of-their-own-recognized-by-process-rules.md) — why a backup run is a kind of its
+  own.
 
 ## Not here
 

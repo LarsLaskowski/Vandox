@@ -23,8 +23,8 @@ process holds open whose own mode grants the agent write is writable, and CAP_DA
 directories closed to the agent. The measurements are in [Agent rights](../areas/agent-rights.md).
 
 The process collector needs CAP_SYS_PTRACE alone for `smaps_rollup` (0113), the connection collector reads `fdinfo` with
-CAP_SYS_PTRACE alone and deliberately not the `fd` links (0115), and the journal and logs come through the groups `systemd-journal`
-and `adm`. 0030 granted CAP_DAC_READ_SEARCH only for listing `/proc/<pid>/fd`, which 0115 gave up; the log shipping collector would use
+CAP_SYS_PTRACE alone and deliberately not the `fd` links (0144), and the journal and logs come through the groups `systemd-journal`
+and `adm`. 0030 granted CAP_DAC_READ_SEARCH only for listing `/proc/<pid>/fd`, which 0144 gave up; the log shipping collector would use
 it only for a configured file that neither its user nor its groups can read.
 
 ## Options considered

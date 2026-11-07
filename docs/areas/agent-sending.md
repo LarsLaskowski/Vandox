@@ -68,7 +68,7 @@ in outline are in [Agent](agent.md) (*Connection*).
 A record is acknowledged in the spool only after a `2xx` answer, and a stream's position moves only after the spool kept the
 acknowledgement. When the spool did not keep it (more than 64 ranges, logged as the warning `acknowledgement not kept` with `err`, once
 until an acknowledgement succeeds, or a gap it could not take), the stream waits one wait of its own schedule and sends the same records
-again; the backend stores a resent record once ([Wire format](wire-format.md), *Batch identity*). A read the spool refuses logs the
+again; the backend stores a resent record once ([Wire format](wire-format.md), *Batch identity (0045)*). A read the spool refuses logs the
 warning `spool not readable` (`err`) once for the failure and retries after the same wait. A failed delivery inside a backfill pass (an
 acknowledgement the spool did not keep, a wait for a free give-up slot) does not end the pass: after its wait the pass reads again from
 its position, so it never moves past an unacknowledged record.
@@ -132,9 +132,10 @@ logs nothing.
 - [0006](../decisions/0006-agent-connects-outbound-only.md) — why the agent only connects outbound.
 - [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why a request carries one batch, is
   acknowledged by its status alone and marks a refusal of the batch itself with a header.
-- [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why a live and a backfill stream
-  with one shared backoff, refused records given up with a recorded gap at most 10 an hour, holes bounded at 32 and the backfill paused
-  under memory pressure.
+- [0125](../decisions/0125-sender-with-a-live-and-a-backfill-stream-over-one-shared-backoff.md) — why a live and a backfill stream with one
+  shared backoff, holes bounded at 32 and the backfill paused under memory pressure.
+- [0176](../decisions/0176-the-sender-gives-up-refused-records-one-by-one-with-a-recorded-gap-at-a-bounded-rate.md) — why refused records
+  are given up with a recorded gap, at most 10 an hour.
 - [0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md) — why every non-loopback connection is
   bound to `tailscale0`.
 

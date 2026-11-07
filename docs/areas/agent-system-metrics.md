@@ -210,7 +210,7 @@ A run reads one file at a time into reused buffers, holds per process only its n
 
 A read that blocks is abandoned at the timeout with a gap, and the collector is not started again while it hangs. A local user who holds
 a process's memory map lock can make its `cmdline` or `smaps_rollup` read block; that costs process samples, as gaps, until the process
-moves (accepted residual, record 0113, option 10).
+moves (accepted residual, record 0113, option 7).
 
 A snapshot of 250 processes takes under 100 ms ([Benchmarks](../BENCHMARKS.md), *Process snapshot*, not measured on the server); the
 agent's total CPU on the server is 0.42 % of one core over 24 hours (*Agent footprint*). The cost of reading `smaps_rollup` of every
@@ -220,10 +220,15 @@ process every 15 seconds under pressure is unmeasured on the server, an **open p
 
 - [0019](../decisions/0019-agent-reads-proc-instead-of-top-lsof.md) — why `/proc` is read directly instead of running `top`.
 - [0111](../decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md) — three system collectors, `statfs` and
-  `adjtimex`, the synchronization rule, the PLL offset only while the PLL is on, absent values left out instead of zero.
+  `adjtimex`.
+- [0138](../decisions/0138-clock-synchronized-below-16-seconds-of-maximum-error-pll-offset-only-while-the-pll-is-on.md) — the
+  synchronization rule and the PLL offset only while the PLL is on.
+- [0139](../decisions/0139-a-broken-system-file-fails-the-sample-a-measurement-the-host-does-not-offer-is-omitted.md) — a broken file fails
+  the sample; absent values left out instead of zero.
 - [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — PSS from
-  `smaps_rollup`, top processes and every program (every process under pressure), legacy names plus literal rules, an entry that fails its
-  check left out.
+  `smaps_rollup`, top processes and every program (every process under pressure), an entry that fails its check left out.
+- [0142](../decisions/0142-program-names-follow-the-legacy-derivation-after-literal-grouping-rules.md) — legacy names plus literal grouping
+  rules.
 
 ## Not here
 

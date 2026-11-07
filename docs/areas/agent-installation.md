@@ -5,7 +5,7 @@
 How `vandox-agent` is installed, upgraded and removed on the monitored server: the release's install bundle, the root-run scripts
 `install.sh` and `uninstall.sh` with their arguments, checks, messages and exit codes, what they create, the checks on the server and the
 systemd unit in short (security areas 2, 6 and 9). The operator relies on it; every setting of the unit with its reason is in
-`deploy/agent/README.md`, the reasons for the choices in record 0131.
+`deploy/agent/README.md`, the reasons for the choices in records 0131 and 0182 to 0191.
 
 ## The bundle and the tailnet
 
@@ -192,9 +192,25 @@ with `IPAddressAllow=localhost 100.64.0.0/10 fd7a:115c:a1e0::/48` (the enforceme
 
 ## Related decisions
 
-- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the token is
-  a systemd credential, the unit allows tailnet addresses only, the resource limits and `GOMEMLIMIT=`, the checksum check, and remove
-  and purge.
+- [0131](../decisions/0131-the-agents-install-scripts-unit-and-files-reach-the-server-as-an-install-bundle-released-with-the-binary.md) —
+  why the scripts, unit and files reach the server as an install bundle released with the binary.
+- [0182](../decisions/0182-the-agent-token-reaches-the-agent-as-a-systemd-credential.md) — why the token is a systemd credential.
+- [0183](../decisions/0183-the-agent-unit-allows-only-localhost-and-the-tailnet-ranges-as-addresses.md) — why the unit allows only localhost
+  and the tailnet addresses.
+- [0184](../decisions/0184-the-agent-unit-sets-a-hard-memory-limit-with-gomemlimit-below-it.md) — why the resource limits and `GOMEMLIMIT=`.
+- [0185](../decisions/0185-the-agent-units-system-call-filter-is-built-from-system-service-plus-adjtimex.md) — why the system-call filter is
+  `@system-service` plus `adjtimex`.
+- [0186](../decisions/0186-install-sh-checks-the-binary-against-the-sha-256-the-bundle-carries.md) — why the binary is checked against the
+  SHA-256 the bundle carries.
+- [0187](../decisions/0187-uninstalling-the-agent-removes-it-and-purging-also-deletes-its-data.md) — why remove and purge.
+- [0188](../decisions/0188-the-agent-unit-and-scripts-are-verified-by-a-ci-job-on-systemd-249.md) — why the unit and scripts are verified by
+  a CI job on systemd 249.
+- [0189](../decisions/0189-the-install-scripts-read-spool-directory-of-a-kept-configuration-with-a-fail-closed-line-reader.md) — why
+  `spool.directory` of a kept configuration is read by a fail-closed line reader.
+- [0190](../decisions/0190-the-install-scripts-refuse-a-bundle-another-user-could-change-and-check-its-manifest-before-sourcing.md) — why
+  the entry check and the manifest check before sourcing.
+- [0191](../decisions/0191-the-documented-install-steps-are-single-commands-with-check-and-extraction-in-one-line.md) — why the documented
+  install steps are single commands.
 - [0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md) — why the sender binds to `tailscale0` and
   the unit needs no ordering on `tailscaled`.
 - [0030](../decisions/0030-agent-runs-unprivileged-with-named-capabilities.md) — why a dedicated unprivileged user.

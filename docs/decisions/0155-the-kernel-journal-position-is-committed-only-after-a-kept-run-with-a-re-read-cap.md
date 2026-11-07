@@ -33,7 +33,7 @@ number, not by kill identity. The question came to the Product Manager as escala
 
 The kernel collector commits what a run reached as one unit at the next run, only when that run's result was kept, checks its own
 records before returning them and gives a span up with a gap after a fixed number of dropped re-reads. The rules are in
-[Agent kernel events and boots](../areas/agent-kernel-events.md) (*Kernel events*, **Commit and re-read**).
+[Agent kernel events and boots](../areas/agent-kernel-events.md) (*Commit and re-read*).
 
 ## Consequences
 

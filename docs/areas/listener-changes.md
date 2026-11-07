@@ -135,7 +135,7 @@ PID, times and counts are plain text. The backend's log holds no listener, comma
   are stored and read with an empty command (a user name of 1,024 bytes as UTF-16 is 2 KiB, so an entry is at most about 2.2 KB and 64 of
   them about 140 KB). That is 40 findings of about 420 KB (16.8 MB) and 20 change-only findings of about 140 KB (2.8 MB), so the section is
   at most about 20 MB in the run (computed from these bounds, not measured as a whole; on the page, where every text also carries its runs,
-  up to about 82 MB per circuit, [Web UI](web-ui.md), *Limits and errors*).
+  up to about 82 MB per circuit, [Report page](web-ui-report-page.md), *Limits and errors*).
 - **Time**: the section adds four reads of the narrow derived tables and decodes no payload, and may add at most 5 seconds to a run. Over a
   database with one more year of connection snapshots (one agent, 525,600 marks written through the store's write path in batches of
   1,440, 100 agent starts, 10,000 snapshots with agent findings, 762 MiB) the counts take 101 to 155 ms, the findings after an agent start
@@ -150,11 +150,16 @@ PID, times and counts are plain text. The backend's log holds no listener, comma
 
 ## Related decisions
 
-- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the agent marks
-  its first snapshot after a start, the storage layer compares across the start when it stores the snapshots, and the report shows these
+- [0148](../decisions/0148-agent-marks-its-first-snapshot-after-a-start-and-what-its-listener-list-holds.md) — why the agent marks its first
+  snapshot after a start.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the storage layer compares across the start when it
+  stores the snapshots.
+- [0149](../decisions/0149-new-listeners-section-capped-per-finding-kind-changed-endpoints-without-command.md) — why the report shows these
   findings with the agent's own under separate caps.
-- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why
-  the agent's connection snapshots carry a bounded listener check with the inventory state.
+- [0143](../decisions/0143-new-listener-check-against-the-last-inventory-bounded-privileged-ports-first.md) — why the agent's connection
+  snapshots carry a bounded listener check.
+- [0148](../decisions/0148-agent-marks-its-first-snapshot-after-a-start-and-what-its-listener-list-holds.md) — why a snapshot states its
+  inventory.
 
 ## Not here
 

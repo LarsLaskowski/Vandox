@@ -178,7 +178,7 @@ message.
 The reader and the collector hold at most 4 MiB live, independent of the size of the journal, the backlog and an entry: fixed buffers, at
 most 1,024 file headers, the drift window and trigger lists of 64 entries each and at most 256 kill records per run.
 
-## Residuals (records 0119, 0120)
+## Residuals (records 0119, 0120, 0153, 0154)
 
 - The facility rule proves that the kernel wrote the line, not that the OOM killer did: kernel code that prints a line of the same form at
   facility 0 is recorded as a kill.
@@ -226,11 +226,19 @@ one warning `boot ID not readable`; the other features run. The agent does not s
 
 - [0028](../decisions/0028-data-gaps-are-always-recorded.md) — every span of kernel messages that cannot be read is a recorded gap.
 - [0119](../decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md) — the binary journal
-  files read by the agent itself, set-aside files included, without decompression and only in the two layouts journald writes; only the
-  kernel transport with facility 0 counts; a kill timed by its receipt corrected for the kernel clock's drift.
-- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — a live kill requests extra
-  snapshots and is named by its identity, boots come from the saved state, the position is committed only after a kept run with at most
-  three re-reads, the boot reaches the state only once a run is kept.
+  files read by the agent itself, set-aside files included, without decompression; only the kernel transport with facility 0 counts.
+- [0154](../decisions/0154-the-journal-reader-reads-the-compact-layout-chosen-per-file-from-the-headers-flag.md) — the two layouts journald
+  writes, COMPACT read by the same reader.
+- [0153](../decisions/0153-a-kill-is-timed-by-its-receipt-corrected-for-the-kernel-clocks-drift.md) — a kill timed by its receipt corrected
+  for the kernel clock's drift.
+- [0120](../decisions/0120-oom-kill-triggers-extra-process-and-connection-snapshots.md) — a live kill requests extra snapshots and is named
+  by its identity.
+- [0157](../decisions/0157-boots-recognized-from-the-saved-boot-id-previous-uptime-from-the-saved-uptime.md) — boots come from the saved
+  state.
+- [0155](../decisions/0155-the-kernel-journal-position-is-committed-only-after-a-kept-run-with-a-re-read-cap.md) — the position is committed
+  only after a kept run with at most three re-reads.
+- [0159](../decisions/0159-boot-and-backup-run-changes-reach-the-state-only-once-their-run-is-kept.md) — the boot reaches the state only
+  once a run is kept.
 
 ## Not here
 
@@ -245,5 +253,6 @@ one warning `boot ID not readable`; the other features run. The agent does not s
 `internal/journal` (the journal file reader) and `internal/journal/journaltest` (a writer of journal files for tests; fixtures
 `testdata/journal/`: an online, an archived and a set-aside file generated from `kernel.export`, the same three in the compact layout under
 `testdata/journal/compact/`, and under `testdata/journal/systemd-255/` two compact files systemd-journal-remote 255 wrote from
-`kernel.export` and `live.export`), `internal/kernevents` (kernel event collector and boot check; two tests assert the 4 MiB bound at
+`kernel.export` and `live.export`; every generated fixture must be accepted by `journalctl --verify` and read back by
+`journalctl -o export`), `internal/kernevents` (kernel event collector and boot check; two tests assert the 4 MiB bound at
 journals of 1,000 and 100,000 kernel entries, `TestKernel_LogsHoldNoMessageText` the log texts).

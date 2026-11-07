@@ -112,7 +112,7 @@ and the production kernel (5.15) predates it.
   or that lies below a directory they cannot search, is logged `log file not readable` with the reason `permission denied` and not
   shipped. The error logs of Plesk and the web servers (`/var/log/nginx/error.log`, `/var/log/apache2/error.log`,
   `/var/log/plesk/panel.log`, `/var/log/sw-cp-server/error_log`) are such files unless the operator has granted the agent read by hand
-  with the commands of `deploy/agent/README.md` (*Error logs of Plesk and the web servers*; record 0121): no new right of the agent in
+  with the commands of `deploy/agent/README.md` (*Error logs of Plesk and the web servers*; record 0165): no new right of the agent in
   the unit or the installer, but the grant widens what a compromised agent can read, and a default ACL on a log directory widens what
   every file later created there grants, which the README states; its statements about the server's own file rights, rotation and
   `plesk repair fs` are marked unverified. The unit must keep the journal directories and the configured files reachable (no
@@ -218,10 +218,10 @@ to (record 0122):
   set holds `CAP_SYS_PTRACE` only, and why the filter also denies `process_madvise`.
 - [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the
   process collector reads `smaps_rollup` with the capability.
-- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) —
-  why the connection collector reads `fdinfo` with `CAP_SYS_PTRACE` alone.
-- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why the error log
-  read grant is made by hand.
+- [0144](../decisions/0144-socket-owners-from-fdinfo-on-the-socket-mount-the-agent-learns-at-its-start.md) — why the connection collector
+  reads `fdinfo` with `CAP_SYS_PTRACE` alone.
+- [0165](../decisions/0165-error-logs-the-agent-cannot-read-get-a-documented-grant-by-hand-not-a-new-right.md) — why the error log read
+  grant is made by hand.
 - [0013](../decisions/0013-mariadb-access-via-unix-socket-process-privilege.md) — why a `unix_socket` MariaDB user with only `PROCESS`.
 
 ## Not here
@@ -232,7 +232,7 @@ to (record 0122):
   [Agent connections](agent-connections.md), [Agent services and backup runs](agent-services.md),
   [Agent MariaDB collector](agent-mariadb.md), [Agent kernel events and boots](agent-kernel-events.md),
   [Agent log shipping](agent-log-shipping.md).
-- The spool's file access rules: [Agent spool](agent-spool.md), *File access*.
+- The spool's file access rules: [Agent spool](agent-spool.md), *File access (security area 9)*.
 
 ## Implementation
 

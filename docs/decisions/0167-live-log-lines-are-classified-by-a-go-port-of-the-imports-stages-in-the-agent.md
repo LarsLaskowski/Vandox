@@ -52,6 +52,6 @@ and its run's start. When a group closes is in [Agent log shipping](../areas/age
 - Where the import skips a line it cannot date (an impossible or unstorable syslog time), the collector ships it raw, because live a
   skipped line would be a loss without a gap; live and imported records of such a line differ.
 - Forged mail, MariaDB and kernel lines now make events live, not only on import; later alert rules (#56, #61) must weigh that
-  ([Log signatures](../areas/log-signatures.md), *Limitations*).
+  ([Log signatures](../areas/log-signatures.md), *Limits and errors*).
 - A MariaDB line now waits up to 60 seconds, plus the shipping delay, unless the next MariaDB line ends its entry earlier; that is well
   inside the live allowance of log lines (record 0130).

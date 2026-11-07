@@ -230,11 +230,21 @@ descriptors takes 57.8 ms ([Benchmarks](../BENCHMARKS.md), *Connection snapshot*
 ## Related decisions
 
 - [0019](../decisions/0019-agent-reads-proc-instead-of-top-lsof.md) — why `/proc` is read instead of running `lsof`.
-- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) —
-  the `/proc/net` tables with owners from `fdinfo` on the probed socket mount (`CAP_SYS_PTRACE` alone), regular and full snapshots in one
-  record kind, the bounded listener check favoring privileged ports, the socket `uid` and `mixed_uids`.
-- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — the `start`
-  check, the `inventory` and `tables` fields, the comparison across agent starts in the backend.
+- [0115](../decisions/0115-connection-collector-proc-net-tables-regular-and-full-snapshots-in-one-record-kind.md) — the `/proc/net` tables,
+  regular and full snapshots in one record kind.
+- [0144](../decisions/0144-socket-owners-from-fdinfo-on-the-socket-mount-the-agent-learns-at-its-start.md) — owners from `fdinfo` on the
+  probed socket mount (`CAP_SYS_PTRACE` alone).
+- [0145](../decisions/0145-fdinfo-lines-accepted-in-the-range-the-kernel-prints-them.md) — `fdinfo` lines accepted in the range the kernel
+  prints them.
+- [0143](../decisions/0143-new-listener-check-against-the-last-inventory-bounded-privileged-ports-first.md) — the bounded listener check
+  favoring privileged ports.
+- [0146](../decisions/0146-socket-uid-from-the-tables-uid-column-lowest-uid-and-mixed-uids-per-endpoint.md) — the socket `uid` and
+  `mixed_uids`.
+- [0147](../decisions/0147-a-known-endpoint-whose-socket-uid-changes-is-reported-as-a-changed-listener.md) — a known endpoint whose socket
+  UID changes reported as a changed listener.
+- [0148](../decisions/0148-agent-marks-its-first-snapshot-after-a-start-and-what-its-listener-list-holds.md) — the `start` check, the
+  `inventory` and `tables` fields.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — the comparison across agent starts in the backend.
 
 ## Not here
 

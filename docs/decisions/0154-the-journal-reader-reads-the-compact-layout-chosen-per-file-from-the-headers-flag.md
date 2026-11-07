@@ -39,7 +39,7 @@ The header is untrusted input like every other field, and the online file's head
 The reader supports exactly the two keyed-hash layouts journald writes, the server's and `COMPACT`, chosen per file from the
 header's flag, refuses every other layout as a recorded gap, and bounds every read, also from an array a cursor kept across a header
 re-read, by the current header's arena and the file. The rules are in
-[Agent kernel events and boots](../areas/agent-kernel-events.md) (*Kernel events*, **Layout**).
+[Agent kernel events and boots](../areas/agent-kernel-events.md) (*Layout (security area 10)*).
 
 ## Consequences
 

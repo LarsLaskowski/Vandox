@@ -103,7 +103,7 @@ Deliberate behavior that changes only with the Product Manager.
   [agent](../docs/areas/agent.md) (*Scheduling*).
 - **Backfilled data never raises an alert by itself**: every record is classified live or backfilled once, when
   stored; alerts run on live data only — [0022](../docs/decisions/0022-backfill-detection-and-live-only-alerts.md),
-  [0130](../docs/decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md);
+  [0130](../docs/decisions/0130-live-or-backfilled-is-decided-at-write-time.md);
   [detection-and-reports](../docs/areas/detection-and-reports.md) (*Live data and backfill*).
 
 ## Integration surface

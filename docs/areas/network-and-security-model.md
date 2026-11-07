@@ -74,7 +74,7 @@ on the address in `INGEST_BIND_ADDRESS`, the backend host's tailnet address. The
   does not stop a host name: the local name-server stub is localhost, so a lookup through it is not blocked (the residual above), and
   only a name server outside localhost and the tailnet fails. Use the tailnet address: the documented setup turns Tailscale's DNS off on the monitored server (`tailscale set --accept-dns=false`),
   because its policy lets the server reach only the ingest port, so Tailscale's name servers can be out of reach and lookups can fail; MagicDNS names then do not resolve there
-  ([Agent installation](agent-installation.md), [record 0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md), [record 0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md)).
+  ([Agent installation](agent-installation.md), [record 0183](../decisions/0183-the-agent-unit-allows-only-localhost-and-the-tailnet-ranges-as-addresses.md), [record 0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md)).
 - The agent sends its token only to `backend.url`, uses no proxy and follows no redirect, never switches certificate verification
   off, uses plain `http` only to the backend host's tailnet address, where Tailscale encrypts and authenticates the transport, and
   treats every answer as untrusted (at most 4,096 bytes of body read and discarded, only the status and the exact value of the header
@@ -143,20 +143,23 @@ agent's installation: `install.sh` creates it on the first install, `uninstall.s
   address through a published port.
 - [0134](../decisions/0134-sender-binds-non-loopback-connections-to-the-tailnet-device.md) — why the sender binds every non-loopback
   connection to `tailscale0`.
-- [0131](../decisions/0131-agent-unit-and-install-scripts-credential-tailnet-allow-list-checksum-remove-and-purge.md) — why the agent's unit
-  allows only tailnet addresses and localhost.
+- [0183](../decisions/0183-the-agent-unit-allows-only-localhost-and-the-tailnet-ranges-as-addresses.md) — why the agent's unit allows only
+  tailnet addresses and localhost.
 - [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the agent sends one batch per
   request with a bearer token and judges the answer by its status and one fixed header value.
-- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
-  token is bound to one agent ID and a free-space floor bounds what a token holder can write.
+- [0126](../decisions/0126-the-ingest-token-is-bound-to-one-configured-agent-id.md) — why the token is bound to one agent ID.
+- [0177](../decisions/0177-ingest-is-bounded-by-two-slots-through-the-commit-and-a-free-space-floor-not-a-rate-cap.md) — why a free-space
+  floor bounds what a token holder can write.
 - [0127](../decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) — why TUN mode and a
   required bind address.
 - [0016](../decisions/0016-web-ui-in-home-lan-with-login.md) — why the web UI is LAN-only with a login.
 - [0132](../decisions/0132-tailnet-policy-documented-as-console-settings-no-default-maintainer-grant.md) — why the policy is documented in the README as console
   settings, the README pinned by tests, gives maintainer devices nothing by default, and leaves the token's exposure while Tailscale is down to a follow-up.
 - [0013](../decisions/0013-mariadb-access-via-unix-socket-process-privilege.md) — why a `unix_socket` user with only `PROCESS`.
-- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the
-  agent's own minimal client, fixed captured statements and a refusal recorded with its error number.
+- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements.md) — why the agent's own minimal client and fixed
+  captured statements.
+- [0151](../decisions/0151-a-refused-mariadb-login-is-recorded-as-not-answering-with-its-error-code.md) — why a refusal is recorded with its
+  error number.
 - [0025](../decisions/0025-server-ram-stays-at-2-gb.md) — why the server's RAM stays at 2 GB.
 
 ## Not here

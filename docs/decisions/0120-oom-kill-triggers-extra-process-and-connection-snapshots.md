@@ -33,7 +33,7 @@ of their own: the journal position
 
 A live OOM kill makes the kernel collector request one extra run of `processes` and `connections` through the scheduler, rate-limited
 per collector, and the snapshots name the kills by their identity. The rules are in
-[Agent kernel events and boots](../areas/agent-kernel-events.md) (*Kernel events*), the [Agent](../areas/agent.md) area
+[Agent kernel events and boots](../areas/agent-kernel-events.md) (*Extra snapshots*), the [Agent](../areas/agent.md) area
 (*Scheduling*, the extra run) and the trigger in [Wire format records](../areas/wire-format-records.md) (*Snapshot trigger*).
 
 ## Consequences

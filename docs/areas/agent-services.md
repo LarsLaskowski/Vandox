@@ -118,7 +118,7 @@ of its own.
 ### Matching
 
 Each run lists `/proc` as the process collector does (its 4,096 lowest PIDs) and reads `stat` and `cmdline` of each process with the
-process collector's readers ([Agent system metrics](agent-system-metrics.md), *Readers*). A process matches when a rule's `command` equals
+process collector's readers ([Agent system metrics](agent-system-metrics.md), *Readers (security area 10)*). A process matches when a rule's `command` equals
 its `command` as the process collector derives it (*Names* there), or when its cleaned command line starts with a rule's
 `cmdline_prefix`; both are literal comparisons, so `grep pzstd` (command `grep`) does not match `command: pzstd`. A process that cannot be
 read, ended or not, is skipped like an ended one, without a log line or a gap.
@@ -157,7 +157,7 @@ A boot ID that cannot be read or is not a lower-case UUID ([Agent kernel events 
 that cannot be read, a `/proc` that cannot be listed or the run's deadline fail the run (a gap); the error texts name the file and a fixed
 reason, never a command or command line. The stored `command` is the process collector's external text.
 
-### Residuals (record 0120)
+### Residuals (record 0158)
 
 - The default rules come from the processes captured during a Plesk backup (#287): `backup-archiver --pack` runs for every part, the
   database dumps included, and `sw-tar --create` with `pzstd` for the file archives; the rules name the creating modes, so a restore
@@ -170,10 +170,14 @@ reason, never a command or command line. The stored `command` is the process col
 ## Related decisions
 
 - [0019](../decisions/0019-agent-reads-proc-instead-of-top-lsof.md) — no program is started; the states come from systemd over the bus.
-- [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — a minimal D-Bus client of
-  its own, one connection per run, polling, records on change, after a start or a lost sample and hourly, patterns up to 256 services.
-- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — backup runs as a record kind
-  of their own, `pzstd` and Plesk's two creating processes as default rules, the run reaching the state only once a check is kept.
+- [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-one-connection-per-run.md) — a minimal D-Bus client of its own, one
+  connection per run, patterns up to 256 services.
+- [0150](../decisions/0150-unit-states-polled-and-recorded-on-change-after-a-lost-sample-and-hourly.md) — polling, records on change, after
+  a start or a lost sample and hourly.
+- [0158](../decisions/0158-backup-runs-as-a-record-kind-of-their-own-recognized-by-process-rules.md) — backup runs as a record kind of their
+  own, `pzstd` and Plesk's two creating processes as default rules.
+- [0159](../decisions/0159-boot-and-backup-run-changes-reach-the-state-only-once-their-run-is-kept.md) — the run reaching the state only
+  once a check is kept.
 
 ## Not here
 

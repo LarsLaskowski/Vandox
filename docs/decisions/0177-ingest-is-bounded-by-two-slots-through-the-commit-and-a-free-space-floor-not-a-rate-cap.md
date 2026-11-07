@@ -37,5 +37,5 @@ the option in [Configuration options](../areas/configuration-options.md).
 
 - A token holder can still grow the database up to the floor; the web UI and the import keep working there, and ingest resumes when
   space is freed or retention (#46) removes data.
-- Revisit the slot count when the measured memory of one request (Wire format area, *Duties of the ingest API*) or several agents
+- Revisit the slot count when the measured memory of one request (Ingest endpoint area, *Limits, slots and memory*) or several agents
   (#89) change the budget.

@@ -232,12 +232,12 @@ The reader with the decoder read every entry of the server's two system files (7
 descriptor `0x60`) and of a later copy with a user journal (`user-10000.journal` and 22 archives; 54,360 system entries, 38 to 444 per
 user file) without an unreadable item (not committed). The user files' seqnum IDs differ from the system file's, their
 sequence numbers rise strictly within and across the archives, and those of the current user file lie inside the system file's range
-without colliding with a system number, as record 0121 assumes. CI writes `testdata/journal/live.export` (21 entries of the server's
+without colliding with a system number, as record 0160 assumes. CI writes `testdata/journal/live.export` (21 entries of the server's
 transports and field forms, one message of 20,000 bytes) as journal files with zstd frames of the server's form
 (`testdata/journal/zstd-frames.txt`); the agent's and the import's tests both read the records the import maps from it
 (`testdata/journal/live-records.jsonl`).
 
-## Residuals (record 0121)
+## Residuals
 
 - After an unclean end (SIGKILL, a crash, a power loss) the lines read after the last saved position are shipped again: at most one
   state interval plus one collector interval (10 + 2 seconds); nothing marks them as duplicates. A stop with SIGTERM is exact.
@@ -261,9 +261,13 @@ transports and field forms, one message of 20,000 bytes) as journal files with z
 
 ## Related decisions
 
-- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why a position
-  per sequence-number ID over system and user files, bounded zstd decoding, commit when kept, the stop flush, the import's stages
-  (options 15 to 23) and drop patterns bounded by compiled size.
+- [0160](../decisions/0160-log-shipping-keeps-a-journal-position-per-seqnum-id.md) — a position per sequence-number ID.
+- [0121](../decisions/0121-log-shipping-decodes-zstd-journal-items-with-a-bounded-library-decoder.md) — bounded zstd decoding.
+- [0161](../decisions/0161-log-shipping-commits-its-positions-when-the-scheduler-keeps-a-run.md) — commit when kept.
+- [0168](../decisions/0168-open-log-groups-are-sent-at-a-clean-stop-and-a-holding-source-is-saved-at-its-oldest-held-line.md) — the stop
+  flush.
+- [0167](../decisions/0167-live-log-lines-are-classified-by-a-go-port-of-the-imports-stages-in-the-agent.md) — the import's stages.
+- [0170](../decisions/0170-log-shipping-drop-patterns-are-bounded-by-their-compiled-size.md) — drop patterns bounded by compiled size.
 - [0119](../decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md) — why the binary
   journal files are read directly.
 - [0028](../decisions/0028-data-gaps-are-always-recorded.md) — why every span that cannot be shipped is a recorded gap.

@@ -75,7 +75,7 @@ anything: when any read fails, nothing is written, and nothing of the batch is s
   or content type it does not support (`415`), a full disk, a busy or failing store, a timeout or the stop of the service (`503`,
   `408`). A redirect is not followed. So a version mismatch or a temporary fault never makes the agent give up records.
 - **Repeats.** A batch whose answer was lost is sent again; the store keeps each agent ID and sequence number once ([Wire
-  format](wire-format.md), *Batch identity*), so a repeat is answered `204`, stores only the records it did not have and changes no
+  format](wire-format.md), *Batch identity (0045)*), so a repeat is answered `204`, stores only the records it did not have and changes no
   stored row, its receive time included. A record whose sequence number is stored with other content counts as a duplicate and never
   replaces the stored one. Two requests with overlapping records at once both get `204`.
 
@@ -102,7 +102,7 @@ connection that is not trusted (it is aborted at once) and takes its place; the 
 read, only when all 16 held connections are trusted, and a place freed by a finished connection serves the next one. The web listener
 has no such cap. A host without the token therefore cannot keep the agent out by holding connections. A sustained connection flood can
 delay the agent's first connection (after a start or a lost connection) until one attempt wins the race; it cannot evict a connection
-the agent has used. A token holder can hold all 16; the agent keeps its records and retries (record 0126).
+the agent has used. A token holder can hold all 16; the agent keeps its records and retries (record 0178).
 
 ## Limits, slots and memory
 
@@ -174,9 +174,13 @@ once. The web UI and the import do not check the floor; the database still grows
 
 - [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the ingest request carries one
   batch with a bearer token and is acknowledged by its status, and why a refused batch is marked with a header.
-- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the token
-  is bound to one configured agent ID, two slots are held through the commit, a free-space floor stands instead of a rate cap, and
-  how the shutdown bounds a write.
+- [0126](../decisions/0126-the-ingest-token-is-bound-to-one-configured-agent-id.md) — why the token is bound to one configured agent ID.
+- [0177](../decisions/0177-ingest-is-bounded-by-two-slots-through-the-commit-and-a-free-space-floor-not-a-rate-cap.md) — why two slots are
+  held through the commit and a free-space floor stands instead of a rate cap.
+- [0178](../decisions/0178-a-full-ingest-listener-evicts-the-oldest-connection-that-has-not-passed-the-token-check.md) — why a full listener
+  evicts the oldest untrusted connection.
+- [0179](../decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md) — how the shutdown
+  bounds a write.
 - [0128](../decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md) — why the decoder the endpoint
   uses reads the gzip framing itself.
 - [0032](../decisions/0032-secrets-only-from-environment-or-docker-secrets.md) — why the token comes only from the environment.

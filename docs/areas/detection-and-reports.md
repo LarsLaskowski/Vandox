@@ -116,8 +116,11 @@ level of the mail services (process state, ports, logs), never individual mail a
 - [0008](../decisions/0008-deterministic-detection-and-alerting.md) — why detection is deterministic and AI only writes the report.
 - [0020](../decisions/0020-analysis-before-alerting-forensics-release.md) — why the first release is the forensics release.
 - [0022](../decisions/0022-backfill-detection-and-live-only-alerts.md) — why the backend classifies live and backfilled data itself.
-- [0130](../decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) — why the
-  classification is made at write time, gaps are stateful rows and the offset comes from caught-up self samples (amends 0022).
+- [0130](../decisions/0130-live-or-backfilled-is-decided-at-write-time.md) — why the classification is made at write time (amends 0022).
+- [0180](../decisions/0180-sequence-and-time-gaps-are-stateful-rows-that-become-final-after-a-quiet-wait.md) — why gaps are stateful rows
+  that become final after a quiet wait.
+- [0181](../decisions/0181-the-agents-clock-offset-is-measured-from-caught-up-self-samples.md) — why the offset comes from caught-up self
+  samples.
 - [0024](../decisions/0024-nightly-report-timing.md) — why 06:00 or after the backfill.
 - [0026](../decisions/0026-services-disabled-reversibly-only.md) — why services are only disabled reversibly.
 - [0015](../decisions/0015-mail-services-checked-not-mail-accounts.md) — why mail services are checked, not mail accounts.

@@ -29,7 +29,7 @@ lines it loses (record 0166).
 ## Decision
 
 A renamed file whose read fails in 150 kept runs in a row is given up with one gap from its own last time, and the newer file is read
-on in the same run. The rules are in [Agent log shipping](../areas/agent-log-shipping.md) (*Rotation*).
+on in the same run. The rules are in [Agent log shipping from files](../areas/agent-log-shipping-files.md) (*Rotation*).
 
 ## Consequences
 

@@ -268,17 +268,33 @@ section, keeps the defaults, which ship the journal at `info` and more severe an
 - [0049](../decisions/0049-strict-configuration-file-schema-and-errors.md) — why the file is strict and errors never echo values.
 - [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why
   `web.trusted_proxies` is a comma-separated string.
-- [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process grouping rules are a list of mappings of literal comparisons that the strict decoder checks.
-- [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the units to track are a list of names and patterns, an entry without a suffix is a service, and other unit types are refused.
-- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the MariaDB collector, which these options switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
-- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why backup runs are named by literal process rules with `pzstd` and Plesk's two creating processes as the defaults, and why the agent's state lives in `spool.directory` without a new option.
-- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why log shipping reads the journal, `syslog` files and the Plesk and web server error log files, why drop patterns are bounded by their compiled size, and why the state file stores a file's position by the hash of its path.
-- [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why `spool.max_size` is
-  at most 64 GiB and the spool's files are uncompressed.
-- [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the backfill has its own,
-  configurable bandwidth.
-- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
-  backend binds the one token to `ingest.agent_id` and stops ingest below `ingest.min_free`.
+- [0142](../decisions/0142-program-names-follow-the-legacy-derivation-after-literal-grouping-rules.md) — why the process grouping rules are
+  a list of mappings of literal comparisons that the strict decoder checks.
+- [0140](../decisions/0140-a-null-element-in-a-configuration-list-is-refused-never-dropped.md) — why a null element of an agent list option
+  is refused, never dropped.
+- [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-one-connection-per-run.md) — why the units to track are a list of
+  names and patterns, an entry without a suffix is a service, and other unit types are refused.
+- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements.md) — why the MariaDB collector, which these options
+  switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
+- [0158](../decisions/0158-backup-runs-as-a-record-kind-of-their-own-recognized-by-process-rules.md) — why backup runs are named by literal
+  process rules with `pzstd` and Plesk's two creating processes as the defaults.
+- [0156](../decisions/0156-one-agent-state-file-in-the-spool-directory-written-by-a-state-job.md) — why the agent's state lives in
+  `spool.directory` without a new option.
+- [0160](../decisions/0160-log-shipping-keeps-a-journal-position-per-seqnum-id.md) — why log shipping reads the journal by seqnum ID.
+- [0164](../decisions/0164-error-logs-are-shipped-with-an-operator-named-format-and-a-go-port-of-the-imports-grammars.md) — why it reads the
+  Plesk and web server error log files with an operator-named format.
+- [0170](../decisions/0170-log-shipping-drop-patterns-are-bounded-by-their-compiled-size.md) — why drop patterns are bounded by their
+  compiled size.
+- [0163](../decisions/0163-the-state-file-keys-a-configured-log-file-by-the-sha-256-of-its-path.md) — why the state file stores a file's
+  position by the hash of its path.
+- [0123](../decisions/0123-agent-spool-in-uncompressed-segment-files-with-checksummed-frames-and-a-bounded-file-count.md) — why
+  `spool.max_size` is at most 64 GiB and the spool's files are uncompressed.
+- [0125](../decisions/0125-sender-with-a-live-and-a-backfill-stream-over-one-shared-backoff.md) — why the backfill has its own, configurable
+  bandwidth.
+- [0126](../decisions/0126-the-ingest-token-is-bound-to-one-configured-agent-id.md) — why the backend binds the one token to
+  `ingest.agent_id`.
+- [0177](../decisions/0177-ingest-is-bounded-by-two-slots-through-the-commit-and-a-free-space-floor-not-a-rate-cap.md) — why it stops ingest
+  below `ingest.min_free`.
 
 ## Not here
 

@@ -22,7 +22,7 @@ records they cover, or a crash would lose those records without a gap. Collector
 ## Decision
 
 Option 3: every save of the state file first syncs the spool. The boot and the open backup run reach the state only once the
-scheduler reports the run's records kept (record 0120), so the barrier covers them as well. The order is in
+scheduler reports the run's records kept (record 0159), so the barrier covers them as well. The order is in
 [Agent spool](../areas/agent-spool.md) and [Agent](../areas/agent.md) (*Agent state*).
 
 ## Consequences

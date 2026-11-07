@@ -10,7 +10,7 @@
 
 #37 ships logs without loss or duplicates across a restart (spec S4). A collector's run hands its records to the scheduler, which may
 drop a run; the kernel collector commits its position at the start of its next run, once the previous run is known to
-be kept ([0119](0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md)). A saved position must
+be kept ([0155](0155-the-kernel-journal-position-is-committed-only-after-a-kept-run-with-a-re-read-cap.md)). A saved position must
 never cover records a crash can still lose.
 
 ## Options considered

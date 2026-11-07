@@ -196,7 +196,7 @@ field value or a message.
 | warning `time zone not readable` | `err`: `localtime not readable` | the first run that cannot load the zone |
 | info `time zone readable again` | — | the first run that loads it after that |
 
-## Residuals (record 0121)
+## Residuals
 
 - The count of failing runs of a renamed file is not saved, so an agent restarted within every 150 runs never gives the file up, and
   the newer lines of its configured file stay held back with the warning `log file not readable` (`read failed`) standing.
@@ -207,13 +207,21 @@ field value or a message.
 
 ## Related decisions
 
-- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why configured
-  files are opened only through a link-free walk with their positions stored by the hash of the path; for the error log files (#289)
-  why the grammars are ported from the import and pinned by golden records, why a line dated after its run never moves a gap start,
-  and why the read grant is made by hand.
+- [0162](../decisions/0162-configured-log-files-are-opened-through-a-link-free-walk.md) — why configured files are opened only through a
+  link-free walk.
+- [0163](../decisions/0163-the-state-file-keys-a-configured-log-file-by-the-sha-256-of-its-path.md) — why their positions are stored by the
+  hash of the path.
+- [0164](../decisions/0164-error-logs-are-shipped-with-an-operator-named-format-and-a-go-port-of-the-imports-grammars.md) — why the error
+  log grammars (#289) are ported from the import and pinned by golden records.
+- [0166](../decisions/0166-a-log-line-dated-after-its-runs-start-never-moves-the-files-bookkeeping-times.md) — why a line dated after its
+  run never moves a gap start.
+- [0165](../decisions/0165-error-logs-the-agent-cannot-read-get-a-documented-grant-by-hand-not-a-new-right.md) — why the error log read
+  grant is made by hand.
+- [0169](../decisions/0169-a-renamed-log-file-whose-read-keeps-failing-is-given-up-after-150-kept-runs.md) — why a renamed file whose read
+  keeps failing is given up after 150 kept runs.
 - [0092](../decisions/0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md) — why lines that do not parse are
   kept raw, and the unverified zone of the panel log.
-- [0130](../decisions/0130-live-or-backfilled-at-write-time-gaps-as-stateful-objects-offset-from-caught-up-self-samples.md) — why a
+- [0130](../decisions/0130-live-or-backfilled-is-decided-at-write-time.md) — why a
   record far from its receive time is stored backfilled (E11).
 
 ## Not here

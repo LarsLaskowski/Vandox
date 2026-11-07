@@ -49,7 +49,7 @@ increase strictly and stay below 2^63 - 1. A spool that lost its counter (a rein
 file of another agent ID or a damaged one) and a spool after an unclean stop in an earlier boot start at least at the
 **clock bound**, the wall clock's microseconds since the Unix epoch plus 1,000,000, so the agent keeps its ID and its
 new numbers lie above every number it issued before, unless the clock was set back by more than the time in between
-(record 0123, amending 0045). Two consequences for the backend's sequence detection ([Detection, alerts and
+(record 0171, amending 0045). Two consequences for the backend's sequence detection ([Detection, alerts and
 reports](detection-and-reports.md), *Live data and backfill*): an agent's first number is large, so numbers below the first number
 the backend received from an agent are never reported as missing; and a fresh start or a crash leaves a jump in the numbers, which
 is reported as a `sequence_missing` gap like any other gap in them and becomes final after 5 minutes in which no record arrives into it.
@@ -169,10 +169,10 @@ not a JSON integer, is malformed: the major is an integer in every version (0043
 and new kinds; a decoder ignores unknown keys at any depth and so accepts a newer minor of its major. The current version is
 **1.1**: 1.1 added the optional fields of `connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check` with the
 value `start`, `new_listeners`, `new_listeners_omitted`, `changed_listeners`, `changed_listeners_omitted`, `inventory`, `tables`;
-records 0115 and 0116; and `uid`, `user`, `mixed_uids` of its listener entries and `uid`, `user` of its connection entries, record
-0115), the optional field `error_code` of `mariadb_status` (record 0118), the optional fields `boot_id` and `kernel_time_ns` of
-`kernel_event`'s `oom_kill`, the optional `trigger` of `process_snapshot` and `connection_snapshot`, and the kind `backup_run` (record
-0120); the format is unreleased, so the fields and the kind extend 1.1 in place, and both decoders accept the new kind in the same
+records 0115, 0147 and 0148; and `uid`, `user`, `mixed_uids` of its listener entries and `uid`, `user` of its connection entries, record
+0146), the optional field `error_code` of `mariadb_status` (record 0151), the optional fields `boot_id` and `kernel_time_ns` of
+`kernel_event`'s `oom_kill`, the optional `trigger` of `process_snapshot` and `connection_snapshot`, and the kind `backup_run` (records
+0120 and 0158); the format is unreleased, so the fields and the kind extend 1.1 in place, and both decoders accept the new kind in the same
 change (a decoder without it would refuse the batch); 1.0 was released with v0.1.0. An unknown record kind is rejected. Until the
 upgrade rules are settled (#85), upgrade the backend before the agents.
 
@@ -277,8 +277,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0044](../decisions/0044-batch-validated-as-a-whole-agent-records-only.md) — why a batch is valid only as a whole, carries only agent records and is bounded.
 - [0045](../decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) — why per-record sequence numbers and a spool of at least 7 days.
 - [0046](../decisions/0046-batch-header-describes-the-capture-context.md) — why the header describes the capture, not the sending.
-- [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why a fresh spool takes
-  its sequence numbers from the clock bound instead of a new agent ID (amends 0045).
+- [0171](../decisions/0171-a-fresh-spool-starts-its-sequence-numbers-above-a-clock-bound.md) — why a fresh spool takes its sequence numbers
+  from the clock bound instead of a new agent ID (amends 0045).
 - [0075](../decisions/0075-wire-contract-pinned-by-golden-fixtures.md) — why golden fixtures pin the contract between the two languages.
 - [0076](../decisions/0076-strict-gzip-validation-in-the-backend.md) — why the backend decodes gzip strictly.
 - [0128](../decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md) — why the C# decoder reads the gzip
@@ -287,11 +287,14 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) — why both decoders check
   keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
 - [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.
-- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md),
-  [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md),
-  [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) and
-  [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — the additions that make
-  format 1.1 (details in [Wire format records](wire-format-records.md)).
+- [0115](../decisions/0115-connection-collector-proc-net-tables-regular-and-full-snapshots-in-one-record-kind.md),
+  [0146](../decisions/0146-socket-uid-from-the-tables-uid-column-lowest-uid-and-mixed-uids-per-endpoint.md),
+  [0147](../decisions/0147-a-known-endpoint-whose-socket-uid-changes-is-reported-as-a-changed-listener.md),
+  [0148](../decisions/0148-agent-marks-its-first-snapshot-after-a-start-and-what-its-listener-list-holds.md),
+  [0151](../decisions/0151-a-refused-mariadb-login-is-recorded-as-not-answering-with-its-error-code.md),
+  [0120](../decisions/0120-oom-kill-triggers-extra-process-and-connection-snapshots.md) and
+  [0158](../decisions/0158-backup-runs-as-a-record-kind-of-their-own-recognized-by-process-rules.md) — the additions that make format 1.1
+  (details in [Wire format records](wire-format-records.md)).
 
 ## Not here
 

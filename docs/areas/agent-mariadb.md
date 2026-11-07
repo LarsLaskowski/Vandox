@@ -232,9 +232,12 @@ end a run as `not_answering`, not as a failure. No error text holds a byte the s
 ## Related decisions
 
 - [0013](../decisions/0013-mariadb-access-via-unix-socket-process-privilege.md) — a `unix_socket` user with only `PROCESS`.
-- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — a
-  minimal protocol client of its own over one connection per run, the captured statements and layout bits, a refused login recorded as
-  `not_answering` with its error number, statement texts of only the first 64 threads, exposure counted from the kernel's TCP tables.
+- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements.md) — a minimal protocol client of its own over one
+  connection per run, the captured statements and layout bits, statement texts of only the first 64 threads.
+- [0151](../decisions/0151-a-refused-mariadb-login-is-recorded-as-not-answering-with-its-error-code.md) — a refused login recorded as
+  `not_answering` with its error number.
+- [0152](../decisions/0152-mariadb-exposure-counted-from-the-kernels-tcp-tables-not-from-bind-address.md) — exposure counted from the
+  kernel's TCP tables.
 
 ## Not here
 

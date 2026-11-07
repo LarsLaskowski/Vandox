@@ -82,7 +82,7 @@ connection snapshot gives no peak (`connections` null).
   *Incident notes*). A re-run never deletes or rewrites a note.
 - A stored incident that no rebuilt one overlaps is **kept** as it is, because its lines may have expired.
 - Every incident is saved in its own transaction: an interrupted run keeps what it saved, and the next run completes it.
-- An incident the store refuses (a rule of the storage area, such as more than 8 MiB of serialized JSON) is **skipped**: it is logged as
+- An incident the store refuses (a rule of [Storage writing](storage-writing.md), *Incidents*, such as more than 8 MiB of serialized JSON) is **skipped**: it is logged as
   a warning with its first kill time and the store's text, counted as skipped, and the run goes on.
 - The run reads every stored log line in capture order in pages of 1,000 (by capture time, then record ID), so it is never confused by
   lines that share a time. A page that does not lead past the previous one is an error (`store: reading records: page did not
@@ -117,7 +117,7 @@ connection snapshot gives no peak (`connections` null).
   invisible characters escaped as in the report's code spans ([Forensics report](forensics-report.md), *External text in the report*); its log lines carry only the store's text and the
   first kill time, never input text.
 - The agent's `kernel_event` and `gap` records are not read yet (issue #53). Retention (issue #46) must keep a re-run from replacing
-  a stored incident by a poorer one ([Storage](storage.md), *Retention*).
+  a stored incident by a poorer one ([Storage](storage.md), *Retention (planned)*).
 
 ## Related decisions
 
@@ -125,8 +125,8 @@ connection snapshot gives no peak (`connections` null).
   sub-command, matched by overlapping windows, given a structured hypothesis from fixed rules and bounded in memory and size.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes follow an incident
   through updates and merges and how the web UI shows incidents.
-- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why
-  the agent's connection snapshots count sockets without an owner and why the connection peak is not filtered by source.
+- [0115](../decisions/0115-connection-collector-proc-net-tables-regular-and-full-snapshots-in-one-record-kind.md) — why the agent's
+  connection snapshots count sockets without an owner and why the connection peak is not filtered by source.
 
 ## Not here
 
