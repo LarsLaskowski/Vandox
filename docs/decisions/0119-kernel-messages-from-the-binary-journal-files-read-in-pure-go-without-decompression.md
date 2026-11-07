@@ -60,5 +60,5 @@ facility 0 as kills and decompresses nothing: an entry it cannot read that way i
   `journalctl -o export` must accept; the reader is checked against the real files only on a developer's machine
   (`VANDOX_REAL_JOURNAL_DIR`), and CI sees the generated fixtures.
 - Log shipping reuses the reader for other fields and adds a bounded zstd path that only the log collector uses
-  ([0121](0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)); the kernel collector still
+  ([0121](0121-log-shipping-decodes-zstd-journal-items-with-a-bounded-library-decoder.md)); the kernel collector still
   decompresses nothing.

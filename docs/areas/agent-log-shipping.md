@@ -228,13 +228,14 @@ further IDs (measured peak 1.63 MiB above the base, three copies included).
 
 ## Checked against the server
 
-The reader with the decoder read every entry of the server's two real system files (72,909 and 73,265 entries, 340 zstd frames of
-descriptor `0x60`) and of a later copy with a user journal (`user-10000.journal` and its 22 archives, 24 files) without an unreadable
-item; the user files' seqnum IDs differ from the system file's, their sequence numbers rise strictly within and across the archives,
-and those of the current user file lie inside the system file's range without colliding with a system number, as record 0121 assumes.
-None of the files is committed. CI writes `testdata/journal/live.export` (21 entries of the server's transports and field forms) as
-journal files with zstd frames of the server's form (`testdata/journal/zstd-frames.txt`); both the agent's and the import's tests read
-the records the import maps from it (`testdata/journal/live-records.jsonl`).
+The reader with the decoder read every entry of the server's two system files (72,909 and 73,265 entries, 340 zstd frames of
+descriptor `0x60`) and of a later copy with a user journal (`user-10000.journal` and 22 archives; 54,360 system entries, 38 to 444 per
+user file) without an unreadable item (the files are not committed). The user files' seqnum IDs differ from the system file's, their
+sequence numbers rise strictly within and across the archives, and those of the current user file lie inside the system file's range
+without colliding with a system number, as record 0121 assumes. CI writes `testdata/journal/live.export` (21 entries of the server's
+transports and field forms, one message of 20,000 bytes) as journal files with zstd frames of the server's form
+(`testdata/journal/zstd-frames.txt`); the agent's and the import's tests both read the records the import maps from it
+(`testdata/journal/live-records.jsonl`).
 
 ## Residuals (record 0121)
 

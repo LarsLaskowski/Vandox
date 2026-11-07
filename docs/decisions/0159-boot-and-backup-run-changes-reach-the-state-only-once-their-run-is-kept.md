@@ -11,7 +11,7 @@
 The agent's state file ([0156](0156-one-agent-state-file-in-the-spool-directory-written-by-a-state-job.md)) holds the current boot
 ([0157](0157-boots-recognized-from-the-saved-boot-id-previous-uptime-from-the-saved-uptime.md)) and the open backup run
 ([0158](0158-backup-runs-as-a-record-kind-of-their-own-recognized-by-process-rules.md)), and every save makes the spool durable first
-([0123](0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md)). In the first form (#36) the `kernel`
+([0175](0175-the-state-file-syncs-the-spool-before-every-save.md)). In the first form (#36) the `kernel`
 and `backups` collectors changed the state inside their runs: a save between a run and the hand-over of its records, followed by a
 power loss, lost the `boot` event or the backup start or end for ever while the state already held the change (#300). The scheduler
 can tell a collector whether a run's records were kept.
