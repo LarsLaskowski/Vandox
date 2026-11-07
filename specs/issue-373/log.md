@@ -35,3 +35,4 @@ are quoted in full.
 | 2026-11-07 16:12 | 8 Verbatim fixes | Orchestrator | verbatim, applied exactly as proposed (commit 8b0f77e): blocking finding in record 0192 (install.sh acceptance wording) and non-blocking finding in docs/areas/agent-sending.md (semicolon, rewrapped); decision-check, scope-check pass |
 | 2026-11-07 16:13 | 8 Decide | Lead | RESULT: DONE — both findings already fixed verbatim (8b0f77e); nothing open, no follow-up issue (opus/medium · 23,262 tokens · 3 tool uses · 13 s · 6 in · 1,032 out · 45,906 cache read · 17,821 cache write · 59,475 weighted) |
 | 2026-11-07 16:13 | 9 PR approval | Orchestrator | approved by checklist; record 0192 set to Accepted |
+| 2026-11-07 16:16 | 7 Gate stamp | Orchestrator | PASS on 9ecfdc5fbd7eea6986956178b3f332c7983268bf (tier security, verbatim): Format check pass; decision-check.py pass; scope-check.py pass |
