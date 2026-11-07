@@ -13,3 +13,4 @@ are quoted in full.
 | 2026-11-07 19:59 | 6 Implement | Dev | _is_ipv6 helper added, docs updated; deploy/agent tests pass (verified by orchestrator) (sonnet/medium · 79,125 tokens · 9 tool uses · 25 s · 10 in · 2,642 out · 347,827 cache read · 27,838 cache write · 82,800 weighted) |
 | 2026-11-07 19:59 | 6 Coverage skipped | Orchestrator | Only install.sh and docs changed; outside coverage paths, no uncovered Go/C# lines, no deferred tests |
 | 2026-11-07 19:59 | 6 Documentation | Orchestrator | written in 6 Implement |
+| 2026-11-07 20:08 | 7 Gate stamp | Orchestrator | FAIL on dedc69e0eba32385efc73707ed9cd3eb405298d6 (tier standard): Format check pass; Analyzer gate FAIL; Test with coverage pass; Coverage gate pass; scope-check.py pass · figure-check.py 0 hit(s) |
