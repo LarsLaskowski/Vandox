@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/user"
@@ -1627,6 +1628,101 @@ func TestValidateBackendURL_RefusesHostNames(t *testing.T) {
 			h := newHarness(t)
 			got := h.run(`validate_backend_url "$1"`, "", v)
 			expectResult(t, fmt.Sprintf("validate_backend_url %q", v), got, 0, "", "")
+		})
+	}
+}
+
+// TestValidateBackendURL_RefusesIPv6TheAgentRefuses checks that a bracketed host passes only when the agent's
+// parser (netip.ParseAddr) takes it as hex groups: AC1 refuses malformed literals, AC2 keeps the well-formed ones,
+// AC3 keeps refusing an embedded IPv4 tail, the one deliberate difference.
+func TestValidateBackendURL_RefusesIPv6TheAgentRefuses(t *testing.T) {
+	t.Parallel()
+
+	runIPv6Refused(t)
+	runIPv6Accepted(t)
+	runIPv6Embedded(t)
+}
+
+// ipv6Inner returns the address inside the brackets of a bracketed IPv6 host.
+func ipv6Inner(host string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+}
+
+// runIPv6Refused runs the AC1 subtests: malformed IPv6 literals that netip.ParseAddr refuses and the script refuses.
+func runIPv6Refused(t *testing.T) {
+	t.Helper()
+
+	refused := []string{
+		"[1:::2]", "[:::]", "[::1::]", "[1::2::3]", "[12345::1]", "[00001::1]", "[:1::2]", "[1::2:]",
+		"[:1:2:3:4:5:6:7:8]", "[1:2:3:4:5:6:7:8:]", "[1:2:3]", "[1:2:3:4:5:6:7]", "[1:2:3:4:5:6:7:8:9]",
+		"[1:2:3:4:5:6:7:8::]", "[::1:2:3:4:5:6:7:8]", "[1::2:3:4:5:6:7:8]",
+	}
+
+	for _, host := range refused {
+		url := "http://" + host + ":8081"
+
+		t.Run("AC1 refuses "+url, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := netip.ParseAddr(ipv6Inner(host)); err == nil {
+				t.Fatalf("netip.ParseAddr(%q) accepts the host, want the agent to refuse it", ipv6Inner(host))
+			}
+
+			h := newHarness(t)
+			got := h.run(`validate_backend_url "$1"`, "", url)
+			expectResult(t, fmt.Sprintf("validate_backend_url %q", url), got, 2, "", backendURLLine+"\n")
+		})
+	}
+}
+
+// runIPv6Accepted runs the AC2 subtests: well-formed IPv6 literals, with and without a port and a path, that pass.
+func runIPv6Accepted(t *testing.T) {
+	t.Helper()
+
+	accepted := []string{
+		"[::]", "[::1]", "[1::]", "[fd7a:115c:a1e0::1]", "[1:2:3:4:5:6:7:8]", "[FD7A:115C:A1E0:0:0:0:0:1]",
+		"[0001::00fF]", "[1:2:3:4:5:6:7::]", "[::2:3:4:5:6:7:8]", "[1::3:4:5:6:7:8]",
+	}
+
+	for _, host := range accepted {
+		for _, suffix := range []string{"", ":8081", "/", ":8081/"} {
+			url := "http://" + host + suffix
+
+			t.Run("AC2 accepts "+url, func(t *testing.T) {
+				t.Parallel()
+
+				addr, err := netip.ParseAddr(ipv6Inner(host))
+				if err != nil || addr.Zone() != "" {
+					t.Fatalf("netip.ParseAddr(%q) = %v, %v, want an address without zone", ipv6Inner(host), addr, err)
+				}
+
+				h := newHarness(t)
+				got := h.run(`validate_backend_url "$1"`, "", url)
+				expectResult(t, fmt.Sprintf("validate_backend_url %q", url), got, 0, "", "")
+			})
+		}
+	}
+}
+
+// runIPv6Embedded runs the AC3 subtests: an embedded IPv4 tail, which the agent accepts and the script refuses.
+func runIPv6Embedded(t *testing.T) {
+	t.Helper()
+
+	embedded := []string{"[::ffff:100.64.0.1]", "[::100.64.0.1]"}
+
+	for _, host := range embedded {
+		url := "http://" + host + ":8081"
+
+		t.Run("AC3 refuses "+url, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := netip.ParseAddr(ipv6Inner(host)); err != nil {
+				t.Fatalf("netip.ParseAddr(%q) refuses the host: %v, want the agent to accept it", ipv6Inner(host), err)
+			}
+
+			h := newHarness(t)
+			got := h.run(`validate_backend_url "$1"`, "", url)
+			expectResult(t, fmt.Sprintf("validate_backend_url %q", url), got, 2, "", backendURLLine+"\n")
 		})
 	}
 }
