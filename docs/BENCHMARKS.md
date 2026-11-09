@@ -61,14 +61,26 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 | after 0083 (and writer page cache of 16 MiB) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
 | after 0083 (and writer page cache of 16 MiB) | DS918+ (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
 | after the log templates of [0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) (two runs; metric batches run no template statement) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-12 | 273–386 | 185–402 | 273–282 |
+| `main` at `3e9611b`, with the agent timeline (published program, three runs; see below) | DS918+ (SSD volume, .NET 10.0.14) | Celeron J3455 | 2026-11-08 | 1,438–1,580 | 852–974 | **906–936** |
 
-Outcome against the restated criterion on the DS918+: **met on the SSD volume** (median 783 ms, 12,800 records/s in a steady state) and **not met on the
-HDD volume** (median 1171 ms, about 8,500 records/s). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
-SSD the writer is CPU-bound, on the HDD the median is about 390 ms higher (1171 against 783 ms) because each commit waits for the disk. The database can be put on
+Outcome against the restated criterion on the DS918+: **met on the SSD volume**. The current result is the row of 2026-11-08, measured with the agent timeline in the write
+path (median 906 to 936 ms in three runs, about 10,300 to 11,700 records/s in the later batches); the 783 ms of the row of 2026-10-07 (12,800 records/s in a steady state)
+is from before the agent timeline. The criterion is **not met on the HDD volume** (median 1171 ms, about 8,500 records/s; that row is also from before the agent timeline and was not repeated). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
+SSD the writer is CPU-bound, on the HDD the median was about 390 ms higher (1171 against 783 ms, both before the agent timeline) because each commit waits for the disk. The database can be put on
 either volume; the HDD works too, with the slower writes shown here, which is far above what the agent sends (hundreds of records per minute). The
-first batch is about 250 ms slower than the later ones on the SSD (fresh file, start-up); with the unchanged writer it was 1480 ms. `ReadyToRun`
+first batch was about 250 ms slower than the later ones on the SSD before the agent timeline (fresh file, start-up; 1480 ms with the unchanged writer); in the run of 2026-11-08 it took 1,438 to 1,580 ms against 852 to 974 ms for the later batches. `ReadyToRun`
 made no difference on the development host. The FTS5 remedy of record 0063 (option c) does not apply, because this measurement writes no log lines.
 The development-host rows are not the reference host.
+
+**Run of 2026-11-08 on the DS918+.** The procedure above, with the tool published from `main` at `3e9611b` (`dotnet publish -c Release`, framework-dependent) and run
+in the `mcr.microsoft.com/dotnet/runtime:10.0` container (Ubuntu 24.04.5 inside, .NET 10.0.14, 4 logical CPUs) with the folder on the SSD volume (two M.2 SSDs used as a normal
+volume, not a cache); a 4 KiB write reached the disk in 9.0 to 10.0 ms (median). Three runs gave medians of five batches of 936, 934 and 906 ms, so the criterion of under 1000 ms
+is met in all three; batches 2 to 5 took 852 to 974 ms and the first batch 1,438 to 1,580 ms. One run with `--warmup` gave a warm-up batch of 1000 records of 368 ms and
+batches of 1331 / 856 / 872 / 897 / 907 ms, median 897 ms, met. The prediction below, made before this run (about 900 ms), held: measured 897 to 936 ms.
+
+A different, slower procedure, not the one of this document: `dotnet run` inside the `mcr.microsoft.com/dotnet/sdk:10.0` container gave medians of 1112, 964 and 1077 ms (met in one
+run of three; first batch 1.6 to 2.0 s). The `--backfill` scenario (below) was run only with that procedure, five rounds each: medians of the filling batch 1603, 1487 and 1561 ms
+(rounds 1378 to 2548 ms; first rounds 2010, 2548 and 2298 ms); it was not repeated with the published program, so these are not comparable with the development-host figures below.
 
 **Listener marks** ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored.md)). The write path
 also inserts a row of `connection_marks` for each usable agent connection snapshot and, once per batch, computes the comparison of each agent start
@@ -102,8 +114,8 @@ capture times that repeat every hour, so the first batch inserts about 3,600 sam
 
 The median of five batches rose from 279-304 ms to 319-335 ms (about 12 to 15 per cent), the first batches by about 120 ms: they pay a
 sample-time row and its lookups for each new capture time of a metric, the later ones mostly the stream row and the classification. The criterion
-stays met on the development host with a wide margin; the reference host is not measured (#342), and a rise of the same proportion
-would put its 783 ms median at about 900 ms, still under one second.
+stays met on the development host with a wide margin. A rise of the same proportion would put the reference host's 783 ms median at about 900 ms, still under one second; the
+run of 2026-11-08 on the DS918+ above measured 897 to 936 ms.
 
 The scenario of the backfill (`--backfill`, option of the same tool: `dotnet run -c Release --project tools/Vandox.StorageBenchmark -- <folder> --backfill [--size N]`)
 is the costly path of the timeline: for each of five agents in one database, a small batch is stored, a small batch far above it opens a sequence gap of
@@ -360,12 +372,20 @@ kill $(jobs -p)
 | Host | Kernel | CPU | Date | Processes | Median of ten (ms) |
 | ---- | ------ | --- | ---- | --------: | -----------------: |
 | development host (4 vCPU, sandbox) | 6.18.44 | Intel Xeon 2.80 GHz | 2026-10-17 | 273 | **48.9** |
+| production server (1 core, 1,963 MB, root) | 5.15 | AMD EPYC Processor (with IBPB) | 2026-11-08 | 174 | **55.5** |
 
 The ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273 processes the 190 sleepers started for the run
 allowed reading `smaps_rollup`, while most of the sandbox's own processes (another user namespace) refused it, so the figure is for a
-mix of processes with and without PSS; a host where all of them are readable costs somewhat more. The time of one snapshot on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**; the agent's total CPU there is 0.42 % of one
-core over 24 hours (*Agent footprint*). The cost of reading `smaps_rollup` of every process every 15 seconds under memory pressure is an
-open point of #45 and #342 ([Agent system metrics](areas/agent-system-metrics.md), *Processes*).
+mix of processes with and without PSS; a host where all of them are readable costs somewhat more. 
+
+The row of the server is `BenchmarkProcesses_Collect` as the procedure runs it (pressure mode on, every process read including `smaps_rollup`) as root on the
+production server (Ubuntu 22.04), the test binary built from `3e9611b` (Go version not recorded), `-test.count 10 -test.benchtime 5x`. The server listed **174 processes**, because no
+sleepers were started: that is not the 250 of the criterion, so no verdict is stated for 250 processes there. The ten runs took 61.87, 67.29, 53.29, 54.58, 58.92, 55.02, 56.01,
+54.07, 53.84 and 56.07 ms: median 55.5 ms, range 53.3 to 67.3 ms. One such snapshot every 15 seconds under memory pressure is 0.37 % of one core, in wall time (derived). The
+agent's mean CPU on the server is 0.42 % of one core over 24 hours without sending (*Agent footprint*).
+One episode of memory pressure mode on the server (2026-11-08 00:36:27 to 00:36:37, 10 s) shows that an episode occurs and ends by itself; its CPU cost cannot be separated from the
+total, so it is evidence only, not a measurement of cost. The peak under sustained pressure and the thresholds stay with #45
+([Agent system metrics](areas/agent-system-metrics.md), *Processes*).
 
 ## Connection snapshot
 
@@ -435,9 +455,12 @@ go test ./internal/spool -run '^$' -bench 'BenchmarkOpen_(Full|ManyFiles)' -benc
 | ---- | -- | --- | ---- | ---- | ------------: |
 | development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.10 GHz | 2026-10-23 | `BenchmarkOpen_Full` (about 1.94 GiB in a cap of 2 GiB) | **26.2 ms** |
 | development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.10 GHz | 2026-10-23 | `BenchmarkOpen_ManyFiles` (1,024 files) | **15.9 ms** |
+| production server (1 core, Ubuntu 22.04, kernel 5.15) | not recorded (built with 1.27.0 in the sandbox from `3e9611b`, linux/amd64) | AMD EPYC Processor (with IBPB) | 2026-11-09 | `BenchmarkOpen_Full` (about 1.94 GiB in a cap of 2 GiB) | **55.1 ms** |
+| production server (1 core, Ubuntu 22.04, kernel 5.15) | not recorded (built with 1.27.0 in the sandbox from `3e9611b`, linux/amd64) | AMD EPYC Processor (with IBPB) | 2026-11-09 | `BenchmarkOpen_ManyFiles` (1,024 files) | **26.1 ms** |
 
-Both are far below the 5 seconds. Each figure is the mean of three opens in one run (`-benchtime 3x`), not a median of several runs. The file system
-of the sandbox is not the data volume of a monitored server; the open time on the server is not measured (#342).
+All four are far below the 5 seconds. Each figure is the mean of three opens in one run (`-benchtime 3x`), not a median of several runs. The file system
+of the sandbox is not the data volume of a monitored server. The rows of the server are the same two benchmarks, `spool.test` built from `3e9611b` and run there
+(55,093,710 and 26,079,326 ns/op); the bound is stated for the development host.
 
 ## Agent footprint
 
@@ -484,5 +507,67 @@ Product Manager accepted them on 2026-10-30 (0133):
 - the agent did not send: the backend of the server, `vandoxd` v0.1.0, has no ingest API and answers `404`, and the agent behaved as specified (shared backoff, records kept);
 - the stats of the previous agent instance (before the restart on 2026-10-29) are lost.
 
-Not measured, and open for #342: the footprint while the agent sends and backfills, the cost of `smaps_rollup` of every process under memory pressure (with
-#45), and the spool's open time on the server.
+The footprint while the agent sends and backfills is the run below; the peak under sustained memory pressure stays with #45.
+
+### While sending
+
+The same two targets, measured on the same production server with the agent sending to the backend. Setup:
+
+- Agent `v0.2.0-rc.1` (Go version not recorded), `agent_id` `web`, `backend.url` the backend's tailnet address, the default
+  `backend.backfill_bandwidth` of `256KiB`; the host: Ubuntu 22.04, kernel 5.15, 1 core, 1,963 MB, 174 processes.
+- Backend `vandoxd` `v0.2.0-rc.1` (image `networlddev/vandox:0.2.0-rc.1`) in Docker on the Synology DS918+ (Celeron J3455), memory limit 512 MiB, data on the volume of two M.2 SSDs
+  (used as a normal volume, not a cache), reached over Tailscale.
+- The values were read from the unit (`CPUUsageNSec`, `/proc/<pid>/status`, `smaps_rollup`, `/proc/<pid>/io`, `du` of the spool) and, for the backend, from `docker stats`.
+  No script is kept in the repository.
+
+**The run.** Process 117391 started 2026-11-07 at 21:29:57 CET (`NRestarts=0`). At the reading of 2026-11-09 09:20:00 CET it had run 129,003 s (35 h 50 min 3 s): `CPUUsageNSec`
+626,511,432,000, `VmHWM` 28,164 kB (unchanged since the first backfill), `VmRSS` 15,308 kB, `smaps_rollup` Rss 17,024 kB and Pss 17,020 kB (Pss anonymous 11,796 kB, file 5,224 kB), 10 threads,
+spool 13,256,510 B in 3 files. I/O at that reading: `rchar` 4,798,456,748, `wchar` 354,326,516, `read_bytes` 398,999,552, `write_bytes` 515,022,848, `cancelled_write_bytes` 0.
+Earlier readings: 2026-11-07 21:39:15 (uptime 558 s) `CPUUsageNSec` 47,517,032,000, `VmHWM` 28,164 kB, `VmRSS` 18,148 kB, `wchar` 48.1 MB; 2026-11-08 10:57:39 (uptime 48,462 s)
+`CPUUsageNSec` 258,403,348,000, `VmHWM` 28,164 kB, `VmRSS` 13,096 kB. Mean CPU over the whole run, the first backfill included: **0.49 % of one core** (626.51 s of 129,003 s, derived);
+in live sending, without the first 558 s: 0.45 % ((626.51 − 47.52) s of (129,003 − 558) s, derived); at 48,462 s: 0.53 % (derived).
+
+**First backfill, 2026-11-07.** The spool held about 1.5 GB (about 90 data files of 16.77 MB, 2026-10-28 to 2026-11-07), collected while backend `v0.1.0` had no ingest API. The backend
+stored the first batch at 21:14:59 CET, sent by the previous agent process 96876 (a pre-release build). `v0.2.0-rc.1` was installed at 21:28:33; process 117228 started its backfill at 21:28:37
+and was stopped by a manual restart at 21:29:55, after 82 s and 11.620 s of CPU. In process 117391 the journal shows `backfill started` at 21:30:01 and `backfill finished` at 21:35:34
+with `records=1224755`. The backlog was sent over these three processes in about 20.5 minutes, and the spool fell to 15 MB in 3 files. 1,224,755 records in 333 s are **3,678 records a second**
+(derived; process 117391's share only). The backend received a total of 178 MB by 21:39, about 141 KiB a second on average over the 20.5 minutes (derived). The CPU of process 117391 in the
+backfill was about 46 s: about 14 % of one core for 333 s and 38 µs a record (derived, rough); process 117228 used 11.62 s over 82 s, 14.2 % (derived). The limit of 256 KiB a second was not
+binding: `wchar` was 48.1 MB for the whole first 558 s of process 117391 (derived).
+
+**Clean backfill, 2026-11-09 (the real rate).** Process 300777 started at 09:24:37 CET (a fresh `VmHWM`). `tailscaled` was stopped at 09:32:44 and started at 16:13:06; the agent kept
+spooling. The journal shows the warning `backend not accepting batches` from 09:33:15; at 16:13:35 `backend accepting batches again` with `seconds=24019` (6 h 40 min) and `backfill started`; at 16:14:11
+`backfill finished` with `records=126835`. Readings:
+
+| Time (CET) | `CPUUsageNSec` | `VmHWM` (kB) | `VmRSS` (kB) | Spool (B / files) | `wchar` |
+| ---------- | -------------: | -----------: | -----------: | ----------------- | ------: |
+| 09:32:33 (uptime 476 s) | 3,235,278,000 | 14,888 | 14,028 | 14,658,477 / 3 | 1,177,485 |
+| 16:11:57 | 103,253,278,000 | 19,188 | 16,104 | 58,251,759 / 6 | 50,639,190 |
+| 16:13:51 (16 s into the backfill) | 105,797,105,000 | 26,796 | 24,760 | 24,994,522 / 4 | 53,295,548 |
+| 16:14:14 | 108,054,525,000 | 28,168 (28.8 MB) | 18,052 | 8,256,715 / 3 | 55,895,822 |
+
+36 s for 126,835 records are **3,523 records a second** (derived); a day's backlog of 544,560 records takes about 2 min 35 s at that rate (derived;
+[Agent sending](areas/agent-sending.md) computed about 3 minutes at 3,207 records a second). During the outage (09:32:33 to 16:11:57, 23,964 s) the agent used 100.02 s of CPU, 0.42 % of one core,
+and its spool grew by 43.59 MB, 6.55 MB an hour or 157 MB a day (all derived; the run of #44 also gave 157 MB a day). From 16:11:57 to 16:14:14 (137 s) it used 4.80 s of CPU; the backfill itself took about 12 % of one
+core (derived, rough: 4.80 s minus the 0.42 % baseline over the 101 s outside the backfill, over 36 s), about 34 µs a record. At most 5.26 MB were written in those 137 s (`wchar`, which includes
+every write of the process), about 41 bytes a record and about 143 KiB a second over the 36 s (all derived): the limit of 256 KiB a second was not binding in either backfill. The peak of 28,168 kB (28.8 MB)
+is the same as in the first backfill.
+
+**Memory pressure.** The journal of process 117391 shows one episode: `memory pressure mode on` on 2026-11-08 at 00:36:27 (`mem_available_bytes` 1,016,365,056, `memory_some_avg10` 11.44) and
+`memory pressure mode off` at 00:36:37 (`mem_available_bytes` 1,018,392,576, `memory_some_avg10` 4.21), 10 s in all. `VmHWM` was 28,164 kB before (2026-11-07 21:39:15) and after (2026-11-09 09:20) the
+episode. The episode's CPU cost cannot be separated from the total; it is evidence that an episode occurs and ends by itself, not a measurement. The cost of one process snapshot under pressure is in
+*Process snapshot*.
+
+| Host | Kernel | CPU | RAM | Date | Run | Processes | CPU (% of one core) | Peak RSS | RSS / PSS |
+| ---- | ------ | --- | --- | ---- | --- | --------: | ------------------: | -------: | --------- |
+| production server (monitored), sending | 5.15 | AMD EPYC Processor (with IBPB) | 1,963 MB | 2026-11-09 | 35 h 50 min 3 s | 174 | **0.49** (626.51 s of 129,003 s; 0.45 in live sending) | **28.8 MB** (`VmHWM` 28,164 kB, unchanged since the first backfill) | `VmRSS` 15,308 kB; `smaps_rollup` Rss 17,024 kB and Pss 17,020 kB (Pss anonymous 11,796 kB, file 5,224 kB); 10 threads |
+
+The 28.8 MB follow from 28,164 kB the way the table above converts 19,896 kB to 20.4 MB (kB of 1,024 bytes, in MB of 10^6 bytes).
+
+**Verdict while sending: peak RSS met, mean CPU met, the CPU of a backfill an accepted deviation.** Peak RSS 28.8 MB against 30 MB, with a margin of 1.2 MB (derived); mean CPU 0.49 % against 1 % of one core over
+35 h 50 min (0.45 % in live sending). The agent used about 12 to 14 % of one core while a backfill lasted (the two measurements above, rough), for 36 s in the clean backfill and for the 333 s of the first one in process 117391. The criterion stays the mean over the run, and the Product Manager accepted the CPU of a backfill as a justified deviation on 2026-11-09 ([0195](decisions/0195-a-backfills-cpu-above-one-percent-of-one-core-is-an-accepted-deviation.md)).
+The `--backfill` scenario of the storage benchmark has no criterion of its own, so its figures above need no verdict. The run of #44 stands as it is.
+
+**Backend (observation).** The backend's `docker stats` (30 s sampling) during the first backfill and the clean one: 70 % CPU and 322 MiB of 512 MiB right after the first backfill, and 185.8 MiB with 0.05 % CPU at 10:57 on
+2026-11-08; on 2026-11-09 16:12:47 0.05 % and 231.7 MiB of 512 MiB, 16:13:24 0.04 % and 231.7 MiB, 16:13:56 (during the clean backfill) 59.25 % and 269.3 MiB. Idle memory was 185.8 MiB (2026-11-08 10:57),
+199.4 MiB (2026-11-09 at about 09:20, 2.79 % CPU) and 231.7 MiB (2026-11-09 16:12). The Product Manager considers this not too much. It is an observation, not a finding, and no target or verdict applies.

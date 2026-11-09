@@ -235,8 +235,8 @@ context, summary times), a sparse index (a number every file size / 64 bytes) fo
 and one frame buffer; it does not grow with the number of records. The two read positions are one for each sender stream; the age read
 of the self-metrics (once a minute) takes a position as well, so it can replace one, and the stream whose position was replaced finds
 its place again through the sparse index, which costs reading time, never correctness. Opening a spool filled to the default cap takes
-26.2 ms and one of 1,024 files 15.9 ms on the development host, against a bound of 5 seconds ([BENCHMARKS](../BENCHMARKS.md), *Spool
-open*); not measured on the server (#342).
+26.2 ms and one of 1,024 files 15.9 ms on the development host, against a bound of 5 seconds; on the production server (1 core, AMD EPYC) 55.1 ms and 26.1 ms ([BENCHMARKS](../BENCHMARKS.md), *Spool
+open*).
 
 ## Capacity
 

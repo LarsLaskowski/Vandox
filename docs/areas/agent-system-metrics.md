@@ -212,9 +212,11 @@ A read that blocks is abandoned at the timeout with a gap, and the collector is 
 a process's memory map lock can make its `cmdline` or `smaps_rollup` read block; that costs process samples, as gaps, until the process
 moves (accepted residual, record 0113, option 7).
 
-A snapshot of 250 processes takes under 100 ms ([Benchmarks](../BENCHMARKS.md), *Process snapshot*, not measured on the server); the
-agent's total CPU on the server is 0.42 % of one core over 24 hours (*Agent footprint*). The cost of reading `smaps_rollup` of every
-process every 15 seconds under pressure is unmeasured on the server, an **open point for #45 and #342**.
+A snapshot of 250 processes takes under 100 ms on the development host (48.9 ms). On the production server, with memory pressure mode
+on and every process read including `smaps_rollup`, a snapshot of 174 processes (not the 250 of the criterion) took a median of 55.5 ms
+(53.3 to 67.3 ms of ten runs); one such snapshot every 15 seconds under pressure is 0.37 % of one core, in wall time (derived)
+([Benchmarks](../BENCHMARKS.md), *Process snapshot*). The agent's mean CPU on the server is 0.42 % of one core over 24 hours
+(*Agent footprint*).
 
 ## Related decisions
 

@@ -115,8 +115,14 @@ acknowledgement, since the start), never negative. The `self` collector records 
   7.8 MB without), the same at 600 and at 2,400 records of backlog, against the limit of 16 MiB.
 - 6,807 records of the reference stream ([Agent spool](agent-spool.md), *Capacity*), 2,630,490 bytes of lines, compress to 556,335
   bytes (gzip ratio 4.73), which at the default `256KiB` a second is 3,207 records a second, inside the band of 1,000 to 8,500 a test
-  pins (on the development host; the real rate is not measured yet, #342). At that rate the backlog of a day (544,560 records) takes
-  about 3 minutes of sending beside the live stream.
+  pins (on the development host). Measured on the production server ([Benchmarks](../BENCHMARKS.md), *Agent footprint*, *While sending*):
+  a clean backfill of 126,835 records took 36 s, **3,523 records a second**, and the first backfill of process 117391 sent 1,224,755
+  records in 333 s, 3,678 records a second (that process's share only). At 3,523 records a second the backlog of a day (544,560 records)
+  takes about 2 min 35 s of sending (derived), beside the live stream. The bandwidth limit was not binding in either backfill: the bytes
+  written in the clean backfill's 36 s give about 143 KiB a second (derived, at most, since `wchar` counts every write of the process),
+  against the default `256KiB`. The CPU of a backfill is about 12 to 14 % of one core while it lasts, an accepted deviation
+  ([0195](../decisions/0195-a-backfills-cpu-above-one-percent-of-one-core-is-an-accepted-deviation.md)); the peak RSS in both backfills
+  was 28.8 MB.
 
 ## Logging
 
