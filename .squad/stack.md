@@ -314,7 +314,10 @@ C# (backend): follow the surrounding code and the analyzers; in particular
 - exceptions carry context in their message and are never swallowed; `Program.Main` and similar wiring stay
   thin and hold no logic (record 0074);
 - the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
-  `-p:VandoxCommit` and `-p:VandoxDate`.
+  `-p:VandoxCommit` and `-p:VandoxDate`;
+- names the analyzers refuse, checked by the Lead before a name goes into the plan's *Signatures*: an enum
+  whose name ends in `Flags` or `Enum` (S2344), a visible nested type (CA1034), a type named like its
+  namespace (CA1724).
 
 ## Writing tests
 
