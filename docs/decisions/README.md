@@ -231,5 +231,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0192 | `backend.url` names the backend by IP address; host names are refused | Accepted | 2026-11-07 |
 | 0193 | The report page shows each external text in at most 16 runs | Accepted | 2026-11-07 |
 | 0194 | `install.sh` accepts only the IPv6 literals the agent parses | Accepted | 2026-11-09 |
-| 0195 | A backfill's CPU above 1 % of one core is an accepted deviation; the criterion stays the mean over the run | Proposed | 2026-11-09 |
+| 0195 | A backfill's CPU above 1 % of one core is an accepted deviation; the criterion stays the mean over the run | Accepted | 2026-11-09 |
 <!-- project:end index -->

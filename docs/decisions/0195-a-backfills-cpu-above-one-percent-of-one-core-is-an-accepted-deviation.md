@@ -1,6 +1,6 @@
 # 0195: A backfill's CPU above 1 % of one core is an accepted deviation; the criterion stays the mean over the run
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-09
 - **Area:** Agent
 - **Source:** Issue #342
