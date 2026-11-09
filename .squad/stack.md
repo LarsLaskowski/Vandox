@@ -316,8 +316,8 @@ C# (backend): follow the surrounding code and the analyzers; in particular
 - the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
   `-p:VandoxCommit` and `-p:VandoxDate`;
 - names the analyzers refuse, checked by the Lead before a name goes into the plan's *Signatures*: an enum
-  whose name ends in `Flags` or `Enum` (S2344), a visible nested type (CA1034), a type named like its
-  namespace (CA1724).
+  whose name ends in `Flags` or `Enum` (S2344), and a nested type of any
+  visibility (RH2101 class, RH2104 struct, RH2105 interface, RH2106 record, RH2107 enum, RH2108 delegate).
 
 ## Writing tests
 
