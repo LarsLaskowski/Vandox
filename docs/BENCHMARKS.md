@@ -376,7 +376,7 @@ kill $(jobs -p)
 
 On the development host the ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273 processes the 190 sleepers started for the run
 allowed reading `smaps_rollup`, while most of the sandbox's own processes (another user namespace) refused it, so the figure is for a
-mix of processes with and without PSS; a host where all of them are readable costs somewhat more. 
+mix of processes with and without PSS; a host where all of them are readable costs somewhat more.
 
 The row of the server is `BenchmarkProcesses_Collect` as the procedure runs it (pressure mode on, every process read including `smaps_rollup`) as root on the
 production server (Ubuntu 22.04), the test binary built from `3e9611b` with Go 1.27.0 in the sandbox (linux/amd64, CGO off), `-test.count 10 -test.benchtime 5x`. The server listed **174 processes**, because no
