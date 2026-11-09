@@ -230,4 +230,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0191 | The documented install steps are single commands with check and extraction in one line | Accepted | 2026-10-27 |
 | 0192 | `backend.url` names the backend by IP address; host names are refused | Accepted | 2026-11-07 |
 | 0193 | The report page shows each external text in at most 16 runs | Accepted | 2026-11-07 |
+| 0194 | `install.sh` accepts only the IPv6 literals the agent parses | Accepted | 2026-11-09 |
 <!-- project:end index -->
