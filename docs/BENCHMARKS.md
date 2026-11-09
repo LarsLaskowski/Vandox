@@ -374,7 +374,7 @@ kill $(jobs -p)
 | development host (4 vCPU, sandbox) | 6.18.44 | Intel Xeon 2.80 GHz | 2026-10-17 | 273 | **48.9** |
 | production server (1 core, 1,963 MB, root) | 5.15 | AMD EPYC Processor (with IBPB) | 2026-11-08 | 174 | **55.5** |
 
-The ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273 processes the 190 sleepers started for the run
+On the development host the ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273 processes the 190 sleepers started for the run
 allowed reading `smaps_rollup`, while most of the sandbox's own processes (another user namespace) refused it, so the figure is for a
 mix of processes with and without PSS; a host where all of them are readable costs somewhat more. 
 

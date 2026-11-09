@@ -216,7 +216,7 @@ A snapshot of 250 processes takes under 100 ms on the development host (48.9 ms)
 on and every process read including `smaps_rollup`, a snapshot of 174 processes (not the 250 of the criterion) took a median of 55.5 ms
 (53.3 to 67.3 ms of ten runs); one such snapshot every 15 seconds under pressure is 0.37 % of one core, in wall time (derived)
 ([Benchmarks](../BENCHMARKS.md), *Process snapshot*). The agent's mean CPU on the server is 0.42 % of one core over 24 hours
-(*Agent footprint*).
+without sending and 0.49 % over 35 h 50 min while sending (*Agent footprint*).
 
 ## Related decisions
 
