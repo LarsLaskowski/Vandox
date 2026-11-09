@@ -61,11 +61,10 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 | after 0083 (and writer page cache of 16 MiB) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
 | after 0083 (and writer page cache of 16 MiB) | DS918+ (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
 | after the log templates of [0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) (two runs; metric batches run no template statement) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-12 | 273–386 | 185–402 | 273–282 |
-| `main` at `3e9611b`, with the agent timeline (published program, three runs; see below) | DS918+ (SSD volume, .NET 10.0.14) | Celeron J3455 | 2026-11-08 | 1,438–1,580 | 852–974 | **906–936** |
+| `main` at `3e9611b` (published program, three runs; see below) | DS918+ (SSD volume, .NET 10.0.14) | Celeron J3455 | 2026-11-08 | 1,438–1,580 | 852–974 | **906–936** |
 
-Outcome against the restated criterion on the DS918+: **met on the SSD volume**. The current result is the row of 2026-11-08, measured with the agent timeline in the write
-path (median 906 to 936 ms in three runs, about 10,300 to 11,700 records/s in the later batches); the 783 ms of the row of 2026-10-07 (12,800 records/s in a steady state)
-is from before the agent timeline. The criterion is **not met on the HDD volume** (median 1171 ms, about 8,500 records/s; that row is also from before the agent timeline and was not repeated). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
+Outcome against the restated criterion on the DS918+: **met on the SSD volume**. The current result is the row of 2026-11-08, measured with the writer of `main` at `3e9611b` (median 906 to 936 ms in three runs, about 10,300 to 11,700 records/s in the later batches); the 783 ms of the row of 2026-10-07 (12,800 records/s in a steady state)
+is from before the agent timeline. The criterion is **not met on the HDD volume** (median 1171 ms, about 8,500 records/s). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
 SSD the writer is CPU-bound, on the HDD the median was about 390 ms higher (1171 against 783 ms, both before the agent timeline) because each commit waits for the disk. The database can be put on
 either volume; the HDD works too, with the slower writes shown here, which is far above what the agent sends (hundreds of records per minute). The
 first batch was about 250 ms slower than the later ones on the SSD before the agent timeline (fresh file, start-up; 1480 ms with the unchanged writer); in the run of 2026-11-08 it took 1,438 to 1,580 ms against 852 to 974 ms for the later batches. `ReadyToRun`
@@ -79,8 +78,9 @@ is met in all three; batches 2 to 5 took 852 to 974 ms and the first batch 1,438
 batches of 1331 / 856 / 872 / 897 / 907 ms, median 897 ms, met. The prediction below, made before this run (about 900 ms), held: measured 897 to 936 ms.
 
 A different, slower procedure, not the one of this document: `dotnet run` inside the `mcr.microsoft.com/dotnet/sdk:10.0` container gave medians of 1112, 964 and 1077 ms (met in one
-run of three; first batch 1.6 to 2.0 s). The `--backfill` scenario (below) was run only with that procedure, five rounds each: medians of the filling batch 1603, 1487 and 1561 ms
-(rounds 1378 to 2548 ms; first rounds 2010, 2548 and 2298 ms); it was not repeated with the published program, so these are not comparable with the development-host figures below.
+run of three; first batch 1.6 to 2.0 s). The `--backfill` scenario (below) was run three times with that procedure, five rounds each: medians of the filling batch 1603, 1487 and 1561 ms
+(rounds 1378 to 2548 ms; first rounds 2010, 2548 and 2298 ms). With the published program the scenario ran once on 2026-11-09 (folder `/bench/bf4` on the SSD volume): rounds of 1804, 1482, 1366, 1338 and
+1369 ms (5544, 6746, 7319, 7474 and 7302 records/s), median 1369 ms, fastest 1338 ms. It is a single run and the scenario has no criterion of its own.
 
 **Listener marks** ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored.md)). The write path
 also inserts a row of `connection_marks` for each usable agent connection snapshot and, once per batch, computes the comparison of each agent start
@@ -379,7 +379,7 @@ allowed reading `smaps_rollup`, while most of the sandbox's own processes (anoth
 mix of processes with and without PSS; a host where all of them are readable costs somewhat more. 
 
 The row of the server is `BenchmarkProcesses_Collect` as the procedure runs it (pressure mode on, every process read including `smaps_rollup`) as root on the
-production server (Ubuntu 22.04), the test binary built from `3e9611b` (Go version not recorded), `-test.count 10 -test.benchtime 5x`. The server listed **174 processes**, because no
+production server (Ubuntu 22.04), the test binary built from `3e9611b` with Go 1.27.0 in the sandbox (linux/amd64, CGO off), `-test.count 10 -test.benchtime 5x`. The server listed **174 processes**, because no
 sleepers were started: that is not the 250 of the criterion, so no verdict is stated for 250 processes there. The ten runs took 61.87, 67.29, 53.29, 54.58, 58.92, 55.02, 56.01,
 54.07, 53.84 and 56.07 ms: median 55.5 ms, range 53.3 to 67.3 ms. One such snapshot every 15 seconds under memory pressure is 0.37 % of one core, in wall time (derived). The
 agent's mean CPU on the server is 0.42 % of one core over 24 hours without sending (*Agent footprint*).
@@ -455,8 +455,8 @@ go test ./internal/spool -run '^$' -bench 'BenchmarkOpen_(Full|ManyFiles)' -benc
 | ---- | -- | --- | ---- | ---- | ------------: |
 | development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.10 GHz | 2026-10-23 | `BenchmarkOpen_Full` (about 1.94 GiB in a cap of 2 GiB) | **26.2 ms** |
 | development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.10 GHz | 2026-10-23 | `BenchmarkOpen_ManyFiles` (1,024 files) | **15.9 ms** |
-| production server (1 core, Ubuntu 22.04, kernel 5.15) | not recorded (built with 1.27.0 in the sandbox from `3e9611b`, linux/amd64) | AMD EPYC Processor (with IBPB) | 2026-11-09 | `BenchmarkOpen_Full` (about 1.94 GiB in a cap of 2 GiB) | **55.1 ms** |
-| production server (1 core, Ubuntu 22.04, kernel 5.15) | not recorded (built with 1.27.0 in the sandbox from `3e9611b`, linux/amd64) | AMD EPYC Processor (with IBPB) | 2026-11-09 | `BenchmarkOpen_ManyFiles` (1,024 files) | **26.1 ms** |
+| production server (1 core, Ubuntu 22.04, kernel 5.15) | 1.27.0 (built in the sandbox from `3e9611b`, linux/amd64, CGO off) | AMD EPYC Processor (with IBPB) | 2026-11-09 | `BenchmarkOpen_Full` (about 1.94 GiB in a cap of 2 GiB) | **55.1 ms** |
+| production server (1 core, Ubuntu 22.04, kernel 5.15) | 1.27.0 (built in the sandbox from `3e9611b`, linux/amd64, CGO off) | AMD EPYC Processor (with IBPB) | 2026-11-09 | `BenchmarkOpen_ManyFiles` (1,024 files) | **26.1 ms** |
 
 All four are far below the 5 seconds. Each figure is the mean of three opens in one run (`-benchtime 3x`), not a median of several runs. The file system
 of the sandbox is not the data volume of a monitored server. The rows of the server are the same two benchmarks, `spool.test` built from `3e9611b` and run there
@@ -566,7 +566,7 @@ The 28.8 MB follow from 28,164 kB the way the table above converts 19,896 kB to 
 
 **Verdict while sending: peak RSS met, mean CPU met, the CPU of a backfill an accepted deviation.** Peak RSS 28.8 MB against 30 MB, with a margin of 1.2 MB (derived); mean CPU 0.49 % against 1 % of one core over
 35 h 50 min (0.45 % in live sending). The agent used about 12 to 14 % of one core while a backfill lasted (the two measurements above, rough), for 36 s in the clean backfill and for the 333 s of the first one in process 117391. The criterion stays the mean over the run, and the Product Manager accepted the CPU of a backfill as a justified deviation on 2026-11-09 ([0195](decisions/0195-a-backfills-cpu-above-one-percent-of-one-core-is-an-accepted-deviation.md)).
-The `--backfill` scenario of the storage benchmark has no criterion of its own, so its figures above need no verdict. The run of #44 stands as it is.
+The `--backfill` scenario of the storage benchmark has no criterion of its own, so its figures above need no verdict (the published-program run of 1369 ms median is in *Storage write throughput*). The run of #44 stands as it is.
 
 **Backend (observation).** The backend's `docker stats` (30 s sampling) during the first backfill and the clean one: 70 % CPU and 322 MiB of 512 MiB right after the first backfill, and 185.8 MiB with 0.05 % CPU at 10:57 on
 2026-11-08; on 2026-11-09 16:12:47 0.05 % and 231.7 MiB of 512 MiB, 16:13:24 0.04 % and 231.7 MiB, 16:13:56 (during the clean backfill) 59.25 % and 269.3 MiB. Idle memory was 185.8 MiB (2026-11-08 10:57),

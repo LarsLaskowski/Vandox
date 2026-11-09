@@ -109,3 +109,14 @@ documents. Nothing here may be extended by further computation in the documents 
   1112, 964 and 1077 ms (met once of three; first batch 1.6 to 2.0 s).
 - `--backfill`, only with that SDK-container procedure, five rounds each: medians of the filling batch 1603, 1487 and 1561 ms
   (rounds 1378 to 2548 ms; first rounds 2010, 2548, 2298 ms). Not repeated with the published program.
+
+## 7. `--backfill` with the published program (added later)
+
+On 2026-11-09 the Product Manager ran the `--backfill` scenario once with the published program (framework-dependent publish of main
+`3e9611b`, `mcr.microsoft.com/dotnet/runtime:10.0` container on the DS918+ SSD volume, folder `/bench/bf4`), five rounds: 1804, 1482, 1366,
+1338, 1369 ms (first round 1804, fastest 1338, median 1369, slowest 1804 ms; 5544, 6746, 7319, 7474, 7302 records/s). A single run; the
+scenario has no criterion of its own.
+
+## Build of the test binaries
+
+`procstats.test` and `spool.test` were built with Go 1.27.0 in the orchestrator's sandbox (linux/amd64, CGO off) from commit `3e9611b`.
