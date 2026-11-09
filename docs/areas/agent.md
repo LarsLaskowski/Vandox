@@ -288,6 +288,8 @@ stops, the collectors' flush (at most 5 seconds), this last save (which makes th
 - [0175](../decisions/0175-the-state-file-syncs-the-spool-before-every-save.md) — the state file waits for the spool's sync.
 - [0184](../decisions/0184-the-agent-unit-sets-a-hard-memory-limit-with-gomemlimit-below-it.md) — the unit's restart policy, resource limits
   and `GOMEMLIMIT=`.
+- [0195](../decisions/0195-a-backfills-cpu-above-one-percent-of-one-core-is-an-accepted-deviation.md) — the CPU of a backfill above 1 % of
+  one core is an accepted deviation; the footprint criterion stays the mean over the run.
 
 ## Not here
 

@@ -142,7 +142,7 @@ The reference host is a Synology DS918+ (Intel Celeron J3455). The criterion: th
 transaction each, takes under one second, measured with the storage benchmark on the volume that holds the database; the first batch
 (fresh file) is reported next to it. The criterion is a stress value, since an agent sends hundreds of records per minute. The agent
 timeline and the listener marks of [Storage writing](storage-writing.md) add their work to the same transaction. The criterion is met
-on the SSD volume (783 ms median); on the HDD volume it is not (1,171 ms), because every commit waits for the disk, so the database
+on the SSD volume (median 906 to 936 ms in three runs with the agent timeline in the write path, 2026-11-08); on the HDD volume it is not (1,171 ms), because every commit waits for the disk, so the database
 should be on the SSD, though any volume works. Results and the procedure are in `docs/BENCHMARKS.md` (*Storage write throughput*). The
 criterion is not weakened silently, and `synchronous=FULL` stays unless the Product Manager decides otherwise in a new record.
 
