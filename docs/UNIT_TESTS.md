@@ -140,6 +140,17 @@ criteria carries each id. The test name follows *Naming* unchanged.
   is a timer the code under test needs to fire, not a wait for a result, which stays forbidden
   ([0179](decisions/0179-ingest-writes-end-only-at-the-shutdown-deadline-and-are-drained-before-the-store-closes.md)).
 
+## Load-dependent tests (Go)
+
+The `Go stress` job (`.github/workflows/go-stress.yml`) runs on pull requests that change `internal/**`, `go.mod`, `go.sum`
+or its own files, and on manual dispatch. It starts two busy-loop processes per CPU and runs the tests listed in
+`.github/scripts/stress-go-tests.sh` 20 times under that load with `go test -race -count=20`
+([0196](decisions/0196-load-dependent-go-tests-are-stress-run-from-a-list-in-a-path-filtered-workflow.md)). A Go test is listed
+there when its verdict depends on a ratio of measured durations, on a heap size sampled while or after the code runs
+(`runtime.ReadMemStats`, `runtime/metrics`), or on goroutine scheduling, or when it failed intermittently in CI. The script
+fails when a listed test does not exist or a load process ends early. Run it locally from the repository root:
+`bash .github/scripts/stress-go-tests.sh`.
+
 ## Tests that read repository documents
 
 `.gitattributes` may check files out with CRLF (`*.md text eol=crlf`), so on a CI runner a document carries
@@ -176,4 +187,5 @@ the pattern for `vandoxd`).
 - [ ] Table-driven where there is more than one input; failure messages with got and want.
 - [ ] A test for a squad acceptance criterion carries its id (*Criterion ids*).
 - [ ] Go: passes with `-race`; no real network or clock except the ratio of two durations (see Structure; timeouts: `synctest` or injected durations, decision 0062). .NET: no real network, clock or sleep, again except such a ratio and a library timer that cannot be injected (see Structure); the whole solution builds without any analyzer diagnostic.
+- [ ] Go: a test of that kind is listed in `.github/scripts/stress-go-tests.sh` (*Load-dependent tests (Go)*).
 - [ ] *Format* from `.squad/stack.md` run before committing.

@@ -73,10 +73,11 @@ configurations, and check one in Release locally with `-c Release` (for example
 `dotnet test tests/<Project>.Tests -c Release --filter <ClassOrMethodName>`); *Writing tests* has the consequence
 for allocation bounds.
 
-Test time limits: CI runs `go test` without `-timeout`, so Go's default of 10 minutes per package binary applies,
-under `-race` as locally. A package whose tests take more than a minute locally is a warning sign; size the inputs
-down (the smallest input that still detects the failure) before it nears the limit. The .NET tests have no limit of
-their own beyond GitHub's job timeout.
+Test time limits: the `agent` and `sonarqube` CI jobs run `go test` without `-timeout`, so Go's default of 10 minutes
+per package binary applies there, under `-race` as locally; the `Go stress` job (`.github/scripts/stress-go-tests.sh`)
+sets `-timeout 30m` for its 20 runs under load. A package whose tests take more than a minute locally is a warning
+sign; size the inputs down (the smallest input that still detects the failure) before it nears the limit. The .NET
+tests have no limit of their own beyond GitHub's job timeout.
 
 ## Analyzer gate
 

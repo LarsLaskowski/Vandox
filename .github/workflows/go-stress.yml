@@ -1,0 +1,35 @@
+# Runs the load-dependent Go tests 20 times each under CPU load with .github/scripts/stress-go-tests.sh (record 0196).
+# Actions pinned by full commit SHA, checkout without persisted credentials, no ${{ }} inside a run: script (docs/CONTRIBUTING.md, Workflow rules).
+name: Go stress
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/scripts/stress-go-tests.sh"
+      - ".github/workflows/go-stress.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-stress:
+    name: Go tests under CPU load
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run the listed tests under load
+        run: .github/scripts/stress-go-tests.sh
