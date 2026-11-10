@@ -51,11 +51,9 @@ public class ReportServiceTests
 
         var first = service.RunAsync(Builder(), TestContext.CancellationToken);
 
-        await records.WaitForCallsAsync(1);
+        Assert.HasCount(1, records.Queries, "the first run reads before RunAsync returns, so a second run without the slot would too");
 
         var second = service.RunAsync(Builder(), TestContext.CancellationToken);
-
-        await Task.Delay(200, TestContext.CancellationToken);
 
         var readsWhileFirstRuns = records.Queries.Count;
 
