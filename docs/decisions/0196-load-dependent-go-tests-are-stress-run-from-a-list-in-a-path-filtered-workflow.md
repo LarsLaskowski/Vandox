@@ -9,7 +9,7 @@
 ## Context
 
 Go tests whose verdict depends on runner load failed intermittently in CI and passed on a re-run: the scheduler gap test and the
-connstats heap bound (#336), the sender's 4 KiB cut test (#329, #369). CI runs `go test ./... -race` once per pull request, so such a
+connstats heap bound (#336), the sender's 4 KiB cut test (#329, #369). CI runs `go test ./... -race` once in each of two jobs per pull request, never under added load, so such a
 test shows up only as a random red run on an unrelated pull request. The issue asks for a CI job that runs selected tests with
 `-race -count=20` while other processes load the CPU, with its runtime and trigger in proportion. One plain run of the whole Go suite
 with `-race` takes about 2 min 20 s on 4 CPUs, of which `internal/sender` takes 90 s and `internal/spool` 71 s; record
