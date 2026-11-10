@@ -1,6 +1,6 @@
 # 0196: Load-dependent Go tests are stress-run from a list in a path-filtered workflow
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-10
 - **Area:** —
 - **Source:** Issue #370
