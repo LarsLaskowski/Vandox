@@ -14,6 +14,7 @@ readonly LISTED=(
   "internal/sender TestHTTPTransport_ReadsAtMostFourKiBOfBody"
   "internal/connstats TestConnections_ManySocketsStayWithinCaps"
   "internal/scheduler TestScheduler_TriggerWhileStuckRecordsGap"
+  "internal/scheduler TestStressDryRun_WallClockStaysCloseToCPUTime"
   # The verdict is a ratio of measured durations.
   "internal/wire TestDecoder_TimeIsInProportionToTheLine"
   "internal/logstages TestClassifyMail_TimeGrowsLinearlyWithTheLengthOfTheMessage"
