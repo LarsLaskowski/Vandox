@@ -36,6 +36,7 @@ fail() {
   exit 1
 }
 
+# shellcheck disable=SC2329 # invoked by the EXIT trap
 stop_load() {
   local pid
   for pid in "${load_pids[@]}"; do
@@ -86,7 +87,7 @@ readonly cpus
 load_count=$((cpus * LOADS_PER_CPU))
 readonly load_count
 echo "nproc=${cpus}, starting ${load_count} busy-loop processes"
-trap stop_load EXIT
+trap stop_load EXIT # invoked on every exit
 for ((i = 0; i < load_count; i++)); do
   bash -c 'while :; do :; done' &
   load_pids+=("$!")
