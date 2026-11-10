@@ -185,3 +185,8 @@ No guarantee of `.squad/project.md` is touched: no product code, no release job,
 - Making the job a required check: a `paths`-filtered workflow that does not run would leave a required check pending (record 0196).
 - Tests that bound a process-wide allocation total (`TotalAlloc`, e.g. `TestSession_DiscardsUnsolicitedSignalsWithoutKeepingThem`)
   and real-clock tests with injected durations (record 0062): not listed under the rule; a flake among them widens the rule.
+
+## Security notes
+
+- **Non-blocking (Security, plan review):** the *Workflow rules* in `docs/CONTRIBUTING.md` (lines 249–253) bind only `release.yml`, `base-image-digests.yml` and the *Release build check* job. The new `go-stress.yml` follows them by choice in the plan, and nothing keeps a later edit to it doing so. Smallest fix: add one line to the workflow's header comment. Insert verbatim, right below the planned comment that names the script and record 0196:
+  `# Actions pinned by full commit SHA, checkout without persisted credentials, no ${{ }} inside a run: script (docs/CONTRIBUTING.md, Workflow rules).`
