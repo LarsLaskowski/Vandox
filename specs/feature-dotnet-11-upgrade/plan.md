@@ -41,6 +41,7 @@ at 11.0.0, then `SonarAnalyzer.CSharp` 10.36.0.15337) gives the complete list of
 | 20 | `check-builder-dotnet-version.sh` and `dotnet_major.py` accept `11.0-resolute-chiseled` (both read the leading `<major>.<minor>`) | `.github/scripts/check-builder-dotnet-version.sh:19–20`, `.squad/tools/dotnet_major.py:84–87` | confirmed |
 | 21 | The image starts on Linux 4.4 (DS918+) | to verify: AC4, Product Manager, before step 9 (no session or CI runner has Linux 4.4) | unverified |
 | 22 | CI does not publish the image it builds (`docker save` only feeds the SBOM step, `ci.yml:262`) | `.github/workflows/ci.yml` | confirmed |
+| 23 | `aspnet:11.0-resolute-chiseled` amd64 (index `sha256:fc0ee12f…`) has no shell, apt or dpkg; `usr/bin` holds only `dotnet`; no entry is owned by 65532; `etc/passwd` is the same as in the noble image. The CI smoke test does not check for a shell (`ci.yml:245–249` checks `Config.User`; `smoke-test-backend.sh` checks user, `/data` ownership, health, ports and ingest) | registry layer listing of the amd64 manifest `sha256:6207c495…a58cce4` (5 layers, 467 entries), Security's plan review; `ci.yml`, `.github/scripts/smoke-test-backend.sh:194` | confirmed |
 
 Related defect found on the way (not this change): `web-login.md:90–91` says calls that update root components do not pass the
 session check; aspnetcore v10.0.0 and v11.0.0 `CircuitHost.PerformRootComponentOperations` run them through
@@ -52,7 +53,7 @@ session check; aspnetcore v10.0.0 and v11.0.0 `CircuitHost.PerformRootComponentO
 | -- | ------- | --------- |
 | AC1 | the whole existing suite, unchanged in number (`CI: Backend (.NET)` job; check: `git diff origin/main...HEAD -- tests/` removes no `[TestMethod]`, Reviewer) | all of `tests/` |
 | AC2 | check: *Analyzer gate* on the whole solution (Code Officer, step 7) and the *Sonar gate* on the draft PR; check: `.editorconfig` has `dotnet_diagnostic.S8949.severity = error` in the hand-maintained `[*.cs]` part before the sonar block, `dotnet_diagnostic.BL0016.severity = none` in `[tests/**.cs]`, and S8969 only in the block (Reviewer) | — |
-| AC3 | CI: *Release build check* ("Check base image pinning", "Check builder .NET version", "Build and verify image", "Smoke test backend container") on the early draft PR; before it the *Image build check* (restore-order reproduction, `.squad/stack.md`) by the Dev | — |
+| AC3 | CI: *Release build check* ("Check base image pinning", "Check builder .NET version", "Build and verify image", "Smoke test backend container"), and "Analyze (csharp)" (CodeQL, `codeql.yml`) and "SonarQube" (`ci.yml`), which build with SDK 11, all green on the early draft PR (orchestrator or Dev confirms); no shell or package manager in the runtime image: fact 23; before it the *Image build check* (restore-order reproduction, `.squad/stack.md`) by the Dev | — |
 | AC4 | manual: the Product Manager, on the image built from the draft PR's head after CI is green (*Approach*, *Manual check on the reference host*) | — |
 | AC5 | `SessionCircuitHandlerChecksEventAgainstChangedState`, `SessionCircuitHandlerChecksFirstEventAgainstInitialState`, `SessionCircuitHandlerWithoutKnownStateProcessesNoEvent`, `SessionCircuitHandlerStopsFollowingStateWhenDisposed`; existing `SessionCircuitHandlerPassesActivityOfActiveSession`, `SessionCircuitHandlerEndsCircuitAfterSessionEnded` unchanged | `tests/Vandox.Backend.Tests/SessionCircuitHandlerTests.cs` |
 | AC6 | `ChartInteropRenderToleratesDisconnectedCircuit`, `ChartInteropRenderLetsOtherExceptionsThrough`, `ChartInteropRenderReportsDrawn` | `tests/Vandox.Backend.Tests/ChartInteropTests.cs` |
@@ -81,7 +82,9 @@ Cases:
   These tests pass from step 4 on (the skeleton writes with `CancellationToken.None`) and fail when a write gets the command's
   token. `TemplatesCommand.cs:59` and `IncidentsCommand.cs:55` have no hook between the work and the write; the existing
   interruption tests of both commands stay and the Reviewer checks the two lines by reading.
-- AC9 `HEAD /login` without a session answers `200` with an empty body (`HEAD /` stays `302`, existing).
+- AC9 `HEAD /login` without a session answers `200` with an empty body (`HEAD /` stays `302`, existing); a second case beside
+  it: a signed-in `HEAD /` is answered like its `GET`, without a body (the Tester asserts against the `GET` it runs, not a
+  status fixed here).
 
 ## Approach
 
@@ -102,10 +105,14 @@ through the new overloads stays one write.
 
 **Session check (record 0199).** `SessionCircuitHandler` implements `IDisposable`. The constructor subscribes a private
 handler to `AuthenticationStateChanged` that stores the announced `Task<AuthenticationState>` in a private field. Each inbound
-event awaits that field, or, while no change was announced, `GetAuthenticationStateAsync()` read once and stored (an exception
-from it propagates and nothing is stored); then `_sessions.Touch(state.User)` as today. `Dispose` unsubscribes. The field is
-a reference written by the event and read once per event; no lock (the framework raises the event on the circuit's
-dispatcher; a reference write is atomic).
+event reads that field with `Volatile.Read`; while no change was announced it reads `GetAuthenticationStateAsync()` and
+stores it only if the field is still empty, `Interlocked.CompareExchange(ref _state, initial, null)`, then uses the field's
+value (an exception from the read propagates and nothing is stored); then `_sessions.Touch(state.User)` as today. `Dispose`
+unsubscribes. The event does not come from the circuit's dispatcher: SignalR hub threads raise it (`SetCircuitUser` from
+`ComponentHub` on connect and on authentication refresh) and so does the revalidation loop of `SessionRevalidatingStateProvider`
+(`ForceSignOut` on a thread-pool thread), and the inbound-activity handler runs before `Renderer.Dispatcher.InvokeAsync`
+(aspnetcore v11.0.0 `CircuitHost.cs:410`). The compare-exchange keeps a state announced during the first read from being
+overwritten by it; no further lock is needed, since `SessionStore.Touch` looks the session up live.
 
 **Charts (record 0200).** `ChartInterop.RenderAsync` returns `Task<bool>`: `true` after a create or an update, `false` when
 the interop was disposed while waiting for the gate or a call threw `JSDisconnectedException` (caught in the existing `try`,
@@ -186,7 +193,8 @@ Files no unit test can cover: none (`Dockerfile` and the build files are verifie
 ## Areas
 
 - [web-login](../../docs/areas/web-login.md): *Access* line 49 — `HEAD /login` without a session is answered like
-  `GET /login` without a body; *Related decisions*: 0198, 0199.
+  `GET /login` without a body; and, verbatim (Security note 3), "With a session, a `HEAD` request to a page is answered like
+  its `GET`, without a body (from .NET 11 on)." (Dev; the Lead writes no area document); *Related decisions*: 0198, 0199.
 - [web-ui](../../docs/areas/web-ui.md): *Charts* — a draw on a lost connection ends without an error and is drawn again on
   the next render; *Related decisions*: 0200.
 - [backend-host](../../docs/areas/backend-host.md): *Related decisions*: 0197, 0201; no rule changes.
@@ -223,9 +231,10 @@ and analyzer fixes; the wire format, schema and configuration stay (N1). The ses
 - [x] Exceptions reaching a user: none new. A `JSDisconnectedException` in a chart no longer surfaces (no user is left to see
   it); an `InvalidOperationException` from an unset authentication state ends the live connection like `SessionEndedException`
   and is logged by the framework as a circuit error, never shown.
-- The runtime base moves to Ubuntu 26.04 chiseled: no shell, no package manager, `65532:65532`, pinned by digest; the smoke
-  test checks user, shell and health (AC3).
-- `HEAD /login` returns the public sign-in page's headers only; every other anonymous `HEAD` stays `302` (record 0198).
+- The runtime base moves to Ubuntu 26.04 chiseled: no shell, no package manager (fact 23), `65532:65532`, pinned by digest;
+  the smoke test checks user, health, ports and ingest (AC3).
+- `HEAD /login` returns the public sign-in page's headers only; every other anonymous `HEAD` stays `302`; a signed-in `HEAD`
+  of a page is rendered like its `GET` without a body, under the same authorization (record 0198).
 - SQLitePCLRaw 3 ships its own native SQLite build; the storage and log-search tests (security areas 9, 10) run on it.
 
 ## Decision records
@@ -242,7 +251,9 @@ and analyzer fixes; the wire format, schema and configuration stay (N1). The ses
 ## Out of scope / follow-ups
 
 - Follow-up issue: `web-login.md` *Access* says root-component updates bypass the session check; the framework (10.0.0 and
-  11.0.0) passes them through it (related defect above).
+  11.0.0) passes them through it (related defect above). Also: `ComponentHub.ConnectCircuit` and `OnAuthenticationRefreshedAsync`
+  call `SetCircuitUser(Context.User)`, so a reconnecting circuit takes on the session of the new connection's cookie, while
+  `web-login.md:88` says "A live connection belongs to the session that opened it" (not caused by this change).
 - The Go agent; re-measuring on .NET 11.
 
 ## Challenge notes

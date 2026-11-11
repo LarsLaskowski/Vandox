@@ -37,7 +37,7 @@ public class PayloadValidationTests
 
         // Act
         var error = payload.Validate();
-        var again = PayloadRegistry.Deserialize(kind, JsonDocument.Parse(PayloadRegistry.Serialize(payload)).RootElement);
+        var again = PayloadRegistry.Deserialize(kind, JsonElement.Parse(PayloadRegistry.Serialize(payload)));
 
         // Assert
         Assert.IsNull(error, "valid payload");
@@ -248,7 +248,7 @@ public class PayloadValidationTests
 
         // Act
         var json = PayloadRegistry.Serialize(line);
-        var again = (LogLine)PayloadRegistry.Deserialize(RecordKind.LogLine, JsonDocument.Parse(json).RootElement)!;
+        var again = (LogLine)PayloadRegistry.Deserialize(RecordKind.LogLine, JsonElement.Parse(json))!;
 
         // Assert
         Assert.Contains("\"host\":\"web-1\"", json, "host is written when set");

@@ -27,10 +27,12 @@ decides that. The sign-in page is the same for every installation and holds no d
 ## Decision
 
 Component endpoints keep the framework's methods; a `HEAD /login` without a session is answered like `GET /login` without a
-body, and every other `HEAD` without a session stays `302` to `/login`. The rules are in [web-login](../areas/web-login.md),
+body, and every other `HEAD` without a session stays `302` to `/login`. With a session, a `HEAD` request to a page is answered
+like its `GET`, without a body (from .NET 11 on). The rules are in [web-login](../areas/web-login.md),
 *Access*.
 
 ## Consequences
 
 - A test pins both answers, so a later framework change of the methods shows up as a failing test.
-- A signed-in `HEAD` of a page renders it like a `GET` (without a body) instead of being refused.
+- A signed-in `HEAD` of a page renders it like a `GET`, its data loading included, without a body, instead of being refused
+  (`405` on .NET 10); the authorization is the same as for `GET`, and a page render writes nothing.

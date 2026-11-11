@@ -78,8 +78,8 @@ platform. The Go agent is not affected.
   which would make the block out of date for `sonar-rules.py --check`), and the *Analyzer gate* confirms it after the
   Sonar update.
 - AC3: The Dockerfile builds on the `sdk:11.0` image and runs on the chiseled `aspnet` 11 image, both pinned by a current
-  digest, and the CI image build and compose smoke test pass (non-root user, no shell, health check, ingest port) (S2,
-  N3, N5).
+  digest, the CI image build and compose smoke test pass (non-root user, health check, ingest port), and the runtime image
+  holds no shell or package manager (read from its layers) (S2, N3, N5).
 - AC4: The image built from the pull request branch on the `11.0-resolute-chiseled` base starts on the reference host and
   serves the ingest endpoint there; signed in, a page with a chart stays interactive after an event on it and the browser
   console shows no Content Security Policy violation (S2, S8, N4, N3). Manual: the Product Manager runs that image on the
@@ -135,8 +135,8 @@ platform. The Go agent is not affected.
 ## Area documents
 
 - [web-login](../../docs/areas/web-login.md), *Access*: a `HEAD /login` without a session is answered like
-  `GET /login` without a body, because Razor component endpoints accept `HEAD` from .NET 11 on (AC9, found while
-  planning).
+  `GET /login` without a body, and a signed-in `HEAD` of a page like its `GET` without a body, because Razor component
+  endpoints accept `HEAD` from .NET 11 on (AC9, found while planning).
 - [web-ui](../../docs/areas/web-ui.md), *Charts*: a draw on a lost connection ends without an error and is drawn again on
   the next render (AC6).
 - No other area document changes: [backend-host](../../docs/areas/backend-host.md) names neither a .NET version nor a

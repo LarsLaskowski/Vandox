@@ -31,7 +31,7 @@ public class PayloadRegistryTests
     public void PayloadRegistrySerializeWritesNoKindMember(string kind, string json)
     {
         // Arrange
-        var payload = PayloadRegistry.Deserialize(kind, JsonDocument.Parse(json).RootElement);
+        var payload = PayloadRegistry.Deserialize(kind, JsonElement.Parse(json));
 
         // Act
         var text = PayloadRegistry.Serialize(payload!);
@@ -95,7 +95,7 @@ public class PayloadRegistryTests
     public void PayloadRegistryDeserializeIgnoresKindMember(string kind, string json)
     {
         // Arrange
-        var element = JsonDocument.Parse(json).RootElement;
+        var element = JsonElement.Parse(json);
 
         // Act
         var payload = PayloadRegistry.Deserialize(kind, element);
