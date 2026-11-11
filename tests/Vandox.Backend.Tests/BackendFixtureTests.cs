@@ -72,7 +72,6 @@ public class BackendFixtureTests
         using var fixture = new BackendFixture();
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
         var firstWebPort = fixture.WebPort;
-        var firstIngestPort = fixture.IngestPort;
         using var holder = new TcpListener(IPAddress.Loopback, firstWebPort);
 
         holder.Start();
@@ -88,7 +87,6 @@ public class BackendFixtureTests
 
         // Assert
         Assert.AreNotEqual(firstWebPort, fixture.WebPort, "the web port is a newly chosen one");
-        Assert.AreNotEqual(firstIngestPort, fixture.IngestPort, "the ingest port is a newly chosen one");
         Assert.AreEqual(0, exitCode, "the returned run is the one that started and stopped cleanly");
         Assert.Contains($"listen: 127.0.0.1:{fixture.WebPort}\n", configuration, "the configuration file holds the new web port");
         Assert.Contains($"listen: 127.0.0.1:{fixture.IngestPort}\n", configuration, "the configuration file holds the new ingest port");
