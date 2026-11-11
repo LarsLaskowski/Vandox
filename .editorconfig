@@ -274,11 +274,12 @@ dotnet_diagnostic.IDE0028.severity = error
 # SonarQube Cloud's cognitive-complexity rule (threshold 15), which the SonarAnalyzer package does not run by default.
 dotnet_diagnostic.S3776.severity = error
 
-# The rules of SonarQube Cloud's C# profile "Sonar way comprehensive" that the SonarAnalyzer package does not run by
-# default (its defaults match "Sonar way core"); listed here so the local build reports what the cloud analysis reports
-# (.squad/stack.md, Analyzer gate). Generated from the two profiles' active rules on 2026-10-12; S3776 above is one of them.
-dotnet_diagnostic.S101.severity = error
+# SonarQube Cloud's rule against more than seven parameters, set here because the [tests/**.cs] override below switches
+# it off for tests and .squad/tools/sonar-rules.py leaves a rule the file sets itself out of its block.
 dotnet_diagnostic.S107.severity = error
+
+# squad:sonar-rules begin — written by .squad/tools/sonar-rules.py from the project's SonarQube Cloud C# profile against "Sonar way core"; never edited by hand (.squad/stack.md, Analyzer gate)
+dotnet_diagnostic.S101.severity = error
 dotnet_diagnostic.S108.severity = error
 dotnet_diagnostic.S110.severity = error
 dotnet_diagnostic.S112.severity = error
@@ -480,6 +481,8 @@ dotnet_diagnostic.S8969.severity = error
 dotnet_diagnostic.S8970.severity = error
 dotnet_diagnostic.S9022.severity = error
 dotnet_diagnostic.S9129.severity = error
+dotnet_diagnostic.S4347.severity = none
+# squad:sonar-rules end
 
 # tests/** is excluded from the cloud analysis (ci.yml, sonar.exclusions), so a rule that only test code violates has no
 # cloud finding to mirror: data-driven test methods and sample builders take more than seven parameters on purpose.
