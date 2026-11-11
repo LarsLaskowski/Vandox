@@ -53,8 +53,8 @@ platform. The Go agent is not affected.
   The web login guarantees of `.squad/project.md` (security area 3) hold unchanged.
 - N4: Target host: the image is built for `linux/amd64` and must start on the reference host (Synology DS918+, Celeron J3455,
   Linux 4.4.302+, see `docs/BENCHMARKS.md`) as the `10.0-noble-chiseled` image does. No `aspnet:11.0-noble-chiseled` image
-  exists; the chiseled ASP.NET 11 image is `11.0-resolute-chiseled` (Ubuntu 26.04). Whether it starts on that host is open
-  (*Open questions*).
+  exists; the runtime base is `11.0-resolute-chiseled` (Ubuntu 26.04), accepted by the Product Manager on condition that
+  the image built from the pull request branch starts on that host before the pull request is merged (Q1).
 - N5: One .NET major per repository: `.squad/tools/dotnet_major.py` passes with every project, `global.json` and Dockerfile
   image on 11.
 
@@ -70,7 +70,9 @@ platform. The Go agent is not affected.
 - AC3: The Dockerfile builds on the `sdk:11.0` image and runs on the chiseled `aspnet` 11 image, both pinned by a current
   digest, and the CI image build and compose smoke test pass (non-root user, no shell, health check, ingest port) (S2,
   N3, N5).
-- AC4: The image starts and serves the web UI and the ingest endpoint on the reference host (S2, N4).
+- AC4: The image built from the pull request branch on the `11.0-resolute-chiseled` base starts on the reference host and
+  serves the web UI and the ingest endpoint there (S2, N4). Manual: the Product Manager runs that image on the DS918+ and
+  signs the check off; the pull request stays a draft and is not merged until then.
 - AC5: A live connection whose session has ended processes no further event, also after its authentication state changed
   while it was open (S3, E3, N3).
 - AC6: A chart whose drawing or update fails because the browser connection is gone ends without an exception; any other
@@ -92,11 +94,13 @@ platform. The Go agent is not affected.
 
 ## Open questions
 
-- Q1: The runtime base. Not answered — escalated: `aspnet:11.0-noble-chiseled` does not exist on MCR (tag list read
-  2026-11-11); the chiseled ASP.NET 11 images are `11.0-resolute-chiseled` (Ubuntu 26.04) and their variants, so the
-  runtime base moves from Ubuntu 24.04 to 26.04. Whether that image starts on the reference host (Linux 4.4 kernel,
-  Synology's Docker, a CPU without AVX) no one in the session can check; CI runs it only on a current kernel. AC4 waits
-  for the Product Manager's answer on whether this base is accepted and when the image is tried on that host.
+- Q1: The runtime base. `aspnet:11.0-noble-chiseled` does not exist on MCR (tag list read 2026-11-11); the chiseled
+  ASP.NET 11 images are `11.0-resolute-chiseled` (Ubuntu 26.04) and their variants, so the runtime base moves from
+  Ubuntu 24.04 to 26.04. Whether that image starts on the reference host (Linux 4.4 kernel, Synology's Docker, a CPU
+  without AVX) no one in the session can check; CI runs it only on a current kernel. Answered: (Product Manager,
+  2026-11-11) `11.0-resolute-chiseled` is accepted; the Product Manager runs the image built from the pull request
+  branch on the DS918+ before the pull request is merged, and AC4 is that manual check, signed off by the Product
+  Manager.
 - Q2: Which new rules get an `.editorconfig` line. Answered: (Lead, trial build of `main` with only `net11.0` and
   SDK 11.0.100) CA1830, CA2016, CA2026, BL0013, BL0016 and S8949 are all reported at warning level, which
   `TreatWarningsAsErrors` turns into build errors, and `MSTEST0049` and `S8969` are already `error` in `.editorconfig`.
