@@ -18,7 +18,7 @@ repository (record 0074): keep it true when the build changes.
   every .NET image name the same major, which `dotnet_major.py` checks in the *Analyzer gate*, and a new project gets
   it from the SDK `global.json` selects. Dependabot keeps the SDK and the packages current within that major (the
   image digests are refreshed by hand, record 0041); the move to the next one (target frameworks, `global.json`, the
-  images) is one change of its own. Central package
+  Microsoft.Extensions and Microsoft.Data.Sqlite packages, the images) is one change of its own. Central package
   management (`Directory.Packages.props`), shared build settings in `Directory.Build.props`. Analyzers:
   `Reihitsu.Analyzer` and `SonarAnalyzer.CSharp`, every diagnostic an error (`TreatWarningsAsErrors`). Formatter:
   `reihitsu-format` (local tool, `dotnet-tools.json`). Tests: MSTest 4 with coverlet (`coverlet.runsettings`).
@@ -120,10 +120,10 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    `.editorconfig`, which `python3 .squad/tools/sonar-rules.py` writes from the two profiles (`--check` reports a block
    out of date; severity `SONAR_RULES_SEVERITY` in `squad_settings.py`, here `error`): the *Analyzer gate* reports
    them, among them the cognitive-complexity rule `S3776` (threshold 15, the same as SonarQube Cloud): keep methods
-   below it while writing them instead of splitting them after the gate fails. `S3776` and `S107` (more than seven
-   parameters) are set in `.editorconfig` outside the block, which the tool leaves out of it: `tests/**` is excluded
-   from the cloud analysis (`ci.yml`, `sonar.exclusions`), so `S107` is switched off there, where data-driven test
-   methods need them. A rule that runs only under the scanner stays cloud-only even when set: `S1192` (duplicated
+   below it while writing them instead of splitting them after the gate fails. `S107` (more than seven
+   parameters) is switched off again in the `[tests/**.cs]` section after the block: `tests/**` is excluded
+   from the cloud analysis (`ci.yml`, `sonar.exclusions`), and data-driven test methods need the parameters; a
+   section of a path keeps its own choice only after the block, which `sonar-rules.py` warns about otherwise. A rule that runs only under the scanner stays cloud-only even when set: `S1192` (duplicated
    string literals) is one, found on PR #214 and reported by no local build. When the cloud profile changes, or
    SonarQube reports a `csharpsquid` rule the local build did not, run `sonar-rules.py` again and note a scanner-only
    rule here.
