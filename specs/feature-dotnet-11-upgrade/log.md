@@ -27,3 +27,4 @@ are quoted in full.
 | 2026-11-11 15:33 | 6 Documentation | Orchestrator | written in 6 Implement (G2); Test green there (Core 4095, Storage 632, Import 172, Backend 1254, Go) |
 | 2026-11-11 15:42 | 7 Gate stamp | Orchestrator | PASS on 7d33cf81dc9affaab28d737a156efd42c32306d2 (tier security): Format check pass; Analyzer gate pass; Test with coverage pass; Coverage gate pass; decision-check.py pass; scope-check.py pass · figure-check.py 12 hit(s) |
 | 2026-11-11 15:42 | 7 Early draft PR | Orchestrator | https://github.com/LarsLaskowski/Vandox/pull/417 (draft); follow-up issue #416; waiting for CI incl. CodeQL and SonarQube |
+| 2026-11-11 15:49 | 7 CI on the draft PR | Orchestrator | CI green on https://github.com/LarsLaskowski/Vandox/pull/417: CodeQL incl. Analyze (csharp), Backend (.NET), Agent (Go), Agent install, Release build check, Vulnerability scan; SonarQube Quality Gate passed (0 new issues, 100% coverage on new code) |
