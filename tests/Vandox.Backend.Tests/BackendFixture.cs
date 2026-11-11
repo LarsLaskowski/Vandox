@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 
 using Vandox.Backend.Hosting;
@@ -30,12 +32,23 @@ internal sealed class BackendFixture : IDisposable
     /// </summary>
     internal const string HashText = "$argon2id$v=19$m=19456,t=2,p=1$dmFuZG94LXRlc3Qtc2FsdA$3frGsB3okaDzKgyRpN+kVpXZO4FXj6KACFWm29rDI0Y";
 
+    /// <summary>
+    /// The number of times the service is started at most when a run ends before it reports its start.
+    /// </summary>
+    private const int MaxAttempts = 3;
+
+    /// <summary>
+    /// The seconds one attempt waits for a start that is neither reported nor ended; a hang guard, not a verdict.
+    /// </summary>
+    private const int StartTimeoutSeconds = 60;
+
     #endregion // Constants
 
     #region Fields
 
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentQueue<Task> _runs = new();
+    private string? _trustedProxies;
 
     #endregion // Fields
 
@@ -77,12 +90,12 @@ internal sealed class BackendFixture : IDisposable
     /// <summary>
     /// Gets the web port written to the configuration.
     /// </summary>
-    internal int WebPort { get; }
+    internal int WebPort { get; private set; }
 
     /// <summary>
     /// Gets the ingest port written to the configuration.
     /// </summary>
-    internal int IngestPort { get; }
+    internal int IngestPort { get; private set; }
 
     /// <summary>
     /// Gets what the run wrote to standard output.
@@ -104,6 +117,8 @@ internal sealed class BackendFixture : IDisposable
     /// <param name="trustedProxies">The value of the option; the key is left out when <c>null</c></param>
     internal void UseTrustedProxies(string? trustedProxies)
     {
+        _trustedProxies = trustedProxies;
+
         var option = trustedProxies is null ? string.Empty : $"  trusted_proxies: \"{trustedProxies}\"\n";
 
         File.WriteAllText(ConfigPath, $"web:\n  listen: 127.0.0.1:{WebPort}\n{option}ingest:\n  listen: 127.0.0.1:{IngestPort}\nstorage:\n  directory: {Storage}\nlog:\n  level: debug\n");
@@ -128,25 +143,51 @@ internal sealed class BackendFixture : IDisposable
     }
 
     /// <summary>
-    /// Starts the service with the default environment and waits until it listens.
+    /// Starts the service with the default environment and waits until it listens. A run that ends before it reports its start (for example because
+    /// another process took its port after <see cref="FreePort"/> released it) is started again on two new ports, up to three attempts in total.
     /// </summary>
     /// <param name="stop">Stops the service</param>
     /// <param name="wait">Stops the wait for the start</param>
     /// <param name="clock">The clock of the service, <c>null</c> for the real one</param>
     /// <returns>A task that returns the task of the run</returns>
+    /// <exception cref="InvalidOperationException">Every attempt ended before it reported its start</exception>
+    /// <exception cref="TimeoutException">An attempt neither reported its start nor ended within 60 seconds</exception>
     internal async Task<Task<int>> StartServiceAsync(CancellationToken stop, CancellationToken wait, TimeProvider? clock = null)
     {
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var hooks = new ServeHooks
-                    {
-                        Clock = clock,
-                        Started = _ => started.TrySetResult()
-                    };
-        var run = RunAsync([], hooks, stop);
+        var failures = new StringBuilder();
+        var lastExitCode = 0;
 
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), wait).ConfigureAwait(false);
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var hooks = new ServeHooks
+                        {
+                            Clock = clock,
+                            Started = _ => started.TrySetResult()
+                        };
+            var run = RunAsync([], hooks, stop);
 
-        return run;
+            await Task.WhenAny(started.Task, run).WaitAsync(TimeSpan.FromSeconds(StartTimeoutSeconds), wait).ConfigureAwait(false);
+
+            if (started.Task.IsCompleted)
+            {
+                return run;
+            }
+
+            lastExitCode = await run.ConfigureAwait(false);
+            failures.Append(CultureInfo.InvariantCulture, $"attempt {attempt} on ports {WebPort} and {IngestPort}, exit code {lastExitCode}, standard error:\n{Error}\n");
+
+            if (attempt < MaxAttempts)
+            {
+                WebPort = FreePort();
+                IngestPort = FreePort();
+                Out.GetStringBuilder().Clear();
+                Error.Clear();
+                UseTrustedProxies(_trustedProxies);
+            }
+        }
+
+        throw new InvalidOperationException($"the service stopped before it started in {MaxAttempts} attempts, last exit code {lastExitCode}:\n{failures}");
     }
 
     /// <summary>

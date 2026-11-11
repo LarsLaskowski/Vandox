@@ -155,11 +155,10 @@ func TestScheduler_TriggerKeepsGridWithoutPressure(t *testing.T) {
 	}
 }
 
-func TestScheduler_TriggerReplacesNextRunUnderPressure(t *testing.T) {
+func TestScheduler_TriggerReplacesNextRunUnderPressure_AC1(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := newScripted("kern", nil)
-		h := start(t, []scheduler.Job{pressureJob(c)}, &recordingSink{})
-		h.sched.SetPressure(true)
+		h := startIn(t, []scheduler.Job{pressureJob(c)}, &recordingSink{}, true)
 		h.sleepTo(13 * time.Second)
 		requireAccepted(t, h.sched, "kern", scheduler.Trigger{Kills: killsOf(0, 1)})
 
