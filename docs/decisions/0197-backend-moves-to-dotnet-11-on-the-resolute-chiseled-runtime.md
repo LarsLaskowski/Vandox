@@ -1,6 +1,6 @@
 # 0197: The backend moves to .NET 11; the runtime image becomes the chiseled Ubuntu 26.04 ASP.NET image
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-11
 - **Area:** —
 - **Source:** Product Manager request: move the backend to .NET 11 (feature dotnet-11-upgrade)

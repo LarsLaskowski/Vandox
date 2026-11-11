@@ -1,6 +1,6 @@
 # 0201: The output writes of `vandoxd` commands opt out of cancellation explicitly
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-11
 - **Area:** Backend host
 - **Source:** Product Manager request: move the backend to .NET 11 (feature dotnet-11-upgrade)

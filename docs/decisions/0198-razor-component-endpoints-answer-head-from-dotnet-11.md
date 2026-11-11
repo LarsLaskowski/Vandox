@@ -1,6 +1,6 @@
 # 0198: Razor component endpoints answer HEAD from .NET 11 on; the login page answers HEAD without a session
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-11
 - **Area:** Web login
 - **Source:** Product Manager request: move the backend to .NET 11 (feature dotnet-11-upgrade)

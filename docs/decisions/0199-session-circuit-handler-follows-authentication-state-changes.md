@@ -1,6 +1,6 @@
 # 0199: The live connection's session check follows authentication state changes instead of reading the state per event
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-11
 - **Area:** Web login
 - **Source:** Product Manager request: move the backend to .NET 11 (feature dotnet-11-upgrade)

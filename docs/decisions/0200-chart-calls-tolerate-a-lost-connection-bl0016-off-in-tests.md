@@ -1,6 +1,6 @@
 # 0200: A chart draw on a lost connection ends quietly and is drawn again; BL0016 is off for test code
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-11
 - **Area:** Web UI
 - **Source:** Product Manager request: move the backend to .NET 11 (feature dotnet-11-upgrade)

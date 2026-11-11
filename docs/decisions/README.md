@@ -112,7 +112,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0066 | Log search takes literal terms only; every term is quoted for FTS5, operators and prefixes are not offered yet | Accepted | 2026-10-06 |
 | 0069 | The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count, a grown file continued after its imported start, an older copy recognized by the line-end hashes of the imported one | Accepted | 2026-10-11 |
 | 0072 | vandoxd gets the sub-command import; progress as JSON on stderr, the summary as text on stdout, exit code 1 when a file failed | Accepted | 2026-10-06 |
-| 0073 | The backend is written in .NET 10 with a Blazor web UI; the agent stays in Go | Accepted | 2026-10-06 |
+| 0073 | The backend is written in .NET 10 with a Blazor web UI; the agent stays in Go | Superseded by 0197 | 2026-10-06 |
 | 0074 | Two-language toolchain: Go for the agent, .NET for the backend, one set of quality gates | Accepted | 2026-10-06 |
 | 0075 | The wire contract between the Go encoder and the C# decoder is pinned by golden fixtures | Accepted | 2026-10-06 |
 | 0076 | The backend decodes gzip with strict validation switched on for every process | Accepted | 2026-10-06 |
@@ -233,9 +233,9 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0194 | `install.sh` accepts only the IPv6 literals the agent parses | Accepted | 2026-11-09 |
 | 0195 | A backfill's CPU above 1 % of one core is an accepted deviation; the criterion stays the mean over the run | Accepted | 2026-11-09 |
 | 0196 | Load-dependent Go tests are stress-run from a list in a path-filtered workflow | Accepted | 2026-11-10 |
-| 0197 | The backend moves to .NET 11; the runtime image becomes the chiseled Ubuntu 26.04 ASP.NET image | Proposed | 2026-11-11 |
-| 0198 | Razor component endpoints answer HEAD from .NET 11 on; the login page answers HEAD without a session | Proposed | 2026-11-11 |
-| 0199 | The live connection's session check follows authentication state changes instead of reading the state per event | Proposed | 2026-11-11 |
-| 0200 | A chart draw on a lost connection ends quietly and is drawn again; BL0016 is off for test code | Proposed | 2026-11-11 |
-| 0201 | The output writes of `vandoxd` commands opt out of cancellation explicitly | Proposed | 2026-11-11 |
+| 0197 | The backend moves to .NET 11; the runtime image becomes the chiseled Ubuntu 26.04 ASP.NET image | Accepted | 2026-11-11 |
+| 0198 | Razor component endpoints answer HEAD from .NET 11 on; the login page answers HEAD without a session | Accepted | 2026-11-11 |
+| 0199 | The live connection's session check follows authentication state changes instead of reading the state per event | Accepted | 2026-11-11 |
+| 0200 | A chart draw on a lost connection ends quietly and is drawn again; BL0016 is off for test code | Accepted | 2026-11-11 |
+| 0201 | The output writes of `vandoxd` commands opt out of cancellation explicitly | Accepted | 2026-11-11 |
 <!-- project:end index -->
