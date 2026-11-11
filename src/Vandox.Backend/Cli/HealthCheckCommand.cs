@@ -52,13 +52,13 @@ internal static class HealthCheckCommand
                 return 0;
             }
 
-            await stderr.WriteLineAsync($"vandoxd: health check failed: unexpected status {(int)response.StatusCode}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"vandoxd: health check failed: unexpected status {(int)response.StatusCode}", CancellationToken.None).ConfigureAwait(false);
 
             return 1;
         }
         catch (Exception exception) when (exception is ConfigException or HttpRequestException or OperationCanceledException or FormatException)
         {
-            await stderr.WriteLineAsync($"vandoxd: health check failed: {Reason(exception)}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"vandoxd: health check failed: {Reason(exception)}", CancellationToken.None).ConfigureAwait(false);
 
             return 1;
         }

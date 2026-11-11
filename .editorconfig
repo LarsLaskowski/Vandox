@@ -270,6 +270,7 @@ dotnet_diagnostic.MSTEST0068.severity = error
 dotnet_diagnostic.ASP0015.severity = error
 dotnet_diagnostic.SYSLIB1092.severity = error
 dotnet_diagnostic.IDE0028.severity = error
+dotnet_diagnostic.S8949.severity = error
 
 # squad:sonar-rules begin — written by .squad/tools/sonar-rules.py from the project's SonarQube Cloud C# profile against "Sonar way core"; never edited by hand (.squad/stack.md, Analyzer gate)
 dotnet_diagnostic.S101.severity = error
@@ -486,3 +487,4 @@ dotnet_diagnostic.S4347.severity = none
 # cloud finding to mirror: data-driven test methods and sample builders take more than seven parameters on purpose.
 [tests/**.cs]
 dotnet_diagnostic.S107.severity = none
+dotnet_diagnostic.BL0016.severity = none

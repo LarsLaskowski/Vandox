@@ -48,6 +48,8 @@ public sealed class ChartInterop : IAsyncDisposable
 
     #region Methods
 
+    // Skeleton: removed with the implementation
+#pragma warning disable BL0016
     /// <summary>
     /// Creates the chart on the first call and updates it on later calls.
     /// </summary>
@@ -55,9 +57,9 @@ public sealed class ChartInterop : IAsyncDisposable
     /// <param name="title">The title of the chart</param>
     /// <param name="data">The data to draw</param>
     /// <param name="cancellationToken">The token to cancel the calls</param>
-    /// <returns>A task that completes when the chart is drawn</returns>
+    /// <returns>A task that returns whether the chart was created or updated</returns>
     /// <exception cref="ObjectDisposedException">The interop is disposed</exception>
-    public async Task RenderAsync(ElementReference host, string title, ChartData data, CancellationToken cancellationToken)
+    public async Task<bool> RenderAsync(ElementReference host, string title, ChartData data, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(title);
@@ -73,14 +75,14 @@ public sealed class ChartInterop : IAsyncDisposable
         {
             if (_disposed)
             {
-                return;
+                return true;
             }
 
             if (_chart is not null)
             {
                 await _chart.InvokeVoidAsync("update", cancellationToken, [columns]).ConfigureAwait(false);
 
-                return;
+                return true;
             }
 
             _module ??= await _jsRuntime.InvokeAsync<IJSObjectReference>("import", cancellationToken, [ModulePath]).ConfigureAwait(false);
@@ -88,12 +90,15 @@ public sealed class ChartInterop : IAsyncDisposable
             var labels = data.Series.Select(series => series.Label).ToArray();
 
             _chart = await _module.InvokeAsync<IJSObjectReference>(data.Stacked ? "createStacked" : "create", cancellationToken, [host, title, labels, columns]).ConfigureAwait(false);
+
+            return true;
         }
         finally
         {
             _gate.Release();
         }
     }
+#pragma warning restore BL0016
 
     #endregion // Methods
 

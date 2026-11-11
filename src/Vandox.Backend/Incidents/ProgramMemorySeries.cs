@@ -19,7 +19,7 @@ public sealed class ProgramMemorySeries
 
     private readonly List<DateTimeOffset> _times = [];
 
-    private readonly Dictionary<string, List<double>> _tracked = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<double>> _tracked = [with(StringComparer.Ordinal)];
 
     private readonly List<double> _overflow = [];
 

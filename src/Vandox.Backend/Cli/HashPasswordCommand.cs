@@ -44,12 +44,12 @@ internal static class HashPasswordCommand
 
         if (IsAccepted(password))
         {
-            await stdout.WriteLineAsync(PasswordHash.Create(password)).ConfigureAwait(false);
+            await stdout.WriteLineAsync(PasswordHash.Create(password), CancellationToken.None).ConfigureAwait(false);
 
             return 0;
         }
 
-        await stderr.WriteLineAsync(RefusedText).ConfigureAwait(false);
+        await stderr.WriteLineAsync(RefusedText, CancellationToken.None).ConfigureAwait(false);
 
         return 1;
     }

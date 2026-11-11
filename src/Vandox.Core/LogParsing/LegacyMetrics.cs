@@ -54,7 +54,7 @@ internal static class LegacyMetrics
 
         if (labels.Length > 0)
         {
-            map = new Dictionary<string, string>(StringComparer.Ordinal);
+            map = [with(StringComparer.Ordinal)];
 
             for (var index = 0; index < labels.Length; index += 2)
             {

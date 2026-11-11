@@ -7,7 +7,7 @@ internal sealed class SnapshotPeriod
 {
     #region Fields
 
-    private readonly HashSet<string> _backups = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _backups = [with(StringComparer.Ordinal)];
     private DateTimeOffset _firstAt;
     private long _firstId;
     private IReadOnlyDictionary<string, ProgramUsage>? _first;

@@ -7,7 +7,7 @@ internal sealed class ActionRun : IDisposable
 {
     #region Fields
 
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     private readonly TimeProvider _clock;
 

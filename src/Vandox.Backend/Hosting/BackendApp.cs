@@ -29,22 +29,22 @@ public static class BackendApp
 
         if (options.Help)
         {
-            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor)).ConfigureAwait(false);
+            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor), CancellationToken.None).ConfigureAwait(false);
 
             return 0;
         }
 
         if (options.Error.Length > 0)
         {
-            await stderr.WriteLineAsync(options.Error).ConfigureAwait(false);
-            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor)).ConfigureAwait(false);
+            await stderr.WriteLineAsync(options.Error, CancellationToken.None).ConfigureAwait(false);
+            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor), CancellationToken.None).ConfigureAwait(false);
 
             return 2;
         }
 
         if (options.Version)
         {
-            await stdout.WriteLineAsync(VersionInfo.Describe(CommandLine.BinaryName, typeof(Program).Assembly)).ConfigureAwait(false);
+            await stdout.WriteLineAsync(VersionInfo.Describe(CommandLine.BinaryName, typeof(Program).Assembly), CancellationToken.None).ConfigureAwait(false);
 
             return 0;
         }

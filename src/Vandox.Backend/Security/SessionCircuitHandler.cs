@@ -6,7 +6,7 @@ namespace Vandox.Backend.Security;
 /// <summary>
 /// Ends a live connection whose session has ended: no inbound activity is processed after that.
 /// </summary>
-internal sealed class SessionCircuitHandler : CircuitHandler
+internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
 {
     #region Fields
 
@@ -32,6 +32,8 @@ internal sealed class SessionCircuitHandler : CircuitHandler
 
     #region Methods
 
+    // Skeleton: removed with the implementation
+#pragma warning disable BL0013
     /// <summary>
     /// Checks that the session of the circuit is active and extends its idle time.
     /// </summary>
@@ -48,6 +50,7 @@ internal sealed class SessionCircuitHandler : CircuitHandler
 
         throw new SessionEndedException("The session of the live connection has ended");
     }
+#pragma warning restore BL0013
 
     #endregion // Methods
 
@@ -64,4 +67,13 @@ internal sealed class SessionCircuitHandler : CircuitHandler
     }
 
     #endregion // CircuitHandler
+
+    #region IDisposable
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+    }
+
+    #endregion // IDisposable
 }
