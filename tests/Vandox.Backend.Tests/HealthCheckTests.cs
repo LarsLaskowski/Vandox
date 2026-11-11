@@ -82,5 +82,37 @@ public class HealthCheckTests
         Assert.AreEqual($"http://127.0.0.1:{fixture.WebPort}/healthz", healthy.Requests[0], "the probe asks the configured web address");
     }
 
+    /// <summary>
+    /// A probe whose token is already cancelled prints the failure line and returns 1 without an exception.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    [OSCondition(OperatingSystems.Linux)]
+    public async Task HealthCheckCancelledPrintsFailureAndExitsOne()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var cancelled = new CancellationTokenSource();
+        using var errors = new StringWriter();
+        var healthy = new StubHandler(_ =>
+                                      {
+                                          // Like the real handler, the request notices the cancelled token of the probe.
+                                          cancelled.Token.ThrowIfCancellationRequested();
+
+                                          return new HttpResponseMessage(HttpStatusCode.OK);
+                                      });
+
+        await cancelled.CancelAsync();
+
+        // Act
+        var code = await HealthCheckCommand.RunAsync(fixture.ConfigPath, errors, healthy, cancelled.Token);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.HasCount(1, healthy.Requests, "the probe was sent");
+        Assert.AreEqual("vandoxd: health check failed: timed out\n", errors.ToString(), "the failure line");
+    }
+
     #endregion // Methods
 }

@@ -120,6 +120,49 @@ public partial class HashPasswordCommandTests
     }
 
     /// <summary>
+    /// An interruption that arrives right after the first line was read does not suppress the result: an accepted password still prints its hash with exit code 0,
+    /// a refused one the refusal with exit code 1.
+    /// </summary>
+    /// <param name="accepted">Whether the password is accepted</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task HashPasswordCommandPrintsResultWhenCancelledAfterRead(bool accepted)
+    {
+        // Arrange
+        var password = accepted ? "abcdefghijkl" : "zzzzzzzzzzz";
+
+        using var source = new CancellationTokenSource();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        using var stdin = new CancellingTextReader(password + "\nsecond line\n", source);
+
+        // Act
+        var code = await HashPasswordCommand.RunAsync(stdin, stdout, stderr, source.Token);
+
+        // Assert
+        Assert.IsTrue(source.IsCancellationRequested, "the interruption arrived after the read");
+
+        if (accepted)
+        {
+            var output = stdout.ToString();
+
+            Assert.AreEqual(0, code, "exit code of the accepted password");
+            Assert.AreEqual(string.Empty, stderr.ToString(), "nothing on standard error");
+            Assert.IsTrue(HashLine().IsMatch(output), $"one hash line of the default form: {output}");
+            Assert.IsTrue(PasswordHash.Parse(output.TrimEnd('\n')).Verify(password), "the hash verifies the password");
+        }
+        else
+        {
+            Assert.AreEqual(1, code, "exit code of the refused password");
+            Assert.AreEqual(HashPasswordCommand.RefusedText + "\n", stderr.ToString(), "the refusal on standard error");
+            Assert.AreEqual(string.Empty, stdout.ToString(), "nothing on standard output");
+        }
+    }
+
+    /// <summary>
     /// Builds an accepted input.
     /// </summary>
     /// <param name="kind">The kind of input</param>

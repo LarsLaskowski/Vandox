@@ -12,6 +12,16 @@ namespace Vandox.Backend.Tests;
 [OSCondition(OperatingSystems.Linux)]
 public partial class LoginTests
 {
+    #region Fields
+
+    /// <summary>
+    /// The headers that differ between two answers of the same request (<c>Date</c>) or that frame a body, which an answer to <c>HEAD</c> does not send
+    /// (<c>Transfer-Encoding</c>, <c>Content-Length</c>; RFC 9110, 9.3.2).
+    /// </summary>
+    private static readonly string[] _variableHeaders = ["Date", "Transfer-Encoding", "Content-Length"];
+
+    #endregion // Fields
+
     #region Properties
 
     /// <summary>
@@ -139,6 +149,114 @@ public partial class LoginTests
         Assert.AreEqual("/", second.Headers.Location?.OriginalString, "the second post goes home");
         Assert.AreEqual(HttpStatusCode.Found, page.StatusCode, "the signed-in login page redirects");
         Assert.AreEqual("/", page.Headers.Location?.OriginalString, "the signed-in login page goes home by path");
+    }
+
+    /// <summary>
+    /// A <c>HEAD /login</c> without a session is answered like the <c>GET /login</c> of the sign-in page: status <c>200</c>, the same headers, and no body.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task LoginHeadWithoutSessionAnswersLikeGet()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await fixture.StartServiceAsync(stop.Token, TestContext.CancellationToken);
+
+        using var getClient = new LoginTestClient(fixture.WebPort);
+        using var headClient = new LoginTestClient(fixture.WebPort);
+        using var get = await getClient.GetAsync("/login", TestContext.CancellationToken);
+
+        // Act
+        using var head = await headClient.SendAsync(HttpMethod.Head, "/login", null, null, TestContext.CancellationToken);
+
+        var body = await head.Content.ReadAsByteArrayAsync(TestContext.CancellationToken);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        TestContext.WriteLine($"GET /login: {(int)get.StatusCode}{Environment.NewLine}{string.Join(Environment.NewLine, HeaderLines(get, false))}");
+        TestContext.WriteLine($"HEAD /login: {(int)head.StatusCode}, {body.Length} body bytes{Environment.NewLine}{string.Join(Environment.NewLine, HeaderLines(head, false))}");
+
+        Assert.AreEqual(HttpStatusCode.OK, get.StatusCode, "status of the GET");
+        Assert.AreEqual(HttpStatusCode.OK, head.StatusCode, "status of the HEAD");
+        Assert.AreSequenceEqual(HeaderLines(get, true), HeaderLines(head, true), "the headers of the HEAD are those of the GET");
+        Assert.IsEmpty(body, "no body");
+    }
+
+    /// <summary>
+    /// With a session, a <c>HEAD /</c> is answered like the <c>GET /</c> of the same session: the same status and headers, and no body.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task LoginSignedInHeadAnswersLikeGet()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await fixture.StartServiceAsync(stop.Token, TestContext.CancellationToken);
+
+        using var client = new LoginTestClient(fixture.WebPort);
+        using var signIn = await client.PostLoginAsync(BackendFixture.Password, TestContext.CancellationToken);
+        using var get = await client.GetAsync("/", TestContext.CancellationToken);
+
+        // Act
+        using var head = await client.SendAsync(HttpMethod.Head, "/", null, null, TestContext.CancellationToken);
+
+        var body = await head.Content.ReadAsByteArrayAsync(TestContext.CancellationToken);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        TestContext.WriteLine($"signed-in GET /: {(int)get.StatusCode}{Environment.NewLine}{string.Join(Environment.NewLine, HeaderLines(get, false))}");
+        TestContext.WriteLine($"signed-in HEAD /: {(int)head.StatusCode}, {body.Length} body bytes{Environment.NewLine}{string.Join(Environment.NewLine, HeaderLines(head, false))}");
+
+        Assert.IsTrue(client.HasSession, "the client holds a session cookie");
+        Assert.AreEqual(get.StatusCode, head.StatusCode, "the status of the HEAD is that of the GET");
+        Assert.AreSequenceEqual(HeaderLines(get, true), HeaderLines(head, true), "the headers of the HEAD are those of the GET");
+        Assert.IsEmpty(body, "no body");
+    }
+
+    /// <summary>
+    /// Lists the headers of a response and of its content as <c>name: value</c> lines, sorted by name.
+    /// </summary>
+    /// <param name="response">The response</param>
+    /// <param name="comparable">
+    /// Whether to leave out what differs between two answers of the same request or between a <c>GET</c> and a <c>HEAD</c> by HTTP itself: the
+    /// <c>Date</c> header, the framing headers of a body and the values of cookies
+    /// </param>
+    /// <returns>The lines</returns>
+    private static string[] HeaderLines(HttpResponseMessage response, bool comparable)
+    {
+        var headers = response.Headers.Concat(response.Content.Headers);
+
+        if (comparable)
+        {
+            headers = headers.ExceptBy(_variableHeaders, header => header.Key, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return headers.SelectMany(header => header.Value.Select(value => $"{header.Key}: {(comparable && header.Key == "Set-Cookie" ? WithoutCookieValue(value) : value)}"))
+                      .Order(StringComparer.Ordinal)
+                      .ToArray();
+    }
+
+    /// <summary>
+    /// Replaces the value of a <c>Set-Cookie</c> header's cookie, keeping its name and attributes.
+    /// </summary>
+    /// <param name="setCookie">The header value</param>
+    /// <returns>The header value without the cookie's value</returns>
+    private static string WithoutCookieValue(string setCookie)
+    {
+        var equals = setCookie.IndexOf('=', StringComparison.Ordinal);
+        var end = setCookie.IndexOf(';', StringComparison.Ordinal);
+
+        return end < 0 ? setCookie[..(equals + 1)] : setCookie[..(equals + 1)] + setCookie[end..];
     }
 
     /// <summary>
