@@ -12,7 +12,13 @@ repository (record 0074): keep it true when the build changes.
   patch, so `setup-go` uses the newest 1.27.x available on the runner. `gofmt` as the formatter, `go vet` and
   **golangci-lint** `v2.14.0` (`.golangci.yml`) as the analyzers, `govulncheck` (a `tool` dependency in
   `go.mod`) for known vulnerabilities.
-- .NET SDK `10.0` (`global.json`, `rollForward: latestFeature`), solution `Vandox.slnx`, central package
+- .NET SDK of `global.json` (`10.0.403`; `rollForward` `latestFeature`: the newest installed feature band of that
+  major, never the next major), target framework `net10.0`, solution `Vandox.slnx`. Several majors may be installed
+  side by side (a machine, CI); the repository is built for one: every project's target framework, `global.json` and
+  every .NET image name the same major, which `dotnet_major.py` checks in the *Analyzer gate*, and a new project gets
+  it from the SDK `global.json` selects. Dependabot keeps the SDK and the packages current within that major (the
+  image digests are refreshed by hand, record 0041); the move to the next one (target frameworks, `global.json`, the
+  Microsoft.Extensions and Microsoft.Data.Sqlite packages, the images) is one change of its own. Central package
   management (`Directory.Packages.props`), shared build settings in `Directory.Build.props`. Analyzers:
   `Reihitsu.Analyzer` and `SonarAnalyzer.CSharp`, every diagnostic an error (`TreatWarningsAsErrors`). Formatter:
   `reihitsu-format` (local tool, `dotnet-tools.json`). Tests: MSTest 4 with coverlet (`coverlet.runsettings`).
@@ -109,17 +115,18 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    The `.editorconfig` raises the diagnostics that SonarQube Cloud lists but the compiler reports only at info level
    (`MSTEST0037`, `MSTEST0068`, `ASP0015`, `SYSLIB1092`, `IDE0028`) to errors; add an id there when SonarQube reports a
    new one that the build did not. SonarQube Cloud analyses this project with the built-in C# profile *Sonar way
-   comprehensive* (376 rules), while the SonarAnalyzer package runs by default only the rules of *Sonar way core*
-   (166), so `.editorconfig` switches on every `csharpsquid` rule the comprehensive profile has beyond core (204 ids,
-   generated on 2026-10-12 from the two profiles' active rules through `api/qualityprofiles/search` and
-   `api/rules/search?qprofile=…&activation=true` of `sonarcloud.io`, organization `networlddev`) as errors — among
-   them the cognitive-complexity rule `S3776` (threshold 15, the same as SonarQube Cloud): keep methods below it while
-   writing them instead of splitting them after the gate fails. `tests/**` is excluded from the cloud analysis
-   (`ci.yml`, `sonar.exclusions`), so `S107` (more than seven parameters) is switched off there, where data-driven
-   test methods need them. A rule that runs only under the scanner stays cloud-only even when listed: `S1192`
-   (duplicated string literals) is one, found on PR #214 and reported by no local build. When the cloud profile
-   changes, or SonarQube reports a `csharpsquid` rule the local build did not, regenerate the block the same way and
-   note a scanner-only rule here.
+   comprehensive*, while the SonarAnalyzer package runs by default only the rules of *Sonar way core*. The rules the
+   comprehensive profile adds, and the core rules it switches off, are set in the `squad:sonar-rules` block of
+   `.editorconfig`, which `python3 .squad/tools/sonar-rules.py` writes from the two profiles (`--check` reports a block
+   out of date; severity `SONAR_RULES_SEVERITY` in `squad_settings.py`, here `error`): the *Analyzer gate* reports
+   them, among them the cognitive-complexity rule `S3776` (threshold 15, the same as SonarQube Cloud): keep methods
+   below it while writing them instead of splitting them after the gate fails. `S107` (more than seven
+   parameters) is switched off again in the `[tests/**.cs]` section after the block: `tests/**` is excluded
+   from the cloud analysis (`ci.yml`, `sonar.exclusions`), and data-driven test methods need the parameters; a
+   section of a path keeps its own choice only after the block, which `sonar-rules.py` warns about otherwise. A rule that runs only under the scanner stays cloud-only even when set: `S1192` (duplicated
+   string literals) is one, found on PR #214 and reported by no local build. When the cloud profile changes, or
+   SonarQube reports a `csharpsquid` rule the local build did not, run `sonar-rules.py` again and note a scanner-only
+   rule here.
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
 Other SonarQube Cloud findings (further rules, hotspots, duplication) have no local equivalent: the *Sonar gate*
@@ -371,14 +378,15 @@ documentation, bodies `throw new NotImplementedException();`, so the solution bu
 Constructors store their arguments and never throw: a test harness builds these types, so only member bodies
 fail. The skeleton body above is the default; a zero-value stub is allowed only where it would break a test that
 exists and passes today: the new tests must still fail on the stub, and the Dev reports it as a deviation.
-A private C# member or parameter that nothing calls or reads yet fails the build as S1144 (unused private member) or
-S1172 (unused parameter). Wrap exactly those members in `#pragma warning disable S1144, S1172` /
-`#pragma warning restore S1144, S1172` with the comment `// Skeleton: removed with the implementation`; the Dev lists
-each pragma in its report and removes it in mode `implement`, and the Reviewer blocks one that is still there.
+A C# skeleton raises diagnostics by construction, which the zero-diagnostic rule does not count against it: S1144
+(unused private member), S1172 (unused parameter), S4487 (a private field assigned but not read yet), S2325 (a member
+that does not use instance data yet), CS0067 (an event never raised yet), CS0649 (a field never assigned yet) and
+RH2003 (`NotImplementedException`). Wrap exactly the members that raise one in `#pragma warning disable <the ids the
+build reports>` / `#pragma warning restore <the same ids>` with the comment `// Skeleton: removed with the
+implementation` — no other id; where every member of a new file raises RH2003 or S2325, one pair around the type
+does. The Dev lists each pragma in its report and removes it in mode `implement`, the Reviewer blocks one that is
+still there, and no skeleton pragma may remain when the *Analyzer gate* runs in step 7.
 New skeleton files follow the C# layout in *Writing code* (no final newline); run *Format* on them before *Build*.
-Reihitsu `RH2003` forbids `NotImplementedException` and Sonar `S2325` flags instance members that do not use `this`,
-so every skeleton file carries `#pragma warning disable RH2003, S2325` before its type and the Dev
-removes the line when implementing the file; no skeleton pragma may remain when the *Analyzer gate* runs in step 7.
 
 File names of C# types: the file is named after its type, and for a generic type Reihitsu `RH4001` expects the
 type parameters in braces — `NullAsAbsentConverter{T}.cs`, `NullElementListConverter{TItem}.cs`. A name without
