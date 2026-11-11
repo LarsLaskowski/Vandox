@@ -30,7 +30,12 @@ updates:
         patterns:
           - "*"
 
+  # The SDK of global.json: patch and feature bands as they are released; the next major (10 to 11) comes with the
+  # change of the target framework, never alone.
   - package-ecosystem: dotnet-sdk
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
