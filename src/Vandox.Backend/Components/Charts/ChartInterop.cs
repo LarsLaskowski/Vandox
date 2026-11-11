@@ -48,8 +48,6 @@ public sealed class ChartInterop : IAsyncDisposable
 
     #region Methods
 
-    // Skeleton: removed with the implementation
-#pragma warning disable BL0016
     /// <summary>
     /// Creates the chart on the first call and updates it on later calls.
     /// </summary>
@@ -75,7 +73,7 @@ public sealed class ChartInterop : IAsyncDisposable
         {
             if (_disposed)
             {
-                return true;
+                return false;
             }
 
             if (_chart is not null)
@@ -93,12 +91,16 @@ public sealed class ChartInterop : IAsyncDisposable
 
             return true;
         }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone; a failed call leaves its object unset, so a later render tries again.
+            return false;
+        }
         finally
         {
             _gate.Release();
         }
     }
-#pragma warning restore BL0016
 
     #endregion // Methods
 

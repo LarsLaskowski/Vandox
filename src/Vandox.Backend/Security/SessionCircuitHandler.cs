@@ -13,6 +13,8 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     private readonly AuthenticationStateProvider _authenticationStateProvider;
     private readonly SessionStore _sessions;
 
+    private Task<AuthenticationState>? _state;
+
     #endregion // Fields
 
     #region Constructors
@@ -26,14 +28,14 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     {
         _authenticationStateProvider = authenticationStateProvider;
         _sessions = sessions;
+
+        _authenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
     }
 
     #endregion // Constructors
 
     #region Methods
 
-    // Skeleton: removed with the implementation
-#pragma warning disable BL0013
     /// <summary>
     /// Checks that the session of the circuit is active and extends its idle time.
     /// </summary>
@@ -41,7 +43,20 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     /// <exception cref="SessionEndedException">The session has ended</exception>
     internal async Task CheckSessionAsync()
     {
-        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        // The event comes from hub threads and the revalidation loop, not from the circuit's dispatcher: the first read
+        // stores its state only if no change was announced meanwhile. A read that throws stores nothing.
+        var announced = Volatile.Read(ref _state);
+
+        if (announced is null)
+        {
+            var initial = _authenticationStateProvider.GetAuthenticationStateAsync();
+
+            await initial.ConfigureAwait(false);
+
+            announced = Interlocked.CompareExchange(ref _state, initial, null) ?? initial;
+        }
+
+        var state = await announced.ConfigureAwait(false);
 
         if (_sessions.Touch(state.User))
         {
@@ -50,7 +65,15 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
 
         throw new SessionEndedException("The session of the live connection has ended");
     }
-#pragma warning restore BL0013
+
+    /// <summary>
+    /// Stores the announced authentication state.
+    /// </summary>
+    /// <param name="task">The new authentication state</param>
+    private void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        Volatile.Write(ref _state, task);
+    }
 
     #endregion // Methods
 
@@ -73,6 +96,7 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
+        _authenticationStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
     }
 
     #endregion // IDisposable
