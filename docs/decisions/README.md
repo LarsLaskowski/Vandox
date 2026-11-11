@@ -238,5 +238,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0199 | The live connection's session check follows authentication state changes instead of reading the state per event | Accepted | 2026-11-11 |
 | 0200 | A chart draw on a lost connection ends quietly and is drawn again; BL0016 is off for test code | Accepted | 2026-11-11 |
 | 0201 | The output writes of `vandoxd` commands opt out of cancellation explicitly | Accepted | 2026-11-11 |
-| 0202 | A reconnected live connection follows the session of its new connection | Proposed | 2026-11-11 |
+| 0202 | A reconnected live connection follows the session of its new connection | Accepted | 2026-11-11 |
 <!-- project:end index -->

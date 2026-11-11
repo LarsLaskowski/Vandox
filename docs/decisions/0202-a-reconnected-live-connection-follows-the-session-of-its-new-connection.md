@@ -1,6 +1,6 @@
 # 0202: A reconnected live connection follows the session of its new connection
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-11
 - **Area:** Web login
 - **Source:** Issue #416
