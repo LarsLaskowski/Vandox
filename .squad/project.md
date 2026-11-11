@@ -1,8 +1,8 @@
 # Project
 
 What the squad needs to know beyond the stack; read by the Lead, the Devil's Advocate, Security, the Tester and the
-Reviewer. The agent `vandox-agent` is Go (`cmd/vandox-agent`, `internal/`), the backend `vandoxd` .NET 10 with
-Blazor (`src/Vandox.*`, record 0073). Not template-managed: `adopt-template` creates it once; a product PR updates
+Reviewer. The agent `vandox-agent` is Go (`cmd/vandox-agent`, `internal/`), the backend `vandoxd` .NET 11 with
+Blazor (`src/Vandox.*`, records 0073, 0197). Not template-managed: `adopt-template` creates it once; a product PR updates
 it when the change makes an entry untrue (`.squad/routing.md`, *Scope of a product PR*).
 
 Every entry points: it names files or endpoints and links the area document (`docs/areas/README.md`) or record that
@@ -188,6 +188,6 @@ marked planned.
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
 | Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
-| web login (C#) | `BackendFixture`, `LoginTestClient`, `ScriptedPasswordVerifier`, `Fixed*` providers (Backend tests) | service, browser |
+| web login (C#) | `BackendFixture`, `LoginTestClient`, `ScriptedPasswordVerifier`, `Fixed*` and `Unset*` providers (Backend tests) | service, browser |
 | ingest (C#) | `IngestRig`, `IngestCall`, `RecordingRecordWriter`, `CountingBodyStream`, `StartingResponseBody` (Backend tests) | request, writer |
 | Telegram Bot API | planned: a fake client | the Bot API |

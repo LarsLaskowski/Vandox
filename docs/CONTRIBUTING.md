@@ -192,7 +192,7 @@ that boundary.
 `BASE_<NAME>_TAG` and `BASE_<NAME>_DIGEST`. `FROM` uses only the image and the digest. Dependabot cannot
 read these lines, so the digests are refreshed by hand in a pull request: before every release tag, and
 whenever a .NET patch release or a base image update appears. Read the multi-arch index digest of exactly the tag in
-`BASE_<NAME>_TAG`, for example `docker buildx imagetools inspect mcr.microsoft.com/dotnet/sdk:10.0` (the `Digest:`
+`BASE_<NAME>_TAG`, for example `docker buildx imagetools inspect mcr.microsoft.com/dotnet/sdk:11.0` (the `Digest:`
 line), and write it to `BASE_<NAME>_DIGEST` in a pull request. A new .NET major version changes the
 target framework in `Directory.Build.props`, `global.json`, `BASE_BUILD_TAG`, `BASE_RUNTIME_TAG` and both
 digests together (`.github/scripts/check-builder-dotnet-version.sh` checks that they agree). The release build passes no

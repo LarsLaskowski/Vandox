@@ -189,6 +189,8 @@ finish, the database is closed, the service logs `vandoxd stopped` and exits 0.
 
 ## Related decisions
 
+- [0197](../decisions/0197-backend-moves-to-dotnet-11-on-the-resolute-chiseled-runtime.md) — why .NET 11 on the Ubuntu 26.04 chiseled runtime.
+- [0201](../decisions/0201-command-output-writes-opt-out-of-cancellation.md) — why the commands write their output with `CancellationToken.None`.
 - [0017](../decisions/0017-ingest-via-tailnet-address-and-published-port.md) — why the host's tailnet address and a published port, not `tsnet`.
 - [0023](../decisions/0023-tls-through-a-reverse-proxy.md) — why TLS is terminated by a reverse proxy.
 - [0059](../decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md) — why `/healthz` reads the database and the binary is the probe.

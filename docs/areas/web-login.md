@@ -46,14 +46,15 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 ### Access
 
 - Every request on the web listener needs a session, except:
-  - `GET /login` and the post of the login form (a `HEAD /login` without a session is answered like an unknown path, `302` to `/login`);
+  - `GET /login` and the post of the login form (a `HEAD /login` without a session is answered like `GET /login`, without a body: `200`, the same headers apart from `Transfer-Encoding`, and a fresh `vandox_csrf` cookie);
   - `GET` and `HEAD /healthz` ([Backend host](backend-host.md), *Health*);
   - the static files of the web UI (style sheets, scripts, brand images and the framework script; the same files for every
     installation, without data);
   - `POST /logout`.
-- Without a session, a `GET` or `HEAD` request is answered `302` with `Location: /login`, also for a path that does not exist, so an
+- Without a session, a `GET` or `HEAD` request (`HEAD /login` excepted) is answered `302` with `Location: /login`, also for a path that does not exist, so an
   anonymous visitor cannot tell which paths exist; the login does not carry a return address, and after signing in the user lands on
   `/`. Every other request without a session, including those of the live connection (`/_blazor`), is answered `401`.
+- With a session, a `HEAD` request to a page is answered like its `GET`, without a body (from .NET 11 on); `HEAD /` answers `200` with an empty body.
 - With a session, a path that does not exist shows the *Not found* page with status `404`; a signed-in user who opens `/login` is sent
   to `/` (`302`). A post of the login form that carries a session is sent to `/` (`302`) as well, before its antiforgery token is
   looked at: that token was issued before the sign-in and no longer matches, so a second click on the button or a login page left
@@ -187,6 +188,8 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 - [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) — why argon2id in strict PHC form, Konscious and `hash-password`.
 - [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why forwarded headers only from configured proxies, the per-client lockout and the overall cap.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why a note is saved by a plain form post with the token to an endpoint behind the session.
+- [0198](../decisions/0198-razor-component-endpoints-answer-head-from-dotnet-11.md) — why `HEAD /login` is answered like `GET` and a signed-in `HEAD` of a page like its `GET`, without a body.
+- [0199](../decisions/0199-session-circuit-handler-follows-authentication-state-changes.md) — why the circuit handler follows the authentication state changes instead of reading the provider on every event.
 - [0016](../decisions/0016-web-ui-in-home-lan-with-login.md) — why the UI is LAN-only with a login.
 - [0023](../decisions/0023-tls-through-a-reverse-proxy.md) — why TLS is terminated by a reverse proxy.
 - [0060](../decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md) — why the loopback binding is not a security boundary.
