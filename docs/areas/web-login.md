@@ -86,12 +86,14 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   copy of it, no longer signs anyone in.
 - Sign-out: every page shows a *Sign out* button in its header. `POST /logout` with a valid antiforgery token ends the session on the
   server, deletes the cookie and answers `303` with `Location: /login`; without a session it only redirects.
-- A live connection belongs to the session that opened it. Every event, interop call and navigation it sends is checked against the
-  session first; once the session has ended, an event, interop call or navigation it sends ends the connection and is not processed.
-  Not checked: the acknowledgement of a render (the framework discards the result of the check, so it is only dropped), calls that
-  update root components (the framework does not pass them through the check; the pages do not send them, since routing is
-  interactive for the whole application) and the data of a transfer from the server to the browser that had already started (no page
-  uses such transfers). A page also
+- A live connection is checked against the session of the connection it runs on: the one that opened it and, after a reconnect, the
+  one of the new connection's cookie, which must be an active session (the browser keeps one cookie for all tabs, so a tab that
+  reconnects after a new sign-in continues on the new session). Every event, interop call, navigation and update of root components
+  it sends is checked against that session first; once the session has ended, the connection ends and the call is not processed.
+  Each page sends one update of root components when its live connection starts.
+  Not checked: the acknowledgement of a render (the framework discards the result of the check, so it is only dropped), the restore
+  of the component state that an update of root components carries (it happens before the check; no page keeps such state) and the
+  data of a transfer from the server to the browser that had already started (no page uses such transfers). A page also
   checks its session every 30 seconds and goes to `/login` when it has ended, which bounds that window.
 
 ### Cross-site requests
@@ -190,6 +192,7 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why a note is saved by a plain form post with the token to an endpoint behind the session.
 - [0198](../decisions/0198-razor-component-endpoints-answer-head-from-dotnet-11.md) — why `HEAD /login` is answered like `GET` and a signed-in `HEAD` of a page like its `GET`, without a body.
 - [0199](../decisions/0199-session-circuit-handler-follows-authentication-state-changes.md) — why the circuit handler follows the authentication state changes instead of reading the provider on every event.
+- [0202](../decisions/0202-a-reconnected-live-connection-follows-the-session-of-its-new-connection.md) — why a reconnected live connection follows the session of its new connection.
 - [0016](../decisions/0016-web-ui-in-home-lan-with-login.md) — why the UI is LAN-only with a login.
 - [0023](../decisions/0023-tls-through-a-reverse-proxy.md) — why TLS is terminated by a reverse proxy.
 - [0060](../decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md) — why the loopback binding is not a security boundary.
