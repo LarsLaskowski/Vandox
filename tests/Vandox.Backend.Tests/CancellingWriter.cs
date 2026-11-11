@@ -1,7 +1,7 @@
 namespace Vandox.Backend.Tests;
 
 /// <summary>
-/// A string writer that cancels a token as soon as anything is written to it.
+/// A string writer that cancels a token as soon as anything is written to it, through the string or the span overload (the asynchronous string overloads of .NET 11 write through the span overload).
 /// </summary>
 internal sealed class CancellingWriter : StringWriter
 {
@@ -25,6 +25,13 @@ internal sealed class CancellingWriter : StringWriter
     #endregion // Constructors
 
     #region TextWriter
+
+    /// <inheritdoc />
+    public override void Write(ReadOnlySpan<char> buffer)
+    {
+        base.Write(buffer);
+        _source.Cancel();
+    }
 
     /// <inheritdoc />
     public override void Write(string? value)

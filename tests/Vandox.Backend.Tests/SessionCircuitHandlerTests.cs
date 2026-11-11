@@ -81,6 +81,44 @@ public class SessionCircuitHandlerTests
     }
 
     /// <summary>
+    /// Once the handler is disposed it no longer follows state changes: a change to a user whose session ended does not change the user the next event is checked against.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SessionCircuitHandlerStopsFollowingStateWhenDisposed()
+    {
+        // Arrange
+        var sessions = new SessionStore(new FakeTimeProvider());
+        var active = NewTicket();
+        var ended = NewTicket();
+
+        await sessions.StoreAsync(active);
+        await sessions.RemoveAsync(await sessions.StoreAsync(ended));
+
+        var provider = new FixedAuthenticationStateProvider(active.Principal);
+        var handler = new SessionCircuitHandler(provider, sessions);
+        var calls = 0;
+        var inbound = handler.CreateInboundActivityHandler(_ =>
+                                                           {
+                                                               calls++;
+
+                                                               return Task.CompletedTask;
+                                                           });
+
+        await inbound(null!);
+
+        handler.Dispose();
+        provider.ChangeUser(ended.Principal);
+
+        // Act
+        await inbound(null!);
+
+        // Assert
+        Assert.AreEqual(2, calls, "the event after the disposal was checked against the active user, not the announced one, and reached the next handler");
+    }
+
+    /// <summary>
     /// Creates a ticket with a new session claim.
     /// </summary>
     /// <returns>The ticket</returns>

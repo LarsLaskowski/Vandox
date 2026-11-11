@@ -26,6 +26,8 @@ public class TimeSeriesChartTests
 
     private static readonly string[] _destroyed = ["chart.destroy"];
 
+    private static readonly string[] _drawnAgain = ["runtime.import", "module.create", "module.create"];
+
     #endregion // Fields
 
     #region Methods
@@ -102,6 +104,43 @@ public class TimeSeriesChartTests
         Assert.AreSequenceEqual(afterFirst, afterSame, "the same data instance calls nothing further");
         Assert.AreSequenceEqual(_afterNewData, afterNew, "a new data instance updates the chart");
         Assert.AreSequenceEqual(_destroyed, afterDispose.Skip(afterNew.Length).Take(1).ToArray(), "disposing destroys the chart");
+    }
+
+    /// <summary>
+    /// A first render that fails because the circuit is gone reaches no renderer and does not count as drawn: the next render with the same data creates the chart again.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task TimeSeriesChartDrawsAgainAfterDisconnectedRender()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var data = CreateData(1.0);
+
+        await using var services = new ServiceCollection().AddLogging().AddSingleton<IJSRuntime>(runtime).BuildServiceProvider();
+
+        var renderer = new ComponentTestRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        runtime.Fail("module", "create", new JSDisconnectedException("the circuit is gone"));
+
+        var id = await renderer.AddAsync<TimeSeriesChart>(Parameters("Load", data));
+
+        var afterFailure = runtime.Calls.Select(call => $"{call.Target}.{call.Identifier}").ToArray();
+
+        runtime.Recover("module", "create");
+
+        // Act
+        await renderer.UpdateAsync(id, Parameters("Load", data));
+
+        var afterRetry = runtime.Calls.Select(call => $"{call.Target}.{call.Identifier}").ToArray();
+
+        await renderer.DisposeAllAsync();
+
+        // Assert
+        Assert.IsEmpty(renderer.Exceptions, "the lost connection reached no renderer");
+        Assert.AreSequenceEqual(_afterFirstRender, afterFailure, "the first render imported the module and tried to create the chart");
+        Assert.AreSequenceEqual(_drawnAgain, afterRetry, "the same data instance creates the chart again");
     }
 
     /// <summary>

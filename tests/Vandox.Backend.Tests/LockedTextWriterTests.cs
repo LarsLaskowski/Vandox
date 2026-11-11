@@ -74,9 +74,9 @@ public class LockedTextWriterTests
 
         // Act
         WriteSynchronously(writer);
-        await writer.WriteAsync("e");
+        await writer.WriteAsync("e", TestContext.CancellationToken);
         WriteLineSynchronously(writer);
-        await writer.WriteLineAsync("g");
+        await writer.WriteLineAsync("g", TestContext.CancellationToken);
 
         // Assert
         Assert.AreEqual($"abcdef{newLine}g{newLine}", writer.ToString(), "every overload appends its text in write order");

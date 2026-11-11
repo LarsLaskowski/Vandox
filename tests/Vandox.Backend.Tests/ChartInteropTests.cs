@@ -386,6 +386,40 @@ public class ChartInteropTests
     }
 
     /// <summary>
+    /// A render whose call fails because the circuit is gone ends without an exception and reports that nothing was drawn, whichever call notices it.
+    /// </summary>
+    /// <param name="target">The target of the failing call</param>
+    /// <param name="identifier">The identifier of the failing call</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    [DataRow("runtime", "import")]
+    [DataRow("module", "create")]
+    [DataRow("chart", "update")]
+    public async Task ChartInteropRenderToleratesDisconnectedCircuit(string target, string identifier)
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var host = new ElementReference("host-1");
+
+        await using var interop = new ChartInterop(runtime);
+
+        if (target == "chart")
+        {
+            await interop.RenderAsync(host, "Load", CreateData(1.0), CancellationToken.None);
+        }
+
+        runtime.Fail(target, identifier, new JSDisconnectedException("the circuit is gone"));
+
+        // Act
+        var drawn = await interop.RenderAsync(host, "Load", CreateData(2.0), CancellationToken.None);
+
+        // Assert
+        Assert.IsFalse(drawn, "a render on a lost connection does not count as drawn");
+        Assert.AreEqual($"{target}.{identifier}", $"{runtime.Calls[^1].Target}.{runtime.Calls[^1].Identifier}", "the failing call was the last one made");
+    }
+
+    /// <summary>
     /// Creates chart data with two series; the offset tells the data of two renders apart.
     /// </summary>
     /// <param name="offset">The offset added to the values</param>
