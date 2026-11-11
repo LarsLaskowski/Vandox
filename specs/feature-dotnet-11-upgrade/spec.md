@@ -1,7 +1,7 @@
 # Spec: Move the backend to .NET 11
 
 Source: the user's description (log.md, step 1)
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -73,7 +73,8 @@ platform. The Go agent is not affected.
 - AC2: The *Analyzer gate* reports nothing for the whole solution on the 11 SDK with the newest `SonarAnalyzer.CSharp`
   release; `.editorconfig` sets `S8949` to `error` in its hand-maintained `[*.cs]` section, outside the
   `squad:sonar-rules` block; a rule new with this change that a deliberately offending line does not fail the build on
-  is set to `error` there too (S6). S8969 stays `error` through the `squad:sonar-rules` block (no hand line beside it,
+  is set to `error` there too (S6). BL0016 is off for test code only (`[tests/**.cs]`), where it reports every call on
+  the hand-written doubles of the JavaScript runtime. S8969 stays `error` through the `squad:sonar-rules` block (no hand line beside it,
   which would make the block out of date for `sonar-rules.py --check`), and the *Analyzer gate* confirms it after the
   Sonar update.
 - AC3: The Dockerfile builds on the `sdk:11.0` image and runs on the chiseled `aspnet` 11 image, both pinned by a current
@@ -98,13 +99,14 @@ platform. The Go agent is not affected.
   Dockerfile name .NET 11 (N2).
 - AC9: The framework and library facts that records 0097, 0098, 0099, 0103 and 0105 rest on are read again in the 11.0.0
   sources or packages, each with its source and result named in the plan's *Verified facts*; a record whose fact no longer
-  holds is superseded by a new record, and the code or area document it governs is brought in line (S7, N3).
+  holds is superseded or amended by a new record (`docs/decisions/README.md`), and the code or area document it governs
+  is brought in line (S7, N3).
 
 ## Out of scope
 
 - The Go agent and its toolchain.
 - New .NET 11 features or APIs beyond what a fixed diagnostic needs; no behavior change beyond what a fixed diagnostic
-  requires (AC5 to AC7).
+  requires (AC5 to AC7) or a changed framework fact brings with it (AC9).
 - Measurements recorded on .NET 10 (`docs/BENCHMARKS.md`, timings in area documents): they stay as measured; no
   re-measurement on .NET 11.
 - Packages other than those named in AC1 and AC2 (Dependabot keeps them current).
@@ -123,27 +125,22 @@ platform. The Go agent is not affected.
   `TreatWarningsAsErrors` turns into build errors, and `MSTEST0049` and `S8969` are already `error` in `.editorconfig`.
   A line for them would be redundant; S8949 gets one because the user asked for it explicitly, and AC2 keeps the check
   for a rule the newer Sonar release adds below warning level.
-- Q3: Claims of the description checked against the trial build and the package feeds. Answered: confirmed are IDE0028 in 11 places of
-  Vandox.Core; CA1830 in FtsQuery.cs and ImportRepository.cs; CA2016 and S8949 in the CLI commands and BackendApp.cs;
-  BL0016 in ChartInterop.cs (three calls in the render path); BL0013 in SessionCircuitHandler.cs; CA2026 in tests
-  (BackupRunTests.cs among them); `sdk:11.0` exists; `Microsoft.Data.Sqlite` and
-  `Microsoft.Extensions.TimeProvider.Testing` 11.0.0 exist. Refuted: S8949 needs no Sonar update (10.35.0.4138 already
-  reports it); S8969 is in 10.35.0.4138 too and is not reported by it on `main`. Not named in the description: CA1830
-  also in `src/Vandox.Import/PathText.cs`; BL0016 in the test doubles `RecordingJsRuntime.cs`,
-  `RecordingJsObjectReference.cs` and in `ChartInteropTests.cs`; S8949 and MSTEST0049 in `LockedTextWriterTests.cs`.
-  The newest Sonar release is 10.36.0.15337; it may report more, which the *Analyzer gate* decides.
+- Q3: Claims of the description. Answered: (Lead, trial build and package feeds) confirmed: IDE0028 in 11 places of
+  Vandox.Core; CA1830, CA2016, S8949, BL0016, BL0013 and CA2026 where the description names them; `sdk:11.0` and both
+  packages at 11.0.0 exist. Refuted: S8949 needs no Sonar update (10.35.0.4138 reports it); S8969 is not reported on
+  `main`. More sites than named: the plan's *Verified facts*.
 - Q4: Whether the project blocks of `AGENTS.md` may change in a product PR. Answered: yes (`AGENTS.md`, *Related skills*);
   `.github/copilot-instructions.md` must stay identical (`config-check.py`).
 
 ## Area documents
 
-- [backend-host](../../docs/areas/backend-host.md), *Container image*: the runtime image is the chiseled ASP.NET 11 image
-  (its distribution named if the document names one); nothing else changes.
-- No other area document changes: the behavior of S3 to S5 is unchanged, and the fixes of E1 to E3 keep what
-  [web-login](../../docs/areas/web-login.md), [web-ui](../../docs/areas/web-ui.md) and
-  [backend-host](../../docs/areas/backend-host.md) state today (none of them describes a chart failure on a lost
-  connection) — unless AC9 finds a changed framework fact, in which case the area document the superseding record
-  governs states the new behavior.
+- [web-login](../../docs/areas/web-login.md), *Access*: a `HEAD /login` without a session is answered like
+  `GET /login` without a body, because Razor component endpoints accept `HEAD` from .NET 11 on (AC9, found while
+  planning).
+- [web-ui](../../docs/areas/web-ui.md), *Charts*: a draw on a lost connection ends without an error and is drawn again on
+  the next render (AC6).
+- No other area document changes: [backend-host](../../docs/areas/backend-host.md) names neither a .NET version nor a
+  distribution of the runtime image, and the behavior of S3, S5, E2 and E3 stays as web-login and backend-host state it.
 
 ## Challenge
 

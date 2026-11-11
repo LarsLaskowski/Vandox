@@ -233,4 +233,9 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0194 | `install.sh` accepts only the IPv6 literals the agent parses | Accepted | 2026-11-09 |
 | 0195 | A backfill's CPU above 1 % of one core is an accepted deviation; the criterion stays the mean over the run | Accepted | 2026-11-09 |
 | 0196 | Load-dependent Go tests are stress-run from a list in a path-filtered workflow | Accepted | 2026-11-10 |
+| 0197 | The backend moves to .NET 11; the runtime image becomes the chiseled Ubuntu 26.04 ASP.NET image | Proposed | 2026-11-11 |
+| 0198 | Razor component endpoints answer HEAD from .NET 11 on; the login page answers HEAD without a session | Proposed | 2026-11-11 |
+| 0199 | The live connection's session check follows authentication state changes instead of reading the state per event | Proposed | 2026-11-11 |
+| 0200 | A chart draw on a lost connection ends quietly and is drawn again; BL0016 is off for test code | Proposed | 2026-11-11 |
+| 0201 | The output writes of `vandoxd` commands opt out of cancellation explicitly | Proposed | 2026-11-11 |
 <!-- project:end index -->
