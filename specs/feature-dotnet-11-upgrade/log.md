@@ -32,3 +32,4 @@ are quoted in full.
 | 2026-11-11 15:53 | 8 Security diff | Security | VERDICT: APPROVED — no findings; all plan notes resolved; digests re-measured on MCR (opus/medium · 80,927 tokens · 16 tool uses · 88 s · 28 in · 8,300 out · 733,755 cache read · 77,416 cache write · 349,972 weighted) |
 | 2026-11-11 16:11 | 9 Manual check AC4 | Product Manager | AC4 passed: the image built from the branch (code SHA 7d33cf81dc9a, head 13e31887f96d76020e81d720f10e9f5aad2e5baf) runs on the DS918+; sign-off by the Product Manager |
 | 2026-11-11 16:11 | 9 PR approval | Orchestrator | approved by checklist: stamp and review round clean, AC4 signed off by the Product Manager; records 0197-0201 Accepted, 0073 Superseded by 0197; no decision open |
+| 2026-11-11 16:13 | 7 Gate stamp | Orchestrator | PASS on a435a2c8ae7bbebbab82b4af97ba4ea6339c6728 (tier security, verbatim): Format check pass; decision-check.py pass; scope-check.py pass |
