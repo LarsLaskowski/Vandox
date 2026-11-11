@@ -23,7 +23,7 @@ internal sealed class StrictYamlDecoder
     private static readonly string[] _secretWords = ["token", "password", "secret"];
 
     private readonly string _file;
-    private readonly Dictionary<string, int> _lines = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _lines = [with(StringComparer.Ordinal)];
 
     #endregion // Fields
 

@@ -43,7 +43,7 @@ internal sealed partial class LoginTestClient : IDisposable
     #region Fields
 
     private readonly HttpClient _client;
-    private readonly Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _cookies = [with(StringComparer.Ordinal)];
     private readonly string _baseAddress;
 
     #endregion // Fields

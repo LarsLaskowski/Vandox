@@ -117,7 +117,7 @@ internal sealed class WireKeyCheck
     /// <returns>The first violation, or <c>null</c></returns>
     private string? WalkObject(JsonElement element, int depth)
     {
-        var set = _sets[depth] ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var set = _sets[depth] ??= [with(StringComparer.OrdinalIgnoreCase)];
         var keys = _keys[depth] ??= [];
         var count = element.GetPropertyCount();
 

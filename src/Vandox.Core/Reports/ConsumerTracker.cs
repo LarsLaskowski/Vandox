@@ -17,7 +17,7 @@ public sealed class ConsumerTracker
     #region Fields
 
     private readonly int _maxPrograms;
-    private readonly Dictionary<string, ProgramStatistics> _programs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ProgramStatistics> _programs = [with(StringComparer.Ordinal)];
 
     #endregion // Fields
 

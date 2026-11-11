@@ -12,7 +12,7 @@ internal sealed partial class TimelineStatement : IDisposable
     #region Fields
 
     private readonly SqliteCommand _command;
-    private readonly Dictionary<string, SqliteParameter> _parameters = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SqliteParameter> _parameters = [with(StringComparer.Ordinal)];
 
     #endregion // Fields
 

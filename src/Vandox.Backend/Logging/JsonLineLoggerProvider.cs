@@ -14,7 +14,7 @@ public sealed class JsonLineLoggerProvider : ILoggerProvider
     private readonly TextWriter _writer;
     private readonly LogLevel _minimum;
     private readonly TimeProvider _clock;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     #endregion // Fields
 

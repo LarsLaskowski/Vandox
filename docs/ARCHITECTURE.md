@@ -108,7 +108,7 @@ way, and agents of the hosting provider are never disabled or changed
   ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample.md),
   [0136](decisions/0136-systemd-notification-by-hand-and-a-watchdog-gated-on-the-collector-runners.md),
   [0111](decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md)).
-- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
+- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 11 ([0197](decisions/0197-backend-moves-to-dotnet-11-on-the-resolute-chiseled-runtime.md); ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
   imports logs saved on the backend host

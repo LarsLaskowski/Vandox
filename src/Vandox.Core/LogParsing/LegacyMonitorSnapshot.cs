@@ -43,9 +43,9 @@ internal sealed class LegacyMonitorSnapshot
     private readonly DateTimeOffset _capturedAt;
     private readonly Dictionary<string, LegacyCounter> _counters;
     private readonly List<(long Line, string Reason)> _held = [];
-    private readonly HashSet<string> _meminfoFields = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _pressureKeys = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _vmstatCounters = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _meminfoFields = [with(StringComparer.Ordinal)];
+    private readonly HashSet<string> _pressureKeys = [with(StringComparer.Ordinal)];
+    private readonly HashSet<string> _vmstatCounters = [with(StringComparer.Ordinal)];
     private LegacySnapshotPhase _phase = LegacySnapshotPhase.Load;
     private LegacySection _section = LegacySection.None;
     private LegacyProcessTable? _table = new();

@@ -56,7 +56,7 @@ internal static class TemplatesCommand
         {
             var result = await store.RebuildTemplatesAsync(StorageLimits.TemplateRebuildBatchLines, (lines, _) => ReportProgress(logger, lines), cancellationToken).ConfigureAwait(false);
 
-            await stdout.WriteAsync(FormatSummary(result)).ConfigureAwait(false);
+            await stdout.WriteAsync(FormatSummary(result), CancellationToken.None).ConfigureAwait(false);
 
             return 0;
         }

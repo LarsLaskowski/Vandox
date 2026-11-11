@@ -10,7 +10,7 @@ internal sealed class LegacyParseState
     /// <summary>
     /// Gets the last value of each vmstat counter.
     /// </summary>
-    internal Dictionary<string, LegacyCounter> Counters { get; } = new(StringComparer.Ordinal);
+    internal Dictionary<string, LegacyCounter> Counters { get; } = [with(StringComparer.Ordinal)];
 
     /// <summary>
     /// Gets or sets a value indicating whether a header of this parse has resolved.

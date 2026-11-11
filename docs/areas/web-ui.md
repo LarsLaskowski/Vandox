@@ -75,6 +75,7 @@ home network; the views ([Logs view](web-ui-logs-view.md), [Incidents view](web-
 - Labels and titles are written as text, never as HTML: the chart library sets a title and a label as text content (read in the
   vendored file), so a label that holds external text, such as a program name, carries no markup; a view escapes such a label first
   (*External text*).
+- A draw on a lost connection (the circuit is gone) ends without an error and does not count as drawn: the chart is drawn again on the next render of the component.
 - A **stacked chart** draws the cumulative sums of its series as filled areas, each band between a series and the one below, and shows the
   value of each series itself in the legend. Every series of a stacked chart has a value at every time; a gap is refused as a programming
   error: `The stacked series '<label>' has no value at point <i>.` The series colors are six custom properties, `--vandox-chart-1` to
@@ -174,6 +175,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 
 ## Related decisions
 
+- [0200](../decisions/0200-chart-calls-tolerate-a-lost-connection-bl0016-off-in-tests.md) — why a draw on a lost connection ends quietly and is repeated on the next render.
 - [0081](../decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md) — why Blazor in the Interactive Server render mode on labelled listeners.
 - [0051](../decisions/0051-brand-assets-in-docs-assets-web-ui-and-telegram-with-their-features.md) — why `docs/assets/` is the single source of the logo.
 - [0098](../decisions/0098-web-ui-serves-only-its-own-static-web-assets.md) — why own static web assets only, brand copies, vendored uPlot and a script-set theme.

@@ -1,7 +1,7 @@
 # Stack: Go agent and .NET backend
 
 The toolchain and the exact commands of this repository, which has two languages: the agent
-(`vandox-agent`) is Go, the backend (`vandoxd`) is .NET 10 with Blazor (record 0073). Every squad member,
+(`vandox-agent`) is Go, the backend (`vandoxd`) is .NET 11 with Blazor (records 0073, 0197). Every squad member,
 skill and instruction file refers to the entries below by their *italic name*; each command covers both
 languages. Seeded from the Squad-Spec-Repository-Template `go` profile, extended for .NET and owned by this
 repository (record 0074): keep it true when the build changes.
@@ -12,8 +12,8 @@ repository (record 0074): keep it true when the build changes.
   patch, so `setup-go` uses the newest 1.27.x available on the runner. `gofmt` as the formatter, `go vet` and
   **golangci-lint** `v2.14.0` (`.golangci.yml`) as the analyzers, `govulncheck` (a `tool` dependency in
   `go.mod`) for known vulnerabilities.
-- .NET SDK of `global.json` (`10.0.403`; `rollForward` `latestFeature`: the newest installed feature band of that
-  major, never the next major), target framework `net10.0`, solution `Vandox.slnx`. Several majors may be installed
+- .NET SDK of `global.json` (`11.0.100`; `rollForward` `latestFeature`: the newest installed feature band of that
+  major, never the next major), target framework `net11.0`, solution `Vandox.slnx`. Several majors may be installed
   side by side (a machine, CI); the repository is built for one: every project's target framework, `global.json` and
   every .NET image name the same major, which `dotnet_major.py` checks in the *Analyzer gate*, and a new project gets
   it from the SDK `global.json` selects. Dependabot keeps the SDK and the packages current within that major (the

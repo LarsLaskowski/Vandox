@@ -53,11 +53,29 @@ internal sealed class LockedTextWriter : TextWriter
     }
 
     /// <inheritdoc />
+    public override void Write(ReadOnlySpan<char> buffer)
+    {
+        lock (_lock)
+        {
+            _text.Append(buffer);
+        }
+    }
+
+    /// <inheritdoc />
     public override void Write(string? value)
     {
         lock (_lock)
         {
             _text.Append(value);
+        }
+    }
+
+    /// <inheritdoc />
+    public override void WriteLine(ReadOnlySpan<char> buffer)
+    {
+        lock (_lock)
+        {
+            _text.Append(buffer).Append(CoreNewLine);
         }
     }
 

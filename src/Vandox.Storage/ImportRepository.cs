@@ -306,7 +306,7 @@ internal static class ImportRepository
                 break;
             }
 
-            builder.Append(rune.ToString());
+            builder.Append(rune);
         }
 
         return builder.ToString();

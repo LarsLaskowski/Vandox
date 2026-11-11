@@ -159,7 +159,7 @@ internal static class FtsQuery
             }
             else
             {
-                current.Append(rune.ToString());
+                current.Append(rune);
             }
         }
 

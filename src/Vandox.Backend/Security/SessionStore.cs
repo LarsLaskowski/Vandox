@@ -42,7 +42,7 @@ internal sealed class SessionStore : ITicketStore
 
     private readonly TimeProvider _timeProvider;
     private readonly Lock _lock = new();
-    private readonly Dictionary<string, StoredSession> _sessions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, StoredSession> _sessions = [with(StringComparer.Ordinal)];
 
     #endregion // Fields
 

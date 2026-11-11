@@ -51,7 +51,7 @@ internal sealed class LoginThrottle
 
     private readonly TimeProvider _timeProvider;
     private readonly Lock _lock = new();
-    private readonly Dictionary<string, LoginClient> _clients = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, LoginClient> _clients = [with(StringComparer.Ordinal)];
     private readonly Queue<DateTimeOffset> _globalFailures = new();
 
     #endregion // Fields

@@ -7,7 +7,7 @@
 
 Vandox monitors a Linux server and keeps the evidence needed for forensics.
 It consists of two binaries: the agent, written in Go to stay small on the monitored server, and the
-backend, written in .NET 10 with a Blazor web UI. Both implement the same data model and wire format.
+backend, written in .NET 11 with a Blazor web UI. Both implement the same data model and wire format.
 
 What the software does, area by area — formats, limits, error behavior and guarantees — is written in the
 [area documents](docs/areas/README.md); this README is the user guide and links them.

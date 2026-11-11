@@ -191,7 +191,7 @@ public class LogLineTests
     public void LogLineDeserializeReadsAMissingOrEmptyEventAsEmpty(string json)
     {
         // Act
-        var line = (LogLine)PayloadRegistry.Deserialize(RecordKind.LogLine, JsonDocument.Parse(json).RootElement)!;
+        var line = (LogLine)PayloadRegistry.Deserialize(RecordKind.LogLine, JsonElement.Parse(json))!;
 
         // Assert
         Assert.AreEqual(string.Empty, line.Event, "event");
@@ -214,7 +214,7 @@ public class LogLineTests
 
         // Act
         var json = PayloadRegistry.Serialize(line);
-        var again = (LogLine)PayloadRegistry.Deserialize(RecordKind.LogLine, JsonDocument.Parse(json).RootElement)!;
+        var again = (LogLine)PayloadRegistry.Deserialize(RecordKind.LogLine, JsonElement.Parse(json))!;
 
         // Assert
         Assert.AreEqual("mariadb.start", again.Event, "event after a round trip");

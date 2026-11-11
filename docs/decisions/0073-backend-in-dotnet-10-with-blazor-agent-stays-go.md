@@ -1,6 +1,6 @@
 # 0073: The backend is written in .NET 10 with a Blazor web UI; the agent stays in Go
 
-- **Status:** Accepted
+- **Status:** Superseded by 0197
 - **Date:** 2026-10-06
 - **Area:** —
 - **Source:** Product Manager request: move the backend to .NET 10 with Blazor, keep the agent in Go

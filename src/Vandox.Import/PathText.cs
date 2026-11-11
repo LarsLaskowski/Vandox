@@ -65,7 +65,7 @@ internal static class PathText
                 break;
             }
 
-            builder.Append(rune.ToString());
+            builder.Append(rune);
         }
 
         return builder.ToString();

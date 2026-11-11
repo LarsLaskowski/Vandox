@@ -46,6 +46,16 @@ internal sealed class RecordingJsRuntime : IJSRuntime
     }
 
     /// <summary>
+    /// Lets the next calls of an identifier on a target succeed again after <see cref="Fail"/>.
+    /// </summary>
+    /// <param name="target">The target: <c>runtime</c>, <c>module</c> or <c>chart</c></param>
+    /// <param name="identifier">The identifier; <c>DisposeAsync</c> for a disposal</param>
+    internal void Recover(string target, string identifier)
+    {
+        _failures.Remove((target, identifier));
+    }
+
+    /// <summary>
     /// Records a call of a reference and throws the scripted exception, if any.
     /// </summary>
     /// <param name="call">The call</param>

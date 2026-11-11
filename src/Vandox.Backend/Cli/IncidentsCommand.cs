@@ -52,7 +52,7 @@ internal static class IncidentsCommand
 
         try
         {
-            var result = await reconstructor.RunAsync(saved => stdout.WriteAsync(IncidentSummaryWriter.FormatIncident(saved) + "\n"), cancellationToken).ConfigureAwait(false);
+            var result = await reconstructor.RunAsync(saved => stdout.WriteAsync(IncidentSummaryWriter.FormatIncident(saved) + "\n", CancellationToken.None), cancellationToken).ConfigureAwait(false);
 
             await IncidentSummaryWriter.WriteAsync(stdout, result).ConfigureAwait(false);
 

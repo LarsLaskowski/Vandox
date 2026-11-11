@@ -25,7 +25,7 @@ internal sealed class SignatureCatalogReader
     private static readonly HashSet<string> _signatureKeys = new(["id", "description", "program", "source", "event", "message", "fields"], StringComparer.Ordinal);
 
     private readonly string _name;
-    private readonly HashSet<string> _ids = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _ids = [with(StringComparer.Ordinal)];
 
     #endregion // Fields
 

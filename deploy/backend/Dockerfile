@@ -1,4 +1,4 @@
-# Backend image for vandoxd (.NET 10, Blazor). The build context is the repository root:
+# Backend image for vandoxd (.NET 11, Blazor). The build context is the repository root:
 #   docker build -f deploy/backend/Dockerfile .
 # Base images are pinned by digest only; each tag is kept in its own ARG for readability and the
 # OCI base-image labels. The builder tag follows the target framework in Directory.Build.props. The release
@@ -6,11 +6,11 @@
 # release build check report a stale digest (docs/CONTRIBUTING.md, record 0041).
 # The HEALTHCHECK runs `vandoxd -healthcheck` (record 0059); the image declares no EXPOSE on purpose.
 ARG BASE_BUILD_IMAGE="mcr.microsoft.com/dotnet/sdk"
-ARG BASE_BUILD_TAG="10.0"
-ARG BASE_BUILD_DIGEST="sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e"
+ARG BASE_BUILD_TAG="11.0"
+ARG BASE_BUILD_DIGEST="sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea"
 ARG BASE_RUNTIME_IMAGE="mcr.microsoft.com/dotnet/aspnet"
-ARG BASE_RUNTIME_TAG="10.0-noble-chiseled"
-ARG BASE_RUNTIME_DIGEST="sha256:f2557fb81b1cfcfdfcde9d3bf247ed60b2cd38f00a88153f61e34737fab8ade7"
+ARG BASE_RUNTIME_TAG="11.0-resolute-chiseled"
+ARG BASE_RUNTIME_DIGEST="sha256:fc0ee12f9ea79bde6cda88c7a34e5467fe383dbb62276be0ec13e5e9cc1654ac"
 
 FROM ${BASE_BUILD_IMAGE}@${BASE_BUILD_DIGEST} AS build
 

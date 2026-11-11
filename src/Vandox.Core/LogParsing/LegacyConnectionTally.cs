@@ -11,7 +11,7 @@ internal sealed class LegacyConnectionTally
 {
     #region Fields
 
-    private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _keys = [with(StringComparer.Ordinal)];
     private readonly Dictionary<(string Proto, string State), uint> _states = [];
     private readonly Dictionary<(int Pid, string Command), int> _processIndex = [];
     private readonly List<ProcessConnections> _processes = [];

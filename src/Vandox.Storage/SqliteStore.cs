@@ -65,7 +65,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     private readonly SqliteConnection _writer;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly SemaphoreSlim _readers = new(MaxReaders, MaxReaders);
-    private readonly HashSet<string> _writtenAgents = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _writtenAgents = [with(StringComparer.Ordinal)];
     private bool _disposed;
 
     #endregion // Fields

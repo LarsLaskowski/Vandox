@@ -146,8 +146,8 @@ public class BackupRunTests
         // Act
         var startText = PayloadRegistry.Serialize(start);
         var endText = PayloadRegistry.Serialize(end);
-        var startAgain = (BackupRun)PayloadRegistry.Deserialize(RecordKind.BackupRun, JsonDocument.Parse(startText).RootElement)!;
-        var endAgain = (BackupRun)PayloadRegistry.Deserialize(RecordKind.BackupRun, JsonDocument.Parse(endText).RootElement)!;
+        var startAgain = (BackupRun)PayloadRegistry.Deserialize(RecordKind.BackupRun, JsonElement.Parse(startText))!;
+        var endAgain = (BackupRun)PayloadRegistry.Deserialize(RecordKind.BackupRun, JsonElement.Parse(endText))!;
 
         // Assert
         Assert.AreEqual(5150, startAgain.Pid, "start: pid");

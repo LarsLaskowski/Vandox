@@ -28,7 +28,7 @@ internal sealed class AgentTimeline : IDisposable
     private readonly SqliteConnection _connection;
     private readonly SqliteTransaction _transaction;
     private readonly string _agentId;
-    private readonly Dictionary<string, TimelineStatement> _statements = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TimelineStatement> _statements = [with(StringComparer.Ordinal)];
 
     private bool _known;
     private long _floor;
