@@ -26,3 +26,4 @@ are quoted in full.
 | 2026-11-11 15:33 | 6 Coverage skipped (G2) | Orchestrator | skipped — G2 changed documentation only; the Coverage gate passed on the same code in G1 (new 100%, overall 96.7%) and step 7 runs it again |
 | 2026-11-11 15:33 | 6 Documentation | Orchestrator | written in 6 Implement (G2); Test green there (Core 4095, Storage 632, Import 172, Backend 1254, Go) |
 | 2026-11-11 15:42 | 7 Gate stamp | Orchestrator | PASS on 7d33cf81dc9affaab28d737a156efd42c32306d2 (tier security): Format check pass; Analyzer gate pass; Test with coverage pass; Coverage gate pass; decision-check.py pass; scope-check.py pass · figure-check.py 12 hit(s) |
+| 2026-11-11 15:42 | 7 Early draft PR | Orchestrator | https://github.com/LarsLaskowski/Vandox/pull/417 (draft); follow-up issue #416; waiting for CI incl. CodeQL and SonarQube |
