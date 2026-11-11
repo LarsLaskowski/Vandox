@@ -99,3 +99,7 @@ Guarantee 3 of `.squad/project.md` holds: a live connection never runs without a
 ## Out of scope / follow-ups
 
 None.
+
+## Security notes
+
+- Non-blocking (fix now, a one-line edit in plan.md): *Architecture check* says "Guarantee 3 of `.squad/project.md` holds". But `.squad/project.md` *Guarantees* (lines 94–110) has three guarantees, and the third is "Backfilled data never raises an alert by itself". No guarantee is about sessions; the plan means security area 3. Suggested text: `No guarantee of .squad/project.md is affected; security area 3 (Web UI login) holds: a live connection never runs without an active session (rows 2, 8).`
