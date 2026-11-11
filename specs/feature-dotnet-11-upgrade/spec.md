@@ -30,6 +30,11 @@ platform. The Go agent is not affected.
   ([backend-host](../../docs/areas/backend-host.md)).
 - S6: Given a developer who writes code that one of the rules new with this change reports (S8949, CA2016, CA1830, CA2026,
   BL0013, BL0016), when they build, then the build fails on it.
+- S7: Given a decision record whose reasoning rests on framework or library behavior read from the .NET 10 sources (0097,
+  0098, 0099, 0103, 0105), when the backend moves to .NET 11, then that behavior is read again in the 11.0.0 sources or
+  packages, and a record whose fact no longer holds is superseded.
+- S8: Given the image on the reference host, when the Product Manager signs in, opens a page with a chart and triggers an
+  event on it, then the page stays interactive and the browser console shows no Content Security Policy violation.
 
 ## Errors and edge cases
 
@@ -40,7 +45,9 @@ platform. The Go agent is not affected.
   today (`template rebuild interrupted`, `incidents` and `report` with exit code 1, …) still does; none ends with an unhandled
   exception instead.
 - E3: The authentication state of a live connection changes while it is open: the next event is checked against the session
-  of the current state, never of a stale one.
+  of the current state, never of a stale one. An event that arrives before any change is checked against the connection's
+  initial state; a connection with no known state processes no event; once the connection closes, its handler no longer
+  follows state changes.
 
 ## Non-functional requirements
 
@@ -66,28 +73,38 @@ platform. The Go agent is not affected.
 - AC2: The *Analyzer gate* reports nothing for the whole solution on the 11 SDK with the newest `SonarAnalyzer.CSharp`
   release; `.editorconfig` sets `S8949` to `error` in its hand-maintained `[*.cs]` section, outside the
   `squad:sonar-rules` block; a rule new with this change that a deliberately offending line does not fail the build on
-  is set to `error` there too (S6).
+  is set to `error` there too (S6). S8969 stays `error` through the `squad:sonar-rules` block (no hand line beside it,
+  which would make the block out of date for `sonar-rules.py --check`), and the *Analyzer gate* confirms it after the
+  Sonar update.
 - AC3: The Dockerfile builds on the `sdk:11.0` image and runs on the chiseled `aspnet` 11 image, both pinned by a current
   digest, and the CI image build and compose smoke test pass (non-root user, no shell, health check, ingest port) (S2,
   N3, N5).
 - AC4: The image built from the pull request branch on the `11.0-resolute-chiseled` base starts on the reference host and
-  serves the web UI and the ingest endpoint there (S2, N4). Manual: the Product Manager runs that image on the DS918+ and
-  signs the check off; the pull request stays a draft and is not merged until then.
+  serves the ingest endpoint there; signed in, a page with a chart stays interactive after an event on it and the browser
+  console shows no Content Security Policy violation (S2, S8, N4, N3). Manual: the Product Manager runs that image on the
+  DS918+ and signs the check off; the pull request stays a draft and is not merged until then.
 - AC5: A live connection whose session has ended processes no further event, also after its authentication state changed
-  while it was open (S3, E3, N3).
-- AC6: A chart whose drawing or update fails because the browser connection is gone ends without an exception; any other
-  failure of a chart call reaches the caller as today (S4, E1).
+  while it was open; an event before any change is checked against the initial state, a connection with no known state
+  processes no event, and the handler stops following state changes when the connection closes (S3, E3, N3).
+- AC6: A chart draw or update that fails with `JSDisconnectedException` (the browser connection is gone) ends without an
+  exception and does not count as drawn, so the data is drawn again on the next render; every other failure of a chart
+  call reaches the caller as today (S4, E1). Today that exception escapes the chart; this is the one deliberate behavior
+  change.
 - AC7: Every `vandoxd` command prints the same text and exits with the same code as on `main`; a command interrupted while
   it writes its output reports the interruption as it does today and ends without an unhandled exception (S5, E2).
 - AC8: No document, comment or configuration states .NET 10 as the backend's current platform: a new decision record
-  supersedes 0073, and `.squad/stack.md`, `.squad/project.md`, the project blocks of `AGENTS.md` and
+  supersedes 0073, and `README.md`, `.squad/stack.md`, `.squad/project.md`, the project blocks of `AGENTS.md` and
   `.github/copilot-instructions.md`, `docs/ARCHITECTURE.md`, `docs/CONTRIBUTING.md`, `.github/dependabot.yml` and the
   Dockerfile name .NET 11 (N2).
+- AC9: The framework and library facts that records 0097, 0098, 0099, 0103 and 0105 rest on are read again in the 11.0.0
+  sources or packages, each with its source and result named in the plan's *Verified facts*; a record whose fact no longer
+  holds is superseded by a new record, and the code or area document it governs is brought in line (S7, N3).
 
 ## Out of scope
 
 - The Go agent and its toolchain.
-- New .NET 11 features or APIs beyond what a fixed diagnostic needs; behavior changes of any kind.
+- New .NET 11 features or APIs beyond what a fixed diagnostic needs; no behavior change beyond what a fixed diagnostic
+  requires (AC5 to AC7).
 - Measurements recorded on .NET 10 (`docs/BENCHMARKS.md`, timings in area documents): they stay as measured; no
   re-measurement on .NET 11.
 - Packages other than those named in AC1 and AC2 (Dependabot keeps them current).
@@ -124,4 +141,25 @@ platform. The Go agent is not affected.
   (its distribution named if the document names one); nothing else changes.
 - No other area document changes: the behavior of S3 to S5 is unchanged, and the fixes of E1 to E3 keep what
   [web-login](../../docs/areas/web-login.md), [web-ui](../../docs/areas/web-ui.md) and
-  [backend-host](../../docs/areas/backend-host.md) state today.
+  [backend-host](../../docs/areas/backend-host.md) state today (none of them describes a chart failure on a lost
+  connection) — unless AC9 finds a changed framework fact, in which case the area document the superseding record
+  governs states the new behavior.
+
+## Challenge
+
+- MAJOR 1 (no check of an interactive UI; framework facts of 0097, 0098, 0099, 0103, 0105 not re-checked on 11): accepted.
+  S7 and AC9 require reading those facts again in the 11.0.0 sources or packages and superseding a record whose fact
+  changed; S8 and AC4 extend the manual check on the DS918+ to sign-in, a page with a chart, an event on it, and a browser
+  console without a Content Security Policy violation. AC5's unit tests cover the session check ending the circuit only
+  as far as the handler itself; whether the framework still ends the circuit on its exception is part of AC9 (0103).
+- MINOR 1 (S8969 not asserted): accepted. AC2 states S8969 stays `error` through the `squad:sonar-rules` block
+  (`.editorconfig`, checked) with no hand line, and the *Analyzer gate* confirms it after the Sonar update.
+- MINOR 2 (`README.md` and `docs/areas/backend-host.md` missing from AC8): accepted for `README.md`, whose line 10 names
+  .NET 10. Rejected for `backend-host.md`: its *Container image* section names neither a .NET version nor a distribution
+  (checked), so it states no .NET 10 platform; it is already listed under *Area documents*.
+- MINOR 3 (initial state, no known state, unsubscribing): accepted. E3 and AC5 now name the three cases;
+  `SessionCircuitHandler.CheckSessionAsync` reads the current state on every event today (checked).
+- MINOR 4 (AC6 is a behavior change): accepted. AC6 names `JSDisconnectedException` as the only swallowed failure, says
+  the data does not count as drawn (so it is drawn again), and calls this the one deliberate behavior change; *Out of
+  scope* now allows no behavior change beyond what a fixed diagnostic requires (AC5 to AC7). Confirmed:
+  `TimeSeriesChart.OnAfterRenderAsync` sets `_rendered` after `RenderAsync` and catches nothing today.
