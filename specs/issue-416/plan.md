@@ -85,7 +85,7 @@ Web login: *Sessions* corrected, no change in behavior.
 
 ## Architecture check
 
-Guarantee 3 of `.squad/project.md` holds: a live connection never runs without an active session (rows 2, 8).
+No guarantee of `.squad/project.md` is affected; security area 3 (Web UI login) holds: a live connection never runs without an active session (rows 2, 8).
 
 ## Security considerations
 
