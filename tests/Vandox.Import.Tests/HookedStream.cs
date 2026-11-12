@@ -7,7 +7,9 @@ internal sealed class HookedStream : Stream
 {
     #region Fields
 
+#pragma warning disable CA2213 // The test owns the inner stream and reads it after the wrapper
     private readonly Stream _inner;
+#pragma warning restore CA2213
     private readonly Action _beforeRead;
 
     #endregion // Fields
