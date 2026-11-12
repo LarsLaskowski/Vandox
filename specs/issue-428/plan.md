@@ -85,3 +85,7 @@ No guarantee of `.squad/project.md` or `docs/ARCHITECTURE.md` changes; the rule 
 ## Out of scope / follow-ups
 
 Moving assignments to callers (record 0204, option 1).
+
+## Security notes
+
+Security (plan review, APPROVED), non-blocking: the AC3 check `grep -rnE '#pragma warning disable CA2100[[:space:]]*$'` misses two forms that also hide CA2100 without a reason: a pragma with an empty comment (`... CA2100 //`) and a pragma with no rule ID (`#pragma warning disable` with nothing after it, which turns off every rule, CA2100 included). Use `grep -rnE '#pragma warning disable([[:space:]]+CA2100)?[[:space:]]*(//[[:space:]]*)?$' src tests tools` (prints nothing) for AC3.
