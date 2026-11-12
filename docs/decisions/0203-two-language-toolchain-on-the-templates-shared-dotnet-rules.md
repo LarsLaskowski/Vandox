@@ -13,8 +13,9 @@
 of Reihitsu RH3001 (no negation operator `!`) and SonarAnalyzer S1125 (no comparison of a boolean with a literal) by
 positive conditions, so the `dotnet` profile's `== false` rule did not apply here. The template now gives every .NET
 repository the same analyzer rules and build structure (LarsLaskowski/Squad-Spec-Repository-Template#337); its owner
-decided that `== false` is the binding style and that S1125 is off in every repository (#338). SonarQube Cloud's
-built-in *Sonar way comprehensive* profile cannot switch S1125 off; with the rule off in the source it reports nothing.
+decided that `== false` is the binding style and that S1125 is off in every repository
+(LarsLaskowski/Squad-Spec-Repository-Template#338). SonarQube Cloud's built-in *Sonar way comprehensive* profile cannot
+switch S1125 off; with the rule off in the source it reports nothing.
 
 ## Options considered
 

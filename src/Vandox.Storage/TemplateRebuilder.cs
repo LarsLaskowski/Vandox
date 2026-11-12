@@ -17,14 +17,10 @@ internal static class TemplateRebuilder
     /// </summary>
     internal const string MarkerKey = "template_rebuild";
 
+    // The hours reference the templates, so they go first; Microsoft.Data.Sqlite runs the statements of one text in order.
+    private const string ClearStatements = "DELETE FROM log_template_hours; DELETE FROM log_templates; DELETE FROM log_source_hours";
+
     #endregion // Constants
-
-    #region Fields
-
-    // The hours reference the templates, so they go first.
-    private static readonly string[] _clearStatements = ["DELETE FROM log_template_hours", "DELETE FROM log_templates", "DELETE FROM log_source_hours"];
-
-    #endregion // Fields
 
     #region Methods
 
@@ -47,13 +43,12 @@ internal static class TemplateRebuilder
     /// <returns>A task that returns the highest record ID</returns>
     internal static async Task<long> ClearAsync(SqliteConnection connection, SqliteTransaction transaction, string marker, CancellationToken cancellationToken)
     {
-        foreach (var sql in _clearStatements)
-        {
-            var delete = connection.CreateCommand();
-            await using var deleteDisposal = delete.ConfigureAwait(false);
+        var delete = connection.CreateCommand();
 
+        await using (delete.ConfigureAwait(false))
+        {
             delete.Transaction = transaction;
-            delete.CommandText = sql;
+            delete.CommandText = ClearStatements;
             await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -66,7 +61,13 @@ internal static class TemplateRebuilder
         write.Parameters.AddWithValue("$marker", marker);
         await write.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
-        return await ScalarAsync(connection, transaction, "SELECT coalesce(max(id), 0) FROM records", cancellationToken).ConfigureAwait(false);
+        var high = connection.CreateCommand();
+        await using var highDisposal = high.ConfigureAwait(false);
+
+        high.Transaction = transaction;
+        high.CommandText = "SELECT coalesce(max(id), 0) FROM records";
+
+        return Convert.ToInt64(await high.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -153,26 +154,13 @@ internal static class TemplateRebuilder
             await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        return await ScalarAsync(connection, transaction, "SELECT count(*) FROM log_templates", cancellationToken).ConfigureAwait(false);
-    }
+        var count = connection.CreateCommand();
+        await using var countDisposal = count.ConfigureAwait(false);
 
-    /// <summary>
-    /// Runs a query that returns one integer.
-    /// </summary>
-    /// <param name="connection">The writer connection</param>
-    /// <param name="transaction">The open transaction</param>
-    /// <param name="sql">The SQL</param>
-    /// <param name="cancellationToken">Cancels the query</param>
-    /// <returns>A task that returns the value</returns>
-    private static async Task<long> ScalarAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken cancellationToken)
-    {
-        var command = connection.CreateCommand();
-        await using var commandDisposal = command.ConfigureAwait(false);
+        count.Transaction = transaction;
+        count.CommandText = "SELECT count(*) FROM log_templates";
 
-        command.Transaction = transaction;
-        command.CommandText = sql;
-
-        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        return Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
     }
 
     #endregion // Methods

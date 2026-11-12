@@ -5,6 +5,7 @@
 !Directory.Build.props
 !Directory.Packages.props
 !Vandox.slnx
+!.squad/dotnet-rules.globalconfig
 !src/
 !LICENSE
 **/bin

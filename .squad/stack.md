@@ -261,7 +261,8 @@ web asset under `wwwroot/` or the Dockerfile runs it before the review:
 
 ```bash
 scratch="$(mktemp -d)"
-git ls-files -z -- .editorconfig global.json Directory.Build.props Directory.Packages.props Vandox.slnx 'src/*.csproj' \
+git ls-files -z -- .editorconfig global.json Directory.Build.props Directory.Packages.props Vandox.slnx \
+  .squad/dotnet-rules.globalconfig 'src/*.csproj' \
   | xargs -0 -I{} cp --parents {} "$scratch"
 (cd "$scratch" && dotnet restore src/Vandox.Backend/Vandox.Backend.csproj)
 git ls-files -z -- src/ | xargs -0 -I{} cp --parents {} "$scratch"

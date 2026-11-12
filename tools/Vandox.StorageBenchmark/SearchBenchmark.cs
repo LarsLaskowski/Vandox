@@ -180,14 +180,38 @@ internal static class SearchBenchmark
     /// <param name="folder">The folder of the database</param>
     private static void PrintShares(string folder)
     {
-        Print($"log lines: {TemplateBenchmark.Count(folder, "SELECT count(*) FROM log_lines")}; templates: {TemplateBenchmark.Count(folder, "SELECT count(*) FROM log_templates")}");
+        Print($"log lines: {TemplateBenchmark.Count(folder, c => c.CommandText = "SELECT count(*) FROM log_lines")}; templates: {TemplateBenchmark.Count(folder, c => c.CommandText = "SELECT count(*) FROM log_templates")}");
 
         foreach (var word in new[] { RareWord, PercentWord, NearCapWord, CommonWord, PairFirst, PairSecond, $"{PairFirst} {PairSecond}", $"{MassPrefix}01", $"{MassPrefix}09", $"{TogetherPrefix}01" })
         {
-            Print($"lines with '{word}': {TemplateBenchmark.Count(folder, $"SELECT count(*) FROM log_fts WHERE log_fts MATCH '{word.Replace(" ", " AND ", StringComparison.Ordinal)}'")}");
+            var match = word.Replace(" ", " AND ", StringComparison.Ordinal);
+            var count = TemplateBenchmark.Count(folder,
+                                                c =>
+                                                {
+                                                    c.CommandText = "SELECT count(*) FROM log_fts WHERE log_fts MATCH $match";
+                                                    c.Parameters.AddWithValue("$match", match);
+                                                });
+
+            Print($"lines with '{word}': {count}");
         }
 
-        Print($"lines of program {RareProgram}: {TemplateBenchmark.Count(folder, $"SELECT count(*) FROM log_lines WHERE program = '{RareProgram}'")}; of program {CommonProgram}: {TemplateBenchmark.Count(folder, $"SELECT count(*) FROM log_lines WHERE program = '{CommonProgram}'")}");
+        Print($"lines of program {RareProgram}: {CountProgram(folder, RareProgram)}; of program {CommonProgram}: {CountProgram(folder, CommonProgram)}");
+    }
+
+    /// <summary>
+    /// Counts the log lines of one program.
+    /// </summary>
+    /// <param name="folder">The folder of the database</param>
+    /// <param name="program">The program</param>
+    /// <returns>The count</returns>
+    private static long CountProgram(string folder, string program)
+    {
+        return TemplateBenchmark.Count(folder,
+                                       c =>
+                                       {
+                                           c.CommandText = "SELECT count(*) FROM log_lines WHERE program = $program";
+                                           c.Parameters.AddWithValue("$program", program);
+                                       });
     }
 
     /// <summary>
@@ -388,7 +412,13 @@ internal static class SearchBenchmark
         }
 
         var match = FtsQuery.Build(text);
-        var count = TemplateBenchmark.Count(folder, $"SELECT count(*) FROM (SELECT rowid FROM log_fts WHERE log_fts MATCH '{match.Replace("'", "''", StringComparison.Ordinal)}' LIMIT {LogFinder.SelectiveMatches})");
+        var count = TemplateBenchmark.Count(folder,
+                                            c =>
+                                            {
+                                                c.CommandText = "SELECT count(*) FROM (SELECT rowid FROM log_fts WHERE log_fts MATCH $match LIMIT $limit)";
+                                                c.Parameters.AddWithValue("$match", match);
+                                                c.Parameters.AddWithValue("$limit", LogFinder.SelectiveMatches);
+                                            });
 
         return count < LogFinder.SelectiveMatches ? "index" : "scan";
     }

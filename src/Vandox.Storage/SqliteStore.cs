@@ -57,6 +57,9 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     // file system before the commit; the readers keep the default (record 0083).
     private const string WriterPragmas = CommonPragmas + " PRAGMA cache_size=-16384;";
 
+    // The readers are query-only.
+    private const string ReaderPragmas = CommonPragmas + " PRAGMA query_only=1;";
+
     #endregion // Constants
 
     #region Fields
@@ -230,7 +233,12 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         try
         {
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
+
+            using (var pragmas = connection.CreateCommand())
+            {
+                pragmas.CommandText = ReaderPragmas;
+                await pragmas.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
 
             ReaderQuery.Attach(connection, cancellationToken);
 
@@ -260,7 +268,13 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         try
         {
             await writer.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(writer, WriterPragmas, cancellationToken).ConfigureAwait(false);
+
+            using (var pragmas = writer.CreateCommand())
+            {
+                pragmas.CommandText = WriterPragmas;
+                await pragmas.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             await RequireWalAsync(writer, cancellationToken).ConfigureAwait(false);
             await SchemaMigrator.MigrateAsync(writer, cancellationToken).ConfigureAwait(false);
 
@@ -299,21 +313,6 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                    Pooling = false,
                    DefaultTimeout = BusyTimeoutSeconds
                }.ToString();
-    }
-
-    /// <summary>
-    /// Runs one or more statements.
-    /// </summary>
-    /// <param name="connection">The connection</param>
-    /// <param name="sql">The statements</param>
-    /// <param name="cancellationToken">Cancels the call</param>
-    /// <returns>A task that completes when the statements ran</returns>
-    private static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
-    {
-        using var command = connection.CreateCommand();
-
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
