@@ -105,7 +105,7 @@ No guarantee touched: no ownership or disposal order changes.
 ## Out of scope / follow-ups
 
 - MSTEST0001 (#430).
-- Disposing the `GZipStream` in `Scanner.StreamAsync` (follow-up issue, Lead decision on Security's plan-review note).
+- Disposing the `GZipStream` in `Scanner.StreamAsync` (#433, Lead decision on Security's plan-review note).
 
 ## Security notes
 
