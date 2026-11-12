@@ -22,6 +22,9 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
   one test class per class under test (`Foo.cs` → `FooTests.cs`) in the namespace `<Project>.Tests`. Internal
   members are tested through `InternalsVisibleTo`. Shared helpers (`TempDirectory`, fakes, builders) are
   `internal` classes of the test project.
+  Every test project has a `MSTestSettings.cs` with `[assembly: DoNotParallelize]`, since heap, allocation and
+  timing tests read process-wide state ([record 0206](/docs/decisions/0206-test-assemblies-run-their-tests-one-at-a-time-stated-explicitly.md));
+  a new test project adds the same file.
 - Go: colocated `_test.go` files, one per source file under test (`foo.go` → `foo_test.go`), in the same
   package (white-box) unless the test exercises only the exported API (`package foo_test`).
 
