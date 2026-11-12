@@ -163,8 +163,10 @@ them to a shell. The first such test also tests the normalizer with CRLF input.
 
 ## Code coverage
 
-**Threshold: at least 80 % line coverage on new or changed production code, and at least 80 % overall** —
-the same measure as SonarQube's "coverage on new code". Both values are set in `.squad/tools/squad_settings.py`
+**Threshold: at least 80 % coverage on new or changed production code, and at least 80 % line coverage overall** —
+the same measure as SonarQube's "coverage on new code": covered lines and branch conditions together, so an
+untested arm of a `switch` or an `if` counts on a changed line (C#; the Go report records no branch conditions, so
+Go code counts its lines). Both values are set in `.squad/tools/squad_settings.py`
 (`COVERAGE_THRESHOLD`, `COVERAGE_OVERALL_THRESHOLD`); the overall one may start lower in a repository adopted
 with a coverage debt and is only ever raised. Check it locally before a push with *Test with coverage* and the
 *Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). Lines that genuinely
@@ -186,7 +188,8 @@ the pattern for `vandoxd`).
 
 - [ ] New production code has accompanying unit tests — mandatory, not optional.
 - [ ] The *Analyzer gate* passes.
-- [ ] At least 80 % line coverage on new/changed production code and overall (*Coverage gate*).
+- [ ] At least 80 % coverage (lines and branch conditions) on new/changed production code and 80 % line coverage
+  overall (*Coverage gate*).
 - [ ] Table-driven where there is more than one input; failure messages with got and want.
 - [ ] A test for a squad acceptance criterion carries its id (*Criterion ids*).
 - [ ] Go: passes with `-race`; no real network or clock except the ratio of two durations (see Structure; timeouts: `synctest` or injected durations, decision 0062). .NET: no real network, clock or sleep, again except such a ratio and a library timer that cannot be injected (see Structure); the whole solution builds without any analyzer diagnostic.

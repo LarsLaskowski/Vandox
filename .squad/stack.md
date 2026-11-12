@@ -257,7 +257,10 @@ can contain files the image never gets (Vandox#24: `_framework/blazor.web.js` wa
 missing from the image, because no `.razor` file existed at restore time). Where Docker runs, build the image.
 Where it does not (the cloud sessions), reproduce the Dockerfile's order in a scratch directory; every change
 to a `.csproj`, `Directory.*.props`, `Vandox.slnx`, `global.json`, a `.razor` or other content item, a static
-web asset under `wwwroot/` or the Dockerfile runs it before the review:
+web asset under `wwwroot/` or the Dockerfile runs it before the review. The image build needs
+`.squad/dotnet-rules.globalconfig`, which `Directory.Build.props` names: a Dockerfile that copies files by name
+copies it into the build stage, and a `.dockerignore` that leaves out `.squad/` lets it in (`dotnet_config.py`
+checks both):
 
 ```bash
 scratch="$(mktemp -d)"
@@ -281,7 +284,9 @@ is open.
 `coverage-check.py` merges every `TestResults/**/coverage.cobertura.xml`: coverlet's report of each .NET test
 project and `TestResults/go/coverage.cobertura.xml`, which `go-coverage-to-cobertura.py` writes from
 `coverage.out`. Production code is every `*.go`, `*.cs` and `*.razor` file outside `tests/` and `*_test.go`
-(`.squad/tools/squad_settings.py`). The thresholds are 80 % on new/changed code and 80 % overall.
+(`.squad/tools/squad_settings.py`). The thresholds are 80 % on new/changed code and 80 % line coverage overall. On
+new/changed code the gate counts the branch conditions coverlet records in its Cobertura report together with the
+lines, as SonarQube Cloud does; the Go conversion records none, so Go code counts its lines only.
 
 ## Coverage exclusions
 
