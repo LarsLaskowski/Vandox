@@ -11,7 +11,7 @@
 The template's shared .NET rule baseline ([0203](0203-two-language-toolchain-on-the-templates-shared-dotnet-rules.md))
 sets CA2213 (*Disposable fields should be disposed*) at `warning`, which the build treats as an error. CA2213 reports a
 disposable field that the declaring type's `Dispose` never disposes, also when the field only holds an object its caller
-owns. Six fields are reported: five hold an object the caller owns and disposes — the wrapped stream of `FilterStream`
+owns. Six fields are reported: five hold an object the caller owns — the wrapped stream of `FilterStream`
 (Import), `GzipMemberReader` (wire decoder; `BatchDecoder.OpenAsync` documents that it leaves its input open) and the test
 stream `HookedStream`, the standard-error writer of `JsonLineLoggerProvider` (shared by the bootstrap and the service
 logger factory), and the current `ActionRun` of `ActionSequence` (disposed by the caller of `BeginAsync`). The sixth, the
