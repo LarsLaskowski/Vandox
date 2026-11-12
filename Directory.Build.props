@@ -31,6 +31,10 @@
     <PackageReference Include="Reihitsu.Analyzer" PrivateAssets="all" />
     <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
   </ItemGroup>
+  <!-- The rules the baseline switches off, also for generated code (Razor components) that .editorconfig misses -->
+  <ItemGroup>
+    <GlobalAnalyzerConfigFiles Include="$(MSBuildThisFileDirectory).squad/dotnet-rules.globalconfig" />
+  </ItemGroup>
   <!-- Every test project (name ending in .Tests): MSTest, which brings MSTest.Analyzers, and coverage -->
   <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

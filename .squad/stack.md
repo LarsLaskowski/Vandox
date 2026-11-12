@@ -131,8 +131,12 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    paths come after them, and the baseline's paths block already switches off `S107`, `BL0016` and `CA2007` for test
    projects (`**/*.Tests/**.cs`). A rule the code does not meet yet goes into `DOTNET_RULES_PENDING` in
    `squad_settings.py` with the issue that brings the code up to it: it is written as `suggestion`, which the gate
-   still reports in a changed file, and the entry goes once the issue is done. A diagnostic SonarQube Cloud lists but
-   the build reports only at info level is raised in the template's baseline, not here.
+   still reports in a changed file, and the entry goes once the issue is done; that holds for a rule the baseline does
+   not set too (one on only through `AnalysisLevel`, CA1848). The blocks do not reach the code the Razor compiler
+   generates from a `.razor` file's markup; the rules the baseline switches off (S1125) are off there too through the
+   template-managed global analyzer config `.squad/dotnet-rules.globalconfig`, which `Directory.Build.props` names in
+   `GlobalAnalyzerConfigFiles`. A diagnostic SonarQube Cloud lists but the build reports only at info level is raised
+   in the template's baseline, not here.
 
    SonarQube Cloud analyses this project with the built-in C# profile *Sonar way comprehensive*, while the
    SonarAnalyzer package runs by default only the rules of *Sonar way core*. The rules the comprehensive profile adds,
