@@ -16,11 +16,10 @@ the attribute MSTest runs the tests of one assembly sequentially, and no run set
 
 Several tests read process-wide state that a concurrent test would disturb: heap bounds through
 `GC.GetTotalMemory(true)` (Backend `HeapSampler`, Core `KernelReportGrouperTests` and eight more Core classes),
-allocation bounds through `GC.GetTotalAllocatedBytes(true)` (Backend `IngestEndpointConcurrencyTests`, Core
+allocation bounds through `GC.GetTotalAllocatedBytes(true)` (Backend `IngestEndpointConcurrencyTests`, `IngestEndpointTests`, Core
 `BatchDecoderTests`, `JournalExportReaderTests`, `MariaDbErrorLogParserTests`), duration ratios and timeout races with
 `Stopwatch` (Core `LogTemplateNormalizerTests`, `MailLineClassifierTests`, Storage `SqliteStoreTests`,
-`WriteThroughputTests`), and `SqliteConnection.ClearAllPools()`, which clears every pool of the process, in the
-`TempDirectory` of Storage and Import. Import has no heap, allocation or timing bound, but its `ClearAllPools()` call
+`WriteThroughputTests`), and `SqliteConnection.ClearAllPools()`, which clears every pool of the process, in the `TempDirectory` of Backend, Storage and Import. Import has no heap, allocation or timing bound, but its `ClearAllPools()` call
 has not been shown harmless beside a concurrent test that holds a pooled connection.
 
 ## Options considered
