@@ -16,7 +16,7 @@ CA2213 reports six disposable fields the declaring type's `Dispose` never dispos
 | 2 | The writer is standard error, shared by two factories | BackendApp.cs:97,111; StoreCommand.cs:32,46; ImportCommand.cs:34,49 | confirmed |
 | 3 | The decoder leaves its input open | BatchDecoder.cs:63-64 doc, :82 | confirmed |
 | 4 | The caller owns the run | ActionSequence.cs:45; PageRunner.cs:97 `using var run` | confirmed |
-| 5 | FilterStream callers dispose the inner streams themselves | ImportPass.cs:283-287; Scanner.cs:150,220,464-475 | confirmed |
+| 5 | FilterStream callers dispose the inner streams themselves | ImportPass.cs:283-288; Scanner.cs:150-151, 395; the `GZipStream` at Scanner.cs:471 is not disposed on any path (follow-up issue) | confirmed |
 | 6 | Tests read the inner stream after the wrapper | ContentStreamTests.cs:313,370 (`inner.Consumed`) | confirmed |
 | 7 | The gate never creates a wait handle; disposing it fails a waiting render's `Release` (ChartInterop.cs:101) | no `AvailableWaitHandle` in the repository; SemaphoreSlim creates its handle only there and throws `ObjectDisposedException` from `Release` after `Dispose` (runtime source) | confirmed |
 | 8 | Each diagnostic sits on the field declaration, so a pragma around it suppresses it | SARIF line numbers = declaration lines | confirmed |
@@ -105,6 +105,7 @@ No guarantee touched: no ownership or disposal order changes.
 ## Out of scope / follow-ups
 
 - MSTEST0001 (#430).
+- Disposing the `GZipStream` in `Scanner.StreamAsync` (follow-up issue, Lead decision on Security's plan-review note).
 
 ## Security notes
 
