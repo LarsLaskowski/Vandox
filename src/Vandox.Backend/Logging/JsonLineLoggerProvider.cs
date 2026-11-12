@@ -11,7 +11,9 @@ public sealed class JsonLineLoggerProvider : ILoggerProvider
 {
     #region Fields
 
+#pragma warning disable CA2213 // The caller owns the writer: standard error, shared by the bootstrap and the service logger
     private readonly TextWriter _writer;
+#pragma warning restore CA2213
     private readonly LogLevel _minimum;
     private readonly TimeProvider _clock;
     private readonly Lock _gate = new();

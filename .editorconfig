@@ -215,8 +215,7 @@ dotnet_diagnostic.CA2101.severity = warning
 dotnet_diagnostic.CA2200.severity = warning
 dotnet_diagnostic.CA2207.severity = warning
 dotnet_diagnostic.CA2212.severity = warning
-# pending: #429 (DOTNET_RULES_PENDING)
-dotnet_diagnostic.CA2213.severity = suggestion
+dotnet_diagnostic.CA2213.severity = warning
 dotnet_diagnostic.CA2214.severity = warning
 dotnet_diagnostic.CA2216.severity = warning
 dotnet_diagnostic.CA2229.severity = warning

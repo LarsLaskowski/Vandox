@@ -21,7 +21,9 @@ public sealed class ChartInterop : IAsyncDisposable
 
     private readonly IJSRuntime _jsRuntime;
 
+#pragma warning disable CA2213 // The gate never creates its wait handle; disposing it would fail a render still waiting when the interop is disposed
     private readonly SemaphoreSlim _gate = new(1, 1);
+#pragma warning restore CA2213
 
     private IJSObjectReference? _module;
 

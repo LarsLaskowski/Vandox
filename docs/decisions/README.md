@@ -241,4 +241,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0202 | A reconnected live connection follows the session of its new connection | Accepted | 2026-11-11 |
 | 0203 | Two-language toolchain with one set of quality gates, the .NET rules from the template's shared baseline | Accepted | 2026-11-12 |
 | 0204 | SQL command text meets CA2100 through justified suppressions at the command helpers | Accepted | 2026-11-12 |
+| 0205 | Disposable fields meet CA2213 through suppressions that name their owner | Accepted | 2026-11-12 |
 <!-- project:end index -->

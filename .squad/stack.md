@@ -347,6 +347,10 @@ C# (backend): follow the surrounding code and the analyzers; in particular
 - assign constant SQL to `CommandText` directly where possible; a helper that takes the statement text wraps its
   one `CommandText` assignment in `#pragma warning disable CA2100 // <where the text comes from>` /
   `#pragma warning restore CA2100`, in tests too, never a bare pragma (record 0204);
+- a disposable field the type does not own (a wrapped stream, a writer or a run its caller disposes) is declared
+  between `#pragma warning disable CA2213 // <who owns it>` and `#pragma warning restore CA2213`; a field the type
+  owns is disposed in its `Dispose`, unless disposing it would break the type, which its suppression then names
+  (the `ChartInterop` gate, record 0205);
 - the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
   `-p:VandoxCommit` and `-p:VandoxDate`;
 - names the analyzers refuse, checked by the Lead before a name goes into the plan's *Signatures*: an enum
