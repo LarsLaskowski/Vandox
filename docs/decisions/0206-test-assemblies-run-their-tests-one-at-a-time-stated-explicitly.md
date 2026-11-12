@@ -1,6 +1,6 @@
 # 0206: Test assemblies run their tests one at a time, stated explicitly
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-12
 - **Area:** —
 - **Source:** Issue #430

@@ -242,5 +242,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0203 | Two-language toolchain with one set of quality gates, the .NET rules from the template's shared baseline | Accepted | 2026-11-12 |
 | 0204 | SQL command text meets CA2100 through justified suppressions at the command helpers | Accepted | 2026-11-12 |
 | 0205 | Disposable fields meet CA2213 through suppressions that name their owner | Accepted | 2026-11-12 |
-| 0206 | Test assemblies run their tests one at a time, stated explicitly | Proposed | 2026-11-12 |
+| 0206 | Test assemblies run their tests one at a time, stated explicitly | Accepted | 2026-11-12 |
 <!-- project:end index -->
