@@ -1,6 +1,6 @@
 # 0204: SQL command text meets CA2100 through justified suppressions at the command helpers
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-12
 - **Area:** Storage
 - **Source:** Issue #428
