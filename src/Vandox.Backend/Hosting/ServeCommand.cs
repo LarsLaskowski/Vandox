@@ -162,7 +162,8 @@ internal static class ServeCommand
 
         try
         {
-            await using var app = Build(config, loggerFactory, hooks, store, verifier);
+            var app = Build(config, loggerFactory, hooks, store, verifier);
+            await using var appDisposal = app.ConfigureAwait(false);
 
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
             await RunStartedAsync(app, config, hooks, logger, cancellationToken).ConfigureAwait(false);

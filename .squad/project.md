@@ -82,7 +82,7 @@ protected, where, and the area documents that state its rules.
 13. **Release pipeline and published artifacts** — published only from an admin-tagged release, built from pinned
     inputs, checksummed and attested; token and signing permission each in one job. `.github/workflows/release.yml`,
     `base-image-digests.yml`, the *Release build check* of `ci.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
-    `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`, vendored
+    `.dockerignore`, `.config/dotnet-tools.json`, the GitHub environment `release`, vendored
     `src/Vandox.Backend/wwwroot/lib/uplot/` — [CONTRIBUTING](../docs/CONTRIBUTING.md) (*Versioning and releases*),
     records [0027](../docs/decisions/0027-project-name-and-docker-image.md),
     [0037](../docs/decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md),

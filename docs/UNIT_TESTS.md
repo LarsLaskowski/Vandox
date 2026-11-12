@@ -172,7 +172,7 @@ SonarQube Cloud analyzes them but excludes them from its coverage measure (`sona
 [0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md)). In C#,
 `Program.cs` only hands the process boundaries (arguments, environment, standard streams, cancellation) to a
 testable entry method, and that top-level wiring is the accepted uncovered code
-([0074](decisions/0074-two-language-toolchain-and-combined-quality-gates.md)). In Go, a
+([0203](decisions/0203-two-language-toolchain-on-the-templates-shared-dotnet-rules.md)). In Go, a
 binary's `main` therefore only calls `os.Exit(run(...))` with the process boundaries (context, arguments,
 environment, standard streams and, for `vandoxd`, the listen function) as arguments; `run` is tested in the
 package's `main_test.go`, and the `main` body is the accepted uncovered wiring

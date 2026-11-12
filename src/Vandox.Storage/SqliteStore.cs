@@ -57,6 +57,9 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     // file system before the commit; the readers keep the default (record 0083).
     private const string WriterPragmas = CommonPragmas + " PRAGMA cache_size=-16384;";
 
+    // The readers are query-only.
+    private const string ReaderPragmas = CommonPragmas + " PRAGMA query_only=1;";
+
     #endregion // Constants
 
     #region Fields
@@ -126,7 +129,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         try
         {
-            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            await using var leaseDisposal = lease.ConfigureAwait(false);
 
             await SchemaMigrator.ReadVersionAsync(lease.Connection, cancellationToken).ConfigureAwait(false);
         }
@@ -229,7 +233,12 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         try
         {
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
+
+            using (var pragmas = connection.CreateCommand())
+            {
+                pragmas.CommandText = ReaderPragmas;
+                await pragmas.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
 
             ReaderQuery.Attach(connection, cancellationToken);
 
@@ -259,7 +268,13 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         try
         {
             await writer.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(writer, WriterPragmas, cancellationToken).ConfigureAwait(false);
+
+            using (var pragmas = writer.CreateCommand())
+            {
+                pragmas.CommandText = WriterPragmas;
+                await pragmas.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             await RequireWalAsync(writer, cancellationToken).ConfigureAwait(false);
             await SchemaMigrator.MigrateAsync(writer, cancellationToken).ConfigureAwait(false);
 
@@ -298,21 +313,6 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                    Pooling = false,
                    DefaultTimeout = BusyTimeoutSeconds
                }.ToString();
-    }
-
-    /// <summary>
-    /// Runs one or more statements.
-    /// </summary>
-    /// <param name="connection">The connection</param>
-    /// <param name="sql">The statements</param>
-    /// <param name="cancellationToken">Cancels the call</param>
-    /// <returns>A task that completes when the statements ran</returns>
-    private static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
-    {
-        using var command = connection.CreateCommand();
-
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -368,7 +368,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         try
         {
-            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            await using var leaseDisposal = lease.ConfigureAwait(false);
 
             return await ReaderQuery.ReadAsync(lease.Connection, sql, parameters, map, context, cancellationToken).ConfigureAwait(false);
         }
@@ -390,7 +391,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         try
         {
-            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            await using var leaseDisposal = lease.ConfigureAwait(false);
 
             return await action(lease.Connection).ConfigureAwait(false);
         }
@@ -442,7 +444,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         try
         {
-            await using var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            await using var transactionDisposal = transaction.ConfigureAwait(false);
             var result = await action(transaction, cancellationToken).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -486,7 +489,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         try
         {
-            await using var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            await using var transactionDisposal = transaction.ConfigureAwait(false);
             using var writer = new BatchWriter(_writer, transaction);
 
             if (batch.Import is not null)
@@ -732,7 +736,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         try
         {
-            await using var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            await using var transactionDisposal = transaction.ConfigureAwait(false);
             var result = await IncidentRepository.SaveAsync(_writer, transaction, incident, data, savedAt, cancellationToken).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -765,7 +770,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         try
         {
-            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            await using var leaseDisposal = lease.ConfigureAwait(false);
             using var command = lease.Connection.CreateCommand();
 
             command.CommandText = "SELECT count(*) FROM incidents";
@@ -829,7 +835,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         try
         {
-            await using var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            await using var transactionDisposal = transaction.ConfigureAwait(false);
             var outcome = await IncidentNoteRepository.SaveAsync(_writer, transaction, edit, cancellationToken).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -946,7 +953,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         try
         {
-            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            await using var leaseDisposal = lease.ConfigureAwait(false);
 
             return await ImportRepository.FindBasesAsync(lease.Connection, headSha256, sourceType, cancellationToken).ConfigureAwait(false);
         }

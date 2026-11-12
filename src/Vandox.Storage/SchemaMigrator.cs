@@ -13,262 +13,262 @@ internal static class SchemaMigrator
     #region Fields
 
     private static readonly SchemaStep[] _steps = [
-                                                      new(1, ["CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT"]),
+                                                      new(1, [c => c.CommandText = "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT"]),
                                                       new(2,
                                                           [
-                                                              """
-                                                              CREATE TABLE records (
-                                                                id INTEGER PRIMARY KEY,
-                                                                kind TEXT NOT NULL,
-                                                                origin TEXT NOT NULL,
-                                                                source TEXT NOT NULL,
-                                                                agent_id TEXT,
-                                                                seq INTEGER,
-                                                                captured_at INTEGER NOT NULL,
-                                                                received_at INTEGER NOT NULL,
-                                                                boot_id TEXT,
-                                                                clock_offset_ns INTEGER,
-                                                                data TEXT
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE UNIQUE INDEX records_agent_seq ON records(agent_id, seq) WHERE origin = 'agent'",
-                                                              "CREATE INDEX records_kind_source_time ON records(kind, source, captured_at)",
-                                                              "CREATE INDEX records_kind_time ON records(kind, captured_at)",
-                                                              """
-                                                              CREATE TABLE metrics (
-                                                                record_id INTEGER PRIMARY KEY REFERENCES records(id),
-                                                                source TEXT NOT NULL,
-                                                                name TEXT NOT NULL,
-                                                                captured_at INTEGER NOT NULL,
-                                                                value REAL NOT NULL,
-                                                                unit TEXT NOT NULL,
-                                                                labels TEXT
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE INDEX metrics_source_name_time ON metrics(source, name, captured_at)",
-                                                              """
-                                                              CREATE TABLE log_lines (
-                                                                record_id INTEGER PRIMARY KEY REFERENCES records(id),
-                                                                log TEXT NOT NULL,
-                                                                program TEXT NOT NULL,
-                                                                pid INTEGER NOT NULL,
-                                                                priority INTEGER,
-                                                                message TEXT NOT NULL,
-                                                                truncated INTEGER NOT NULL
-                                                              ) STRICT
-                                                              """,
-                                                              """
-                                                              CREATE VIRTUAL TABLE log_fts USING fts5(message, content='log_lines', content_rowid='record_id',
-                                                                tokenize='unicode61 remove_diacritics 2')
-                                                              """
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE records (
+                                                                                     id INTEGER PRIMARY KEY,
+                                                                                     kind TEXT NOT NULL,
+                                                                                     origin TEXT NOT NULL,
+                                                                                     source TEXT NOT NULL,
+                                                                                     agent_id TEXT,
+                                                                                     seq INTEGER,
+                                                                                     captured_at INTEGER NOT NULL,
+                                                                                     received_at INTEGER NOT NULL,
+                                                                                     boot_id TEXT,
+                                                                                     clock_offset_ns INTEGER,
+                                                                                     data TEXT
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE UNIQUE INDEX records_agent_seq ON records(agent_id, seq) WHERE origin = 'agent'",
+                                                              c => c.CommandText = "CREATE INDEX records_kind_source_time ON records(kind, source, captured_at)",
+                                                              c => c.CommandText = "CREATE INDEX records_kind_time ON records(kind, captured_at)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE metrics (
+                                                                                     record_id INTEGER PRIMARY KEY REFERENCES records(id),
+                                                                                     source TEXT NOT NULL,
+                                                                                     name TEXT NOT NULL,
+                                                                                     captured_at INTEGER NOT NULL,
+                                                                                     value REAL NOT NULL,
+                                                                                     unit TEXT NOT NULL,
+                                                                                     labels TEXT
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX metrics_source_name_time ON metrics(source, name, captured_at)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE log_lines (
+                                                                                     record_id INTEGER PRIMARY KEY REFERENCES records(id),
+                                                                                     log TEXT NOT NULL,
+                                                                                     program TEXT NOT NULL,
+                                                                                     pid INTEGER NOT NULL,
+                                                                                     priority INTEGER,
+                                                                                     message TEXT NOT NULL,
+                                                                                     truncated INTEGER NOT NULL
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = """
+                                                                                   CREATE VIRTUAL TABLE log_fts USING fts5(message, content='log_lines', content_rowid='record_id',
+                                                                                     tokenize='unicode61 remove_diacritics 2')
+                                                                                   """
                                                           ]),
                                                       new(3,
                                                           [
-                                                              """
-                                                              CREATE TABLE import_files (
-                                                                id INTEGER PRIMARY KEY,
-                                                                sha256 BLOB NOT NULL UNIQUE CHECK (length(sha256) = 32),
-                                                                size INTEGER NOT NULL CHECK (size >= 0),
-                                                                name TEXT NOT NULL,
-                                                                file_name BLOB NOT NULL CHECK (length(file_name) <= 1024),
-                                                                mod_time INTEGER,
-                                                                source_type TEXT NOT NULL,
-                                                                records INTEGER NOT NULL DEFAULT 0 CHECK (records >= 0),
-                                                                complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),
-                                                                started_at INTEGER NOT NULL,
-                                                                completed_at INTEGER
-                                                              ) STRICT
-                                                              """
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE import_files (
+                                                                                     id INTEGER PRIMARY KEY,
+                                                                                     sha256 BLOB NOT NULL UNIQUE CHECK (length(sha256) = 32),
+                                                                                     size INTEGER NOT NULL CHECK (size >= 0),
+                                                                                     name TEXT NOT NULL,
+                                                                                     file_name BLOB NOT NULL CHECK (length(file_name) <= 1024),
+                                                                                     mod_time INTEGER,
+                                                                                     source_type TEXT NOT NULL,
+                                                                                     records INTEGER NOT NULL DEFAULT 0 CHECK (records >= 0),
+                                                                                     complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),
+                                                                                     started_at INTEGER NOT NULL,
+                                                                                     completed_at INTEGER
+                                                                                   ) STRICT
+                                                                                   """
                                                           ]),
-                                                      new(4, ["ALTER TABLE log_lines ADD COLUMN host TEXT NOT NULL DEFAULT ''"]),
-                                                      new(5, ["ALTER TABLE log_lines ADD COLUMN event TEXT NOT NULL DEFAULT ''"]),
+                                                      new(4, [c => c.CommandText = "ALTER TABLE log_lines ADD COLUMN host TEXT NOT NULL DEFAULT ''"]),
+                                                      new(5, [c => c.CommandText = "ALTER TABLE log_lines ADD COLUMN event TEXT NOT NULL DEFAULT ''"]),
                                                       new(6,
                                                           [
-                                                              "ALTER TABLE import_files ADD COLUMN head_sha256 BLOB CHECK (head_sha256 IS NULL OR length(head_sha256) = 32)",
-                                                              "ALTER TABLE import_files ADD COLUMN continues_id INTEGER",
-                                                              "ALTER TABLE import_files ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK (start_offset >= 0)",
-                                                              "CREATE INDEX import_files_head ON import_files(head_sha256, source_type, size) WHERE complete = 1 AND head_sha256 IS NOT NULL"
+                                                              c => c.CommandText = "ALTER TABLE import_files ADD COLUMN head_sha256 BLOB CHECK (head_sha256 IS NULL OR length(head_sha256) = 32)",
+                                                              c => c.CommandText = "ALTER TABLE import_files ADD COLUMN continues_id INTEGER",
+                                                              c => c.CommandText = "ALTER TABLE import_files ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK (start_offset >= 0)",
+                                                              c => c.CommandText = "CREATE INDEX import_files_head ON import_files(head_sha256, source_type, size) WHERE complete = 1 AND head_sha256 IS NOT NULL"
                                                           ]),
                                                       new(7,
                                                           [
-                                                              "ALTER TABLE import_files ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0)",
-                                                              "ALTER TABLE import_files ADD COLUMN hashes_attempt INTEGER",
-                                                              """
-                                                              CREATE TABLE import_line_hashes (
-                                                                file_id INTEGER NOT NULL,
-                                                                attempt INTEGER NOT NULL CHECK (attempt > 0),
-                                                                first_offset INTEGER NOT NULL CHECK (first_offset >= 0),
-                                                                last_offset INTEGER NOT NULL CHECK (last_offset > first_offset),
-                                                                hashes BLOB NOT NULL CHECK (length(hashes) BETWEEN 16 AND 65536 AND length(hashes) % 16 = 0),
-                                                                PRIMARY KEY (file_id, attempt, last_offset)
-                                                              ) STRICT
-                                                              """
+                                                              c => c.CommandText = "ALTER TABLE import_files ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0)",
+                                                              c => c.CommandText = "ALTER TABLE import_files ADD COLUMN hashes_attempt INTEGER",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE import_line_hashes (
+                                                                                     file_id INTEGER NOT NULL,
+                                                                                     attempt INTEGER NOT NULL CHECK (attempt > 0),
+                                                                                     first_offset INTEGER NOT NULL CHECK (first_offset >= 0),
+                                                                                     last_offset INTEGER NOT NULL CHECK (last_offset > first_offset),
+                                                                                     hashes BLOB NOT NULL CHECK (length(hashes) BETWEEN 16 AND 65536 AND length(hashes) % 16 = 0),
+                                                                                     PRIMARY KEY (file_id, attempt, last_offset)
+                                                                                   ) STRICT
+                                                                                   """
                                                           ]),
                                                       new(8,
                                                           [
-                                                              """
-                                                              CREATE TABLE log_templates (
-                                                                id INTEGER PRIMARY KEY,
-                                                                source TEXT NOT NULL,
-                                                                program TEXT NOT NULL,
-                                                                template TEXT NOT NULL,
-                                                                first_seen INTEGER NOT NULL,
-                                                                last_seen INTEGER NOT NULL,
-                                                                count INTEGER NOT NULL CHECK (count > 0),
-                                                                UNIQUE (source, program, template)
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE INDEX log_templates_source_first_seen ON log_templates(source, first_seen)",
-                                                              """
-                                                              CREATE TABLE log_template_hours (
-                                                                template_id INTEGER NOT NULL REFERENCES log_templates(id),
-                                                                hour INTEGER NOT NULL,
-                                                                count INTEGER NOT NULL CHECK (count > 0),
-                                                                PRIMARY KEY (template_id, hour)
-                                                              ) STRICT, WITHOUT ROWID
-                                                              """,
-                                                              "CREATE INDEX log_template_hours_hour ON log_template_hours(hour)",
-                                                              """
-                                                              CREATE TABLE log_source_hours (
-                                                                source TEXT NOT NULL,
-                                                                hour INTEGER NOT NULL,
-                                                                count INTEGER NOT NULL CHECK (count > 0),
-                                                                PRIMARY KEY (source, hour)
-                                                              ) STRICT, WITHOUT ROWID
-                                                              """
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE log_templates (
+                                                                                     id INTEGER PRIMARY KEY,
+                                                                                     source TEXT NOT NULL,
+                                                                                     program TEXT NOT NULL,
+                                                                                     template TEXT NOT NULL,
+                                                                                     first_seen INTEGER NOT NULL,
+                                                                                     last_seen INTEGER NOT NULL,
+                                                                                     count INTEGER NOT NULL CHECK (count > 0),
+                                                                                     UNIQUE (source, program, template)
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX log_templates_source_first_seen ON log_templates(source, first_seen)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE log_template_hours (
+                                                                                     template_id INTEGER NOT NULL REFERENCES log_templates(id),
+                                                                                     hour INTEGER NOT NULL,
+                                                                                     count INTEGER NOT NULL CHECK (count > 0),
+                                                                                     PRIMARY KEY (template_id, hour)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX log_template_hours_hour ON log_template_hours(hour)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE log_source_hours (
+                                                                                     source TEXT NOT NULL,
+                                                                                     hour INTEGER NOT NULL,
+                                                                                     count INTEGER NOT NULL CHECK (count > 0),
+                                                                                     PRIMARY KEY (source, hour)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """
                                                           ]),
                                                       new(9,
                                                           [
-                                                              """
-                                                              CREATE TABLE incidents (
-                                                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                                                started_at INTEGER NOT NULL,
-                                                                ended_at INTEGER NOT NULL CHECK (ended_at > started_at),
-                                                                first_kill_at INTEGER NOT NULL,
-                                                                kill_count INTEGER NOT NULL CHECK (kill_count > 0),
-                                                                created_at INTEGER NOT NULL,
-                                                                updated_at INTEGER NOT NULL,
-                                                                data TEXT NOT NULL
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE INDEX incidents_started_at ON incidents(started_at)"
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE incidents (
+                                                                                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                                                     started_at INTEGER NOT NULL,
+                                                                                     ended_at INTEGER NOT NULL CHECK (ended_at > started_at),
+                                                                                     first_kill_at INTEGER NOT NULL,
+                                                                                     kill_count INTEGER NOT NULL CHECK (kill_count > 0),
+                                                                                     created_at INTEGER NOT NULL,
+                                                                                     updated_at INTEGER NOT NULL,
+                                                                                     data TEXT NOT NULL
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX incidents_started_at ON incidents(started_at)"
                                                           ]),
                                                       new(10,
                                                           [
-                                                              """
-                                                              CREATE TABLE incident_notes (
-                                                                written_for INTEGER PRIMARY KEY,
-                                                                incident_id INTEGER NOT NULL REFERENCES incidents(id),
-                                                                text TEXT NOT NULL CHECK (length(CAST(text AS BLOB)) BETWEEN 1 AND 5400),
-                                                                updated_at INTEGER NOT NULL
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE INDEX incident_notes_incident ON incident_notes(incident_id, written_for)"
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE incident_notes (
+                                                                                     written_for INTEGER PRIMARY KEY,
+                                                                                     incident_id INTEGER NOT NULL REFERENCES incidents(id),
+                                                                                     text TEXT NOT NULL CHECK (length(CAST(text AS BLOB)) BETWEEN 1 AND 5400),
+                                                                                     updated_at INTEGER NOT NULL
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX incident_notes_incident ON incident_notes(incident_id, written_for)"
                                                           ]),
                                                       new(11,
                                                           [
-                                                              """
-                                                              CREATE TABLE connection_marks (
-                                                                record_id INTEGER PRIMARY KEY REFERENCES records(id),
-                                                                agent_id TEXT NOT NULL,
-                                                                seq INTEGER NOT NULL,
-                                                                captured_at INTEGER NOT NULL,
-                                                                listener_check TEXT NOT NULL,
-                                                                new_count INTEGER NOT NULL CHECK (new_count >= 0),
-                                                                new_listeners TEXT
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE UNIQUE INDEX connection_marks_agent_seq ON connection_marks(agent_id, seq)",
-                                                              "CREATE INDEX connection_marks_findings ON connection_marks(captured_at DESC, agent_id, seq DESC) WHERE new_count > 0",
-                                                              """
-                                                              CREATE TABLE listener_comparisons (
-                                                                record_id INTEGER PRIMARY KEY REFERENCES records(id),
-                                                                agent_id TEXT NOT NULL,
-                                                                seq INTEGER NOT NULL,
-                                                                captured_at INTEGER NOT NULL,
-                                                                base_record_id INTEGER,
-                                                                base_seq INTEGER,
-                                                                base_captured_at INTEGER,
-                                                                outcome TEXT NOT NULL,
-                                                                new_count INTEGER NOT NULL CHECK (new_count >= 0),
-                                                                new_listeners TEXT,
-                                                                finding INTEGER NOT NULL CHECK (finding IN (0, 1))
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE INDEX listener_comparisons_findings ON listener_comparisons(captured_at DESC, agent_id, seq DESC) WHERE finding = 1"
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE connection_marks (
+                                                                                     record_id INTEGER PRIMARY KEY REFERENCES records(id),
+                                                                                     agent_id TEXT NOT NULL,
+                                                                                     seq INTEGER NOT NULL,
+                                                                                     captured_at INTEGER NOT NULL,
+                                                                                     listener_check TEXT NOT NULL,
+                                                                                     new_count INTEGER NOT NULL CHECK (new_count >= 0),
+                                                                                     new_listeners TEXT
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE UNIQUE INDEX connection_marks_agent_seq ON connection_marks(agent_id, seq)",
+                                                              c => c.CommandText = "CREATE INDEX connection_marks_findings ON connection_marks(captured_at DESC, agent_id, seq DESC) WHERE new_count > 0",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE listener_comparisons (
+                                                                                     record_id INTEGER PRIMARY KEY REFERENCES records(id),
+                                                                                     agent_id TEXT NOT NULL,
+                                                                                     seq INTEGER NOT NULL,
+                                                                                     captured_at INTEGER NOT NULL,
+                                                                                     base_record_id INTEGER,
+                                                                                     base_seq INTEGER,
+                                                                                     base_captured_at INTEGER,
+                                                                                     outcome TEXT NOT NULL,
+                                                                                     new_count INTEGER NOT NULL CHECK (new_count >= 0),
+                                                                                     new_listeners TEXT,
+                                                                                     finding INTEGER NOT NULL CHECK (finding IN (0, 1))
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX listener_comparisons_findings ON listener_comparisons(captured_at DESC, agent_id, seq DESC) WHERE finding = 1"
                                                           ]),
                                                       new(12,
                                                           [
-                                                              "ALTER TABLE records ADD COLUMN live INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1))",
-                                                              """
-                                                              CREATE TABLE agent_streams (
-                                                                agent_id TEXT PRIMARY KEY,
-                                                                floor_seq INTEGER NOT NULL,
-                                                                max_seq INTEGER NOT NULL,
-                                                                max_captured_at INTEGER NOT NULL,
-                                                                fill_at INTEGER NOT NULL,
-                                                                open_gaps INTEGER NOT NULL DEFAULT 0 CHECK (open_gaps >= 0),
-                                                                offset_ns INTEGER,
-                                                                measured_at INTEGER,
-                                                                clock_off INTEGER NOT NULL DEFAULT 0 CHECK (clock_off IN (0, 1)),
-                                                                last_bound_ns INTEGER,
-                                                                last_captured_at INTEGER,
-                                                                last_received_at INTEGER
-                                                              ) STRICT, WITHOUT ROWID
-                                                              """,
-                                                              """
-                                                              INSERT INTO agent_streams(agent_id, floor_seq, max_seq, max_captured_at, fill_at, open_gaps)
-                                                              SELECT agent_id, seq, seq, captured_at, received_at, 0
-                                                              FROM (SELECT agent_id, seq, captured_at, received_at, max(seq) FROM records WHERE origin = 'agent' AND agent_id IS NOT NULL GROUP BY agent_id)
-                                                              """,
-                                                              """
-                                                              CREATE TABLE agent_clock_samples (
-                                                                agent_id TEXT NOT NULL,
-                                                                sort TEXT NOT NULL CHECK (sort IN ('counted', 'run')),
-                                                                bucket INTEGER NOT NULL,
-                                                                bound_ns INTEGER NOT NULL,
-                                                                PRIMARY KEY (agent_id, sort, bucket)
-                                                              ) STRICT, WITHOUT ROWID
-                                                              """,
-                                                              """
-                                                              CREATE TABLE agent_sample_times (
-                                                                agent_id TEXT NOT NULL,
-                                                                captured_at INTEGER NOT NULL,
-                                                                min_seq INTEGER NOT NULL,
-                                                                max_seq INTEGER NOT NULL,
-                                                                PRIMARY KEY (agent_id, captured_at)
-                                                              ) STRICT, WITHOUT ROWID
-                                                              """,
-                                                              """
-                                                              CREATE TABLE gaps (
-                                                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                                                agent_id TEXT NOT NULL,
-                                                                kind TEXT NOT NULL CHECK (kind IN ('sequence', 'time')),
-                                                                cause TEXT NOT NULL,
-                                                                state TEXT NOT NULL CHECK (state IN ('open', 'closed', 'final')),
-                                                                first_seq INTEGER,
-                                                                last_seq INTEGER,
-                                                                from_seq INTEGER,
-                                                                to_seq INTEGER,
-                                                                from_at INTEGER NOT NULL,
-                                                                to_at INTEGER NOT NULL,
-                                                                detected_at INTEGER NOT NULL,
-                                                                changed_at INTEGER NOT NULL,
-                                                                CHECK (first_seq <= last_seq)
-                                                              ) STRICT
-                                                              """,
-                                                              "CREATE INDEX gaps_seq ON gaps(agent_id, first_seq) WHERE kind = 'sequence' AND state <> 'closed'",
-                                                              "CREATE INDEX gaps_seq_open ON gaps(agent_id, first_seq) WHERE kind = 'sequence' AND state = 'open'",
-                                                              "CREATE UNIQUE INDEX gaps_time ON gaps(agent_id, from_at) WHERE kind = 'time' AND state <> 'closed'",
-                                                              "CREATE INDEX gaps_agent ON gaps(agent_id, id)"
+                                                              c => c.CommandText = "ALTER TABLE records ADD COLUMN live INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1))",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE agent_streams (
+                                                                                     agent_id TEXT PRIMARY KEY,
+                                                                                     floor_seq INTEGER NOT NULL,
+                                                                                     max_seq INTEGER NOT NULL,
+                                                                                     max_captured_at INTEGER NOT NULL,
+                                                                                     fill_at INTEGER NOT NULL,
+                                                                                     open_gaps INTEGER NOT NULL DEFAULT 0 CHECK (open_gaps >= 0),
+                                                                                     offset_ns INTEGER,
+                                                                                     measured_at INTEGER,
+                                                                                     clock_off INTEGER NOT NULL DEFAULT 0 CHECK (clock_off IN (0, 1)),
+                                                                                     last_bound_ns INTEGER,
+                                                                                     last_captured_at INTEGER,
+                                                                                     last_received_at INTEGER
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = """
+                                                                                   INSERT INTO agent_streams(agent_id, floor_seq, max_seq, max_captured_at, fill_at, open_gaps)
+                                                                                   SELECT agent_id, seq, seq, captured_at, received_at, 0
+                                                                                   FROM (SELECT agent_id, seq, captured_at, received_at, max(seq) FROM records WHERE origin = 'agent' AND agent_id IS NOT NULL GROUP BY agent_id)
+                                                                                   """,
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE agent_clock_samples (
+                                                                                     agent_id TEXT NOT NULL,
+                                                                                     sort TEXT NOT NULL CHECK (sort IN ('counted', 'run')),
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     bound_ns INTEGER NOT NULL,
+                                                                                     PRIMARY KEY (agent_id, sort, bucket)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE agent_sample_times (
+                                                                                     agent_id TEXT NOT NULL,
+                                                                                     captured_at INTEGER NOT NULL,
+                                                                                     min_seq INTEGER NOT NULL,
+                                                                                     max_seq INTEGER NOT NULL,
+                                                                                     PRIMARY KEY (agent_id, captured_at)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE gaps (
+                                                                                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                                                     agent_id TEXT NOT NULL,
+                                                                                     kind TEXT NOT NULL CHECK (kind IN ('sequence', 'time')),
+                                                                                     cause TEXT NOT NULL,
+                                                                                     state TEXT NOT NULL CHECK (state IN ('open', 'closed', 'final')),
+                                                                                     first_seq INTEGER,
+                                                                                     last_seq INTEGER,
+                                                                                     from_seq INTEGER,
+                                                                                     to_seq INTEGER,
+                                                                                     from_at INTEGER NOT NULL,
+                                                                                     to_at INTEGER NOT NULL,
+                                                                                     detected_at INTEGER NOT NULL,
+                                                                                     changed_at INTEGER NOT NULL,
+                                                                                     CHECK (first_seq <= last_seq)
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX gaps_seq ON gaps(agent_id, first_seq) WHERE kind = 'sequence' AND state <> 'closed'",
+                                                              c => c.CommandText = "CREATE INDEX gaps_seq_open ON gaps(agent_id, first_seq) WHERE kind = 'sequence' AND state = 'open'",
+                                                              c => c.CommandText = "CREATE UNIQUE INDEX gaps_time ON gaps(agent_id, from_at) WHERE kind = 'time' AND state <> 'closed'",
+                                                              c => c.CommandText = "CREATE INDEX gaps_agent ON gaps(agent_id, id)"
                                                           ]),
                                                       new(13,
                                                           [
-                                                              "ALTER TABLE connection_marks ADD COLUMN changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)",
-                                                              "ALTER TABLE connection_marks ADD COLUMN changed_listeners TEXT",
-                                                              "ALTER TABLE listener_comparisons ADD COLUMN changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)",
-                                                              "ALTER TABLE listener_comparisons ADD COLUMN changed_listeners TEXT",
-                                                              "CREATE INDEX connection_marks_changes ON connection_marks(captured_at DESC, agent_id, seq DESC) WHERE new_count = 0 AND changed_count > 0"
+                                                              c => c.CommandText = "ALTER TABLE connection_marks ADD COLUMN changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)",
+                                                              c => c.CommandText = "ALTER TABLE connection_marks ADD COLUMN changed_listeners TEXT",
+                                                              c => c.CommandText = "ALTER TABLE listener_comparisons ADD COLUMN changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)",
+                                                              c => c.CommandText = "ALTER TABLE listener_comparisons ADD COLUMN changed_listeners TEXT",
+                                                              c => c.CommandText = "CREATE INDEX connection_marks_changes ON connection_marks(captured_at DESC, agent_id, seq DESC) WHERE new_count = 0 AND changed_count > 0"
                                                           ])
                                                   ];
 
@@ -330,7 +330,8 @@ internal static class SchemaMigrator
     {
         try
         {
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            await using var transactionDisposal = transaction.ConfigureAwait(false);
             var current = await CurrentVersionAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
 
             if (current > latest)
@@ -348,7 +349,7 @@ internal static class SchemaMigrator
                 using var command = connection.CreateCommand();
 
                 command.Transaction = transaction;
-                command.CommandText = statement;
+                statement(command);
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 

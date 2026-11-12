@@ -205,8 +205,10 @@ internal sealed class ImportPass
 
         try
         {
-            await using var file = _source.Root.OpenRegular(item.Location.FsPath);
-            await using var content = Decompress(file, item.Location.Gzip);
+            var file = _source.Root.OpenRegular(item.Location.FsPath);
+            await using var fileDisposal = file.ConfigureAwait(false);
+            var content = Decompress(file, item.Location.Gzip);
+            await using var contentDisposal = content.ConfigureAwait(false);
 
             await ImportContentAsync(item, state, content, cancellationToken).ConfigureAwait(false);
         }
@@ -278,9 +280,12 @@ internal sealed class ImportPass
     /// <returns>A task that returns how many entries of the group were handled</returns>
     private async Task<int> ReadArchiveAsync(ImportLocation location, List<FoundFile> group, CancellationToken cancellationToken)
     {
-        await using var file = _source.Root.OpenRegular(location.FsPath);
-        await using var raw = Decompress(file, location.ArchiveGzip);
-        await using var reader = new TarReader(new TarHeaderGuardStream(raw), leaveOpen: true);
+        var file = _source.Root.OpenRegular(location.FsPath);
+        await using var fileDisposal = file.ConfigureAwait(false);
+        var raw = Decompress(file, location.ArchiveGzip);
+        await using var rawDisposal = raw.ConfigureAwait(false);
+        var reader = new TarReader(new TarHeaderGuardStream(raw), leaveOpen: true);
+        await using var readerDisposal = reader.ConfigureAwait(false);
         var position = 0;
         var index = 0;
 
@@ -318,7 +323,8 @@ internal sealed class ImportPass
 
         try
         {
-            await using var content = Decompress(entry.DataStream ?? Stream.Null, item.Location.Gzip);
+            var content = Decompress(entry.DataStream ?? Stream.Null, item.Location.Gzip);
+            await using var contentDisposal = content.ConfigureAwait(false);
 
             await ImportContentAsync(item, state, content, cancellationToken).ConfigureAwait(false);
         }

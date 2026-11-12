@@ -124,16 +124,22 @@ All commands, with what each one checks, are listed in [`.squad/stack.md`](/.squ
 
 **Profile `dotnet`**
 
-- **Target framework** as set in the project files (see `.squad/stack.md`); **nullable reference types**, **implicit usings**, and
-  **documentation XML** generation are all enabled.
+- **Target framework** set once in `Directory.Build.props` (a project file names only a platform of the same major,
+  `net11.0-windows`), with **nullable reference types**, **implicit usings**, **documentation XML**,
+  `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild` and `AnalysisLevel` `latest-recommended` for every project;
+  `dotnet_config.py` checks the build structure in the *Analyzer gate* (`.squad/stack.md`).
 - **Central Package Management** via `Directory.Packages.props`; never put versions in individual
   `.csproj` files.
 - **Reihitsu.Analyzer** and **SonarAnalyzer.CSharp** are dev dependencies in every project (via
   `Directory.Build.props`).
+- **Analyzer rules** and their severities come from the template, the same in every .NET repository: the
+  `squad:dotnet-rules` and `squad:sonar-rules` blocks of `.editorconfig`, written by `.squad/tools/dotnet-rules.py`
+  and `sonar-rules.py`; never set them outside the blocks (a rule the code does not meet yet: `DOTNET_RULES_PENDING`,
+  `.squad/stack.md`, *Analyzer gate*).
 - **Solution format** is `.slnx` (XML-based) at the repository root.
 <!-- stack:end configuration -->
 <!-- project:begin configuration -->
-- **.NET** SDK from `global.json`, solution `Vandox.slnx`, packages via `Directory.Packages.props`, build settings in `Directory.Build.props` (all analyzer diagnostics are errors); local tools (`reihitsu-format`, `dotnet-sonarscanner`) in `dotnet-tools.json`.
+- **.NET** SDK from `global.json`, solution `Vandox.slnx`, packages via `Directory.Packages.props`, build settings in `Directory.Build.props` (all analyzer diagnostics are errors); local tools (`reihitsu-format` at the Reihitsu.Analyzer version, `dotnet-sonarscanner`) in `.config/dotnet-tools.json`.
 <!-- project:end configuration -->
 
 ## Code style
@@ -155,7 +161,7 @@ region named after the interface, its description not ending in "implementation"
 members (English, no `<remarks>`); `.ConfigureAwait(false)` in library/service code.
 <!-- stack:end code-style -->
 <!-- project:begin code-style -->
-C# (backend): Reihitsu layout rules (run the formatter, then build), XML documentation on every member, nullable reference types, `CancellationToken` last for anything that does I/O or blocks, logging through `[LoggerMessage]` methods, exceptions never swallowed. The analyzers forbid `!` and boolean comparisons with literals alike: write positive conditions (see `.squad/stack.md`). In this repository S1125 also forbids `== false`, so the `dotnet` profile's `== false` rule above does not apply (record 0074).
+C# (backend): Reihitsu layout rules (run the formatter, then build), XML documentation on every member, nullable reference types, `CancellationToken` last for anything that does I/O or blocks, logging through `[LoggerMessage]` methods, exceptions never swallowed. RH3001 forbids `!`: write `== false` as the `dotnet` profile says; S1125 is off in the template's baseline, and existing positive conditions stay (record 0203, `.squad/stack.md`).
 <!-- project:end code-style -->
 
 ## Testing

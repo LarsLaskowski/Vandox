@@ -63,7 +63,8 @@ internal static class ImportCommand
 
         try
         {
-            await using var store = await SqliteStore.OpenAsync(config.Storage.Directory, cancellationToken).ConfigureAwait(false);
+            var store = await SqliteStore.OpenAsync(config.Storage.Directory, cancellationToken).ConfigureAwait(false);
+            await using var storeDisposal = store.ConfigureAwait(false);
 
             return await ImportIntoAsync(store, registry, root, logger, stdout, clock, cancellationToken).ConfigureAwait(false);
         }

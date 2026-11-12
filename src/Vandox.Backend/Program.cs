@@ -28,10 +28,11 @@ public static class Program
                                      .ToList();
 
         // Standard output is UTF-8 without a byte order mark whatever the locale is: the forensics report holds non-ASCII text.
-        await using var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))
-                                 {
-                                     AutoFlush = true
-                                 };
+        var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))
+                     {
+                         AutoFlush = true
+                     };
+        await using var stdoutDisposal = stdout.ConfigureAwait(false);
         using var stop = new CancellationTokenSource();
         var registrations = new List<PosixSignalRegistration>();
 

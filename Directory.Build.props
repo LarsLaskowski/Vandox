@@ -1,27 +1,44 @@
 <Project>
-
+  <!-- One build structure in every .NET repository of the template (.squad/stack.md, Toolchain): the target framework
+       and these switches are set here once, never in a project file; dotnet_config.py checks it in the Analyzer gate.
+       The values of the target framework and the packages are the project's. -->
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <!-- The project's own build settings -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
     <InvariantGlobalization>true</InvariantGlobalization>
     <RepositoryUrl>https://github.com/LarsLaskowski/Vandox</RepositoryUrl>
   </PropertyGroup>
-
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
   <ItemGroup>
     <!-- The default of GZipStream ends a truncated stream silently and passes it on as complete: strict validation makes it throw (ADR 0076). -->
     <RuntimeHostConfigurationOption Include="System.IO.Compression.UseStrictValidation" Value="true" />
   </ItemGroup>
-
+  <!-- The analyzers in every project, dev-only, so SonarQube Cloud's issues surface in the local build -->
   <ItemGroup>
     <PackageReference Include="Reihitsu.Analyzer" PrivateAssets="all" />
     <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
   </ItemGroup>
-
+  <!-- The rules the baseline switches off, also for generated code (Razor components) that .editorconfig misses -->
+  <ItemGroup>
+    <GlobalAnalyzerConfigFiles Include="$(MSBuildThisFileDirectory).squad/dotnet-rules.globalconfig" />
+  </ItemGroup>
+  <!-- Every test project (name ending in .Tests): MSTest, which brings MSTest.Analyzers, and coverage -->
+  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="MSTest" />
+    <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+  </ItemGroup>
 </Project>

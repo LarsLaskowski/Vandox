@@ -247,9 +247,9 @@ internal static class TemplateBenchmark
     /// Runs a counting query on the database file.
     /// </summary>
     /// <param name="folder">The folder of the database</param>
-    /// <param name="sql">The query</param>
+    /// <param name="prepare">Sets the query's text and parameters</param>
     /// <returns>The count</returns>
-    internal static long Count(string folder, string sql)
+    internal static long Count(string folder, Action<SqliteCommand> prepare)
     {
         var builder = new SqliteConnectionStringBuilder
                       {
@@ -264,7 +264,7 @@ internal static class TemplateBenchmark
 
         using var command = connection.CreateCommand();
 
-        command.CommandText = sql;
+        prepare(command);
 
         return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
@@ -328,7 +328,9 @@ internal static class TemplateBenchmark
         var times = new List<double>();
         var total = Stopwatch.StartNew();
 
-        await using (var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false))
+        var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
+
+        await using (store.ConfigureAwait(false))
         {
             for (var first = 0; first < lines; first += size)
             {
@@ -361,13 +363,14 @@ internal static class TemplateBenchmark
     /// <returns>A task that completes when the figures are printed</returns>
     private static async Task QueryAsync(string folder, int lines, CancellationToken cancellationToken, bool hostile = false, DateTimeOffset? rangeEnd = null)
     {
-        await using var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
+        var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
+        await using var storeDisposal = store.ConfigureAwait(false);
 
         var end = rangeEnd ?? _start.AddSeconds(SecondsInThirtyDays);
         var to = end.AddHours(1);
         var from = to.AddHours(-RangeHours);
 
-        Print($"{lines} lines: {Count(folder, "SELECT count(*) FROM log_templates")} templates, {Count(folder, "SELECT count(*) FROM log_template_hours")} template hours, {Count(folder, "SELECT count(*) FROM log_source_hours")} source hours");
+        Print($"{lines} lines: {Count(folder, c => c.CommandText = "SELECT count(*) FROM log_templates")} templates, {Count(folder, c => c.CommandText = "SELECT count(*) FROM log_template_hours")} template hours, {Count(folder, c => c.CommandText = "SELECT count(*) FROM log_source_hours")} source hours");
 
         if (hostile)
         {
@@ -432,7 +435,14 @@ internal static class TemplateBenchmark
     /// <returns>A task that completes when the time is printed</returns>
     private static async Task SpikesAsync(SqliteStore store, string folder, string title, TemplateSpikeQuery query, CancellationToken cancellationToken)
     {
-        var candidates = Count(folder, string.Create(CultureInfo.InvariantCulture, $"SELECT count(*) FROM log_template_hours WHERE hour >= {StorageTimeNanoseconds(query.From)} AND hour < {StorageTimeNanoseconds(query.To)} AND count >= {query.MinCount}"));
+        var candidates = Count(folder,
+                               c =>
+                               {
+                                   c.CommandText = "SELECT count(*) FROM log_template_hours WHERE hour >= $from AND hour < $to AND count >= $min";
+                                   c.Parameters.AddWithValue("$from", StorageTimeNanoseconds(query.From));
+                                   c.Parameters.AddWithValue("$to", StorageTimeNanoseconds(query.To));
+                                   c.Parameters.AddWithValue("$min", query.MinCount);
+                               });
         var watch = Stopwatch.StartNew();
         var spikes = await store.TemplateSpikesAsync(query, cancellationToken).ConfigureAwait(false);
 
