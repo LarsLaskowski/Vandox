@@ -105,3 +105,7 @@ No guarantee touched: no ownership or disposal order changes.
 ## Out of scope / follow-ups
 
 - MSTEST0001 (#430).
+
+## Security notes
+
+Security (plan review, APPROVED), non-blocking: plan fact 5 is inaccurate. It cites Scanner.cs:464-475 as proof that FilterStream callers dispose the inner streams, but `var gzip = new GZipStream(content, CompressionMode.Decompress);` at Scanner.cs:471 is never disposed on any path (Tar, Unrecognized or `RecognizeAsync`); `HashingStream` does not dispose its inner stream and `TarReader` is `leaveOpen: true`, so the zlib inflater's state is freed only by the finalizer, once per gzip file scanned. The suppression neither causes nor hides this, and CA2000 is not set in `.editorconfig`. Smallest fix: change fact 5's evidence to "ImportPass.cs:283-288; Scanner.cs:150-151, 395; the `GZipStream` at Scanner.cs:471 is not disposed (follow-up issue)". Recommendation: open a linked issue to dispose `gzip` in `StreamAsync` (`await using`, with the wrapped `PrefixStream` left open through `leaveOpen: true`); it is a behavior change in an area-9 path and does not belong in this trivial-tier change.
