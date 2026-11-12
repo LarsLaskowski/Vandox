@@ -1,6 +1,6 @@
 # 0205: Disposable fields meet CA2213 through suppressions that name their owner
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-12
 - **Area:** —
 - **Source:** Issue #429
