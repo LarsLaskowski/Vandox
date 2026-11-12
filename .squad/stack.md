@@ -4,7 +4,7 @@ The toolchain and the exact commands of this repository, which has two languages
 (`vandox-agent`) is Go, the backend (`vandoxd`) is .NET 11 with Blazor (records 0073, 0197). Every squad member,
 skill and instruction file refers to the entries below by their *italic name*; each command covers both
 languages. Seeded from the Squad-Spec-Repository-Template `go` profile, extended for .NET and owned by this
-repository (record 0074): keep it true when the build changes.
+repository (record 0203): keep it true when the build changes.
 
 ## Toolchain
 
@@ -21,10 +21,20 @@ repository (record 0074): keep it true when the build changes.
   Microsoft.Extensions and Microsoft.Data.Sqlite packages, the images) is one change of its own. Central package
   management (`Directory.Packages.props`), shared build settings in `Directory.Build.props`. Analyzers:
   `Reihitsu.Analyzer` and `SonarAnalyzer.CSharp`, every diagnostic an error (`TreatWarningsAsErrors`). Formatter:
-  `reihitsu-format` (local tool, `dotnet-tools.json`). Tests: MSTest 4 with coverlet (`coverlet.runsettings`).
+  `reihitsu-format` (local tool, `.config/dotnet-tools.json`, at the same version as the **Reihitsu.Analyzer** pinned
+  in `Directory.Packages.props`; otherwise the formatter can revert code the analyzer considers correct). Tests:
+  MSTest 4 with coverlet (`coverlet.runsettings`), referenced with the test SDK by `Directory.Build.props` for every
+  project whose name ends in `.Tests`.
+- One build structure in every .NET repository of the template: `Directory.Build.props` sets the target framework
+  and `Nullable`, `ImplicitUsings`, `GenerateDocumentationFile`, `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`
+  and `AnalysisLevel` `latest-recommended` for every project, and no project file sets one again (only a platform of
+  the same major, `net11.0-windows`) or gives a package a version; there is no rule set, no rule in `NoWarn` and no
+  assembly-wide `SuppressMessage`, and C# files are checked out with CRLF. `dotnet_config.py` checks all of it in the
+  *Analyzer gate*, also with `--lint-only`; the values of the target framework, the SDK and the packages are the
+  project's.
 - The SessionStart hook `.claude/hooks/session-start.sh` runs the hook of each profile in remote
   sessions: `session-start-go.sh` (`go mod download`, the pinned golangci-lint) and `session-start-dotnet.sh`
-  (`dotnet tool restore` for the formatter and `dotnet-sonarscanner` pinned in `dotnet-tools.json`, and restores the
+  (`dotnet tool restore` for the formatter and `dotnet-sonarscanner` pinned in `.config/dotnet-tools.json`, and restores the
   solution).
 
 Cloud session notes (found when a cloud image lacked the .NET SDK):
@@ -112,21 +122,29 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    per project. Reihitsu and SonarAnalyzer run inside the build with every rule, info level included, and every
    diagnostic of any severity in a changed C# file fails the gate (diagnostics in unchanged files are listed, not gating).
    Fixable style findings are the Code Officer's; findings that need a code change go to the Dev or Tester.
-   The `.editorconfig` raises the diagnostics that SonarQube Cloud lists but the compiler reports only at info level
-   (`MSTEST0037`, `MSTEST0068`, `ASP0015`, `SYSLIB1092`, `IDE0028`) to errors; add an id there when SonarQube reports a
-   new one that the build did not. SonarQube Cloud analyses this project with the built-in C# profile *Sonar way
-   comprehensive*, while the SonarAnalyzer package runs by default only the rules of *Sonar way core*. The rules the
-   comprehensive profile adds, and the core rules it switches off, are set in the `squad:sonar-rules` block of
-   `.editorconfig`, which `python3 .squad/tools/sonar-rules.py` writes from the two profiles (`--check` reports a block
-   out of date; severity `SONAR_RULES_SEVERITY` in `squad_settings.py`, here `error`): the *Analyzer gate* reports
-   them, among them the cognitive-complexity rule `S3776` (threshold 15, the same as SonarQube Cloud): keep methods
-   below it while writing them instead of splitting them after the gate fails. `S107` (more than seven
-   parameters) is switched off again in the `[tests/**.cs]` section after the block: `tests/**` is excluded
-   from the cloud analysis (`ci.yml`, `sonar.exclusions`), and data-driven test methods need the parameters; a
-   section of a path keeps its own choice only after the block, which `sonar-rules.py` warns about otherwise. A rule that runs only under the scanner stays cloud-only even when set: `S1192` (duplicated
-   string literals) is one, found on PR #214 and reported by no local build. When the cloud profile changes, or
-   SonarQube reports a `csharpsquid` rule the local build did not, run `sonar-rules.py` again and note a scanner-only
-   rule here.
+   The gate also runs `dotnet_config.py`, which checks the build structure (*Toolchain*) and the rule blocks.
+
+   The C# rules and their severities are the template's, the same in every .NET repository: `python3
+   .squad/tools/dotnet-rules.py` writes its baseline (`.squad/dotnet-rules.editorconfig`, the stricter setting of the
+   repositories winning) into the `squad:dotnet-rules` blocks of `.editorconfig` (`--check` reports them out of date).
+   No section of every C# file sets a rule or a code-style option outside the blocks; the project's own sections of
+   paths come after them, and the baseline's paths block already switches off `S107`, `BL0016` and `CA2007` for test
+   projects (`**/*.Tests/**.cs`). A rule the code does not meet yet goes into `DOTNET_RULES_PENDING` in
+   `squad_settings.py` with the issue that brings the code up to it: it is written as `suggestion`, which the gate
+   still reports in a changed file, and the entry goes once the issue is done. A diagnostic SonarQube Cloud lists but
+   the build reports only at info level is raised in the template's baseline, not here.
+
+   SonarQube Cloud analyses this project with the built-in C# profile *Sonar way comprehensive*, while the
+   SonarAnalyzer package runs by default only the rules of *Sonar way core*. The rules the comprehensive profile adds,
+   and the core rules it switches off, are set in the `squad:sonar-rules` block of `.editorconfig`, which `python3
+   .squad/tools/sonar-rules.py` writes from the two profiles at `error` (`--check` reports a block out of date; a
+   pending rule at `suggestion`), except the rules the dotnet-rules baseline already sets, which keep the baseline's
+   severity: the gate reports them, among them the cognitive-complexity rule `S3776` (threshold 15, the same as
+   SonarQube Cloud): keep methods below it while writing them instead of splitting them after the gate fails. A Sonar
+   rule the projects keep off is switched off in the baseline, since the built-in profile cannot be changed (S1125).
+   A rule that runs only under the scanner stays cloud-only even when set: `S1192` (duplicated string literals) is
+   one, found on PR #214 and reported by no local build. When the cloud profile changes, or SonarQube reports a
+   `csharpsquid` rule the local build did not, run `sonar-rules.py` again and note a scanner-only rule here.
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
 Other SonarQube Cloud findings (further rules, hotspots, duplication) have no local equivalent: the *Sonar gate*
@@ -218,9 +236,9 @@ arguments of the new logger calls for those names. In Go the query flags names c
 `apiKey` and `secretKey`, unless the name also contains `hash`, `crypt`, `code`, `mask`, `test` or `redact`; avoid those
 in logger arguments of the agent too.
 
-Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
-S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early
-returns or a small `Require`-style helper; never a workaround such as `== default(bool)`.
+RH3001 forbids the negation operator `!`: write `== false` instead (record 0203). S1125 (no comparison of a
+boolean with a literal) is off in the template's baseline, the same in every .NET repository; existing positive
+conditions stay as they are. Never a workaround such as `== default(bool)`.
 IDE0046 (prefer a conditional expression over an `if` that returns) collides with S3358 (no nested ternaries)
 and stays silent (record 0087): an `if` with an early return is the accepted form.
 
@@ -272,7 +290,7 @@ it excludes `.squad/**`, `.claude/**` and `src/Vandox.Backend/wwwroot/js/**` (re
 can cover (`wwwroot/js/**`, a generated file) is added to that argument, and to `COVERAGE_EXCLUDES` where
 `COVERAGE_PATHSPECS` includes it, with a decision record — never to `sonar.exclusions`, which would drop it
 from the analysis too. Process startup wiring is not excluded: a Go `main` and `Program.Main` stay thin and are
-the accepted uncovered lines (`docs/UNIT_TESTS.md`, records 0072 and 0074).
+the accepted uncovered lines (`docs/UNIT_TESTS.md`, records 0072 and 0203).
 
 ## Writing code
 
@@ -320,7 +338,7 @@ C# (backend): follow the surrounding code and the analyzers; in particular
   follow the assignment into the lambda and reports the test as always false (`S2583`), and the local
   build stays silent. Pass the value out through the callback's return value or a field instead;
 - exceptions carry context in their message and are never swallowed; `Program.Main` and similar wiring stay
-  thin and hold no logic (record 0074);
+  thin and hold no logic (record 0203);
 - the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
   `-p:VandoxCommit` and `-p:VandoxDate`;
 - names the analyzers refuse, checked by the Lead before a name goes into the plan's *Signatures*: an enum

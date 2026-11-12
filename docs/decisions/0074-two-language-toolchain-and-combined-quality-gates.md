@@ -1,6 +1,6 @@
 # 0074: Two-language toolchain: Go for the agent, .NET for the backend, one set of quality gates
 
-- **Status:** Accepted
+- **Status:** Superseded by [0203](0203-two-language-toolchain-on-the-templates-shared-dotnet-rules.md)
 - **Date:** 2026-10-06
 - **Area:** —
 - **Source:** Product Manager request: move the backend to .NET 10 with Blazor, keep the agent in Go

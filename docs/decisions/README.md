@@ -113,7 +113,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0069 | The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count, a grown file continued after its imported start, an older copy recognized by the line-end hashes of the imported one | Accepted | 2026-10-11 |
 | 0072 | vandoxd gets the sub-command import; progress as JSON on stderr, the summary as text on stdout, exit code 1 when a file failed | Accepted | 2026-10-06 |
 | 0073 | The backend is written in .NET 10 with a Blazor web UI; the agent stays in Go | Superseded by 0197 | 2026-10-06 |
-| 0074 | Two-language toolchain: Go for the agent, .NET for the backend, one set of quality gates | Accepted | 2026-10-06 |
+| 0074 | Two-language toolchain: Go for the agent, .NET for the backend, one set of quality gates | Superseded by [0203](0203-two-language-toolchain-on-the-templates-shared-dotnet-rules.md) | 2026-10-06 |
 | 0075 | The wire contract between the Go encoder and the C# decoder is pinned by golden fixtures | Accepted | 2026-10-06 |
 | 0076 | The backend decodes gzip with strict validation switched on for every process | Accepted | 2026-10-06 |
 | 0077 | Storage on Microsoft.Data.Sqlite with the unchanged schema, migrations and connection rules | Accepted | 2026-10-06 |
@@ -239,4 +239,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0200 | A chart draw on a lost connection ends quietly and is drawn again; BL0016 is off for test code | Accepted | 2026-11-11 |
 | 0201 | The output writes of `vandoxd` commands opt out of cancellation explicitly | Accepted | 2026-11-11 |
 | 0202 | A reconnected live connection follows the session of its new connection | Accepted | 2026-11-11 |
+| 0203 | Two-language toolchain with one set of quality gates, the .NET rules from the template's shared baseline | Accepted | 2026-11-12 |
 <!-- project:end index -->

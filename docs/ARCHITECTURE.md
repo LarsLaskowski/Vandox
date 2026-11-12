@@ -188,7 +188,7 @@ flowchart LR
 
 Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md),
-[0074](decisions/0074-two-language-toolchain-and-combined-quality-gates.md),
+[0203](decisions/0203-two-language-toolchain-on-the-templates-shared-dotnet-rules.md),
 [0013](decisions/0013-mariadb-access-via-unix-socket-process-privilege.md),
 [0014](decisions/0014-log-import-is-a-core-component.md),
 [0015](decisions/0015-mail-services-checked-not-mail-accounts.md),
