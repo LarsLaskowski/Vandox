@@ -210,8 +210,7 @@ dotnet_diagnostic.CA1873.severity = warning
 dotnet_diagnostic.CA2002.severity = warning
 # ConfigureAwait(false) on every await of production code, the house style for library and service code (#338)
 dotnet_diagnostic.CA2007.severity = warning
-# pending: #428 (DOTNET_RULES_PENDING)
-dotnet_diagnostic.CA2100.severity = suggestion
+dotnet_diagnostic.CA2100.severity = warning
 dotnet_diagnostic.CA2101.severity = warning
 dotnet_diagnostic.CA2200.severity = warning
 dotnet_diagnostic.CA2207.severity = warning

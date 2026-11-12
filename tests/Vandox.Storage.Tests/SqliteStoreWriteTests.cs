@@ -633,7 +633,7 @@ public class SqliteStoreWriteTests
     {
         await using var command = connection.CreateCommand();
 
-#pragma warning disable CA2100
+#pragma warning disable CA2100 // the table and condition are literals of the calling test
         command.CommandText = $"SELECT COUNT(*) FROM {fromWhere}";
 #pragma warning restore CA2100
 

@@ -54,7 +54,9 @@ public partial class AgentTimelineQueriesTests
         {
             using var command = connection.CreateCommand();
 
+#pragma warning disable CA2100 // the explained statement is a test-owned query text
             command.CommandText = $"EXPLAIN QUERY PLAN {sql}";
+#pragma warning restore CA2100
 
             foreach (var parameter in ParameterPattern().Matches(sql).DistinctBy(match => match.Value))
             {

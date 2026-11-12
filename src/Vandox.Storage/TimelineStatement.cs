@@ -28,7 +28,9 @@ internal sealed partial class TimelineStatement : IDisposable
     {
         _command = connection.CreateCommand();
         _command.Transaction = transaction;
+#pragma warning disable CA2100 // constant statement of the callers, values bound as parameters
         _command.CommandText = sql;
+#pragma warning restore CA2100
 
         foreach (var name in ParameterPattern().Matches(sql).Select(match => match.Value).Distinct())
         {

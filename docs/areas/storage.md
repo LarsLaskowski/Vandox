@@ -28,6 +28,9 @@ import tracks files on top of this store in [Log import](log-import.md).
   31 s were measured without it). It matters only against another process that opens the same file, such as `vandoxd import`,
   `vandoxd templates` or a backup; an ingest write that hits it fails and is answered `503`.
 - Two processes may open the database at once.
+- Every SQL statement is a constant or composed of constant fragments; every value from a request, batch, file or address is bound as a
+  parameter, never written into the text. A helper that takes the statement text suppresses CA2100 at its one `CommandText`
+  assignment with that reason.
 - **A cancelled token or a passed deadline interrupts a running reader statement.** Every reader connection checks the cancellation of
   its call every 1,000 SQLite virtual-machine instructions (a progress handler), so it also stops the work SQLite does before the first
   row (a sort, an aggregate, the `MATCH` of a search, including the FTS5 module's reads of its index pages). The call then ends as
@@ -166,6 +169,8 @@ stored once") is tested against the real store; fakes for other consumers only r
   stream rows exist.
 - [0181](../decisions/0181-the-agents-clock-offset-is-measured-from-caught-up-self-samples.md) — why the stream row and the clock samples
   hold the measured clock offset.
+- [0204](../decisions/0204-sql-command-text-meets-ca2100-through-justified-suppressions-at-the-command-helpers.md) — why a helper that takes
+  the statement text suppresses CA2100 with a reason instead of the callers assigning it.
 
 ## Not here
 
