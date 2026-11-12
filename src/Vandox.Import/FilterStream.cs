@@ -7,7 +7,9 @@ internal abstract class FilterStream : Stream
 {
     #region Fields
 
+#pragma warning disable CA2213 // The caller owns the inner stream
     private readonly Stream _inner;
+#pragma warning restore CA2213
 
     #endregion // Fields
 

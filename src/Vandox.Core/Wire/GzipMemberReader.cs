@@ -58,7 +58,9 @@ internal sealed class GzipMemberReader : Stream
     /// <summary>
     /// The compressed stream.
     /// </summary>
+#pragma warning disable CA2213 // The caller owns the input; BatchDecoder leaves it open
     private readonly Stream _input;
+#pragma warning restore CA2213
 
     /// <summary>
     /// The bytes taken from the input and not yet consumed.

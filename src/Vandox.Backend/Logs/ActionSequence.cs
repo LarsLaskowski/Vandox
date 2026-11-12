@@ -11,7 +11,9 @@ internal sealed class ActionSequence : IDisposable
 
     private readonly TimeSpan _limit;
 
+#pragma warning disable CA2213 // The caller of BeginAsync owns and disposes the run
     private ActionRun? _current;
+#pragma warning restore CA2213
 
     #endregion // Fields
 
