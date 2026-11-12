@@ -49,14 +49,16 @@ internal static class TemplateRebuilder
     {
         foreach (var sql in _clearStatements)
         {
-            await using var delete = connection.CreateCommand();
+            var delete = connection.CreateCommand();
+            await using var deleteDisposal = delete.ConfigureAwait(false);
 
             delete.Transaction = transaction;
             delete.CommandText = sql;
             await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await using var write = connection.CreateCommand();
+        var write = connection.CreateCommand();
+        await using var writeDisposal = write.ConfigureAwait(false);
 
         write.Transaction = transaction;
         write.CommandText = "INSERT INTO meta(key, value) VALUES ($key, $marker) ON CONFLICT(key) DO UPDATE SET value = excluded.value";
@@ -77,7 +79,8 @@ internal static class TemplateRebuilder
     /// <returns>A task that returns <c>false</c> when the row is missing or holds another value</returns>
     internal static async Task<bool> HoldsMarkerAsync(SqliteConnection connection, SqliteTransaction transaction, string marker, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
+        var command = connection.CreateCommand();
+        await using var commandDisposal = command.ConfigureAwait(false);
 
         command.Transaction = transaction;
         command.CommandText = "SELECT value FROM meta WHERE key = $key";
@@ -104,7 +107,9 @@ internal static class TemplateRebuilder
         var lastId = afterId;
         var lines = 0;
 
-        await using (var command = connection.CreateCommand())
+        var command = connection.CreateCommand();
+
+        await using (command.ConfigureAwait(false))
         {
             command.Transaction = transaction;
             command.CommandText = "SELECT l.record_id, r.source, l.program, l.message, r.captured_at FROM log_lines l JOIN records r ON r.id = l.record_id "
@@ -113,7 +118,8 @@ internal static class TemplateRebuilder
             command.Parameters.AddWithValue("$high", highId);
             command.Parameters.AddWithValue("$limit", batchLines);
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            await using var readerDisposal = reader.ConfigureAwait(false);
 
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -137,7 +143,9 @@ internal static class TemplateRebuilder
     /// <returns>A task that returns the number of rows of <c>log_templates</c></returns>
     internal static async Task<long> FinishAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)
     {
-        await using (var delete = connection.CreateCommand())
+        var delete = connection.CreateCommand();
+
+        await using (delete.ConfigureAwait(false))
         {
             delete.Transaction = transaction;
             delete.CommandText = "DELETE FROM meta WHERE key = $key";
@@ -158,7 +166,8 @@ internal static class TemplateRebuilder
     /// <returns>A task that returns the value</returns>
     private static async Task<long> ScalarAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
+        var command = connection.CreateCommand();
+        await using var commandDisposal = command.ConfigureAwait(false);
 
         command.Transaction = transaction;
         command.CommandText = sql;

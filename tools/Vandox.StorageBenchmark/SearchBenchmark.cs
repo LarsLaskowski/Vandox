@@ -100,7 +100,8 @@ internal static class SearchBenchmark
             await WriteAsync(work, lines, size > 0 ? size : DefaultBatchSize, cancellationToken).ConfigureAwait(false);
             PrintShares(work);
 
-            await using var store = await SqliteStore.OpenAsync(work, cancellationToken).ConfigureAwait(false);
+            var store = await SqliteStore.OpenAsync(work, cancellationToken).ConfigureAwait(false);
+            await using var storeDisposal = store.ConfigureAwait(false);
 
             var cases = await BuildCasesAsync(store, cancellationToken).ConfigureAwait(false);
             var slowest = 0D;
@@ -159,7 +160,9 @@ internal static class SearchBenchmark
     {
         var total = Stopwatch.StartNew();
 
-        await using (var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false))
+        var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
+
+        await using (store.ConfigureAwait(false))
         {
             for (var first = 0; first < lines; first += size)
             {

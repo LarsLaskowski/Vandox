@@ -230,7 +230,9 @@ public static class Program
 
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"flush to disk of a 4 KiB write on this volume: median {flush:F1} ms (a transaction waits for at least one such flush)"));
 
-            await using (var store = await SqliteStore.OpenAsync(work, cancellationToken).ConfigureAwait(false))
+            var store = await SqliteStore.OpenAsync(work, cancellationToken).ConfigureAwait(false);
+
+            await using (store.ConfigureAwait(false))
             {
                 var seq = 1UL;
 
@@ -290,7 +292,9 @@ public static class Program
         var block = new byte[4096];
         var times = new List<double>();
 
-        await using (var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.None))
+        var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.None);
+
+        await using (file.ConfigureAwait(false))
         {
             for (var index = 0; index < ProbeRounds; index++)
             {

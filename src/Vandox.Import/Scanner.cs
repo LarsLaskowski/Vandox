@@ -147,7 +147,8 @@ internal sealed class Scanner
     {
         try
         {
-            await using var reader = new TarReader(new TarHeaderGuardStream(content), leaveOpen: true);
+            var reader = new TarReader(new TarHeaderGuardStream(content), leaveOpen: true);
+            await using var readerDisposal = reader.ConfigureAwait(false);
             var index = 0;
 
             while (await reader.GetNextEntryAsync(false, cancellationToken).ConfigureAwait(false) is { } entry)
@@ -390,7 +391,8 @@ internal sealed class Scanner
 
         try
         {
-            await using var file = _source.Root.OpenRegular(relative);
+            var file = _source.Root.OpenRegular(relative);
+            await using var fileDisposal = file.ConfigureAwait(false);
 
             item.Modified = File.GetLastWriteTimeUtc(file.SafeFileHandle);
             await StreamAsync(item, file, cancellationToken).ConfigureAwait(false);
@@ -552,15 +554,16 @@ internal sealed class Scanner
         var key = ContentHead.Key(head);
         var bases = parser.LineFramed ? await CollectBasesAsync(key, parser.Type, cancellationToken).ConfigureAwait(false) : [];
 
-        await using var hashing = new HashingStream(content,
-                                                    _progressBytes,
-                                                    mark => Report(new ImportProgress
-                                                                   {
-                                                                       Event = ProgressEvent.ScanProgress,
-                                                                       Path = item.Display,
-                                                                       Bytes = mark
-                                                                   }),
-                                                    bases);
+        var hashing = new HashingStream(content,
+                                        _progressBytes,
+                                        mark => Report(new ImportProgress
+                                                       {
+                                                           Event = ProgressEvent.ScanProgress,
+                                                           Path = item.Display,
+                                                           Bytes = mark
+                                                       }),
+                                        bases);
+        await using var hashingDisposal = hashing.ConfigureAwait(false);
 
         await hashing.CopyToAsync(Stream.Null, cancellationToken).ConfigureAwait(false);
 

@@ -51,7 +51,9 @@ internal static class BackfillBenchmark
             Console.WriteLine($"{RuntimeInformation.OSDescription}; {RuntimeInformation.FrameworkDescription}; {Environment.ProcessorCount} logical CPUs");
             Console.WriteLine($"database below {directory}; {Rounds} rounds, each of an agent with a gap of {size} numbers and {size + (2 * Edge)} seconds, filled by one batch of {size} metric points");
 
-            await using (var store = await SqliteStore.OpenAsync(work, cancellationToken).ConfigureAwait(false))
+            var store = await SqliteStore.OpenAsync(work, cancellationToken).ConfigureAwait(false);
+
+            await using (store.ConfigureAwait(false))
             {
                 for (var round = 1; round <= Rounds; round++)
                 {

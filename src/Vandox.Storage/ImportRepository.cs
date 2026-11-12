@@ -79,7 +79,8 @@ internal static class ImportRepository
     {
         ValidateLineHashes(hashes);
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+        var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+        await using var transactionDisposal = transaction.ConfigureAwait(false);
 
         using (var insert = connection.CreateCommand())
         {
@@ -200,7 +201,8 @@ internal static class ImportRepository
     /// <returns>A task that returns the import state</returns>
     internal static async Task<ImportFile> BeginAsync(SqliteConnection connection, ImportFileStart start, CancellationToken cancellationToken)
     {
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+        var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+        await using var transactionDisposal = transaction.ConfigureAwait(false);
 
         var exists = await ExistsAsync(connection, transaction, start, cancellationToken).ConfigureAwait(false);
 

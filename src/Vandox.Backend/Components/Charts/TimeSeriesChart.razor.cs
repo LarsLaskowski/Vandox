@@ -58,7 +58,7 @@ public sealed partial class TimeSeriesChart : IAsyncDisposable
 
         _interop ??= new ChartInterop(JSRuntime);
 
-        if (await _interop.RenderAsync(_host, Title, data, _cancellation.Token))
+        if (await _interop.RenderAsync(_host, Title, data, _cancellation.Token).ConfigureAwait(true))
         {
             _rendered = data;
         }

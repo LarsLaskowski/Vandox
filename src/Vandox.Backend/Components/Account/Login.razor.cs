@@ -69,7 +69,7 @@ public sealed partial class Login
             return;
         }
 
-        var outcome = await LoginService.SignInAsync(context, Password, context.RequestAborted);
+        var outcome = await LoginService.SignInAsync(context, Password, context.RequestAborted).ConfigureAwait(true);
 
         if (outcome == LoginOutcome.SignedIn)
         {

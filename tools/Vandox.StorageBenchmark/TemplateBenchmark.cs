@@ -328,7 +328,9 @@ internal static class TemplateBenchmark
         var times = new List<double>();
         var total = Stopwatch.StartNew();
 
-        await using (var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false))
+        var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
+
+        await using (store.ConfigureAwait(false))
         {
             for (var first = 0; first < lines; first += size)
             {
@@ -361,7 +363,8 @@ internal static class TemplateBenchmark
     /// <returns>A task that completes when the figures are printed</returns>
     private static async Task QueryAsync(string folder, int lines, CancellationToken cancellationToken, bool hostile = false, DateTimeOffset? rangeEnd = null)
     {
-        await using var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
+        var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
+        await using var storeDisposal = store.ConfigureAwait(false);
 
         var end = rangeEnd ?? _start.AddSeconds(SecondsInThirtyDays);
         var to = end.AddHours(1);

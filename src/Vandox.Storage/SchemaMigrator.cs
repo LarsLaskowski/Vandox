@@ -330,7 +330,8 @@ internal static class SchemaMigrator
     {
         try
         {
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            await using var transactionDisposal = transaction.ConfigureAwait(false);
             var current = await CurrentVersionAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
 
             if (current > latest)
