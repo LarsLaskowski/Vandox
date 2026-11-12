@@ -94,3 +94,7 @@ No guarantee of `.squad/project.md` is touched; production code is unchanged.
 ## Out of scope / follow-ups
 
 - Squad lesson (step 12, `squad-upstream`): `analyzer-check-dotnet.py:68` drops location-less diagnostics, so a pending assembly-level rule (MSTEST0001) is never reported, against `.squad/stack.md` ("which the gate still reports in a changed file"); and the baseline does not set MSTEST0001, so after this change a new test project without the attribute is caught by nothing.
+
+## Security notes
+
+Security (plan review, APPROVED), non-blocking N1 (fix now, in step 6): AC1 can only be checked by reading the SARIF, since the Analyzer gate cannot see the rule. The Tester's report should name the exact command and quote its output, for example `python3 -I -c '...results...ruleId=="MSTEST0001"...' tests/*/obj/roslyn.sarif` printing nothing after the gate's Release build. Without that, the Reviewer has to count AC1 as not run. The gap the Lead raised (the gate skips location-less diagnostics, `.squad/tools/analyzer-check-dotnet.py:67-69`, and the baseline leaves MSTEST0001 at MSTest's default `suggestion`) is a squad lesson, not this change's to close: removing the pending entry weakens nothing, and a test project without the attribute still runs sequentially.
