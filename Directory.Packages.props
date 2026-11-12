@@ -1,18 +1,24 @@
 <Project>
+  <!-- Central Package Management: every version is written here, never in a project file (dotnet_config.py) -->
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Code analysis (every project); reihitsu.cli in .config/dotnet-tools.json stays at the analyzer's version -->
     <PackageVersion Include="Reihitsu.Analyzer" Version="1.2.0" />
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.36.0.15337" />
+    <!-- Tests (every project whose name ends in .Tests) -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageVersion Include="MSTest" Version="4.5.3" />
+    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The project's own packages -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="11.0.0" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
     <PackageVersion Include="NodaTime" Version="3.3.7" />
     <PackageVersion Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
-    <PackageVersion Include="MSTest" Version="4.5.3" />
-    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
   </ItemGroup>
 </Project>
