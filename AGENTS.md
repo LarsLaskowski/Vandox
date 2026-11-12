@@ -48,7 +48,8 @@ container on any Docker host in the home network (for example a NAS such as Syno
   the *Analyzer gate* from `.squad/stack.md` and fix every finding before considering the work done (in
   the squad skills, the Code Officer owns this).
 - New or changed production code needs unit tests until the *Coverage gate* in `.squad/stack.md` passes:
-  **at least 80 % line coverage** on new or changed lines and overall (the thresholds live in
+  **at least 80 % coverage** on new or changed lines (with the branch conditions the coverage report records, as
+  SonarQube counts them) and line coverage overall (the thresholds live in
   `.squad/tools/squad_settings.py`, see [`UNIT_TESTS.md`](/docs/UNIT_TESTS.md#code-coverage)).
 <!-- stack:begin golden-rules -->
 **Profile `go`**
