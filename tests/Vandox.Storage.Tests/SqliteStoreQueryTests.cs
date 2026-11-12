@@ -735,7 +735,9 @@ public class SqliteStoreQueryTests
 
         using var command = connection.CreateCommand();
 
+#pragma warning disable CA2100 // the statement is a test-owned literal passed by the calling test
         command.CommandText = sql;
+#pragma warning restore CA2100
         await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
     }
 

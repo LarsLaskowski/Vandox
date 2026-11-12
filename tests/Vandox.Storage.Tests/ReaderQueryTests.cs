@@ -57,9 +57,11 @@ public class ReaderQueryTests
 
         using var command = connection.CreateCommand();
 
+#pragma warning disable CA2100 // the statement is built by the test helper from test constants
         command.CommandText = CountSql(LongRows, 1);
 
         // Act
+#pragma warning restore CA2100
         var exception = Assert.ThrowsExactly<SqliteException>(() => command.ExecuteScalar(), "the statement is interrupted");
 
         // Assert

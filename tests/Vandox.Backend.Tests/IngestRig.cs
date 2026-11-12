@@ -248,7 +248,9 @@ internal sealed class IngestRig : IAsyncDisposable
 
         await using var command = connection.CreateCommand();
 
+#pragma warning disable CA2100 // the statement is a test-owned literal passed by the calling test
         command.CommandText = sql;
+#pragma warning restore CA2100
 
         var value = await command.ExecuteScalarAsync(cancellationToken);
 

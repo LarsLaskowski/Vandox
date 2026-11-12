@@ -2331,7 +2331,7 @@ public class SqliteStoreLogExplorerTests
 
         await using var command = connection.CreateCommand();
 
-#pragma warning disable CA2100
+#pragma warning disable CA2100 // the explained statement is a test-owned query text
         command.CommandText = $"EXPLAIN QUERY PLAN {sql}";
 #pragma warning restore CA2100
 
@@ -2391,7 +2391,7 @@ public class SqliteStoreLogExplorerTests
 
         await using var command = connection.CreateCommand();
 
-#pragma warning disable CA2100
+#pragma warning disable CA2100 // the statement is a test-owned literal passed by the calling test
         command.CommandText = sql;
 #pragma warning restore CA2100
 
@@ -2420,7 +2420,7 @@ public class SqliteStoreLogExplorerTests
 
         using var command = connection.CreateCommand();
 
-#pragma warning disable CA2100
+#pragma warning disable CA2100 // the statement is a test-owned literal passed by the calling test
         command.CommandText = sql;
 #pragma warning restore CA2100
 

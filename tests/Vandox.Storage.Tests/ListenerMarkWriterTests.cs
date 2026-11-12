@@ -309,7 +309,9 @@ public class ListenerMarkWriterTests
 
         using var command = connection.CreateCommand();
 
+#pragma warning disable CA2100 // the statement is a test-owned literal passed by the calling test
         command.CommandText = sql;
+#pragma warning restore CA2100
 
         return Convert.ToString(await command.ExecuteScalarAsync(TestContext.CancellationToken), System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
     }
@@ -328,7 +330,9 @@ public class ListenerMarkWriterTests
 
         using var command = connection.CreateCommand();
 
+#pragma warning disable CA2100 // the statement is a test-owned literal passed by the calling test
         command.CommandText = sql;
+#pragma warning restore CA2100
 
         return (string)(await command.ExecuteScalarAsync(TestContext.CancellationToken))!;
     }
