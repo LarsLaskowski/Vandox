@@ -56,7 +56,9 @@ internal static class ReaderQuery
 
         try
         {
+#pragma warning disable CA2100 // constant statement of the callers, values bound as parameters
             command.CommandText = sql;
+#pragma warning restore CA2100
 
             foreach (var (name, value) in parameters)
             {

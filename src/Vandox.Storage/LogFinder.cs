@@ -412,7 +412,9 @@ internal static class LogFinder
     {
         var command = connection.CreateCommand();
 
+#pragma warning disable CA2100 // constant statement of the callers, values bound as parameters
         command.CommandText = sql;
+#pragma warning restore CA2100
 
         foreach (var (name, value) in parameters)
         {

@@ -344,6 +344,9 @@ C# (backend): follow the surrounding code and the analyzers; in particular
   build stays silent. Pass the value out through the callback's return value or a field instead;
 - exceptions carry context in their message and are never swallowed; `Program.Main` and similar wiring stay
   thin and hold no logic (record 0203);
+- assign constant SQL to `CommandText` directly where possible; a helper that takes the statement text wraps its
+  one `CommandText` assignment in `#pragma warning disable CA2100 // <where the text comes from>` /
+  `#pragma warning restore CA2100`, in tests too, never a bare pragma (record 0204);
 - the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
   `-p:VandoxCommit` and `-p:VandoxDate`;
 - names the analyzers refuse, checked by the Lead before a name goes into the plan's *Signatures*: an enum

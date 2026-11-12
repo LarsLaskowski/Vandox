@@ -191,7 +191,9 @@ internal sealed class BatchWriter : IDisposable
         var command = connection.CreateCommand();
 
         command.Transaction = transaction;
+#pragma warning disable CA2100 // constant statement of the callers, values bound as parameters
         command.CommandText = text;
+#pragma warning restore CA2100
 
         return command;
     }

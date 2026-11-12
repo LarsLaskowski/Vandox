@@ -181,7 +181,9 @@ internal static class IncidentNoteRepository
         var command = connection.CreateCommand();
 
         command.Transaction = transaction;
+#pragma warning disable CA2100 // constant statement of the callers, values bound as parameters
         command.CommandText = sql;
+#pragma warning restore CA2100
 
         return command;
     }

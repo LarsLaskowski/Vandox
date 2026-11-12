@@ -163,7 +163,9 @@ internal sealed class ListenerMarkWriter : IDisposable
         var command = _connection.CreateCommand();
 
         command.Transaction = _transaction;
+#pragma warning disable CA2100 // constant statement of the callers, values bound as parameters
         command.CommandText = text;
+#pragma warning restore CA2100
 
         foreach (var name in names)
         {
