@@ -105,7 +105,8 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
 1. `go vet ./...` for the whole module.
 2. `golangci-lint run --new-from-merge-base=origin/main --whole-files ./...`, which reports every issue
    anywhere in a Go file changed since the merge base with `origin/main`. `gocognit` (threshold 15,
-   `.golangci.yml`) stands in for SonarQube Cloud's cognitive-complexity rule `go:S3776`. The two measures are
+   `.golangci.yml`) stands in for SonarQube Cloud's cognitive-complexity rule `go:S3776`, test files included
+   (SonarQube analyzes `_test.go` files too, `sonar.test.inclusions`; never exclude them). The two measures are
    close but not identical: in every case measured (PR #110, `main`) gocognit flagged at least what
    SonarQube flagged, and it also counts an `if` on the bare `err != nil` check, which SonarQube does not, so
    it can flag a function SonarQube accepts. Such a finding is fixed like any other diagnostic; a new gocognit
