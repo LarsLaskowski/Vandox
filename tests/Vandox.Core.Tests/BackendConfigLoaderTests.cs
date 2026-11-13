@@ -870,5 +870,34 @@ public class BackendConfigLoaderTests
         Assert.AreEqual($"config: {nothing}:2: incidents.window_before: has no value", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(nothing, []), "null value").Message, "message of a null value");
     }
 
+    /// <summary>
+    /// An invalid period of any of the seven retention keys is refused at its line with the fixed E1 text, which does not show the value.
+    /// </summary>
+    /// <param name="key">The key inside the <c>retention</c> section</param>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [DataRow("raw")]
+    [DataRow("rollups_5m")]
+    [DataRow("rollups_1h")]
+    [DataRow("logs")]
+    [DataRow("snapshots")]
+    [DataRow("events")]
+    [DataRow("incidents")]
+    public void BackendConfigLoaderRefusesInvalidRetentionPeriodWithReason(string key)
+    {
+        // Arrange
+        const string reason = "must be a whole number of days from 1d to 9999d, such as 30d, or unlimited";
+        string[] invalid = ["0d", "10000d", "30", "30D", "1y", "24h", "+30d", "-30d", "030d", "1.5d", "\"30d \"", "\" 30d\"", "\"unlimited \"", "Unlimited", "UNLIMITED", "never", $"\"{char.ConvertFromUtf32(0xFF13)}{char.ConvertFromUtf32(0xFF10)}d\"", $"\"{char.ConvertFromUtf32(0x0663)}{char.ConvertFromUtf32(0x0660)}d\""];
+        using var directory = new TempDirectory();
+
+        // Act and assert
+        foreach (var value in invalid)
+        {
+            var path = directory.Write("vandoxd.yaml", $"log:\n  level: info\nretention:\n  {key}: {value}\n");
+
+            Assert.AreEqual($"config: {path}:4: retention.{key}: {reason}", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), $"retention.{key} {value}").Message, $"message for retention.{key} {value}");
+        }
+    }
+
     #endregion // Methods
 }

@@ -19,16 +19,15 @@ public class RetentionConfigTests
     {
         // Arrange
         var config = new RetentionConfig();
-        (string Key, string Text, TimeSpan? Expected)[] defaults =
-        [
-            ("raw", config.Raw, TimeSpan.FromDays(30)),
-            ("rollups_5m", config.FiveMinuteRollups, TimeSpan.FromDays(365)),
-            ("rollups_1h", config.HourlyRollups, TimeSpan.FromDays(1095)),
-            ("logs", config.Logs, TimeSpan.FromDays(90)),
-            ("snapshots", config.Snapshots, TimeSpan.FromDays(30)),
-            ("events", config.Events, TimeSpan.FromDays(1095)),
-            ("incidents", config.Incidents, null)
-        ];
+        (string Key, string Text, TimeSpan? Expected)[] defaults = [
+                                                                       ("raw", config.Raw, TimeSpan.FromDays(30)),
+                                                                       ("rollups_5m", config.FiveMinuteRollups, TimeSpan.FromDays(365)),
+                                                                       ("rollups_1h", config.HourlyRollups, TimeSpan.FromDays(1095)),
+                                                                       ("logs", config.Logs, TimeSpan.FromDays(90)),
+                                                                       ("snapshots", config.Snapshots, TimeSpan.FromDays(30)),
+                                                                       ("events", config.Events, TimeSpan.FromDays(1095)),
+                                                                       ("incidents", config.Incidents, null)
+                                                                   ];
 
         // Act
         var parsed = defaults.Select(entry => (entry.Key, Accepted: RetentionPeriod.TryParse(entry.Text, out var value), Value: value, entry.Expected)).ToList();
