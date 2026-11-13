@@ -95,6 +95,39 @@ public class IncidentRowViewTests
     }
 
     /// <summary>
+    /// The victim and the programs that grew of a row are built with at most 16 runs each, and the characters shown are those of the escaped text.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public void IncidentRowViewShowsVictimAndProgramsInAtMostSixteenRuns()
+    {
+        // Arrange
+        var text = Alternating(1024);
+        var summary = Summary(1, text, 1, TimeSpan.Zero);
+
+        summary.Hypothesis.GrowthKnown = true;
+        summary.Hypothesis.Growth.Add(new ProgramGrowth
+                                      {
+                                          Program = text,
+                                          StartRssBytes = 1,
+                                          EndRssBytes = 805306369,
+                                          GrowthBytes = 805306368
+                                      });
+
+        var counts = new List<int>();
+
+        // Act
+        var row = IncidentRowView.From(summary);
+
+        // Assert
+        Assert.AreEqual(1, text[1], "the input holds U+0001");
+        Assert.HasCount(1, row.Growth, "the program that grew is shown");
+        CheckField("the victim", row.Victim, text, LogText.MaxShortChars, counts);
+        CheckField("the program", row.Growth[0].Program, text, LogText.MaxShortChars, counts);
+        Assert.AreEqual(IncidentsView.MaxTextRuns, counts.Max(), "a text that alternates fills all 16 runs");
+    }
+
+    /// <summary>
     /// Creates a summary.
     /// </summary>
     /// <param name="id">The number</param>
@@ -117,6 +150,38 @@ public class IncidentRowViewTests
                    CreatedAt = _firstKill.AddDays(1),
                    UpdatedAt = _firstKill.AddDays(1)
                };
+    }
+
+    /// <summary>
+    /// Builds a text whose characters alternate between two characters.
+    /// </summary>
+    /// <param name="length">The length</param>
+    /// <returns>The text</returns>
+    private static string Alternating(int length)
+    {
+        var characters = new char[length];
+
+        for (var position = 0; position < length; position++)
+        {
+            characters[position] = position % 2 == 0 ? 'a' : (char)1;
+        }
+
+        return new string(characters);
+    }
+
+    /// <summary>
+    /// Checks that a built field has at most 16 runs and shows the same characters as the escaped text, and records its run count.
+    /// </summary>
+    /// <param name="name">The name of the field</param>
+    /// <param name="runs">The runs of the field</param>
+    /// <param name="text">The text the field was built from</param>
+    /// <param name="cap">The character cap of the field</param>
+    /// <param name="counts">The collected run counts</param>
+    private static void CheckField(string name, IReadOnlyList<TextRun> runs, string text, int cap, List<int> counts)
+    {
+        Assert.IsLessThanOrEqualTo(IncidentsView.MaxTextRuns, runs.Count, $"{name} has at most 16 runs");
+        Assert.AreEqual(LogText.Escape(text, cap), string.Concat(runs.Select(run => run.Text)), $"{name} shows the escaped text unchanged");
+        counts.Add(runs.Count);
     }
 
     #endregion // Methods
