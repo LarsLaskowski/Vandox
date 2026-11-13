@@ -12,7 +12,6 @@ See [spec.md](spec.md).
 
 | # | Claim | Evidence | Status |
 | - | ----- | -------- | ------ |
-| 1 | Nothing removes stored data today; retention is planned only | `docs/areas/storage.md:119-140`; no `DELETE FROM records` in `src/` | confirmed |
 | 2 | All writes share one writer connection behind one `SemaphoreSlim` | `src/Vandox.Storage/SqliteStore.cs:69`, `:488`, `:735` | confirmed |
 | 3 | Duplicates are prevented only by the unique index on `(agent_id, seq)` and `ON CONFLICT DO NOTHING` | `SchemaMigrator.cs:34`, `BatchWriter.cs:49` | confirmed |
 | 4 | The timeline counts `floor <= seq < max` as an arrival and fills open and final gaps (`state <> 'closed'`) | `AgentTimeline.cs:345`, `AgentTimelineQueries.cs:33`; spec E11 corrected to "open or final" | confirmed |
@@ -21,7 +20,6 @@ See [spec.md](spec.md).
 | 7 | Incidents are built only by `vandoxd incidents`, which detects kills with `SignatureDetector` and `IncidentSignatures.OomKill` over every line | `docs/areas/incidents.md:12-15`, `IncidentReconstructor.cs:105-124` | confirmed |
 | 8 | The report counts an hour observed from lines of source `journal`/`syslog`; agent journal lines have source `journal`; every outage counts in the time-of-day rule | `forensics-report.md:34-38, 66`, `agent-log-shipping.md:41`, `ForensicsAnalysis.cs:217` | confirmed |
 | 9 | No hosted background service exists in `vandoxd`; the store is disposed only after the app (`await using` around `ServeAsync`) | `ServeCommand.cs:95-101, 166`; no `BackgroundService` in `src/` | confirmed |
-| 10 | The database runs without `auto_vacuum`; deleted pages are reused, the file does not shrink | no `vacuum` in `src/Vandox.Storage`; SQLite documentation (`PRAGMA auto_vacuum`, default NONE) | confirmed |
 | 11 | Async waiters of `SemaphoreSlim` are released in FIFO order, so a queued ingest write runs before the next retention step | Security's scratch measurement: 0 overtakes in 2,000 runs; AC6's test keeps it | confirmed |
 | 12 | The bundled SQLite of Microsoft.Data.Sqlite offers the `dbstat` table, used to size the allowance of N3 | to verify: Tester, step 5; without it the allowance is the summed `length()` of the kept tables' columns plus 25 % | unverified |
 | 13 | `StoredRecord.Record.Origin` carries `records.origin` | `SchemaMigrator.cs:23`, `DataRecord.cs:13` | confirmed |
@@ -58,7 +56,7 @@ See [spec.md](spec.md).
 | AC10 | `RetentionServiceLogsRollupAndRemovalCounts`, `RetentionServiceLogsNothingForAPassWithoutChange`, `RetentionServiceLogsFailedStepWithOperation` (the line holds no stored message or label text) | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
 | AC11 | `ScanHoldsWindowOfKernelEventKill`, `ScanMakesNoHoldFromCatalogKillLine`, `ScanCatchesLateKernelEvents`, `SaveMergesOverlappingStoredHolds`, `IncidentAfterRemovalEqualsIncidentBefore` (real store, reconstructor run on an unchanged copy and after removal) | `tests/Vandox.Backend.Tests/KillHoldScannerTests.cs` |
 | AC13 | `RemoveExpiredRemovesWindowDataOfIncidentWithoutKernelKill` (incident row stays) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
-| AC13 | `RunLeavesIncidentBeforeLogPeriodUnchanged`, `RunSavesNoNewIncidentBeforeLogPeriodOutsideHolds`, `RunBuildsHeldClusterBeforeLogPeriod`, `RunWithoutLogPeriodRebuildsAsBefore` | `tests/Vandox.Backend.Tests/IncidentReconstructorTests.cs` |
+| AC13 | `RunLeavesIncidentBeforeLogPeriodUnchanged`, `RunSavesNoNewAgentIncidentBeforeLogPeriodOutsideHolds`, `RunBuildsHeldClusterBeforeLogPeriod`, `RunBuildsImportedClusterBeforeLogPeriod`, `RunWithoutLogPeriodRebuildsAsBefore` | `tests/Vandox.Backend.Tests/IncidentReconstructorTests.cs` |
 | AC12 | `ReportSkipsAgentLinesAndSnapshotsPastTheirPeriods`, `ReportKeepsImportedHours` | `tests/Vandox.Backend.Tests/ForensicsReporterTests.cs` |
 | AC12 | `AddIncidentDoesNotJudgeOutageInUnobservedHourBeforeHorizon`, `AddIncidentJudgesAsBeforeWithoutHorizon` | `tests/Vandox.Core.Tests/ForensicsAnalysisTests.cs` |
 
@@ -136,21 +134,22 @@ one of `fold`, `scan`, `remove`; `{Error}` is the `StoreException` message.
 
 **Re-run of incidents (spec S11).** `IncidentReconstructor` gets the log period start (`now − retention.logs`, none when unlimited)
 and the holds (`IRetentionStore.HoldsAsync`) from `IncidentsCommand`. A kill cluster whose window starts before that start is built
-and saved only when one hold contains its whole window; otherwise it is skipped: the stored incidents it overlaps stay unchanged and no
+and saved only when one hold contains its whole window or every kill of it comes from a record of origin `import` (imported data
+is kept, Q1 a); otherwise it is skipped: the stored incidents it overlaps stay unchanged and no
 new incident is saved. Skipped clusters count in `ReconstructionResult` as unchanged.
 
-**Report (spec S10).** `ForensicsReporter` gains a `ReportRetention` (the logs and snapshots periods). It computes the horizons from
-its clock and skips lines and process snapshots of origin other than `import` captured before them. `ForensicsAnalysis.JudgedFrom` (the
+**Report (spec S10).** `ForensicsReporter` takes a `ReportRetention` (logs and snapshots periods) and skips non-imported lines and
+process snapshots captured before `now −` those periods. `ForensicsAnalysis.JudgedFrom` (the
 logs horizon): an outage whose first kill is before it and whose kill hour is not observed is counted as an outage but in no rule.
 No new text. `ReportService` and `ReportCommand` pass the configured periods.
 
-**Benchmark.** `tools/Vandox.StorageBenchmark --retention [--size N]`: writes five batches of N records plus imported lines and held
-windows below the horizon (as many as one step examines), ages them by a fixed clock,
+**Benchmark.** `tools/Vandox.StorageBenchmark --retention [--size N]`: five batches of N records plus imported and held rows below
+the horizon (one step's worth), aged by a fixed clock;
 times five fold and five removal steps and prints the three medians.
 
 ## Options considered
 
-- The alternatives for rollups, retention by kind, kept windows, resends and vacuum are in records 0208 to 0212.
+- Rollups, retention by kind, kept windows, resends, vacuum: records 0208 to 0212.
 - Partial index `where origin = 'agent'` (Security): `backend` is a valid origin under the same periods, so `origin <> 'import'`.
 - Refusing `events` shorter than a data period: rejected, the gap horizon makes every valid setting safe (Security B4).
 - A `vandoxd retention` sub-command: the container has no scheduler, and a second process meets ingest only through the busy timeout.
@@ -276,8 +275,9 @@ All by the Dev, after the code is green:
   `metric_rollups_5m`, `metric_rollups_1h`, `retention_holds`, the indexes `records_removable` and `gaps_to_at` and the `meta` keys; migration step **14**; *Implementation* names
   `RollupFolder`, `RetentionRemover`; related decisions 0208-0212.
 - `docs/areas/storage-writing.md`: line 44 (deletes keep `log_fts`, now done by retention); deduplication: the resend rule of record
-  0211; line 179 (notes: kept, record 0209); template rebuild keeps hours without stored lines.
-- `docs/areas/storage-reading.md`: the rollup reader `IRollupReader`; line 94 "whole retention" stays true.
+  0211, with its residual verbatim: "Residual: a number below `floor_seq` (the backfill below the first number received) is not covered: once a removal pass has removed its copy — on the next pass for a record already past its period (spec E3) — a resend after a lost acknowledgement is stored and folded again. A holder of the agent token can do the same at will."; line 179 (notes: kept, record 0209); the template rebuild keeps hours before the log
+  period.
+- `docs/areas/storage-reading.md`: the rollup reader `IRollupReader`.
 - `docs/areas/configuration-options.md`: the seven `retention.*` rows and a paragraph with the form and the E1 error text.
 - `docs/areas/log-templates.md` lines 66-67 and 123-124: the statistics follow `retention.rollups_1h`, kept while an hour holds a line;
   rebuild behavior.
@@ -290,22 +290,22 @@ All by the Dev, after the code is green:
 - `docs/areas/log-import.md` line 166: imported records are never removed by retention.
 - `docs/areas/backend-host.md`: the service runs the retention job; its four log lines.
 - `docs/ARCHITECTURE.md`: line 15 drop "retention" from the planned list; *Storage and retention*: the table (no longer planned, add
-  events 3 years, imported data kept, incident and kill windows kept), the migrations sentence extended with versions 11 to 14 from
+  events 3 years, imported data kept, windows of agent `kernel_event` OOM kills kept), the migrations sentence extended with versions 11 to 14 from
   `storage.md`, *Interfaces* adds `IRetentionStore` and `IRollupReader`, records 0208-0212; *Components* (`src/Vandox.Backend`): the
   retention job.
 - `README.md` *Backend options*: the seven keys; `deploy/backend/vandoxd.yaml`: a commented `retention:` section with the defaults.
-- `docs/BENCHMARKS.md`: *Retention steps*, procedure and result table for AC6.
+- `docs/BENCHMARKS.md`: *Retention steps* (AC6).
 - `.squad/project.md` (orchestrator writes the reported text): security area 9 adds "retention deletes only through bounded steps of
   `RetentionRemover`"; *Test doubles* row for `ScriptedRetentionStore` (Tester's text). `CHANGELOG.md`: none, written at release
   (`docs/CONTRIBUTING.md:128`).
 
 ## Architecture check
 
-- *No data gaps unless explicitly recorded*: gap records and closed/final gap rows stay for the events period, open gaps forever, and
+- *No data gaps unless explicitly recorded*: gap records and closed or final gap rows stay until the gap horizon (the longest finite period), never inside
+  a hold; open and final sequence gaps forever; and
   no removed number is reported missing (stream row kept, record 0211); a summarized span keeps its gaps.
 - *Backfilled data never raises an alert by itself*: `records.live` is untouched; rollups alert nothing.
-- *A hanging collector never blocks the agent*: agent untouched.
-- Ingest stays bounded: a step is no larger than one batch (AC6); the floor rule of 0177 stays, amended by 0212.
+- Ingest stays bounded: a step is no larger than one batch (AC6); 0212 amends 0177.
 
 ## Security considerations
 
@@ -318,7 +318,7 @@ All by the Dev, after the code is green:
 
 - `docs/decisions/0208-metric-rollups-are-folded-from-new-rows-by-record-id-never-recomputed-from-raw.md` (Proposed)
 - `docs/decisions/0209-retention-removes-by-capture-time-per-kind-imports-kept-events-kept-three-years.md` (Proposed)
-- `docs/decisions/0210-data-in-incident-windows-and-detected-kill-windows-is-kept-with-the-incident.md` (Proposed)
+- `docs/decisions/0210-data-in-the-windows-of-the-agents-kernel-oom-kills-is-kept-as-long-as-their-incident.md` (Proposed)
 - `docs/decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md` (Proposed)
 - `docs/decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md` (Proposed, amends released 0177)
 
@@ -336,10 +336,10 @@ program beyond 30 days).
   and held windows below the horizon.
 - DA 2 (minor, time gaps stored open): accepted. Time gaps are judged by their read state (`GapReadSql.State`); tested with a stored-open,
   read-final time gap; an open or final sequence gap is never removed (also Security B4).
-- DA 3 (minor, `BackendConfig.Keys()`): accepted; call sites named under *Test files*, keys added by the Dev (task 3).
+- DA 3 (minor): accepted; call sites under *Test files*.
 - DA 4 (minor, rebuild of partly kept hours): accepted. The rebuild keeps every hour before the first full hour of the log period and
   recounts only later ones; spec S7 and AC8 amended; `RebuildKeepsStatisticsOfPartlyRemovedHours`.
-- DA 5 (minor, area document name): accepted; `docs/areas/retention.md` in spec and plan.
+- DA 5 (minor): accepted; `docs/areas/retention.md`.
 
 ## Security review
 
@@ -356,7 +356,6 @@ program beyond 30 days).
   open and final sequence gaps never removed, so `WasReceived` cannot swallow a late fill. Spec N8, AC9 amended; tests named in AC9.
 - N1: accepted; decided against the rows as loaded, before the batch's walk (*Approach*, record 0211);
   `WriteBatchMixedResendFillAndNewStoresOnlyFillAndNew`.
-- N2: accepted as a residual in record 0211 and `storage-writing.md`: a number below `floor_seq` whose copy was removed and is resent is
+- N2: accepted as a residual in record 0211 and `storage-writing.md` (wording of the Security delta review): a number below `floor_seq` whose copy was removed and is resent is
   stored and folded again; it needs a lost acknowledgement kept past the period or a token holder.
-- N3: accepted; the scan reads on a reader connection by a row-ID range (*Approach*).
-- N4, N5: accepted; cases added to `RetentionPeriodTryParseRefusesOtherForms` and `RetentionServiceLogsFailedStepWithOperation`.
+- N3, N4, N5: accepted (*Approach*; the test cases of AC1 and AC10).

@@ -33,6 +33,5 @@ is acknowledged with its batch and neither stored nor folded. The rules are in
   into a gap.
 - A number in a closed gap was filled and is a resend; a number in an open or final gap still fills it, as today.
 - An open or final sequence gap is never removed by retention (record 0209), so a late fill is never mistaken for a resend.
-- Residual: a number below `floor_seq` (a backfill below the first number received) is not covered; its resend after removal is stored
-  and folded again. It needs an acknowledgement lost for longer than the period, or a token holder.
+- Residual: a number below `floor_seq` (the backfill below the first number received) is not covered: once a removal pass has removed its copy — on the next pass for a record already past its period (spec E3) — a resend after a lost acknowledgement is stored and folded again. A holder of the agent token can do the same at will.
 - A stream row must therefore never be removed while its agent has records (already a rule of [Storage](../areas/storage.md)).

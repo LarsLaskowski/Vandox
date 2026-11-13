@@ -36,7 +36,8 @@ configurable periods, ingest never waiting on it. The history views (#47, #49) r
   the full incident. A log line that merely reads as an OOM kill keeps nothing.
 - S11: Given a stored incident without such a kill (built from log lines only), when its window data passes its periods, then that data
   is removed, the incident itself stays, and a later run of `vandoxd incidents` leaves every incident whose window starts before the log
-  period (`now − retention.logs`) unchanged unless its whole window is kept by S9.
+  period (`now − retention.logs`) unchanged unless its whole window is kept by S9 or all its kills are imported (imported data is
+  kept, Q1 a).
 - S10: Given log lines or process snapshots of agent data removed, when the forensics report runs, then an hour older than
   `retention.logs` is unknown even where a kept window still holds lines, so base rates use only hours kept under their own period and
   imported hours; an outage whose kill lies in such an hour is listed but not judged.
@@ -113,7 +114,8 @@ configurable periods, ingest never waiting on it. The history views (#47, #49) r
 - AC11: Records in the window of an agent `kernel_event` OOM kill stay past their periods while an incident of it would be kept, and
   `vandoxd incidents` run afterwards builds the same incident as before the removal; a log line read as an OOM kill keeps nothing (S9).
 - AC13: The window data of a stored incident without a `kernel_event` kill is removed by the periods while the incident stays, and a
-  later `vandoxd incidents` run changes no incident whose window starts before the log period and is not wholly kept (S11).
+  later `vandoxd incidents` run changes no incident whose window starts before the log period and is neither wholly kept nor built
+  from imported kills only (S11).
 - AC12: After removal the forensics report counts no hour older than `retention.logs` of agent data as observed and judges no outage in
   such an hour; imported hours count as before (S10).
 - AC10: A pass that changed data writes the N7 log line; a failed step its error (N7).
@@ -123,7 +125,7 @@ configurable periods, ingest never waiting on it. The history views (#47, #49) r
 - Reading the summaries in charts and choosing a resolution (#47, #49), showing gaps (#54), live incidents (#53).
 - Shrinking the file, vacuum, backup (#55) (E8).
 - Summaries of process or connection snapshots (a follow-up issue for #50).
-- Removing imported data on demand; several agents (#89).
+- Removing imported data; several agents (#89).
 
 ## Open questions
 
@@ -132,7 +134,6 @@ configurable periods, ingest never waiting on it. The history views (#47, #49) r
   2026-11-13).
 - Q1 c, raw data inside a kept incident's window. Answered: (Product Manager, 2026-11-13, option B after Security
   B3) kept only for kills an agent `kernel_event` confirms; other window data follows the periods (S9, S11, record 0210).
-- Answered: the UI stack is .NET Blazor, not Go templates (records 0073, 0197); this feature has no UI.
 - Answered: "snapshots" are the `process_snapshot`, `connection_snapshot` and `mariadb_status` records, "raw data" the `metric` values
   (wire format records), the template statistics count as hourly values ([Storage](../../docs/areas/storage.md)).
 - Answered: incidents are unlimited by default and configurable (the issue).
