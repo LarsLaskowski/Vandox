@@ -50,7 +50,7 @@ public class IngestEndpointConcurrencyTests
             var runs = calls.Select(call => Task.Run(() => rig.RunAsync(call), TestContext.CancellationToken)).ToList();
 
             await rig.Writer.WaitForCallsAsync(IngestLimits.Slots, TestContext.CancellationToken, [.. runs]);
-            await IngestRig.SettleAsync();
+            await WaitForBudgetsAsync(rig, 5);
 
             var enteredAtFirst = rig.Writer.Calls;
             var readingAtFirst = calls.Count(call => call.Body.ReadCalls > 0);
@@ -102,7 +102,7 @@ public class IngestEndpointConcurrencyTests
 
         // Act
         runs.Add(Task.Run(() => rig.RunAsync(third), TestContext.CancellationToken));
-        await IngestRig.SettleAsync();
+        await WaitForBudgetsAsync(rig, 3);
 
         var readBeforeCommit = third.Body.ReadCalls;
 
@@ -138,7 +138,6 @@ public class IngestEndpointConcurrencyTests
         // Act
         await call.AbortAsync();
         rig.Clock.Advance(TimeSpan.FromSeconds(31));
-        await IngestRig.SettleAsync();
 
         var cancelledWhileHeld = rig.Writer.Tokens[0].IsCancellationRequested;
 
@@ -241,8 +240,8 @@ public class IngestEndpointConcurrencyTests
         }
         else
         {
-            // The late request takes its receive time and creates its budget timer before the clock moves.
-            await IngestRig.SettleAsync();
+            // The late request armed its budget timer before the clock moves.
+            await WaitForBudgetsAsync(rig, 3);
             Assert.IsFalse(run.IsCompleted, "the late request waits for a slot");
         }
 
@@ -297,7 +296,7 @@ public class IngestEndpointConcurrencyTests
 
         var run = Task.Run(() => rig.RunAsync(waiting), TestContext.CancellationToken);
 
-        await IngestRig.SettleAsync();
+        await WaitForBudgetsAsync(rig, 3);
 
         // Act
         if (@event == "abort")
@@ -342,8 +341,6 @@ public class IngestEndpointConcurrencyTests
         // Act
         var drain = rig.Endpoint.DrainAsync();
 
-        await IngestRig.SettleAsync();
-
         var drainedWhileWriting = drain.IsCompleted;
 
         rig.Writer.ReleaseAll();
@@ -382,7 +379,6 @@ public class IngestEndpointConcurrencyTests
 
         // Act
         rig.Lifetime.Stop();
-        await IngestRig.SettleAsync();
 
         var cancelledAtStop = token.IsCancellationRequested;
 
@@ -455,6 +451,17 @@ public class IngestEndpointConcurrencyTests
     }
 
     /// <summary>
+    /// Waits until the clock reports the given number of request-budget timers armed.
+    /// </summary>
+    /// <param name="rig">The rig whose clock is watched</param>
+    /// <param name="requests">The number of budget timers the requests arm</param>
+    /// <returns>A task that completes when the timers exist</returns>
+    private Task WaitForBudgetsAsync(IngestRig rig, int requests)
+    {
+        return rig.Clock.WaitForTimersAsync(IngestLimits.RequestBudget, requests, TestContext.CancellationToken).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+    }
+
+    /// <summary>
     /// Waits until the clock reports the given number of request-budget timers armed, moves the clock once past the budget and awaits the request.
     /// </summary>
     /// <param name="rig">The rig whose clock moves</param>
@@ -463,7 +470,7 @@ public class IngestEndpointConcurrencyTests
     /// <returns>A task that completes when the request is done</returns>
     private async Task AdvanceUntilDoneAsync(IngestRig rig, int timers, Task run)
     {
-        await rig.Clock.WaitForTimersAsync(IngestLimits.RequestBudget, timers, TestContext.CancellationToken).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        await WaitForBudgetsAsync(rig, timers);
 
         rig.Clock.Advance(IngestLimits.RequestBudget + TimeSpan.FromSeconds(1));
 

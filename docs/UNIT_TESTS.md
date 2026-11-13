@@ -97,6 +97,8 @@ criteria carries each id. The test name follows *Naming* unchanged.
   `Assert.ThrowsExactlyAsync` for expected exceptions. Never `Thread.Sleep` or a real delay to wait for a
   result: await the task or signal the fake; to advance a fake clock only once the code under test has armed its timer,
   use `TimerSignalingClock` (Backend tests), whose `WaitForTimersAsync` completes when the timers exist.
+  Never wait through a fixed number of `Task.Yield` calls either. A check that something has not happened is
+  made right after the signal (or synchronous call) that establishes the state ruling it out.
 - The wire format is covered by a contract test: `WireContractTests` decodes the golden batch the Go encoder
   writes (`testdata/wire/all-kinds.jsonl`; [0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
   Both decoders also run the shared decoder cases in `testdata/wire/decoder-cases.json` (Go
