@@ -15,18 +15,16 @@ See [spec.md](spec.md).
 | 2 | All writes share one writer connection behind one `SemaphoreSlim` | `src/Vandox.Storage/SqliteStore.cs:69`, `:488`, `:735` | confirmed |
 | 3 | Duplicates are prevented only by the unique index on `(agent_id, seq)` and `ON CONFLICT DO NOTHING` | `SchemaMigrator.cs:34`, `BatchWriter.cs:49` | confirmed |
 | 4 | The timeline counts `floor <= seq < max` as an arrival and fills open and final gaps (`state <> 'closed'`) | `AgentTimeline.cs:345`, `AgentTimelineQueries.cs:33`; spec E11 corrected to "open or final" | confirmed |
-| 5 | `records.id` is a plain `INTEGER PRIMARY KEY`, so the highest deleted ID is given again | `SchemaMigrator.cs:21`; scratch check with Python `sqlite3`: insert 3 rows, delete id 3, insert → id 3 | confirmed |
+| 5 | `records.id` is a plain `INTEGER PRIMARY KEY`, so the highest deleted ID is given again | `SchemaMigrator.cs:21`; scratch check with Python `sqlite3` | confirmed |
 | 6 | `vandoxd templates` clears all statistics before recounting | `TemplateRebuilder.cs:21` (`ClearStatements`) | confirmed |
 | 7 | Incidents are built only by `vandoxd incidents`, which detects kills with `SignatureDetector` and `IncidentSignatures.OomKill` over every line | `docs/areas/incidents.md:12-15`, `IncidentReconstructor.cs:105-124` | confirmed |
 | 8 | The report counts an hour observed from lines of source `journal`/`syslog`; agent journal lines have source `journal`; every outage counts in the time-of-day rule | `forensics-report.md:34-38, 66`, `agent-log-shipping.md:41`, `ForensicsAnalysis.cs:217` | confirmed |
 | 9 | No hosted background service exists in `vandoxd`; the store is disposed only after the app (`await using` around `ServeAsync`) | `ServeCommand.cs:95-101, 166`; no `BackgroundService` in `src/` | confirmed |
 | 11 | Async waiters of `SemaphoreSlim` are released in FIFO order, so a queued ingest write runs before the next retention step | Security's scratch measurement: 0 overtakes in 2,000 runs; AC6's test keeps it | confirmed |
-| 12 | The bundled SQLite of Microsoft.Data.Sqlite offers the `dbstat` table, used to size the allowance of N3 | to verify: Tester, step 5; without it the allowance is the summed `length()` of the kept tables' columns plus 25 % | unverified |
-| 13 | `StoredRecord.Record.Origin` carries `records.origin` | `SchemaMigrator.cs:23`, `DataRecord.cs:13` | confirmed |
-| 14 | Record 0177 is released (v0.2.0) and expects retention to let ingest resume at the floor | `git tag --contains` → `v0.2.0`; `0177:39`; amended by 0212 | confirmed |
+| 12 | The bundled SQLite of Microsoft.Data.Sqlite offers the `dbstat` table, used to size the allowance of N3 | Tester, step 5: no `dbstat`; allowance: summed `length()` of the kept tables' columns and index entries' columns, plus 25 % | refuted |
 | 17 | Only `records(kind, captured_at)` serves a removal by time; `origin` is not indexed; `gaps` has no index on `to_at` | `SchemaMigrator.cs:36`, `:260-263` | confirmed |
 | 18 | Time gaps are stored `open`; `final` is computed when read | `AgentTimeline.cs:792-806`, `GapReadSql.cs:12-14` | confirmed |
-| 19 | A metric's labels can reach about 200 KB of stored JSON per row | `wire-format.md:93, 98, 154` (Security's count) | confirmed |
+| 19 | A metric's labels reach about 200 KB of stored JSON | `wire-format.md:93, 98, 154` | confirmed |
 | 20 | Only the kernel writes a `kernel_event` OOM kill: the collector takes kernel-transport entries of facility 0, and `/dev/kmsg` writes get another facility; any local process can write a journal line that the catalog reads as a kill | `agent-kernel-events.md:56-61, 183`; `agent-log-shipping.md:244`, `log-signatures.md:110-115` | confirmed |
 | 21 | `BackendConfig.Keys()` lists every key and tests enumerate it | `BackendConfig.cs:59-62`, `BackendConfigLoaderTests.cs:46, 184-193, 789-796` | confirmed |
 | 16 | A file under `tools/` appears in no coverage report | no test references the tool, as for `BackfillBenchmark.cs` | confirmed |
@@ -49,10 +47,10 @@ See [spec.md](spec.md).
 | AC5 | `ServeRunsRetentionServiceOnlyInTheService`, `CommandsOtherThanServeRemoveNothing` (import, incidents, report, templates on a store with expired data) | `tests/Vandox.Backend.Tests/ServeTests.cs`, `tests/Vandox.Backend.Tests/CommandLineTests.cs` |
 | AC6 | `WriteBatchWaitsAtMostOneRetentionStep` (store step hook; the queued batch runs before the next step; imported lines and held windows below the horizon), `RemoveExpiredStepTouchesAtMostTheStepBound`, `RemoveExpiredReachesRowsBehindKeptRows` (imported and held rows below the horizon, more than one step's worth, before removable ones), `RemoveExpiredQueriesUseIndexSearches` (`EXPLAIN QUERY PLAN` of every removal statement shows `SEARCH`, no `SCAN`), `FoldRollupsStepReadsAtMostTheStepBound` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC6 | manual: Product Manager, `--retention` scenario of the storage benchmark published from the branch head (`docs/BENCHMARKS.md`, *Retention steps*) on the DS918+ SSD volume, before step 9: median removal and fold step at or below the median batch of the same run | — |
-| AC7 | `RetentionKeepsSizeWithinAllowanceUnderConstantLoad` (P = 2 days, hourly passes, metrics every 10 s for 20 series, log lines, snapshots, one event and one gap per hour) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
-| AC8 | `SearchReturnsNoRemovedLine`, `RemoveExpiredReportsNoGapForRemovedNumbers`, `RemoveExpiredKeepsTemplateHoursHoldingLines`, `RemoveExpiredRemovesTemplateHoursPastHourlyPeriod` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
+| AC7 | `RetentionKeepsSizeWithinAllowanceUnderConstantLoad` (P = 12 hours, hourly passes, metrics every 10 s for 5 series, log lines, snapshots, one event and one gap record per hour, origin `agent` with sequence numbers, so sample times and gap rows count; allowance as fact 12) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
+| AC8 | `SearchReturnsNoRemovedLine`, `RemoveExpiredReportsNoGapForRemovedNumbers`, `RemoveExpiredKeepsTemplateHoursHoldingLines`, `RemoveExpiredRemovesTemplateHoursPastHourlyPeriod`, `WriteBatchLateValueBelowTheSampleFloorOpensNoTimeGap` (narrows a containing time gap, opens none) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC8 | `RebuildKeepsStatisticsOfHoursBeforeTheLogPeriod`, `RebuildKeepsStatisticsOfPartlyRemovedHours`, `RebuildRecountsHoursInTheLogPeriod`, `RebuildWithoutLogPeriodRecountsAll` | `tests/Vandox.Storage.Tests/SqliteStoreTemplateRebuildTests.cs` |
-| AC9 | `RemoveExpiredKeepsImportedRecords`, `RemoveExpiredKeepsEventsUntilEventsPeriod` (each event kind), `RemoveExpiredRemovesGapRowsOnlyPastTheGapHorizon` (closed sequence gap, time gap stored open that reads final, both past the longest period; with `events` shorter than `raw` kept until `raw` passes; never in a window or hold), `RemoveExpiredNeverRemovesOpenOrFinalSequenceGap`, `RemoveExpiredKeepsListenerFindingsWithTheirSnapshots`, `RemoveExpiredKeepsNewestConnectionMarkPerAgent`, `RemoveExpiredKeepsRecordsInHolds`, `RemoveExpiredKeepsHoldOverlappingIncidentWithNote` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
+| AC9 | `RemoveExpiredKeepsImportedRecords`, `RemoveExpiredKeepsEventsUntilEventsPeriod` (each event kind), `RemoveExpiredRemovesGapRowsOnlyPastTheGapHorizon` (closed sequence gap, time gap stored open that reads final, both past the longest period; with `events` shorter than `raw` kept until `raw` passes; never in a window or hold), `RemoveExpiredNeverRemovesOpenOrFinalSequenceGap`, `RemoveExpiredKeepsListenerFindingsWithTheirSnapshots`, `RemoveExpiredKeepsNewestConnectionMarkPerAgent`, `RemoveExpiredKeepsRecordsInHolds`, `RemoveExpiredKeepsHoldOverlappingIncidentWithNote`, `RemoveExpiredPrunesSampleTimesBelowTheRawHorizonKeepingTheNewest`, `WriteBatchAfterSilencePastTheRawPeriodOpensTimeGap` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC10 | `RetentionServiceLogsRollupAndRemovalCounts`, `RetentionServiceLogsNothingForAPassWithoutChange`, `RetentionServiceLogsFailedStepWithOperation` (the line holds no stored message or label text) | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
 | AC11 | `ScanHoldsWindowOfKernelEventKill`, `ScanMakesNoHoldFromCatalogKillLine`, `ScanCatchesLateKernelEvents`, `SaveMergesOverlappingStoredHolds`, `IncidentAfterRemovalEqualsIncidentBefore` (real store, reconstructor run on an unchanged copy and after removal) | `tests/Vandox.Backend.Tests/KillHoldScannerTests.cs` |
 | AC13 | `RemoveExpiredRemovesWindowDataOfIncidentWithoutKernelKill` (incident row stays) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
@@ -71,8 +69,8 @@ else with the spec's E1 reason `must be a whole number of days from 1d to 9999d,
 (text, `''` for none), `bucket` (start, ns), `min_value`, `max_value`, `sum_value` (REAL), `count` (INTEGER ≥ 1), `last_value`,
 `last_at`, `last_record_id`; primary key `(source, name, labels, bucket)`, index on `bucket`. `retention_holds`: `id`, `started_at`,
 `ended_at` (`CHECK (ended_at > started_at)`), index on `started_at`; stored holds never overlap. Indexes `records_removable` on
-`records(kind, captured_at)` where `origin <> 'import'` and `gaps_to_at` on `gaps(to_at)`. `meta` keys `rollup_after_id` and
-`kill_scan_after_id` (absent = 0). `StorageLimits.SchemaVersion` becomes 14.
+`records(kind, captured_at)` where `origin <> 'import'` and `gaps_to_at` on `gaps(to_at)`. `meta` keys `rollup_after_id`,
+`kill_scan_after_id` (absent = 0) and `sample_time_floor` (absent = none). `StorageLimits.SchemaVersion` becomes 14.
 
 **Fold step (record 0208).** Under the writer lock, one transaction: read at most `StorageLimits.RollupStepRows` (10,000) `metrics`
 rows with `record_id > rollup_after_id` in record ID order, stopping after the row that takes the summed UTF-8 length of the labels
@@ -98,8 +96,10 @@ kill_scan_after_id`, or for metrics `record_id > rollup_after_id`, or it is the 
 is the agent's newest mark or has a listener finding (`new_count > 0`, `changed_count > 0`, or a comparison with `finding = 1`), which
 moves it to the events period. Kinds: `metric` → raw; `log_line` → logs; `process_snapshot`, `connection_snapshot`, `mariadb_status` →
 snapshots; `kernel_event`, `service_state`, `backup_run` → events; `gap` records → the gap horizon. Per record, in order: `log_fts`
-`delete` command with the old message, `log_lines`/`metrics`, `connection_marks`, `listener_comparisons`, `records`;
-`agent_sample_times` rows below the raw horizon go in the metric steps. **Gap horizon** (Security B4): `now −` the longest of
+`delete` command with the old message, `log_lines`/`metrics`, `connection_marks`, `listener_comparisons`, `records`; a step that
+removed log lines ends with an FTS5 incremental merge of at most 64 pages (`'merge', -64`), so the `delete` entries free index pages
+(record 0212). The metric steps prune `agent_sample_times` below the raw horizon except each agent's newest row and raise
+`sample_time_floor` to it; below the floor a sample time only narrows a time gap (record 0213). **Gap horizon** (Security B4): `now −` the longest of
 `events`, `raw`, `logs`, `snapshots`, `rollups_5m`, `rollups_1h`, none while one is unlimited. Gap rows through `gaps_to_at`: a
 sequence gap only when `closed`, a time gap when its read state (`GapReadSql.State`) is `closed` or `final`, `to_at` before the gap
 horizon, and its span overlaps no hold; a sequence gap that is `open` or `final` is never removed. Template hours
@@ -152,8 +152,8 @@ times five fold and five removal steps and prints the three medians.
 - Rollups, retention by kind, kept windows, resends, vacuum: records 0208 to 0212.
 - Partial index `where origin = 'agent'` (Security): `backend` is a valid origin under the same periods, so `origin <> 'import'`.
 - Refusing `events` shorter than a data period: rejected, the gap horizon makes every valid setting safe (Security B4).
-- A `vandoxd retention` sub-command: the container has no scheduler, and a second process meets ingest only through the busy timeout.
-- Steps bounded by time: untestable without a real clock; the row bounds plus the AC6 measurement suffice.
+- A `vandoxd retention` sub-command: the container has no scheduler.
+- Steps bounded by time: untestable without a real clock.
 
 ## Affected projects and types
 
@@ -252,9 +252,8 @@ Existing call sites of changed signatures: `BackendConfig.Keys()` gains the seve
 Tester. `TemplateRebuilderTests`/`SqliteStoreTemplateRebuildTests` cases that expect a full clear keep passing (every hour of their data
 holds lines); the Tester confirms.
 
-Code no unit test can cover: `tools/Vandox.StorageBenchmark/RetentionBenchmark.cs` and its option in `Program.cs` — a measurement
-program for the reference host; no test assembly loads the tool, so it appears in no coverage report (fact 16), as the other benchmark
-files. No exclusion is added.
+Code no unit test can cover: `tools/Vandox.StorageBenchmark/RetentionBenchmark.cs` and its option in `Program.cs`, a measurement
+program in no coverage report (fact 16); no exclusion.
 
 ## Areas
 
@@ -269,14 +268,15 @@ files. No exclusion is added.
 All by the Dev, after the code is green:
 
 - `docs/areas/retention.md` (new) from `_template.md`: the content of *Approach* as rules (periods per kind, imports, events, windows
-  and holds, folding, step bounds, pass timing, busy and failure, shutdown, log lines, E8), links records 0208-0212; `docs/areas/README.md`:
+  and holds, folding, step bounds, pass timing, busy and failure, shutdown, log lines, E8, the sample-time floor, the FTS5 merge of each log step), links records 0208-0213; `docs/areas/README.md`:
   its index row.
 - `docs/areas/storage.md`: *Retention (planned)* replaced by a short paragraph linking `retention.md`; schema version 14; the tables
   `metric_rollups_5m`, `metric_rollups_1h`, `retention_holds`, the indexes `records_removable` and `gaps_to_at` and the `meta` keys; migration step **14**; *Implementation* names
-  `RollupFolder`, `RetentionRemover`; related decisions 0208-0212.
+  `RollupFolder`, `RetentionRemover`; the `agent_sample_times` row and line 136: sample times follow `retention.raw`, the newest per
+  agent kept, `meta` key `sample_time_floor` (record 0213); related decisions 0208-0213.
 - `docs/areas/storage-writing.md`: line 44 (deletes keep `log_fts`, now done by retention); deduplication: the resend rule of record
-  0211, with its residual verbatim: "Residual: a number below `floor_seq` (the backfill below the first number received) is not covered: once a removal pass has removed its copy — on the next pass for a record already past its period (spec E3) — a resend after a lost acknowledgement is stored and folded again. A holder of the agent token can do the same at will."; line 179 (notes: kept, record 0209); the template rebuild keeps hours before the log
-  period.
+  0211, with the residual of record 0211 verbatim; line 179 (notes: kept, record 0209); the template rebuild keeps hours before the log
+  period; *Time gaps* (line 112): a sample time below `sample_time_floor` adds no row and opens no time gap, it only narrows one (record 0213).
 - `docs/areas/storage-reading.md`: the rollup reader `IRollupReader`.
 - `docs/areas/configuration-options.md`: the seven `retention.*` rows and a paragraph with the form and the E1 error text.
 - `docs/areas/log-templates.md` lines 66-67 and 123-124: the statistics follow `retention.rollups_1h`, kept while an hour holds a line;
@@ -321,6 +321,7 @@ All by the Dev, after the code is green:
 - `docs/decisions/0210-data-in-the-windows-of-the-agents-kernel-oom-kills-is-kept-as-long-as-their-incident.md` (Proposed)
 - `docs/decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md` (Proposed)
 - `docs/decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md` (Proposed, amends released 0177)
+- `docs/decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md` (Proposed, step 6)
 
 ## Out of scope / follow-ups
 

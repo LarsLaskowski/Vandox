@@ -249,4 +249,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0210 | Data in the windows of the agent's kernel OOM kills is kept as long as their incident | Proposed | 2026-11-13 |
 | 0211 | A resent agent record whose stored copy was removed is not stored again | Proposed | 2026-11-13 |
 | 0212 | Retention frees space inside the database file, not on the volume | Proposed | 2026-11-13 |
+| 0213 | Agent sample times follow the raw period, below a floor that opens no time gap | Proposed | 2026-11-13 |
 <!-- project:end index -->

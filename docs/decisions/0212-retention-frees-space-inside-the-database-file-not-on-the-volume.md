@@ -31,3 +31,6 @@ endpoint](../areas/ingest-endpoint.md).
 
 - The size criterion of #46 is about growth: after the periods are full, new data reuses the freed pages.
 - Until #55, an operator at the floor frees space on the volume by hand.
+- A removed log line leaves a `delete` entry in the FTS5 index, which frees no page until its segments merge; each removal step that
+  removed log lines therefore ends with an incremental merge of at most 64 pages, bounded like the step itself, so the index reuses its
+  pages instead of growing.
