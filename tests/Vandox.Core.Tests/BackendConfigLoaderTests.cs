@@ -41,6 +41,13 @@ public class BackendConfigLoaderTests
         Assert.AreEqual("1GiB", config.Ingest.MinFree, "ingest.min_free");
         Assert.AreEqual("/data", config.Storage.Directory, "storage.directory");
         Assert.AreEqual("info", config.Log.Level, "log.level");
+        Assert.AreEqual("30d", config.Retention.Raw, "retention.raw");
+        Assert.AreEqual("365d", config.Retention.FiveMinuteRollups, "retention.rollups_5m");
+        Assert.AreEqual("1095d", config.Retention.HourlyRollups, "retention.rollups_1h");
+        Assert.AreEqual("90d", config.Retention.Logs, "retention.logs");
+        Assert.AreEqual("30d", config.Retention.Snapshots, "retention.snapshots");
+        Assert.AreEqual("1095d", config.Retention.Events, "retention.events");
+        Assert.AreEqual("unlimited", config.Retention.Incidents, "retention.incidents");
         Assert.IsFalse(config.Secrets.AgentToken.IsSet || config.Secrets.WebPasswordHash.IsSet || config.Secrets.TelegramBotToken.IsSet, "no secret is set");
 
         foreach (var key in BackendConfig.Keys().Where(key => key != "import.time_zone" && key != "ingest.agent_id"))
@@ -178,18 +185,21 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
-    /// The list of keys names the time zone after the other import options and before the incident windows.
+    /// The list of keys names the time zone after the other import options and before the incident windows, and the seven retention periods last.
     /// </summary>
     [TestMethod]
+    [TestCategory("AC1")]
     public void BackendConfigKeysListTimeZone()
     {
         // Act
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreEqual("incidents.window_after", keys[^1], "the window after is the last key");
-        Assert.AreEqual("incidents.window_before", keys[^2], "the window before is the second last key");
-        Assert.AreEqual("import.time_zone", keys[^3], "the time zone is the last import key");
+        Assert.AreEqual("retention.incidents", keys[^1], "the incident period is the last key");
+        Assert.AreEqual("retention.raw", keys[^7], "the raw period is the first retention key");
+        Assert.AreEqual("incidents.window_after", keys[^8], "the window after is the last key before the retention periods");
+        Assert.AreEqual("incidents.window_before", keys[^9], "the window before precedes the window after");
+        Assert.AreEqual("import.time_zone", keys[^10], "the time zone is the last import key");
         Assert.Contains("log.level", keys, "the other keys stay");
     }
 
@@ -783,16 +793,17 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
-    /// The list of keys names the error log paths after <c>log.level</c> and before the time zone, and the incident windows last.
+    /// The list of keys names the error log paths after <c>log.level</c> and before the time zone, then the incident windows and the seven retention periods in file order.
     /// </summary>
     [TestMethod]
+    [TestCategory("AC1")]
     public void BackendConfigKeysListErrorLogPathsBeforeTimeZone()
     {
         // Act
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreSequenceEqual(["web.listen", "web.trusted_proxies", "ingest.listen", "ingest.agent_id", "ingest.min_free", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"], keys, "keys in order");
+        Assert.AreSequenceEqual(["web.listen", "web.trusted_proxies", "ingest.listen", "ingest.agent_id", "ingest.min_free", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after", "retention.raw", "retention.rollups_5m", "retention.rollups_1h", "retention.logs", "retention.snapshots", "retention.events", "retention.incidents"], keys, "keys in order");
     }
 
     /// <summary>
