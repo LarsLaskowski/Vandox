@@ -144,7 +144,7 @@ public class IncidentDetailViewTests
         }
 
         Assert.AreEqual(IncidentsView.MaxTextRuns, counts.Max(), "a text that alternates fills all 16 runs");
-        Assert.HasCount(11 + 6, counts, "every field was checked");
+        Assert.HasCount(12 + 6, counts, "every field was checked");
     }
 
     /// <summary>
