@@ -169,7 +169,9 @@ untested arm of a `switch` or an `if` counts on a changed line (C#; the Go repor
 Go code counts its lines). Both values are set in `.squad/tools/squad_settings.py`
 (`COVERAGE_THRESHOLD`, `COVERAGE_OVERALL_THRESHOLD`); the overall one may start lower in a repository adopted
 with a coverage debt and is only ever raised. Check it locally before a push with *Test with coverage* and the
-*Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). Lines that genuinely
+*Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). The gate lists every changed production file with
+its covered/coverable changed lines, the covered branch conditions on them (`+ m/n conditions`, C# only), the
+uncovered line numbers and the lines with an uncovered condition (`conditions not covered`). Lines that genuinely
 cannot be covered by a unit test (for example `main` wiring) need an explicit, recorded decision. The
 measure covers Go and C# together (`*.go`, `*.cs`, `*.razor`; `.squad/tools/squad_settings.py`). The own
 browser scripts (`src/Vandox.Backend/wwwroot/js/`) have no unit tests, as the project has no Node build;
