@@ -29,7 +29,7 @@ Either way the records stay in the spool until the tailnet is up, and the agent 
 the second layer. This holds only with the backend's tailnet **address** in `backend.url`, as step 4 and *What you need* ask: a host
 name is refused by the agent and by `install.sh`, so no name server can choose where the token goes (record 0192). The server needs Tailscale in TUN mode with the default interface name `tailscale0`; with Tailscale's
 userspace networking or another name no send gets through (`connection failed`). A user who can create an interface named `tailscale0` is
-root, who reads the token anyway. The checks of this binding on the production server have **not yet run** (issue #372).
+root, who reads the token anyway. The checks of this binding ran on the production server (*Checks on the server*).
 
 1. **Install Tailscale** with Tailscale's guide for Linux, which covers Ubuntu 22.04: <https://tailscale.com/kb/1031/install-linux>.
    Use the package repository method that the guide describes. Check what a script does before you run it, as you would with any
@@ -226,7 +226,7 @@ root, who reads the token anyway. The checks of this binding on the production s
      After about 90 seconds, `cat /root/vandox-egress.txt` must show two equal counts (the unit sent no packet while `tailscaled` was
      stopped, on any interface) and `Device "tailscale0" does not exist.`; the agent's journal shows `connection failed` in that window
      and sending again afterwards. A line with `check failed` means a count could not be read; the check then proves nothing. These
-     checks have **not yet run** on the production server (issue #372). A boot is covered by the same mechanism; `netplan apply` and a
+     checks ran on the production server with the results in *Checks on the server*. A boot is covered by the same mechanism; `netplan apply` and a
      carrier flap are not run on the production server (the CI job covers them).
    - If `tailscale status` says Tailscale is stopped or logged out, check `systemctl status tailscaled` and run
      `systemctl enable --now tailscaled`; if it asks for a login, join again with step 3. The agent keeps spooling meanwhile.
@@ -768,8 +768,8 @@ The results are in the last column; they are the first run's, with a note where 
 | Tailscale policy settings | the access controls in the admin console (step 2 of *Tailscale on the monitored server*) | both tags owned by `autogroup:admin`; the agent's only rule TCP `8081` to `tag:vandox-backend`; `autogroup:member` to `autogroup:self`; no default rule | in place on the production tailnet; the probes of step 4 show their effect |
 | Tailscale checks | the probes of step 4 of *Tailscale on the monitored server*, with `tailscale status` and `tailscale exit-node list` | `404` and `401` from the ingest port; every other probe blocked; the backend host the only peer; no exit node | the pong, the `404` of the first `curl`, all five blocked probes (`124`, IPv4 and IPv6), `tailscale status` with the backend host as the only peer and `No exit nodes found` as expected; the second `curl` printed `404` instead of `401`, because the backend had no ingest API (as in *Transmission to the backend*); that deferral is settled by the `v0.2.0-rc.1` run (note after the table) |
 | Tailscale settings | the `tailscale set` line and `tailscale debug prefs` (step 3) | SSH, accepted routes, advertised routes, exit node, app connector, web client and Tailscale's DNS off; tag `tag:vandox-agent` | as expected: the settings line applied, `tailscale debug prefs` shows the values above, Tailscale's DNS is off, `getent hosts github.com` prints an address, and the machine list shows `tag:vandox-agent` |
-| Route while Tailscale is up | `ip route get 100.64.0.1` (step 5 of *Tailscale on the monitored server*) | names `dev tailscale0` | not yet run (issue #372) |
-| Egress while `tailscaled` is stopped | the one line of step 5 of *Tailscale on the monitored server* (IP accounting of the unit), then `cat /root/vandox-egress.txt` | two equal `IPEgressPackets` counts, `tailscale0` absent, `connection failed` in the agent's journal in that window and sending again afterwards | not yet run (issue #372) |
+| Route while Tailscale is up | `ip route get 100.64.0.1` (step 5 of *Tailscale on the monitored server*) | names `dev tailscale0` | `100.64.123.100 dev tailscale0 table 52 src 100.97.145.39 uid 0` (kernel 5.15.0-203-generic, 2026-11-13) |
+| Egress while `tailscaled` is stopped | the one line of step 5 of *Tailscale on the monitored server* (IP accounting of the unit), then `cat /root/vandox-egress.txt` | two equal `IPEgressPackets` counts, `tailscale0` absent, `connection failed` in the agent's journal in that window and sending again afterwards | `before=0 after=0` and `Device "tailscale0" does not exist.`; the journal shows `backend not accepting batches` (`timeout`, `connection failed`) in the window and `backend accepting batches again` with a backfill 43 seconds later. `systemd-networkd` was `active` and `NetworkManager` `inactive`. `tcpdump` is installed on the server and may stay; the check does not need it (it reads the unit's IP accounting, see record 0134). |
 | Key expiry of the tagged server | the server's entry in the admin console (step 3) | expiry disabled | expiry disabled |
 
 **The `v0.2.0-rc.1` run.** The agent `v0.2.0-rc.1` ran on the same production server and sent to a backend `vandoxd` `v0.2.0-rc.1` on the
