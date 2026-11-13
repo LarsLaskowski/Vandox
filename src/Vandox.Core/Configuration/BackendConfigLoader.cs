@@ -25,6 +25,7 @@ public static class BackendConfigLoader
     private const string ListenReason = "must be [host]:port with an empty host or an IP address and a port of 1 to 65535";
     private const int MaxPortDigits = 5;
     private const string WindowReason = "must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h";
+    private const string RetentionReason = "must be a whole number of days from 1d to 9999d, such as 30d, or unlimited";
     private const string LogFileReason = "must be an absolute, clean path of a file in a directory (no trailing slash, no . or .. elements)";
 
     #endregion // Constants
@@ -192,6 +193,13 @@ public static class BackendConfigLoader
                 "must be a time zone of the IANA time zone database, such as UTC or Europe/Berlin");
         Require(IsWindow(config.Incidents.WindowBefore), file, lines, "incidents.window_before", WindowReason);
         Require(IsWindow(config.Incidents.WindowAfter), file, lines, "incidents.window_after", WindowReason);
+        Require(RetentionPeriod.TryParse(config.Retention.Raw, out _), file, lines, "retention.raw", RetentionReason);
+        Require(RetentionPeriod.TryParse(config.Retention.FiveMinuteRollups, out _), file, lines, "retention.rollups_5m", RetentionReason);
+        Require(RetentionPeriod.TryParse(config.Retention.HourlyRollups, out _), file, lines, "retention.rollups_1h", RetentionReason);
+        Require(RetentionPeriod.TryParse(config.Retention.Logs, out _), file, lines, "retention.logs", RetentionReason);
+        Require(RetentionPeriod.TryParse(config.Retention.Snapshots, out _), file, lines, "retention.snapshots", RetentionReason);
+        Require(RetentionPeriod.TryParse(config.Retention.Events, out _), file, lines, "retention.events", RetentionReason);
+        Require(RetentionPeriod.TryParse(config.Retention.Incidents, out _), file, lines, "retention.incidents", RetentionReason);
     }
 
     /// <summary>

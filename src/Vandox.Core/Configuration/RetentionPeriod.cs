@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Vandox.Core.Configuration;
 
 /// <summary>
@@ -24,10 +26,28 @@ public static class RetentionPeriod
     /// <returns>True when the text is a valid period</returns>
     public static bool TryParse(string text, out TimeSpan? value)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        value = null;
+
+        if (text == Unlimited)
+        {
+            return true;
+        }
+
+        if (text.Length < 2 || text.Length > 5 || text[^1] != 'd')
+        {
+            return false;
+        }
+
+        var digits = text.AsSpan(0, text.Length - 1);
+
+        if (digits[0] == '0' || digits.ContainsAnyExceptInRange('0', '9'))
+        {
+            return false;
+        }
+
+        value = TimeSpan.FromDays(int.Parse(digits, NumberStyles.None, CultureInfo.InvariantCulture));
+
+        return true;
     }
 
     #endregion // Methods
