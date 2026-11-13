@@ -51,7 +51,7 @@ See [spec.md](spec.md).
 | AC8 | `SearchReturnsNoRemovedLine`, `RemoveExpiredReportsNoGapForRemovedNumbers`, `RemoveExpiredKeepsTemplateHoursHoldingLines`, `RemoveExpiredRemovesTemplateHoursPastHourlyPeriod`, `WriteBatchLateValueBelowTheSampleFloorOpensNoTimeGap` (narrows a containing time gap, opens none) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC8 | `RebuildKeepsStatisticsOfHoursBeforeTheLogPeriod`, `RebuildKeepsStatisticsOfPartlyRemovedHours`, `RebuildRecountsHoursInTheLogPeriod`, `RebuildWithoutLogPeriodRecountsAll` | `tests/Vandox.Storage.Tests/SqliteStoreTemplateRebuildTests.cs` |
 | AC9 | `RemoveExpiredKeepsImportedRecords`, `RemoveExpiredKeepsEventsUntilEventsPeriod` (each event kind), `RemoveExpiredRemovesGapRowsOnlyPastTheGapHorizon` (closed sequence gap, time gap stored open that reads final, both past the longest period; with `events` shorter than `raw` kept until `raw` passes; never in a window or hold), `RemoveExpiredNeverRemovesOpenOrFinalSequenceGap`, `RemoveExpiredKeepsListenerFindingsWithTheirSnapshots`, `RemoveExpiredKeepsNewestConnectionMarkPerAgent`, `RemoveExpiredKeepsRecordsInHolds`, `RemoveExpiredKeepsHoldOverlappingIncidentWithNote`, `RemoveExpiredPrunesSampleTimesBelowTheRawHorizonKeepingTheNewest`, `WriteBatchAfterSilencePastTheRawPeriodOpensTimeGap` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
-| AC10 | `RetentionServiceLogsRollupAndRemovalCounts`, `RetentionServiceLogsNothingForAPassWithoutChange`, `RetentionServiceLogsFailedStepWithOperation` (the line holds no stored message or label text) | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
+| AC10 | `RetentionServiceLogsRollupAndRemovalCounts` (events 69, 70, 73, each count in its field), `RetentionServiceLogsOnlyRecordsLineWhenNoDerivedDataRemoved`, `RetentionServiceLogsNothingForAPassWithoutChange`, `RetentionServiceLogsFailedStepWithOperation` (no stored message or label text) | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
 | AC11 | `ScanHoldsWindowOfKernelEventKill`, `ScanMakesNoHoldFromCatalogKillLine`, `ScanCatchesLateKernelEvents`, `SaveMergesOverlappingStoredHolds`, `IncidentAfterRemovalEqualsIncidentBefore` (real store, reconstructor run on an unchanged copy and after removal) | `tests/Vandox.Backend.Tests/KillHoldScannerTests.cs` |
 | AC13 | `RemoveExpiredRemovesWindowDataOfIncidentWithoutKernelKill` (incident row stays) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC13 | `RunLeavesIncidentBeforeLogPeriodUnchanged`, `RunSavesNoNewAgentIncidentBeforeLogPeriodOutsideHolds`, `RunBuildsHeldClusterBeforeLogPeriod`, `RunBuildsImportedClusterBeforeLogPeriod`, `RunWithoutLogPeriodRebuildsAsBefore` | `tests/Vandox.Backend.Tests/IncidentReconstructorTests.cs` |
@@ -123,13 +123,13 @@ rules stay.
 **Service (Backend).** `RetentionService : BackgroundService`, registered only by `ServeCommand`. It runs at start and on a 5-minute
 timer of the injected `TimeProvider`: fold steps until a step reports no more; when an hour has passed since the last removal pass
 (or none ran yet), the kill scan, then removal steps until none is left, carrying the step's cursor. Between steps it checks the stopping token; a step itself is
-never cancelled once it holds the lock (the writer is never interrupted). A `StoreException` for a busy database logs the warning and
-ends the pass; any other `StoreException` logs the error and ends the pass; the next timer tick retries.
+never cancelled once it holds the lock (the writer is never interrupted). A `StoreException` logs the warning (busy database) or the
+error (any other) and ends the pass; the next timer tick retries.
 
 **Log lines (layout fixed, `[LoggerMessage]` in `BackendLog`).** Event 69, Information, `retention rollup {Values} {Buckets}` after a
-fold pass that folded at least one value; event 70, Information, `retention removal {MetricValues} {LogLines} {Snapshots} {Events}
-{Gaps} {FiveMinuteValues} {HourlyValues} {TemplateHours} {Incidents} {Holds}` after a removal pass that removed or held anything;
-event 71, Warning, `retention step busy {Operation}`; event 72, Error, `retention step failed {Operation} {Error}`. `{Operation}` is
+fold pass that folded at least one value; after a removal pass, each when one of its summed counts is not zero, event 70,
+Information, `retention removal records {MetricValues} {LogLines} {Snapshots} {Events} {Gaps}`, then event 73, Information,
+`retention removal derived {FiveMinuteValues} {HourlyValues} {TemplateHours} {Incidents} {Holds}` (S107, amended AC10); event 71, Warning, `retention step busy {Operation}`; event 72, Error, `retention step failed {Operation} {Error}`. `{Operation}` is
 one of `fold`, `scan`, `remove`; `{Error}` is the `StoreException` message.
 
 **Re-run of incidents (spec S11).** `IncidentReconstructor` gets the log period start (`now − retention.logs`, none when unlimited)
@@ -231,7 +231,8 @@ Backend (Vandox.Backend.Retention, Vandox.Backend.Reports, Vandox.Backend.Hostin
 - `public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, ReportRetention retention, TimeProvider clock)`
   (new overload; the old constructor stays and passes an empty `ReportRetention`)
 - `internal static partial void RetentionRolledUp(this ILogger logger, int values, int buckets)`,
-  `internal static partial void RetentionRemoved(this ILogger logger, int metricValues, int logLines, int snapshots, int events, int gaps, int fiveMinuteValues, int hourlyValues, int templateHours, int incidents, int holds)`,
+  `internal static partial void RetentionRecordsRemoved(this ILogger logger, int metricValues, int logLines, int snapshots, int events, int gaps)`,
+  `internal static partial void RetentionDerivedRemoved(this ILogger logger, int fiveMinuteValues, int hourlyValues, int templateHours, int incidents, int holds)`,
   `internal static partial void RetentionStepBusy(this ILogger logger, string operation)`,
   `internal static partial void RetentionStepFailed(this ILogger logger, string operation, string error)` in BackendLog
 
@@ -247,9 +248,9 @@ ForensicsReporter.cs, ForensicsAnalysis.cs, BackendLog.cs, AgentTimeline.cs.
 with its *Test doubles* row reported for `.squad/project.md`.
 
 Existing call sites of changed signatures: `BackendConfig.Keys()` gains the seven `retention.*` keys (Dev); the Tester adapts
-`BackendConfigLoaderTests.cs:46` (the loop over all keys), `:184-193` and `:789-796`. `ForensicsReporter` keeps its constructor, so `ForensicsReporterTests.cs:502` and
-`ReportPageTests.cs:74` need no change. `SchemaMigrator` tests that assert the version 13 (`SqliteStoreOpenTests`) are adapted by the
-Tester. `TemplateRebuilderTests`/`SqliteStoreTemplateRebuildTests` cases that expect a full clear keep passing (every hour of their data
+`BackendConfigLoaderTests.cs:46` (the loop over all keys), `:184-193` and `:789-796`. `ForensicsReporterTests.cs:502` and
+`ReportPageTests.cs:74` keep the old constructor. The Tester adapts `SqliteStoreOpenTests` asserting
+version 13. `TemplateRebuilderTests`/`SqliteStoreTemplateRebuildTests` cases that expect a full clear keep passing (every hour of their data
 holds lines); the Tester confirms.
 
 Code no unit test can cover: `tools/Vandox.StorageBenchmark/RetentionBenchmark.cs` and its option in `Program.cs`, a measurement
@@ -288,7 +289,7 @@ All by the Dev, after the code is green:
 - `docs/areas/ingest-endpoint.md` line 149: retention bounds the database by age but frees no space on the volume (record 0212).
 - `docs/areas/listener-changes.md`: findings and the newest mark per agent kept for the events period.
 - `docs/areas/log-import.md` line 166: imported records are never removed by retention.
-- `docs/areas/backend-host.md`: the service runs the retention job; its four log lines.
+- `docs/areas/backend-host.md`: the service runs the retention job; its five log lines (events 69 to 73).
 - `docs/ARCHITECTURE.md`: line 15 drop "retention" from the planned list; *Storage and retention*: the table (no longer planned, add
   events 3 years, imported data kept, windows of agent `kernel_event` OOM kills kept), the migrations sentence extended with versions 11 to 14 from
   `storage.md`, *Interfaces* adds `IRetentionStore` and `IRollupReader`, records 0208-0212; *Components* (`src/Vandox.Backend`): the

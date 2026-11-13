@@ -83,7 +83,8 @@ configurable periods, ingest never waiting on it. The history views (#47, #49) r
 - N5: A pass holds at most one step's data in memory, within the container's 512 MiB ([Backend host](../../docs/areas/backend-host.md)).
 - N6: A new schema step adds the summary tables; an older build refuses the newer schema (existing rule). Only the running service
   summarizes and removes; `vandoxd import`, `incidents`, `report` and `templates` remove nothing.
-- N7: Every pass that changed data logs one `info` line with the counts it removed per kind and the buckets it wrote; a failed step logs
+- N7: Every pass that changed data logs `info` lines with the counts it removed per kind (one line for the stored records, one for
+  the summaries, incidents and holds, each only when one of its counts is not zero) and the buckets it wrote; a failed step logs
   its operation and error, never stored text.
 - N8: The guarantee *No data gaps unless explicitly recorded* ([`.squad/project.md`](../../.squad/project.md)) holds after removal:
   gap records and closed or final gap rows stay until the longest finite period among events, raw, logs, snapshots and both rollups
@@ -118,7 +119,7 @@ configurable periods, ingest never waiting on it. The history views (#47, #49) r
   from imported kills only (S11).
 - AC12: After removal the forensics report counts no hour older than `retention.logs` of agent data as observed and judges no outage in
   such an hour; imported hours count as before (S10).
-- AC10: A pass that changed data writes the N7 log line; a failed step its error (N7).
+- AC10: A pass that changed data writes the N7 log lines; a failed step its error (N7).
 
 ## Out of scope
 
@@ -166,3 +167,9 @@ Forensics report (S10), Ingest endpoint (E8); the full list is in the plan's *Do
   DA 4), S9, AC11 (holds only from agent `kernel_event` OOM kills, Security B3), N8, AC9 (the gap horizon, Security B4, DA 2), the
   area document name (DA 5), E11 (open or final gaps, plan fact 4).
 - Amended after the Product Manager's answer to B3 (option B): S8, S9, new S11, N8, AC9, AC11, new AC13.
+
+## Amendments
+
+| Criterion | Change | Reason | Step | Decided by |
+| --------- | ------ | ------ | ---- | ---------- |
+| AC10 | the removal pass writes two N7 lines (records; summaries, incidents and holds), each only when one of its counts is not zero, instead of one | one `[LoggerMessage]` method with ten counts breaks analyzer rule S107 (at most seven parameters), which no file may carry | 4 | Lead |
