@@ -188,18 +188,6 @@ internal sealed class IngestRig : IAsyncDisposable
     }
 
     /// <summary>
-    /// Lets the other tasks run, so that a request that can make progress did before the test looks.
-    /// </summary>
-    /// <returns>A task that completes after the yields</returns>
-    internal static async Task SettleAsync()
-    {
-        for (var index = 0; index < 2000; index++)
-        {
-            await Task.Yield();
-        }
-    }
-
-    /// <summary>
     /// Runs a call to its answer.
     /// </summary>
     /// <param name="call">The call</param>

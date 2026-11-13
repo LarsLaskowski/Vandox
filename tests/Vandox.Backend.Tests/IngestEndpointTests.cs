@@ -94,7 +94,6 @@ public class IngestEndpointTests
         var run = rig.RunAsync(call);
 
         await rig.Writer.WaitForCallsAsync(1, TestContext.CancellationToken, run);
-        await IngestRig.SettleAsync();
 
         var finishedBeforeCommit = run.IsCompleted;
 
