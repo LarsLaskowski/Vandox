@@ -91,7 +91,7 @@ IDs) is shown only through one display that writes it as text, never as markup, 
   U+202E and U+200B), the line and paragraph separators (Zl, Zp), private-use characters (Co), unassigned code points (Cn) and U+FFFD is
   written as a visible escape (`\u202e`, `\U000e0001` above U+FFFF, lower-case hex), styled apart from the text; consecutive escapes
   share one element.
-- A field holds at most 256 runs, unless a view states fewer (the report page: 16); the rest of the field is written as one text in the last run, in the escape style whenever it differs from the field's own text.
+- A field holds at most 256 runs, unless a view states fewer (the report page and the incidents view: 16); the rest of the field is written as one text in the last run, in the escape style whenever it differs from the field's own text.
 - A field is capped at a number of characters set by the view, counted in UTF-16 characters of the displayed text, an escape counting as
   written. A longer field ends at the last whole character or escape that fits, followed by the marker `[cut: <n> more characters]`, `<n>`
   being the characters of the field not shown. The caps are 16,384 characters for a log message and 2,048 for every other field unless a

@@ -70,7 +70,8 @@ Read from the records of `[start, end)` after the incident is shown, each from i
 
 The external text of a stored incident (kill hosts and victims, timeline types, hosts and texts, programs, commands, metric names and
 sources, templates) is shown only through the external-text display of the [web UI](web-ui.md) (*External text*): timeline texts capped
-at 512 characters, every other field at 2,048. The page writes no raw HTML and no `style` attribute.
+at 512 characters, every other field at 2,048, each text in at most 16 runs (`IncidentsView.MaxTextRuns`), the rest as one
+run ([0207](../decisions/0207-incidents-view-shows-each-external-text-in-at-most-16-runs-logs-view-keeps-256.md)). The page writes no raw HTML and no `style` attribute.
 
 ### Notes
 
@@ -117,12 +118,16 @@ at 512 characters, every other field at 2,048. The page writes no raw HTML and n
   read) and keeps only capped text: up to 1,000 timeline entries with texts of at most 512 characters and every other field at most
   2,048, at most 64 notes of 1,800 characters, and charts of at most 300 points of six series, two series of 1,000 points and 300 points;
   while the window is read it holds one snapshot at a time and at most 4,096 programs times 300 snapshots of values (**about 10 MB**).
+  The characters are held as runs, at most 16 a text: with the runs, a field of 1,024 characters takes up to 6 KiB and a timeline text
+  up to 3 KiB (bounds pinned by tests), so a timeline of 1,000 entries, each a host and at most 8 texts (the type is a catalog id),
+  takes up to about **30 MiB** by the caps, and the 4 MiB budget of the stored timeline keeps it below that.
   These amounts are **per circuit**, not across the service: the gate is held per store call, so many open incident pages can each build
-  at once, as with the 5 MiB of a logs page. The number of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
+  at once, as with the 11 MiB of a logs page. The number of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
 
 ## Related decisions
 
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries and the window's own records, saves notes by a form post and links every time to the logs.
+- [0207](../decisions/0207-incidents-view-shows-each-external-text-in-at-most-16-runs-logs-view-keeps-256.md) — why the incidents view shows each external text in at most 16 runs while the logs view keeps 256.
 
 ## Not here
 
@@ -138,4 +143,4 @@ at 512 characters, every other field at 2,048. The page writes no raw HTML and n
 `Vandox.Backend`: `Components/Pages/IncidentsPage` and `IncidentPage`, `Components/Incidents/IncidentNoteForm`; `Incidents/`
 (`IncidentsView`, `IncidentRowView`, `IncidentDetailView`, `IncidentWindowReader`, `ProgramMemorySeries`, `GatedIncidentBrowser`,
 `GatedRecordReader`, `IncidentNoteText`, `IncidentNoteEndpoint` with `RequiredAntiforgery` and no `AllowAnonymous`, logging
-`IncidentNoteSaveFailed`); chart labels through `LogText.Escape(name, 64)`.
+`IncidentNoteSaveFailed`); the run cap `IncidentsView.MaxTextRuns`; chart labels through `LogText.Escape(name, 64)`.
