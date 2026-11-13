@@ -1,7 +1,7 @@
 # Spec: Retire the legacy monitoring script and document v0.2.0
 
 Source: Issue #45
-Status: Draft
+Status: Approved by Product Manager
 
 ## Problem
 
