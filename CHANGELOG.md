@@ -41,7 +41,7 @@ its history. Installation: [docs/INSTALL.md](docs/INSTALL.md), steps 10 and 11.
 - **The backend runs on .NET 11.**
 - The installation guide gained steps 10 and 11 (the ingest port and the agent), and describes running the backend as a host user
   and without Compose.
-- The web login works behind a reverse proxy again, and the report page bounds its memory for external texts.
+- The web login behind a reverse proxy that terminates TLS no longer leaves the browser on the login page, and the report page bounds its memory for external texts.
 
 ### Not in this release
 

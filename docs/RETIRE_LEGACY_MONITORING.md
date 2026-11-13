@@ -79,7 +79,7 @@ sudo chmod 0400 /volume1/docker/vandox/import/sysmonitor-before-retirement.tar.g
 sudo docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/sysmonitor-before-retirement.tar.gz
 ```
 
-Read the summary at the end of the import: the log must be listed as imported. If the import skips snapshots or does not recognize
+Read the summary at the end of the import: each file must be listed as imported, or, where an earlier import (step 6 of the installation guide) already held the script's log, as continued, contained or already imported. If the import skips snapshots or does not recognize
 the log (the format was built from a description, not from the real file), the import's report names each skipped snapshot with its
 reason. Do not edit the log by hand; open an issue with the skipped shapes (the lines the report names, with the usernames and
 addresses removed) and stop here. A failure with `import.time_zone is not set` is completed by setting the option and importing
@@ -93,7 +93,7 @@ rm -- "${home:?}/sysmonitor-before-retirement.tar.gz"
 ```
 
 If the pack line failed, the archive may be incomplete: do not copy it, fix the cause, and delete it with the line above before you
-try again.
+try again. A failure with `tar: sysmonitor.log: file changed as we read it` only means the script wrote during the pack: delete the archive and run the pack line again.
 
 ## 2. Retire the script
 
