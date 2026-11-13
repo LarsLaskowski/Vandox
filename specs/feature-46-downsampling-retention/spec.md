@@ -28,6 +28,9 @@ summaries; this feature produces them.
   values first and then removes the expired data step by step, while the web UI and ingest keep working.
 - S7: Given log lines older than 90 days, when they are removed, then the template statistics of their hours stay (as hourly values,
   1,095 days), and `vandoxd templates` keeps the statistics of hours whose lines are gone.
+- S8: Given the default periods, when agent data passes its period, then imported records stay; OOM kills, boots, service states,
+  backup runs, gap records, gap rows and listener findings stay for 1,095 days (`retention.events`); and every record whose capture
+  time lies in the window of a stored incident stays as long as that incident.
 
 ## Errors and edge cases
 
@@ -44,7 +47,7 @@ summaries; this feature produces them.
   removed before their buckets are stored.
 - E6: Shutdown during a pass: the running step commits or rolls back; shutdown waits for at most that one step.
 - E7: With a finite `retention.incidents`, an incident whose window ended before the period is removed together with its notes; its
-  number is never given again.
+  number is never given again, and the data of its window then follows its own period.
 - E8: Removal frees space inside `vandox.db`, not on the volume: the file does not shrink (that is #55), so ingest stopped at the
   free-space floor resumes only when space on the volume is freed.
 - E9: A record whose capture time lies in the future (a wrong agent clock, a forged batch) is kept until its capture time is past its
@@ -54,7 +57,7 @@ summaries; this feature produces them.
 ## Non-functional requirements
 
 - N1: New options with defaults `retention.raw` `30d`, `retention.rollups_5m` `365d`, `retention.rollups_1h` `1095d`, `retention.logs`
-  `90d`, `retention.snapshots` `30d`, `retention.incidents` `unlimited` (plus `retention.events`, Q1). A record is past its period when
+  `90d`, `retention.snapshots` `30d`, `retention.incidents` `unlimited`, `retention.events` `1095d` (Q1 b). A record is past its period when
   its capture time is earlier than the backend's current UTC time minus the period.
 - N2: Ingest is never blocked: one step of the job does at most the work of one ingest batch of 10,000 records, measured on the
   reference host with the storage benchmark ([Storage](../../docs/areas/storage.md), *Write throughput*); the write-throughput criterion
@@ -68,11 +71,12 @@ summaries; this feature produces them.
 - N7: Every pass that changed data logs one `info` line with the counts it removed per kind and the buckets it wrote; a failed step logs
   its operation and error, never stored text.
 - N8: The guarantee *No data gaps unless explicitly recorded* ([`.squad/project.md`](../../.squad/project.md)) holds after removal:
-  a removed span never reads as normal (Q1 b).
+  gap records and gap rows outlive the raw values of their span by the events period, so a summarized span never reads as normal
+  (Q1 b).
 
 ## Acceptance criteria
 
-- AC1: The six `retention.*` keys (seven with Q1) accept `1d` to `9999d` and `unlimited`, default as N1, and refuse anything else with
+- AC1: The seven `retention.*` keys accept `1d` to `9999d` and `unlimited`, default as N1, and refuse anything else with
   the E1 text (S4, E1, N1).
 - AC2: For every series, each 5-minute and hourly bucket holds minimum, average (mean of all values), maximum, last value (latest
   capture time) and count equal to a computation from all its values, available within 10 minutes after the bucket ends (S2, N4).
@@ -88,7 +92,9 @@ summaries; this feature produces them.
 - AC7: Under a simulated load over twice the shortest period, the database size meets N3 (N3).
 - AC8: After removal, the log search and logs view return no removed line, no sequence gap or new start is reported for removed
   numbers, the template statistics of expired hours remain, and `vandoxd templates` keeps them (S7, E3, E10).
-- AC9: The answers to Q1 hold: imported data, events and gaps, and incident window data are kept as answered (Q1, N8).
+- AC9: Past every period, imported records stay; `kernel_event`, `service_state`, `backup_run` and `gap` records, gap rows and listener
+  findings (with the snapshot records they belong to) stay until past `retention.events`; records captured inside a stored incident's
+  window stay while the incident is stored (S8, N8).
 - AC10: A pass that changed data writes the N7 log line; a failed step its error (N7).
 
 ## Out of scope
@@ -100,15 +106,13 @@ summaries; this feature produces them.
 
 ## Open questions
 
-- Q1 (escalated to the Product Manager, three parts; proposed answers):
-  - a. Imported data: kept outside the periods (recommended: the v0.1.0 forensics history stays whole, and an import is finite and
-    idempotent), or removed by capture time like agent data, or aged from the import time.
-  - b. Events (`kernel_event`, `service_state`, `backup_run`), gap records and gap rows, and listener findings: kept as long as the
-    hourly values, 1,095 days, under `retention.events` (recommended: #49 marks events over a year, and a summarized span without its gap
-    would read as normal, against the gap guarantee), or removed with the raw data after 30 days.
-  - c. The data inside a kept incident's window (log lines, snapshots, metric values): kept as long as the incident (recommended: its
-    charts stay, and a re-run of `vandoxd incidents` cannot replace it by a poorer one; residual: forged kills could pin data, bounded
-    by `ingest.min_free`), or removed by the periods with older incidents frozen against re-runs and their charts empty.
+- Q1 a, imported data. Answered: kept outside the periods (Product Manager, 2026-11-13); an import is finite and idempotent, and the
+  v0.1.0 forensics history stays whole.
+- Q1 b, events, gaps and listener findings. Answered: kept 1,095 days under the new key `retention.events` (Product Manager,
+  2026-11-13); #49 marks events over a year, and the gap guarantee holds for summarized spans.
+- Q1 c, raw data inside a kept incident's window. Answered: kept as long as the incident (Product Manager, 2026-11-13); its charts
+  stay and a re-run of `vandoxd incidents` cannot replace it by a poorer one. Residual: forged kills can pin data, bounded by
+  `ingest.min_free`; recorded in the plan's decision record.
 - Answered: the UI stack is .NET Blazor, not Go templates (records 0073, 0197); this feature has no UI.
 - Answered: "snapshots" are the `process_snapshot`, `connection_snapshot` and `mariadb_status` records, "raw data" the `metric` values
   (wire format records), the template statistics count as hourly values ([Storage](../../docs/areas/storage.md)).
