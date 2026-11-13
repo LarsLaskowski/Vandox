@@ -1172,6 +1172,27 @@ public partial class LegacyMonitorParserTests
     }
 
     /// <summary>
+    /// A dotted IPv4 address on an IPv6 socket is stored as the IPv4-mapped address, without a skip.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task LegacyMonitorParserParseStoresDottedAddressOfIpv6Socket()
+    {
+        // Arrange
+        List<string> sockets = ["autoinsta 181226            root    7u  IPv6 2266160      0t0  TCP 192.0.2.10:8447->198.51.100.20:20530 (ESTABLISHED)"];
+
+        // Act
+        var snapshot = await ConnectionSnapshotOfAsync(sockets);
+
+        // Assert
+        Assert.IsTrue(snapshot.Complete, "the section was closed by the next header line");
+        Assert.AreSequenceEqual(["tcp6|ESTABLISHED|1"], snapshot.States!.Select(state => $"{state.Proto}|{state.State}|{state.Count}").ToList(), "states");
+        Assert.AreSequenceEqual(["::ffff:198.51.100.20|1"], snapshot.Remotes!.Select(remote => $"{remote.Addr}|{remote.Count}").ToList(), "remotes");
+        Assert.AreSequenceEqual(["tcp6|[::ffff:192.0.2.10]:8447|[::ffff:198.51.100.20]:20530|ESTABLISHED|181226|autoinsta"], snapshot.Connections!.Select(connection => $"{connection.Proto}|{connection.Local}|{connection.Remote}|{connection.State}|{connection.Pid}|{connection.Command}").ToList(), "connections");
+    }
+
+    /// <summary>
     /// A socket seen by two processes is counted once in the states, remotes and connections and once per line in the processes; its owner is the first line.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

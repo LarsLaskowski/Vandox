@@ -289,7 +289,8 @@ internal sealed class LegacyLsofLine
     }
 
     /// <summary>
-    /// Reads an address by the strict forms only.
+    /// Reads an address by the strict forms only. With TYPE IPv6 a dotted quad without brackets, as lsof prints the
+    /// IPv4-mapped address of an IPv6 socket, is read by the IPv4 octet rule and kept as the IPv4-mapped IPv6 address.
     /// </summary>
     /// <param name="text">The address text: <c>*</c>, a dotted quad, or an IPv6 address in brackets</param>
     /// <param name="ipv6"><c>true</c> for TYPE IPv6</param>
@@ -306,12 +307,19 @@ internal sealed class LegacyLsofLine
             return true;
         }
 
-        if (ipv6)
+        if (ipv6 && text.StartsWith('['))
         {
-            return text.Length > 1 && text[0] == '[' && text[^1] == ']' && TryParseIpv6(text[1..^1], out address);
+            return text.Length > 1 && text[^1] == ']' && TryParseIpv6(text[1..^1], out address);
         }
 
-        return TryParseQuad(text, out address);
+        if (TryParseQuad(text, out var quad))
+        {
+            address = ipv6 ? quad!.MapToIPv6() : quad;
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
