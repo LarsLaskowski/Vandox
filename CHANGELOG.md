@@ -4,7 +4,7 @@ All notable changes to Vandox are listed here, newest release first. Versions fo
 release is a GitHub release with a `vX.Y.Z` tag on `main` ([CONTRIBUTING.md](docs/CONTRIBUTING.md#versioning-and-releases)). The GitHub release of each
 tag lists the merged pull requests in detail.
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-11-13
 
 The live release: the agent `vandox-agent` collects on the monitored Plesk server and sends to the backend over Tailscale, so
 Vandox sees an outage as it builds up and not only from the logs afterwards. The agent replaces the legacy `top`/`lsof` monitoring
@@ -52,9 +52,9 @@ its history. Installation: [docs/INSTALL.md](docs/INSTALL.md), steps 10 and 11.
 
 - The agent runs on `x86_64` Ubuntu 22.04 servers only, and the image on `x86_64` hosts only.
 - Nothing expires yet: the database keeps every imported line and every stored record until it is deleted.
-- The parallel run of the agent beside the legacy monitoring script decides when a server retires the script; this entry states no
-  result of it. The memory pressure thresholds are fixed, and the agent's peak memory under sustained pressure has not been
-  measured.
+- The agent has run on the production Plesk server since v0.2.0-rc.1; this entry states no result of that run. The memory pressure
+  thresholds are fixed, and the agent's peak memory under sustained pressure is not yet confirmed by a long-term measurement there;
+  a finding is reported as an issue and then examined.
 - Of the checks on the monitored server, the agent's reading of the Plesk and web server error logs (a read grant, tried only in a
   stand-in on Ubuntu 24.04), the route and egress checks of the Tailscale setup and the rotation of rsyslog's log have not run on a
   production server; the checks that did run are in [deploy/agent/README.md](deploy/agent/README.md), *Checks on the server*.

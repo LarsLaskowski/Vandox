@@ -214,7 +214,7 @@ descriptors takes 57.8 ms ([Benchmarks](../BENCHMARKS.md), *Connection snapshot*
 - Short-lived TCP listeners (an FTP passive data connection, ProFTPD without `PassivePorts`) are reported when a run sees one; a server
   whose local port range differs reports UDP sockets outside the fixed range.
 - The agent's totals include sockets without an owner, which `lsof -ni` never listed, and `processes` counts only descriptors the agent can
-  read, so the numbers differ from the legacy source (#45); the incident's connection peak, taken over every source, is won by the agent's
+  read, so the numbers differ from the legacy source; the incident's connection peak, taken over every source, is won by the agent's
   higher totals ([Incidents](incidents.md)).
 - Two UIDs that replace each other on an already mixed endpoint while the lowest UID stays the same (0 and 1001, then 0 and 1002) are not
   detectable; no set of UIDs per endpoint is kept.

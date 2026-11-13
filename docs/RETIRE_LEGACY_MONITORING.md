@@ -5,7 +5,7 @@ This guide is for the operator whose monitored server still runs the shell scrip
 agent against the script, how to keep the script's history in Vandox and how to take the script out of root's crontab. It starts
 when the agent from [step 11 of the installation guide](INSTALL.md#11-install-the-agent-on-the-monitored-server) already runs beside
 the script. Whether the agent is good enough, and when to retire, is your decision; this guide does not state the result of any
-parallel run.
+comparison. One to two days of comparison are enough; a problem seen later is reported as an issue.
 
 Server commands are for a root shell (`sudo -i`), **one line at a time**. Commands for the backend host are marked as such and are
 the ones of [steps 6 and 7 of the installation guide](INSTALL.md#6-collect-the-logs-on-the-monitored-server) with the archive's
