@@ -85,6 +85,7 @@ public class ImporterDirectoryTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC2")]
     public async Task ImporterDecompressesGzipFiles()
     {
         // Arrange
@@ -154,6 +155,7 @@ public class ImporterDirectoryTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC2")]
     public async Task ImporterListsFilesItCannotImport()
     {
         // Arrange
