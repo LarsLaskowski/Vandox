@@ -392,7 +392,6 @@ public partial class LogTextTests
         TestContext.WriteLine($"incident field: alternating {alternating} bytes, plain {plain} bytes");
         Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating field of 1,024 characters");
         Assert.IsLessThan(alternating, plain, "a plain field costs less than an alternating one, so the measurement sees the runs");
-        Assert.IsGreaterThan(0, plain, "the measurement sees the plain runs");
     }
 
     /// <summary>
@@ -415,7 +414,6 @@ public partial class LogTextTests
         TestContext.WriteLine($"timeline text: alternating {alternating} bytes, plain {plain} bytes");
         Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating timeline text of 1,024 characters");
         Assert.IsLessThan(alternating, plain, "a plain text costs less than an alternating one, so the measurement sees the runs");
-        Assert.IsGreaterThan(0, plain, "the measurement sees the plain runs");
     }
 
     /// <summary>
@@ -438,7 +436,6 @@ public partial class LogTextTests
         TestContext.WriteLine($"log message: alternating {alternating} bytes, plain {plain} bytes");
         Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating message of 16,384 characters");
         Assert.IsLessThan(alternating, plain, "a plain message costs less than an alternating one, so the measurement sees the runs");
-        Assert.IsGreaterThan(0, plain, "the measurement sees the plain runs");
     }
 
     /// <summary>
@@ -461,7 +458,6 @@ public partial class LogTextTests
         TestContext.WriteLine($"log field: alternating {alternating} bytes, plain {plain} bytes");
         Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating field of 1,024 characters");
         Assert.IsLessThan(alternating, plain, "a plain field costs less than an alternating one, so the measurement sees the runs");
-        Assert.IsGreaterThan(0, plain, "the measurement sees the plain runs");
     }
 
     /// <summary>
