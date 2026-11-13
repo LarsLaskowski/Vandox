@@ -3,7 +3,6 @@ using System.Net;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Security;
 
@@ -43,7 +42,7 @@ internal sealed class LoginServiceFixture : IDisposable
     /// <summary>
     /// Gets the clock.
     /// </summary>
-    internal FakeTimeProvider Clock { get; } = new();
+    internal TimerSignalingClock Clock { get; } = new();
 
     /// <summary>
     /// Gets the verifier.

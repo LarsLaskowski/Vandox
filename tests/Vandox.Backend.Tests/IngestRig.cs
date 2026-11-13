@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Ingest;
 using Vandox.Core.Configuration;
@@ -43,7 +42,7 @@ internal sealed class IngestRig : IAsyncDisposable
     {
         _directory = directory;
         _store = store;
-        Clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 25, 12, 0, 0, TimeSpan.Zero));
+        Clock = new TimerSignalingClock(new DateTimeOffset(2026, 10, 25, 12, 0, 0, TimeSpan.Zero));
         Writer = new RecordingRecordWriter(store);
         Log = new IngestLogCapture();
         Lifetime = new ControlledApplicationLifetime();
@@ -69,7 +68,7 @@ internal sealed class IngestRig : IAsyncDisposable
     /// <summary>
     /// Gets the fake clock of the endpoint, at 2026-10-25 12:00:00 UTC to start with.
     /// </summary>
-    internal FakeTimeProvider Clock { get; }
+    internal TimerSignalingClock Clock { get; }
 
     /// <summary>
     /// Gets the writer the endpoint writes to.

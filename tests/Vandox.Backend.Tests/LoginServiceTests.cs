@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Security;
 
@@ -194,6 +193,7 @@ public partial class LoginServiceTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC1")]
     public async Task LoginServiceVerifiesOneAttemptAtATime()
     {
         // Arrange
@@ -210,7 +210,7 @@ public partial class LoginServiceTests
         var second = Task.Run(() => fixture.Service.SignInAsync(waiting.Context, "a wrong password", TestContext.CancellationToken), TestContext.CancellationToken);
 
         // Act
-        await AdvanceUntilCompletedAsync(fixture.Clock, second);
+        await AdvanceUntilCompletedAsync(fixture.Clock, 2, second);
 
         var secondOutcome = await second;
 
@@ -231,6 +231,7 @@ public partial class LoginServiceTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC1")]
     public async Task LoginServiceGateStaysUsableAfterTimedOutAndCancelledWaits()
     {
         // Arrange
@@ -253,7 +254,7 @@ public partial class LoginServiceTests
         // Act
         await cancel.CancelAsync();
         await Assert.ThrowsAsync<OperationCanceledException>(() => cancelledTask, "cancelled waiter");
-        await AdvanceUntilCompletedAsync(fixture.Clock, timedOutTask);
+        await AdvanceUntilCompletedAsync(fixture.Clock, 3, timedOutTask);
 
         var timedOutOutcome = await timedOutTask;
 
@@ -332,26 +333,19 @@ public partial class LoginServiceTests
     }
 
     /// <summary>
-    /// Advances the clock by the verification wait until the task has completed.
+    /// Waits until the clock reports the given number of verification-wait timers armed, advances the clock once by the verification wait and awaits the task.
     /// </summary>
     /// <param name="clock">The clock</param>
+    /// <param name="timers">The number of timers the attempts arm before the clock moves</param>
     /// <param name="task">The task</param>
     /// <returns>A task that completes when the task has completed</returns>
-    private async Task AdvanceUntilCompletedAsync(FakeTimeProvider clock, Task task)
+    private async Task AdvanceUntilCompletedAsync(TimerSignalingClock clock, int timers, Task task)
     {
-        var rounds = 0;
+        await clock.WaitForTimersAsync(LoginService.VerificationWait, timers, TestContext.CancellationToken).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
 
-        while (task.Status < TaskStatus.RanToCompletion)
-        {
-            clock.Advance(LoginService.VerificationWait);
-            await Task.Yield();
-            rounds++;
+        clock.Advance(LoginService.VerificationWait);
 
-            if (rounds % 50 == 0)
-            {
-                await Task.Delay(1, TestContext.CancellationToken);
-            }
-        }
+        await task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
     }
 
     #endregion // Methods
