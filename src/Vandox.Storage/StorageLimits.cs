@@ -15,7 +15,7 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 13;
+    public const int SchemaVersion = 14;
 
     /// <summary>
     /// The largest size of the serialized data of one incident in UTF-8 bytes.
@@ -156,6 +156,26 @@ public static class StorageLimits
     /// The largest number of notes read for one incident.
     /// </summary>
     public const int MaxNotesRead = 64;
+
+    /// <summary>
+    /// The most metric values one fold step reads.
+    /// </summary>
+    internal const int RollupStepRows = 10000;
+
+    /// <summary>
+    /// The most records one removal step removes.
+    /// </summary>
+    internal const int RemovalStepRecords = 5000;
+
+    /// <summary>
+    /// The most rows one removal step examines.
+    /// </summary>
+    internal const int RemovalStepExamined = 20000;
+
+    /// <summary>
+    /// The UTF-8 bytes of labels after which one fold step stops reading.
+    /// </summary>
+    internal const int RollupStepLabelBytes = 2097152;
 
     #endregion // Constants
 }

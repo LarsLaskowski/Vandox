@@ -10,7 +10,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IAsyncDisposable
 {
     #region Constants
 
@@ -97,6 +97,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// </summary>
     public bool Created { get; }
 
+    /// <summary>
+    /// Gets or sets a test hook called at the start of each retention step with the writer lock held.
+    /// </summary>
+    internal Func<Task>? RetentionStepStarted { get; set; }
+
     #endregion // Properties
 
     #region Methods
@@ -139,6 +144,25 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
             throw ReaderQuery.Translate(exception, "store: reading schema version", cancellationToken);
         }
     }
+
+    // Skeleton: removed with the implementation
+#pragma warning disable S2325, RH2003
+    /// <summary>
+    /// Rebuilds the template statistics like <see cref="RebuildTemplatesAsync(int, Func{long, CancellationToken, Task}?, CancellationToken)"/>,
+    /// but keeps the statistics of hours that end before <paramref name="keepBefore"/> and counts only the lines from that time on.
+    /// </summary>
+    /// <param name="batchLines">The most log lines one transaction counts, 1 to <see cref="StorageLimits.MaxBatchRecords"/></param>
+    /// <param name="keepBefore">The start of the log period; statistics of earlier hours stay; <c>null</c> recounts all</param>
+    /// <param name="afterBatch">Called outside the writer lock after each committed batch with the lines counted so far; may be <c>null</c></param>
+    /// <param name="cancellationToken">Cancels the rebuild</param>
+    /// <returns>A task that returns the result of the rebuild</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="batchLines"/> is outside 1 to <see cref="StorageLimits.MaxBatchRecords"/></exception>
+    /// <exception cref="StoreException">The database fails, or another rebuild superseded this one</exception>
+    public Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, DateTimeOffset? keepBefore, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore S2325, RH2003
 
     /// <summary>
     /// Rebuilds the template statistics from the stored log lines: empties the three tables, writes the run marker and fixes the
@@ -986,6 +1010,77 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IImportTracker
+
+    #region IRetentionStore
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+    /// <inheritdoc/>
+    public Task<RollupStepResult> FoldRollupsAsync(RetentionPolicy policy, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+    /// <inheritdoc/>
+    public Task<KillScanProgress> KillScanProgressAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<StoredRecord>> ScanRecordsAsync(KillScanQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+    /// <inheritdoc/>
+    public Task SaveKillScanAsync(IReadOnlyList<RetentionHold> holds, KillScanProgress progress, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+    /// <inheritdoc/>
+    public Task<RemovalStepResult> RemoveExpiredAsync(RetentionPolicy policy, DateTimeOffset now, RemovalCursor? cursor, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<RetentionHold>> HoldsAsync(DateTimeOffset rangeStart, DateTimeOffset rangeEnd, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    #endregion // IRetentionStore
+
+    #region IRollupReader
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<RollupBucket>> RollupsAsync(RollupQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    #endregion // IRollupReader
 
     #region IAsyncDisposable
 

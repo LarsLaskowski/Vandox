@@ -160,6 +160,19 @@ internal sealed class AgentTimeline : IDisposable
         }
     }
 
+    // Skeleton: removed with the implementation
+#pragma warning disable S2325, RH2003
+    /// <summary>
+    /// Returns whether a sequence number was received.
+    /// </summary>
+    /// <param name="seq">The sequence number</param>
+    /// <returns>True when the number was received</returns>
+    internal bool WasReceived(long seq)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore S2325, RH2003
+
     /// <summary>
     /// Writes the changed rows and the stream state.
     /// </summary>
