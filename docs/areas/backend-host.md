@@ -176,13 +176,14 @@ finish, the database is closed, the service logs `vandoxd stopped` and exits 0.
   default of the Synology package, the address is no host interface, and Tailscale forwards inbound tailnet connections to
   `127.0.0.1`, where the web port is published: publishing ingest there would leave only the ACL between the tailnet and the web UI.
   On Synology the package is switched to TUN mode as [INSTALL.md](../INSTALL.md) shows.
-- **Not verified on a host** (open for the Product Manager on the Synology host, #45), stated as reported or expected: that Docker
-  cannot bind the tailnet address in userspace mode and Tailscale forwards to `127.0.0.1` there (issue #40, record 0060); the
-  Synology steps to TUN mode (`tailscale configure-host`, a package restart, repeated at boot by a triggered task, from Tailscale's
-  Synology documentation); that after a reboot Docker may start the container before Tailscale has its address — Docker's userland
-  proxy binds the host address and fails while it is missing, the iptables-only path may not, and a container whose binding failed
-  when the daemon started may not be restarted by `unless-stopped`; remedy: `docker compose up -d` once Tailscale is up; and that
-  Synology Container Manager and QNAP Container Station honor `${VAR:?message}` (Compose v2 does, checked by the smoke test).
+- **Verified on a host.** The `v0.2.0-rc.1` run on the Product Manager's Synology host showed the switch of the Tailscale package
+  to TUN mode with its boot-up task (`tailscale configure-host`, a package restart, repeated at boot by a triggered task) and that
+  the container came back after a NAS reboot, with nothing run on top of it.
+- **Not verified on a host**, stated as reported or expected: that Docker cannot bind the tailnet address in userspace mode and
+  Tailscale forwards to `127.0.0.1` there (issue #40, record 0060); the reason a container may stay down after a reboot — Docker's
+  userland proxy binds the host address and fails while it is missing, the iptables-only path may not, and a container whose binding
+  failed when the daemon started may not be restarted by `unless-stopped`; remedy: `docker compose up -d` once Tailscale is up; and
+  that Synology Container Manager and QNAP Container Station honor `${VAR:?message}` (Compose v2 does, checked by the smoke test).
 - **LAN hosts may reach the ingest port.** Docker matches a published port by its destination address only, so a host on the LAN
   that routes packets to the tailnet address may reach the ingest port there, as it may the web port. The token, bound to the one
   agent ID, is the boundary.

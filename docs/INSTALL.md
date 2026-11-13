@@ -251,10 +251,11 @@ sudo docker exec vandoxd dotnet /app/vandoxd.dll report > forensics.md
 From v0.2.0 on, the agent on the monitored server sends its data to the backend over Tailscale, to
 `http://<tailnet address of the Docker host>:8081`. The backend side needs three things.
 
-> The Synology steps and the userspace-mode behavior in this section come from Tailscale's documentation and the project's notes and
-> have **not been verified on a device**; they are to be checked on a Synology host before the release (#45). The source of the
-> Synology steps is Tailscale's Synology guide, <https://tailscale.com/kb/1131/synology>; follow it where it differs from the
-> commands below.
+> The Synology steps and the userspace-mode behavior in this section come from Tailscale's documentation and the project's notes. The
+> `v0.2.0-rc.1` run on the Product Manager's Synology host verified the switch to TUN mode with its boot-up task and that the
+> container came back after a NAS reboot; the rest of the Docker behavior described here is reported or expected, not verified on a
+> device. The source of the Synology steps is Tailscale's Synology guide, <https://tailscale.com/kb/1131/synology>; follow it where it
+> differs from the commands below.
 
 **Tailscale in TUN mode on the Docker host.** Docker can publish a port only on an address of a host interface. In Tailscale's TUN
 mode the tailnet address is on the interface `tailscale0`; in userspace-networking mode it is on no interface, so the binding fails,
@@ -291,8 +292,10 @@ one the agent presents; `ingest.min_free` (default `1GiB`) is the free space bel
 - The container does not start and Docker reports a port binding error: the host does not have the address in `.env` (Tailscale
   down, or in userspace mode). Switch to TUN mode or correct the address, then `sudo docker compose up -d`.
 - After a reboot the container is not running although Tailscale is up: Docker may have started before Tailscale brought up its
-  address, and the restart policy may not retry a failed binding (expected from Docker's behavior, not verified). Run
-  `sudo docker compose up -d` once Tailscale is up; if it happens at every boot, add that command to the end of the triggered task.
+  address, and the restart policy may not retry a failed binding (expected from Docker's behavior). On the Synology host of the
+  `v0.2.0-rc.1` run the container came back by itself after a NAS reboot, with nothing run on top of it; whether it does on your host
+  depends on the start order of Docker and Tailscale. If it does not, run `sudo docker compose up -d` once Tailscale is up; if it
+  happens at every boot, add that command to the end of the triggered task.
 - The backend logs `ingest disabled` at start: the token or `ingest.agent_id` is missing; ingest answers `503` until both are set.
 - The agent logs `token refused`: look in `sudo docker logs vandoxd` for `ingest agent refused` (the agent's `agent_id` differs from
   `ingest.agent_id`, compared exactly) or `ingest token refused` (the agent has another token).
@@ -345,7 +348,11 @@ on the server for that (*Tailscale on the monitored server*, step 3). A console 
 token from a file on standard input (*The token prompt* in [`deploy/agent/README.md`](../deploy/agent/README.md)).
 
 Remove the agent with the bundle's `uninstall.sh` (`--purge` also deletes the configuration, token and spool). Upgrade and an install without internet access on the server are in [`deploy/agent/README.md`](../deploy/agent/README.md), which also lists every option,
-message, check and unit setting. The unit and the scripts ran on a monitored server in the Product Manager's server run; the results
-are in *Checks on the server* of [`deploy/agent/README.md`](../deploy/agent/README.md). The transmission to a backend with the
-ingest API was not part of that run, because no release has the ingest API yet (it will come with v0.2.0). Check it on your own setup
+message, check and unit setting. The unit and the scripts ran on a monitored server in the Product Manager's server run (`v0.0.0-rc.0`); the results
+are in *Checks on the server* of [`deploy/agent/README.md`](../deploy/agent/README.md). That run could not test the transmission, because no release then had the
+ingest API ("no release has the ingest API yet" is the state of that run). The `v0.2.0-rc.1` run settled it: the ingest probe printed
+`401` and the agent's data reached the backend (*Transmission to the backend* in the same section). Check it on your own setup
 with the `POST` line of *Tailscale on the monitored server*, step 4, which must print `401`.
+
+When the agent has run beside the legacy monitoring script of the Plesk server, [Retire the legacy monitoring
+script](RETIRE_LEGACY_MONITORING.md) compares the two, keeps the script's history and takes the script out of root's crontab.
