@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Security;
 
