@@ -463,19 +463,23 @@ internal sealed class Scanner
 
         Stream content = new PrefixStream(head, raw);
 
-        if (format == ContentFormat.Gzip)
+        if (format != ContentFormat.Gzip)
         {
-            item.Location.Gzip = true;
-            item.Name = PathText.TrimGzip(item.Name);
+            await ClassifyAsync(item, format, unsupported, head, content, cancellationToken).ConfigureAwait(false);
 
-            var gzip = new GZipStream(content, CompressionMode.Decompress);
-
-            head = await ReadHeadAsync(gzip, cancellationToken).ConfigureAwait(false);
-            (format, unsupported) = FormatSniffer.Sniff(head);
-            content = new PrefixStream(head, gzip);
+            return;
         }
 
-        await ClassifyAsync(item, format, unsupported, head, content, cancellationToken).ConfigureAwait(false);
+        item.Location.Gzip = true;
+        item.Name = PathText.TrimGzip(item.Name);
+
+        var gzip = new GZipStream(content, CompressionMode.Decompress, leaveOpen: true);
+        await using var gzipDisposal = gzip.ConfigureAwait(false);
+
+        head = await ReadHeadAsync(gzip, cancellationToken).ConfigureAwait(false);
+        (format, unsupported) = FormatSniffer.Sniff(head);
+
+        await ClassifyAsync(item, format, unsupported, head, new PrefixStream(head, gzip), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

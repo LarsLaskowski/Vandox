@@ -27,6 +27,8 @@ public class ImporterArchiveTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC2")]
+    [TestCategory("AC3")]
     public async Task ImporterImportsArchiveEntries()
     {
         // Arrange
@@ -205,6 +207,7 @@ public class ImporterArchiveTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC3")]
     public async Task ImporterFailsCorruptGzip()
     {
         // Arrange
@@ -231,6 +234,7 @@ public class ImporterArchiveTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC2")]
     public async Task ImporterContinuesGzipFilesAndArchiveEntriesPerDecompressedContent()
     {
         // Arrange
