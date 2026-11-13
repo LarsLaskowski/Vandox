@@ -153,7 +153,10 @@ the process snapshot, then per section in file order the metrics in line order a
   `2130706433`, a zone that is looked up on the host); an address is never resolved and no zone is looked up:
   - TYPE `IPv4`: `*` (0.0.0.0) or exactly four dot-separated decimal octets of 1 to 3 digits, at most 255 and without
     a leading zero, built from the four bytes.
-  - TYPE `IPv6`: `*` (::) or an address in brackets followed by `:PORT`; a zone (`%` to the closing bracket) is removed
+  - TYPE `IPv6`: `*` (::), a dotted quad without brackets, or an address in brackets followed by `:PORT`. The dotted
+    quad is how `lsof` prints the IPv4-mapped address of an IPv6 socket; it is read by the TYPE `IPv4` octet rule
+    (so `127.1` and an unbracketed `::ffff:1.2.3.4` are refused) and kept as the IPv4-mapped address `::ffff:a.b.c.d`,
+    not unmapped, as the agent keeps it, with the protocol `tcp6` or `udp6`. For a bracketed address a zone (`%` to the closing bracket) is removed
     and the address kept; the rest is 2 to 45 characters of `0-9 A-F a-f : .` with a colon; a trailing dotted quad
     (after the last colon, with no point before it) must meet the IPv4 octet rule, so `::ffff:1.2.3.04` is refused,
     not read as decimal; only then is the text parsed as an address, and the result must be an IPv6 address without a

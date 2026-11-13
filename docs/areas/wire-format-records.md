@@ -263,6 +263,8 @@ legacy `lsof -ni` parser):
 - a zone (`fe80::1%eth0`) is stripped, the link-local address itself is kept; a zone means nothing to the backend and is rejected
   with reason `zone not allowed`;
 - a wildcard local address (`*` in `lsof`) becomes `0.0.0.0` for IPv4 and `::` for IPv6 sockets;
+- in `lsof`, a dotted IPv4 address on an IPv6 socket becomes the IPv4-mapped address `::ffff:a.b.c.d`, the value the connection
+  collector keeps for the same socket;
 - a port given as a service name (legacy `lsof -ni` without `-P`) is mapped to its number from a built-in table, never by a lookup on
   the host;
 - a socket whose address or port cannot be mapped is left out and reported (the importer counts it as a skipped line) and `complete`
