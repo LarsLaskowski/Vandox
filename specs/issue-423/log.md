@@ -9,3 +9,4 @@ are quoted in full.
 | 2026-11-13 15:48 | 2 Plan | Lead | RESULT: DONE, tier tests: ServeTests wait via StartAsync/WaitForStartAsync watching the run; tests in BackendFixtureTests (AC1-AC3) (opus/medium · 67,853 tokens · 22 tool uses · 163 s · 38 in · 17,170 out · 858,450 cache read · 54,022 cache write · 392,676 weighted) |
 | 2026-11-13 15:48 | 2 Challenge skipped | Orchestrator | challenge skipped — tier tests is never challenged |
 | 2026-11-13 15:53 | 6 Coverage | Tester | Result: tests green (1261 passed), no Dev change. Deferred: none (sonnet/medium · 93,983 tokens · 12 tool uses · 307 s · 22 in · 6,357 out · 896,517 cache read · 37,742 cache write · 168,636 weighted) |
+| 2026-11-13 16:00 | 7 Gate stamp | Orchestrator | PASS on 22823c6a89738e884d29c8c2588aa01b56c276b0 (tier tests): Format check pass; Analyzer gate pass; Test pass; scope-check.py --tier tests pass |
