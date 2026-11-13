@@ -21,6 +21,8 @@ public class SqliteStoreTemplateRebuildTests
 
     private const string CountSum = "SELECT coalesce(sum(count), 0) FROM log_templates";
 
+    private const string CountMismatch = "SELECT count(*) FROM log_templates t WHERE t.count <> (SELECT sum(h.count) FROM log_template_hours h WHERE h.template_id = t.id)";
+
     #endregion // Constants
 
     #region Properties
@@ -448,6 +450,132 @@ public class SqliteStoreTemplateRebuildTests
     }
 
     /// <summary>
+    /// With a log period, the statistics of every hour before its start are kept as stored, the later hours are recounted from the stored lines, and each template's count is the sum of its hours.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreRebuildKeepsStatisticsOfHoursBeforeTheLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, [.. FiveLines(), Samples.LogAt(RecordOrigin.Backend, 0, "syslog", "sshd", Hour(3), "alpha event")]);
+
+        var written = await HourRowsAsync(directory.Path);
+
+        await ExecuteAsync(directory.Path, "UPDATE log_template_hours SET count = count + 40", "UPDATE log_source_hours SET count = count + 9");
+
+        var tampered = await HourRowsAsync(directory.Path);
+
+        // Act
+        await store.RebuildTemplatesAsync(10, Hour(2), null, TestContext.CancellationToken);
+
+        var rebuilt = await HourRowsAsync(directory.Path);
+
+        // Assert
+        Assert.AreSequenceEqual(Before(tampered, Hour(2)), Before(rebuilt, Hour(2)), "the hours before the log period keep their stored statistics");
+        Assert.AreSequenceEqual(From(written, Hour(2)), From(rebuilt, Hour(2)), "the hours of the log period are recounted from the stored lines");
+        Assert.IsNotEmpty(Before(rebuilt, Hour(2)), "hours before the log period are arranged");
+        Assert.AreSequenceEqual(["0"], await RowsAsync(directory.Path, CountMismatch), "the count of each template is the sum of its hours");
+    }
+
+    /// <summary>
+    /// An hour before the log period whose lines were partly removed keeps the statistics of all its lines.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreRebuildKeepsStatisticsOfPartlyRemovedHours()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, FiveLines());
+
+        var written = await HourRowsAsync(directory.Path);
+        var removed = $"(SELECT id FROM records WHERE kind = 'log_line' AND captured_at = {StorageTime.ToNanoseconds(Hour(1)).ToString(CultureInfo.InvariantCulture)})";
+
+        await ExecuteAsync(directory.Path,
+                           $"INSERT INTO log_fts(log_fts, rowid, message) SELECT 'delete', record_id, message FROM log_lines WHERE record_id = {removed}",
+                           $"DELETE FROM log_lines WHERE record_id = {removed}",
+                           $"DELETE FROM records WHERE id = {removed}");
+
+        // Act
+        await store.RebuildTemplatesAsync(10, Hour(2), null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["4"], await RowsAsync(directory.Path, "SELECT count(*) FROM log_lines"), "one line of hour 1 was removed");
+        Assert.AreSequenceEqual(written, await HourRowsAsync(directory.Path), "the partly removed hour keeps the statistics of all its lines");
+        Assert.AreSequenceEqual(["0"], await RowsAsync(directory.Path, CountMismatch), "the count of each template is the sum of its hours");
+    }
+
+    /// <summary>
+    /// The hours of the log period are recounted: changed values return to the write path's and statistics no stored line of the period produces are gone.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreRebuildRecountsHoursInTheLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var stale = StorageTime.ToNanoseconds(Hour(3)).ToString(CultureInfo.InvariantCulture);
+
+        await WriteAsync(store, FiveLines());
+
+        var written = await HourRowsAsync(directory.Path);
+
+        await ExecuteAsync(directory.Path,
+                           $"UPDATE log_template_hours SET count = count + 7 WHERE hour >= {StorageTime.ToNanoseconds(Hour(2)).ToString(CultureInfo.InvariantCulture)}",
+                           $"UPDATE log_source_hours SET count = count + 5 WHERE hour >= {StorageTime.ToNanoseconds(Hour(2)).ToString(CultureInfo.InvariantCulture)}",
+                           $"INSERT INTO log_templates(id, source, program, template, first_seen, last_seen, count) VALUES (900, 'syslog', 'sshd', 'old rules <n>', {stale}, {stale}, 3)",
+                           $"INSERT INTO log_template_hours(template_id, hour, count) VALUES (900, {stale}, 3)",
+                           $"INSERT INTO log_source_hours(source, hour, count) VALUES ('ghost', {stale}, 4)");
+
+        // Act
+        await store.RebuildTemplatesAsync(10, Hour(2), null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(written, await HourRowsAsync(directory.Path), "the hours of the log period equal the write path's");
+        Assert.AreSequenceEqual(["0"], await RowsAsync(directory.Path, "SELECT count(*) FROM log_templates WHERE id = 900"), "the stale template without hours is gone");
+        Assert.AreSequenceEqual(["0"], await RowsAsync(directory.Path, CountMismatch), "the count of each template is the sum of its hours");
+    }
+
+    /// <summary>
+    /// Without a log period the rebuild recounts every hour, as before.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreRebuildWithoutLogPeriodRecountsAll()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, FiveLines());
+
+        var written = await SnapshotAsync(directory.Path);
+
+        await ExecuteAsync(directory.Path,
+                           "UPDATE log_templates SET count = count + 40",
+                           "UPDATE log_template_hours SET count = count + 7",
+                           "UPDATE log_source_hours SET count = count + 9",
+                           "INSERT INTO log_source_hours(source, hour, count) VALUES ('ghost', 0, 4)");
+
+        // Act
+        var result = await store.RebuildTemplatesAsync(10, null, null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(written, await SnapshotAsync(directory.Path), "every hour equals the write path's");
+        Assert.AreEqual(5L, result.Lines, "every stored line is counted");
+    }
+
+    /// <summary>
     /// Gets an hour relative to <see cref="Samples.Base"/>, which starts on a full hour.
     /// </summary>
     /// <param name="offset">The hours after the base</param>
@@ -483,6 +611,38 @@ public class SqliteStoreTemplateRebuildTests
     }
 
     /// <summary>
+    /// Keeps the hour rows of hours before an instant.
+    /// </summary>
+    /// <param name="rows">The rows from <see cref="HourRowsAsync"/></param>
+    /// <param name="instant">The instant</param>
+    /// <returns>The rows</returns>
+    private static List<string> Before(IReadOnlyList<string> rows, DateTimeOffset instant)
+    {
+        return rows.Where(row => HourOf(row) < StorageTime.ToNanoseconds(instant)).ToList();
+    }
+
+    /// <summary>
+    /// Keeps the hour rows of hours at or after an instant.
+    /// </summary>
+    /// <param name="rows">The rows from <see cref="HourRowsAsync"/></param>
+    /// <param name="instant">The instant</param>
+    /// <returns>The rows</returns>
+    private static List<string> From(IReadOnlyList<string> rows, DateTimeOffset instant)
+    {
+        return rows.Where(row => HourOf(row) >= StorageTime.ToNanoseconds(instant)).ToList();
+    }
+
+    /// <summary>
+    /// Reads the hour of a row from <see cref="HourRowsAsync"/>, its first value.
+    /// </summary>
+    /// <param name="row">The row</param>
+    /// <returns>The hour in nanoseconds</returns>
+    private static long HourOf(string row)
+    {
+        return long.Parse(row.Split('|')[0], CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Writes the records as one batch.
     /// </summary>
     /// <param name="store">The store</param>
@@ -507,6 +667,21 @@ public class SqliteStoreTemplateRebuildTests
         rows.AddRange(await RowsAsync(directory, "SELECT 'template', source, program, template, first_seen, last_seen, count FROM log_templates ORDER BY source, program, template"));
         rows.AddRange(await RowsAsync(directory, "SELECT 'template hour', t.source, t.program, t.template, h.hour, h.count FROM log_template_hours h JOIN log_templates t ON t.id = h.template_id ORDER BY t.source, t.program, t.template, h.hour"));
         rows.AddRange(await RowsAsync(directory, "SELECT 'source hour', source, hour, count FROM log_source_hours ORDER BY source, hour"));
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Reads the template and source hours by key, each row starting with its hour.
+    /// </summary>
+    /// <param name="directory">The database directory</param>
+    /// <returns>A task that returns the rows as text</returns>
+    private async Task<IReadOnlyList<string>> HourRowsAsync(string directory)
+    {
+        var rows = new List<string>();
+
+        rows.AddRange(await RowsAsync(directory, "SELECT h.hour, 'template hour', t.source, t.program, t.template, h.count FROM log_template_hours h JOIN log_templates t ON t.id = h.template_id ORDER BY t.source, t.program, t.template, h.hour"));
+        rows.AddRange(await RowsAsync(directory, "SELECT hour, 'source hour', source, count FROM log_source_hours ORDER BY source, hour"));
 
         return rows;
     }
