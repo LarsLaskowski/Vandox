@@ -131,3 +131,62 @@ only the decompressor's native state is released at the end of each file instead
 ## Out of scope / follow-ups
 
 None.
+
+## Challenge notes
+
+Devil's Advocate, mode plan: issue #433 (/home/user/Vandox-433/specs/issue-433/plan.md)
+
+I checked the plan against the code and it holds up. Its factual claims are right:
+- `Scanner.cs:471` creates the `GZipStream` without `leaveOpen` and never disposes it.
+- `ImportPass.cs:82` uses `leaveOpen: true`.
+- Both `TarReader` instances use `leaveOpen: true` (`Scanner.cs:150`, `ImportPass.cs:287`).
+- `IsFailure` (`Scanner.cs:91-94`) does not cover `ObjectDisposedException`, so the plan is right that disposing too early would break the run.
+- All six tests the plan names exist and cover what it claims:
+  - `ImporterListsFilesItCannotImport` has `twice.gz`.
+  - `ImporterImportsArchiveEntries` has a gzip entry `b.log.gz` followed by `readme.txt`, and a `.tar.gz`.
+  - `ImporterFailsCorruptGzip` has `cut.gz` and `junk.gz` followed by `ok.log`.
+
+I also checked one risk the plan does not mention: a decompressor that seeks its inner stream back when it is disposed. It does not apply, because `FilterStream.CanSeek` is false (`src/Vandox.Import/FilterStream.cs:62`).
+
+Rejecting option 3 (the unit test the issue asks for) is justified. The `GZipStream` is a local variable of a private method, so a test could only see its disposal through a member added just for the test. Even then, someone would still have to read the diff to confirm that `StreamAsync` uses that member on every path. The changed lines run in the existing tests for AC2 and AC3.
+
+Objections:
+
+1. minor: the Reviewer's AC1 check leaves out the order between creating the stream and the `await using`. The failure path AC1 lists includes corrupt gzip such as `junk.gz` in `ImporterFailsCorruptGzip`. For that file the inner `ReadHeadAsync(gzip, …)` throws. If the Dev reads the inner head before the `await using`, or between creating the stream and the `await using`, the `GZipStream` still leaks on that path, and the review check as written would pass it. The plan's Approach step 3 has the right order, but the AC1 test row does not ask the Reviewer to check it. Instruction for the Reviewer: also confirm that the `await using` directly follows `new GZipStream(content, CompressionMode.Decompress, leaveOpen: true)`, with no read and no other statement that can throw between them, so the inner `ReadHeadAsync` call runs inside the disposal scope.
+
+## Security notes
+
+Security review, mode `plan`: specs/issue-433/plan.md (worktree /home/user/Vandox-433, branch fix-issue-433-dispose-gzipstream, plan commit 38a1d29)
+
+**Scope and tier**
+- The tier `standard` is right. The fix adds a disposal scope around `ClassifyAsync` in `Scanner.StreamAsync`. It does not create, change or remove a security control: no path handling, no write, no byte, length or entry limit, no failure reason and no exception filter changes.
+- The plan lists the one security area it touches (9, `src/Vandox.Import/`). I found no area it touches without listing it.
+
+**Checked against the code**
+- `/home/user/Vandox-433/src/Vandox.Import/Scanner.cs:459-479`: the `GZipStream` is created without `leaveOpen` and is never disposed. That confirms facts 1 and 5.
+- `/home/user/Vandox-433/src/Vandox.Import/FilterStream.cs:10-12`: the CA2213 suppression says "The caller owns the inner stream". `PrefixStream`, `ErrorTrackingStream` and `TarHeaderGuardStream` have no `Dispose`. `HashingStream.cs:149-157` disposes only its hash. That confirms facts 2, 3 and 11.
+- `Scanner.cs:150-151`: `TarReader` is opened with `leaveOpen: true` and disposed with `await using`. `Scanner.cs:394-395`: the file is owned by `RegularFileAsync`. `/home/user/Vandox-433/src/Vandox.Import/ImportPass.cs:82` already uses `leaveOpen: true` for its decompressor. That confirms facts 4, 6 and 7.
+- The scope placement is correct. If the `await using` sat inside the `if` block, the stream would be disposed before `ClassifyAsync` reads it and would throw `ObjectDisposedException`. `IsFailure` (`Scanner.cs:91-94`) does not catch that exception, so it would abort the run. The plan rules this out explicitly (fact 9, approach step 3) and keeps the existing gzip, tar and corrupt-gzip tests as the guard (AC2, AC3).
+- `ArchiveError` handling is unaffected. `Fail` (`Scanner.cs:441-449`) rethrows the tracker's error after the exception has left `StreamAsync`. Disposing the `GZipStream` with `leaveOpen: true` does not touch the `ErrorTrackingStream`, so the archive error still ends the archive as before.
+
+**Measurement of the library behavior the plan relies on**
+The plan says disposal in decompress mode reads and writes nothing, never touches the inner stream, and cannot replace an exception from the classification. I checked this once with the .NET SDK 11.0.100.
+- Probe file: `/tmp/claude-0/-home-user-Vandox/20a7ec18-4e3f-5d33-90a2-8d6e6d7b6d72/scratchpad/gz/probe.cs`.
+- Command: `cd /tmp/claude-0/-home-user-Vandox/20a7ec18-4e3f-5d33-90a2-8d6e6d7b6d72/scratchpad/gz && dotnet run probe.cs`
+- The probe opens a `GZipStream` (decompress, `leaveOpen: true`) over an inner stream that counts calls and throws on any Read, Write or Flush once armed. It then:
+  - reads part of valid gzip and calls `DisposeAsync`;
+  - reads corrupt gzip until it throws, then calls `DisposeAsync`.
+- Output:
+  ```
+  partial-read dispose: inner calls=0 innerDisposed=False
+  read threw InvalidDataException
+  after-failure dispose: inner calls=0 innerDisposed=False
+  ```
+- Result: disposal neither touches nor disposes the inner stream and throws nothing, both after a partial read and after a corrupt-data failure. The plan's claim holds, and Option 2 (`leaveOpen: false`) is rightly rejected.
+
+**Findings**
+- Blocking: none.
+- Non-blocking: none. Dropping the test seam is acceptable from a security point of view, because the risky failure (disposing too early) is caught by the existing tests. The manual AC1 check in step 8 should confirm three things on the diff:
+  - the constructor passes `leaveOpen: true`;
+  - the `await using` scope encloses the `ClassifyAsync` call;
+  - no other path disposes the stream.
