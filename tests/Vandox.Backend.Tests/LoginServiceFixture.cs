@@ -43,7 +43,7 @@ internal sealed class LoginServiceFixture : IDisposable
     /// <summary>
     /// Gets the clock.
     /// </summary>
-    internal FakeTimeProvider Clock { get; } = new();
+    internal TimerSignalingClock Clock { get; } = new();
 
     /// <summary>
     /// Gets the verifier.

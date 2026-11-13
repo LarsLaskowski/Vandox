@@ -209,6 +209,7 @@ public class IngestEndpointConcurrencyTests
     /// <param name="situation">The situation</param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [TestCategory("AC2")]
     [DataRow("slot wait")]
     [DataRow("trickling body")]
     public async Task IngestEndpointRequestOverBudgetGetsNo2xx(string situation)
@@ -246,7 +247,7 @@ public class IngestEndpointConcurrencyTests
         }
 
         // Act
-        await AdvanceUntilDoneAsync(rig, run);
+        await AdvanceUntilDoneAsync(rig, situation == "slot wait" ? 3 : 1, run);
         rig.Writer.ReleaseAll();
         await Task.WhenAll(holders).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
 
@@ -454,29 +455,19 @@ public class IngestEndpointConcurrencyTests
     }
 
     /// <summary>
-    /// Moves the fake clock past the 30-second budget until the request is done. The request may take its receive time and create its budget timer only after
-    /// the first step, so the clock moves again until the timer fires; no fixed delay decides the outcome.
+    /// Waits until the clock reports the given number of request-budget timers armed, moves the clock once past the budget and awaits the request.
     /// </summary>
     /// <param name="rig">The rig whose clock moves</param>
+    /// <param name="timers">The number of budget timers the requests arm before the clock moves</param>
     /// <param name="run">The request</param>
     /// <returns>A task that completes when the request is done</returns>
-    private async Task AdvanceUntilDoneAsync(IngestRig rig, Task run)
+    private async Task AdvanceUntilDoneAsync(IngestRig rig, int timers, Task run)
     {
-        using var bound = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        await rig.Clock.WaitForTimersAsync(IngestLimits.RequestBudget, timers, TestContext.CancellationToken).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
 
-        bound.CancelAfter(TimeSpan.FromSeconds(60));
+        rig.Clock.Advance(IngestLimits.RequestBudget + TimeSpan.FromSeconds(1));
 
-        Task finished;
-
-        do
-        {
-            rig.Clock.Advance(TimeSpan.FromSeconds(31));
-            finished = await Task.WhenAny(run, Task.Delay(10, bound.Token));
-            bound.Token.ThrowIfCancellationRequested();
-        }
-        while (finished != run);
-
-        await run;
+        await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
     }
 
     /// <summary>
