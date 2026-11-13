@@ -155,18 +155,23 @@ func requireNoStaleResidual(t *testing.T, what, text string) {
 	}
 }
 
-// requireNotYetRunRow reports a missing table row of the checks section that names needle and says "not yet run".
-func requireNotYetRunRow(t *testing.T, checks, needle string) {
+// requireRecordedRow reports a missing table row of the checks section that names needle and holds a recorded result
+// instead of a "not yet run" mark.
+func requireRecordedRow(t *testing.T, checks, needle string) {
 	t.Helper()
 
 	for _, line := range strings.Split(checks, "\n") {
 		row := collapse(line)
-		if strings.HasPrefix(row, "|") && strings.Contains(row, needle) && strings.Contains(row, "not yet run (issue #") {
+		if strings.HasPrefix(row, "|") && strings.Contains(row, needle) {
+			if strings.Contains(row, "not yet run") {
+				t.Errorf("%q row naming %q is still marked \"not yet run\", want the server's result", checksHeading, needle)
+			}
+
 			return
 		}
 	}
 
-	t.Errorf("%q has no row naming %q marked \"not yet run (issue #<n>)\", want one", checksHeading, needle)
+	t.Errorf("%q has no row naming %q, want one with the server's result", checksHeading, needle)
 }
 
 func TestReadme_DescribesTheTailnetDeviceBinding(t *testing.T) {
@@ -182,8 +187,8 @@ func TestReadme_DescribesTheTailnetDeviceBinding(t *testing.T) {
 	requireNoStaleResidual(t, "the network area", area)
 
 	checks := sectionOf(t, readme, checksHeading)
-	requireNotYetRunRow(t, checks, "ip route get 100.64.0.1")
-	requireNotYetRunRow(t, checks, "ipegresspackets")
+	requireRecordedRow(t, checks, "ip route get 100.64.0.1")
+	requireRecordedRow(t, checks, "ipegresspackets")
 }
 
 // fencedBlocks returns the non-empty lines of every fenced block of text, each line without its indentation.

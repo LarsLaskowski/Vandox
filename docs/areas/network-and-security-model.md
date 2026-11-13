@@ -59,7 +59,7 @@ on the address in `INGEST_BIND_ADDRESS`, the backend host's tailnet address. The
   without routes (before its network map, logged out) the packets go into Tailscale and the send ends as a `timeout`. Neither reaches
   the provider's network, and the records stay in the spool until the tailnet is up. The server must run Tailscale in TUN mode with the
   default interface name; otherwise every send fails. Binding a socket to a device needs no capability on Linux 5.7 and later. The
-  server's checks (the route while up, the egress while `tailscaled` is stopped) have not yet run (issue #372). Record 0134.
+  server's checks (the route while up, the egress while `tailscaled` is stopped) ran on the production server and passed. Record 0134.
 - **`backend.url` holds an IP address, so no name answer chooses where the token goes.** The loader, the transport and `install.sh`
   refuse a host name, a short or numeric IPv4 form and an IPv6 zone, so the dialed address is the configured literal and nothing is looked
   up: a name server, forged or not, cannot send the token unbound to a local listener through the loopback exemption (record 0192, which
