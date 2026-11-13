@@ -244,4 +244,9 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0205 | Disposable fields meet CA2213 through suppressions that name their owner | Accepted | 2026-11-12 |
 | 0206 | Test assemblies run their tests one at a time, stated explicitly | Accepted | 2026-11-12 |
 | 0207 | The incidents view shows each external text in at most 16 runs, the logs view keeps 256 | Accepted | 2026-11-13 |
+| 0208 | Metric rollups are folded from new rows by record ID, never recomputed from raw values | Proposed | 2026-11-13 |
+| 0209 | Retention removes by capture time per record kind; imported data is kept, events are kept three years | Proposed | 2026-11-13 |
+| 0210 | Data in incident windows and in the windows of detected kills is kept as long as the incident | Proposed | 2026-11-13 |
+| 0211 | A resent agent record whose stored copy was removed is not stored again | Proposed | 2026-11-13 |
+| 0212 | Retention frees space inside the database file, not on the volume | Proposed | 2026-11-13 |
 <!-- project:end index -->

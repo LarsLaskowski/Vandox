@@ -1,7 +1,7 @@
 # Spec: Downsampling and retention
 
 Source: Issue #46
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -60,8 +60,8 @@ summaries; this feature produces them.
 - E9: A record whose capture time lies in the future (a wrong agent clock, a forged batch) is kept until its capture time is past its
   period.
 - E10: Removed log lines are never returned by the log search, the logs view or the context of a hit.
-- E11: An agent record resent after its stored copy was removed (a number at or below the highest the agent sent and in no open sequence
-  gap) is acknowledged and neither stored again nor merged into a bucket.
+- E11: An agent record resent after its stored copy was removed (a number at or below the highest the agent sent and in no sequence gap
+  that is not closed, open or final) is acknowledged and neither stored again nor merged into a bucket.
 - E12: Template statistics of an hour that still holds a stored line (an imported one, a kept window) stay past `retention.rollups_1h`.
 
 ## Non-functional requirements
