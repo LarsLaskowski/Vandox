@@ -14,6 +14,11 @@ internal static class RetentionQueries
     internal const string RollupWatermarkKey = "rollup_after_id";
 
     /// <summary>
+    /// The <c>meta</c> key of the raw horizon below which sample times are pruned.
+    /// </summary>
+    internal const string SampleFloorKey = "sample_time_floor";
+
+    /// <summary>
     /// The <c>meta</c> key of the highest record ID the kill scan has read.
     /// </summary>
     internal const string KillScanKey = "kill_scan_after_id";
@@ -160,6 +165,26 @@ internal static class RetentionQueries
     /// Deletes a record.
     /// </summary>
     internal const string DeleteRecord = "DELETE FROM records WHERE id = $id";
+
+    /// <summary>
+    /// Reads the first agent after an agent ID.
+    /// </summary>
+    internal const string NextAgent = "SELECT agent_id FROM agent_streams WHERE agent_id > $after ORDER BY agent_id LIMIT 1";
+
+    /// <summary>
+    /// Reads the newest sample time of an agent.
+    /// </summary>
+    internal const string NewestSampleTime = "SELECT max(captured_at) FROM agent_sample_times WHERE agent_id = $agent";
+
+    /// <summary>
+    /// Reads the oldest sample times of an agent below a bound.
+    /// </summary>
+    internal const string OldSampleTimes = "SELECT captured_at FROM agent_sample_times WHERE agent_id = $agent AND captured_at < $upper ORDER BY captured_at LIMIT $limit";
+
+    /// <summary>
+    /// Deletes a sample time.
+    /// </summary>
+    internal const string DeleteSampleTime = "DELETE FROM agent_sample_times WHERE agent_id = $agent AND captured_at = $at";
 
     /// <summary>
     /// Walks the gap rows by the end of their span.

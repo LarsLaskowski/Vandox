@@ -13,7 +13,7 @@ internal sealed class RetentionRemover
 
     private const string GapRecords = RecordKind.Gap;
 
-    private const string RetentionGapRows = "gap_rows";
+    private const string GapRows = "gap_rows";
 
     private const string FiveMinuteBuckets = "rollups_5m";
 
@@ -49,7 +49,7 @@ internal sealed class RetentionRemover
                                                    RecordKind.ServiceState,
                                                    RecordKind.BackupRun,
                                                    GapRecords,
-                                                   RetentionGapRows,
+                                                   GapRows,
                                                    FiveMinuteBuckets,
                                                    HourlyBuckets,
                                                    TemplateHours,
@@ -203,7 +203,7 @@ internal sealed class RetentionRemover
                    LogLines = Count(RecordKind.LogLine),
                    Snapshots = Count(RecordKind.ProcessSnapshot) + Count(RecordKind.ConnectionSnapshot) + Count(RecordKind.MariaDbStatus),
                    EventRecords = Count(RecordKind.KernelEvent) + Count(RecordKind.ServiceState) + Count(RecordKind.BackupRun) + Count(GapRecords),
-                   Gaps = Count(RetentionGapRows),
+                   Gaps = Count(GapRows),
                    FiveMinuteValues = Count(FiveMinuteBuckets),
                    HourlyValues = Count(HourlyBuckets),
                    TemplateHours = Count(TemplateHours),
@@ -237,7 +237,7 @@ internal sealed class RetentionRemover
                    RecordKind.LogLine => _policy.Logs,
                    RecordKind.ProcessSnapshot or RecordKind.ConnectionSnapshot or RecordKind.MariaDbStatus => _policy.Snapshots,
                    RecordKind.KernelEvent or RecordKind.ServiceState or RecordKind.BackupRun => _policy.Events,
-                   GapRecords or RetentionGapRows => GapPeriod(),
+                   GapRecords or GapRows => GapPeriod(),
                    FiveMinuteBuckets => _policy.FiveMinuteRollups,
                    HourlyBuckets or TemplateHours => _policy.HourlyRollups,
                    _ => _policy.Incidents
@@ -274,7 +274,8 @@ internal sealed class RetentionRemover
 
         return stage switch
                {
-                   RetentionGapRows => Walk(limit => ReadGaps(position, horizon, limit), row => RemoveGap(row, position)),
+                   RecordKind.Metric => PruneSampleTimes(horizon) && WalkRecords(stage, horizon, position),
+                   GapRows => Walk(limit => ReadGaps(position, horizon, limit), row => RemoveGap(row, position)),
                    FiveMinuteBuckets => Walk(limit => ReadBuckets(RetentionQueries.WalkFiveMinutes, horizon, limit), row => RemoveBucket(RetentionQueries.DeleteFiveMinutes, row)),
                    HourlyBuckets => Walk(limit => ReadBuckets(RetentionQueries.WalkHourly, horizon, limit), row => RemoveBucket(RetentionQueries.DeleteHourly, row)),
                    TemplateHours => Walk(limit => ReadTemplateHours(position, horizon, limit), row => RemoveTemplateHour(row, position)),
@@ -282,6 +283,78 @@ internal sealed class RetentionRemover
                    Holds => Walk(limit => ReadHolds(position, horizon, limit), row => RemoveHold(row, position)),
                    _ => WalkRecords(stage, horizon, position)
                };
+    }
+
+    /// <summary>
+    /// Deletes each agent's sample times below the raw horizon except its newest, then raises the sample-time floor to the horizon.
+    /// </summary>
+    /// <param name="horizon">The raw horizon in nanoseconds</param>
+    /// <returns><c>true</c> when every agent is pruned, <c>false</c> when the bound of the step ended the work</returns>
+    private bool PruneSampleTimes(long horizon)
+    {
+        var agent = string.Empty;
+
+        while (NextAgent(agent) is { } next)
+        {
+            agent = next;
+
+            if (PruneAgent(agent, horizon) == false)
+            {
+                return false;
+            }
+        }
+
+        if (_session.ReadNumber(RetentionQueries.SampleFloorKey) < horizon)
+        {
+            _session.WriteNumber(RetentionQueries.SampleFloorKey, horizon);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Deletes the sample times of one agent below a bound and below its newest sample time.
+    /// </summary>
+    /// <param name="agent">The agent ID</param>
+    /// <param name="horizon">The raw horizon in nanoseconds</param>
+    /// <returns><c>false</c> when the bound of the step ended the work</returns>
+    private bool PruneAgent(string agent, long horizon)
+    {
+        using var newest = _session.Statement(RetentionQueries.NewestSampleTime).Set("$agent", agent).Query();
+        var upper = newest.Read() && newest.IsDBNull(0) == false ? Math.Min(horizon, newest.GetInt64(0)) : long.MinValue;
+
+        newest.Close();
+
+        var times = new List<long>();
+
+        using (var reader = _session.Statement(RetentionQueries.OldSampleTimes).Set("$agent", agent).Set("$upper", upper).Set(LimitParameter, (long)(StorageLimits.RemovalStepExamined - _examined)).Query())
+        {
+            while (reader.Read())
+            {
+                times.Add(reader.GetInt64(0));
+            }
+        }
+
+        foreach (var time in times)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            _session.Statement(RetentionQueries.DeleteSampleTime).Set("$agent", agent).Set("$at", time).Execute();
+            _examined++;
+        }
+
+        return BoundReached == false;
+    }
+
+    /// <summary>
+    /// Reads the first agent after an agent ID.
+    /// </summary>
+    /// <param name="after">The agent ID</param>
+    /// <returns>The agent ID, or <c>null</c> when there is none</returns>
+    private string? NextAgent(string after)
+    {
+        using var reader = _session.Statement(RetentionQueries.NextAgent).Set("$after", after).Query();
+
+        return reader.Read() ? reader.GetString(0) : null;
     }
 
     /// <summary>

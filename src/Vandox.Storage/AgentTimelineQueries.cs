@@ -108,6 +108,11 @@ internal static class AgentTimelineQueries
     internal const string ReadClockSamples = "SELECT bucket, bound_ns FROM agent_clock_samples WHERE agent_id = $agent AND sort = $sort ORDER BY bucket";
 
     /// <summary>
+    /// Reads the sample-time floor: the raw horizon below which sample times are pruned.
+    /// </summary>
+    internal const string ReadSampleFloor = "SELECT value FROM meta WHERE key = 'sample_time_floor'";
+
+    /// <summary>
     /// Reads the measured clock offset of an agent.
     /// </summary>
     internal const string ReadClock = "SELECT offset_ns, measured_at FROM agent_streams WHERE agent_id = $agent";
