@@ -240,6 +240,35 @@ public class LegacyLsofLineTests
     }
 
     /// <summary>
+    /// A lenient dotted address on an IPv6 socket is refused like on an IPv4 socket.
+    /// </summary>
+    /// <param name="name">The name column</param>
+    [TestMethod]
+    [TestCategory("AC2")]
+    [DataRow("127.1:22" + Listen)]
+    [DataRow("1:22" + Listen)]
+    [DataRow("0x7f.0.0.1:22" + Listen)]
+    [DataRow("010.0.0.1:22" + Listen)]
+    [DataRow("2130706433:22" + Listen)]
+    [DataRow("1.2.3.256:22" + Listen)]
+    [DataRow("1.2.3.4.5:22" + Listen)]
+    [DataRow("1.2.3:22" + Listen)]
+    [DataRow("::ffff:1.2.3.4:22" + Listen)]
+    [DataRow("[1.2.3.4]:22" + Listen)]
+    [DataRow("192.0.2.1:22->127.1:80 (ESTABLISHED)")]
+    [DataRow("192.0.2.1:22->1.2.3.256:80 (ESTABLISHED)")]
+    [DataRow("192.0.2.1:22->::ffff:1.2.3.4:80 (ESTABLISHED)")]
+    public void LegacyLsofLineTryParseRefusesLenientDottedAddressOfIpv6Socket(string name)
+    {
+        // Act
+        var parsed = LegacyLsofLine.TryParse($"sshd 12 root 3u IPv6 1 0t0 TCP {name}", out var reason);
+
+        // Assert
+        Assert.IsNull(parsed, "the line is not read");
+        Assert.AreEqual(LegacyLsofLine.NotMapped, reason, "the reason");
+    }
+
+    /// <summary>
     /// A dotted IPv4 address on an IPv6 socket is read as the IPv4-mapped IPv6 address, with the protocol tcp6 or udp6.
     /// </summary>
     /// <param name="line">The whole line</param>
@@ -254,7 +283,7 @@ public class LegacyLsofLineTests
     [DataRow("autoinsta 181226 root 7u IPv6 2266161 0t0 TCP 192.0.2.10:https (LISTEN)", "tcp6", "[::ffff:192.0.2.10]:443", "", "LISTEN", true)]
     [DataRow("autoinsta 181226 root 7u IPv6 2266162 0t0 UDP 192.0.2.1:5000", "udp6", "[::ffff:192.0.2.1]:5000", "", "", true)]
     [DataRow("autoinsta 181226 root 7u IPv6 2266163 0t0 TCP *:8447->198.51.100.20:20530 (ESTABLISHED)", "tcp6", "[::]:8447", "[::ffff:198.51.100.20]:20530", "ESTABLISHED", false)]
-    [DataRow("autoinsta 181226 root 7u IPv6 2266164 0t0 TCP 0.0.0.0:22 (LISTEN)", "tcp6", "[::ffff:0.0.0.0]:22", "", "LISTEN", true)]
+    [DataRow("autoinsta 181226 root 7u IPv6 2266164 0t0 TCP 0.0.0.0:22 (LISTEN)", "tcp6", "[::ffff:0:0]:22", "", "LISTEN", true)]
     [DataRow("autoinsta 181226 root 7u IPv6 2266165 0t0 TCP 255.255.255.255:65535 (LISTEN)", "tcp6", "[::ffff:255.255.255.255]:65535", "", "LISTEN", true)]
     public void LegacyLsofLineTryParseReadsDottedAddressOfIpv6SocketAsMapped(string line, string proto, string local, string remote, string state, bool localMapped)
     {
