@@ -27,10 +27,17 @@ summaries; this feature produces them.
 - S6: Given a database of an earlier version holding months of data, when the new version starts, then it summarizes the stored metric
   values first and then removes the expired data step by step, while the web UI and ingest keep working.
 - S7: Given log lines older than 90 days, when they are removed, then the template statistics of their hours stay (as hourly values,
-  1,095 days), and `vandoxd templates` keeps the statistics of hours whose lines are gone.
+  1,095 days), and `vandoxd templates` recounts the hours that still hold stored lines and keeps the statistics of the others.
 - S8: Given the default periods, when agent data passes its period, then imported records stay; OOM kills, boots, service states,
   backup runs, gap records, gap rows and listener findings stay for 1,095 days (`retention.events`); and every record whose capture
   time lies in the window of a stored incident stays as long as that incident.
+- S9: Given an OOM kill no incident covers yet (`vandoxd incidents` was not run), when the data around it passes its period, then every
+  record captured in the kill's window (`incidents.window_before` before it to `incidents.window_after` after it) stays as long as an
+  incident of it would, so a later run still builds the full incident. A kill is a line the signature catalog reads as an OOM kill or an
+  agent `kernel_event` OOM kill.
+- S10: Given log lines or process snapshots of agent data removed, when the forensics report runs, then an hour older than
+  `retention.logs` is unknown even where a kept window still holds lines, so base rates use only hours kept under their own period and
+  imported hours; an outage whose kill lies in such an hour is listed but not judged.
 
 ## Errors and edge cases
 
@@ -41,18 +48,21 @@ summaries; this feature produces them.
 - E3: A record already past its period when it arrives (an old import, a long backfill) is stored, summarized and removed by a later
   pass. Removed data never reads as a gap: no sequence number below removed records is reported missing, and the agent's next batch is
   no new start.
-- E4: Another process holds the database lock (`vandoxd import`, `vandoxd templates`, a backup): the step waits up to the busy timeout,
+- E4: Another process holds the database lock (any other process: `vandoxd import`, `templates`, `incidents`, `report`): the step waits up to the busy timeout,
   the pass ends with a warning and the next pass continues; nothing is half-removed.
 - E5: A step fails (I/O error, full disk): it rolls back completely, the error is logged, the next pass retries; raw values are never
   removed before their buckets are stored.
 - E6: Shutdown during a pass: the running step commits or rolls back; shutdown waits for at most that one step.
-- E7: With a finite `retention.incidents`, an incident whose window ended before the period is removed together with its notes; its
-  number is never given again, and the data of its window then follows its own period.
+- E7: With a finite `retention.incidents`, an incident whose window ended before the period is removed unless it has a note (an
+  incident with a note is kept, record 0107); its number is never given again, and the data of its window then follows its own period.
 - E8: Removal frees space inside `vandox.db`, not on the volume: the file does not shrink (that is #55), so ingest stopped at the
   free-space floor resumes only when space on the volume is freed.
 - E9: A record whose capture time lies in the future (a wrong agent clock, a forged batch) is kept until its capture time is past its
   period.
 - E10: Removed log lines are never returned by the log search, the logs view or the context of a hit.
+- E11: An agent record resent after its stored copy was removed (a number at or below the highest the agent sent and in no open sequence
+  gap) is acknowledged and neither stored again nor merged into a bucket.
+- E12: Template statistics of an hour that still holds a stored line (an imported one, a kept window) stay past `retention.rollups_1h`.
 
 ## Non-functional requirements
 
@@ -62,9 +72,11 @@ summaries; this feature produces them.
 - N2: Ingest is never blocked: one step of the job does at most the work of one ingest batch of 10,000 records, measured on the
   reference host with the storage benchmark ([Storage](../../docs/areas/storage.md), *Write throughput*); the write-throughput criterion
   still holds.
-- N3: Bounded size: under a constant simulated load, once the shortest-lived data has passed its period, the file grows over a further
-  span of the same length by at most the size of the 5-minute and hourly values written in it plus 10 % of its size at the start.
-- N4: Once caught up, data is removed at most one day after its period ends; the job runs at start-up and at least hourly.
+- N3: Bounded size: under a constant simulated agent load of metric values, log lines and snapshots (with events and gaps at a low
+  constant rate), with `retention.raw`, `logs` and `snapshots` set to one period P and the other periods left long, the file grows from
+  P to 2P by at most the size of the summaries, events, gaps and template statistics written in that span plus 10 % of its size at P.
+- N4: Summarizing runs at start-up and at least every 5 minutes; removal at start-up and at least hourly, and once caught up removes
+  data at most one day after its period ends.
 - N5: A pass holds at most one step's data in memory, within the container's 512 MiB ([Backend host](../../docs/areas/backend-host.md)).
 - N6: A new schema step adds the summary tables; an older build refuses the newer schema (existing rule). Only the running service
   summarizes and removes; `vandoxd import`, `incidents`, `report` and `templates` remove nothing.
@@ -81,20 +93,25 @@ summaries; this feature produces them.
 - AC2: For every series, each 5-minute and hourly bucket holds minimum, average (mean of all values), maximum, last value (latest
   capture time) and count equal to a computation from all its values, available within 10 minutes after the bucket ends (S2, N4).
 - AC3: A batch or import that adds values to already summarized buckets corrects exactly those buckets, whether their raw values are
-  still stored or already removed (S3, E2). Tested.
+  still stored or already removed; a resend after removal leaves the bucket unchanged and stores nothing (S3, E2, E11). Tested.
 - AC4: With the default periods, each kind is removed only once past its period (one second before stays, one after goes), incidents
-  stay, and a future capture time is kept (S1, E7, E9, N1).
+  stay, an expired incident with a note stays, and a future capture time is kept (S1, E7, E9, N1).
 - AC5: No raw value is removed before its buckets are stored; a failed, locked or interrupted step leaves the database as before it,
   and the next pass completes the work; an upgraded database is migrated and summarized before removal, and no command other than the
   service removes data (S6, E4, E5, E6, N6).
 - AC6: While a pass runs, an ingest batch is acknowledged with a delay of at most one step, and a step stays within N2 and a pass
   within N5 (S5, N2, N5).
-- AC7: Under a simulated load over twice the shortest period, the database size meets N3 (N3).
+- AC7: Under the N3 load and periods, the database size meets N3 (N3).
 - AC8: After removal, the log search and logs view return no removed line, no sequence gap or new start is reported for removed
-  numbers, the template statistics of expired hours remain, and `vandoxd templates` keeps them (S7, E3, E10).
+  numbers, the template statistics of expired hours remain, and `vandoxd templates` keeps them while recounting hours with stored lines
+  (S7, E3, E10, E12).
 - AC9: Past every period, imported records stay; `kernel_event`, `service_state`, `backup_run` and `gap` records, gap rows and listener
   findings (with the snapshot records they belong to) stay until past `retention.events`; records captured inside a stored incident's
   window stay while the incident is stored (S8, N8).
+- AC11: Records in the window of a kill no stored incident covers stay past their periods, and `vandoxd incidents` run afterwards builds
+  the same incident as before the removal (S9).
+- AC12: After removal the forensics report counts no hour older than `retention.logs` of agent data as observed and judges no outage in
+  such an hour; imported hours count as before (S10).
 - AC10: A pass that changed data writes the N7 log line; a failed step its error (N7).
 
 ## Out of scope
@@ -129,3 +146,22 @@ summaries; this feature produces them.
 - [Log templates](../../docs/areas/log-templates.md), [Incidents](../../docs/areas/incidents.md),
   [Forensics report](../../docs/areas/forensics-report.md), [Ingest endpoint](../../docs/areas/ingest-endpoint.md): behavior after
   removal (the rebuild, re-runs, observed hours, the floor sentence of E8); `docs/ARCHITECTURE.md` retention table no longer planned.
+
+## Challenge
+
+- 1 (major, outages never reconstructed lose their data): accepted. S9 and AC11: the window of every detected kill (catalog OOM line or
+  `kernel_event` OOM kill) is kept like a stored incident's window, so retention does not depend on someone running `vandoxd
+  incidents`. This extends the Product Manager's answer Q1 c in its own direction (keeps more evidence), so no new escalation.
+- 2 (major, report base rates skewed): accepted. S10 and AC12: hours older than `retention.logs` of agent data are unknown even inside
+  kept windows, so base rates come only from hours kept whole; outages there are listed but not judged, the report's existing rule
+  for unobserved hours.
+- 3 (major, resend after removal counted twice): accepted, confirmed in the code (`ON CONFLICT DO NOTHING` on `(agent_id, seq)`,
+  `AgentTimeline` counts `floor <= seq < max` as an arrival). E11 and AC3: such a resend is acknowledged, not stored and not merged.
+- 4 (major, N3 unreachable with defaults): accepted. N3 now fixes the load (metrics, log lines, snapshots, events and gaps) and the
+  periods (raw, logs, snapshots at one P), measures from P to 2P and counts events, gaps and template statistics in the allowance.
+- 5 (minor, 10 minutes vs hourly): accepted. N4 separates summarizing (at least every 5 minutes) from removal (at least hourly).
+- 6 (minor, template statistics vs imported lines and the rebuild): accepted. E12: statistics of an hour with a stored line stay; S7
+  and AC8: the rebuild recounts hours with stored lines and keeps the others (today it clears all, `TemplateRebuilder`).
+- 7 (minor, notes vs record 0107): accepted by keeping the notes: an incident with a note is never removed (E7, AC4), which keeps
+  released record 0107's consequence; no record is superseded.
+- 8 (minor, no backup function): accepted. E4 names any other process and the existing commands only.
