@@ -7,3 +7,4 @@ are quoted in full.
 | ---- | ---- | ------ | ------ |
 | 2026-11-13 15:45 | 1 Intake | Orchestrator | Issue 423 is a bug (label bug), open. Own branch fix-issue-423-servetests-watch-run off main 44f954e; #422 waits as PR 447 in the main checkout. |
 | 2026-11-13 15:48 | 2 Plan | Lead | RESULT: DONE, tier tests: ServeTests wait via StartAsync/WaitForStartAsync watching the run; tests in BackendFixtureTests (AC1-AC3) (opus/medium · 67,853 tokens · 22 tool uses · 163 s · 38 in · 17,170 out · 858,450 cache read · 54,022 cache write · 392,676 weighted) |
+| 2026-11-13 15:48 | 2 Challenge skipped | Orchestrator | challenge skipped — tier tests is never challenged |
