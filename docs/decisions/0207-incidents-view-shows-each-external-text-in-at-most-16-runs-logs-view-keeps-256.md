@@ -1,6 +1,6 @@
 # 0207: The incidents view shows each external text in at most 16 runs, the logs view keeps 256
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-13
 - **Area:** Incidents view
 - **Source:** Issue #392
