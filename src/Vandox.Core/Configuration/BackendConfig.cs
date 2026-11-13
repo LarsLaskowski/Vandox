@@ -44,6 +44,12 @@ public sealed class BackendConfig
     public IncidentConfig Incidents { get; } = new();
 
     /// <summary>
+    /// Gets the retention options.
+    /// </summary>
+    [ConfigKey("retention")]
+    public RetentionConfig Retention { get; } = new();
+
+    /// <summary>
     /// Gets or sets the secrets of the backend.
     /// </summary>
     public BackendSecrets Secrets { get; set; } = new();
