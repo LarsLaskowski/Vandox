@@ -39,11 +39,30 @@ public sealed class ForensicsReporter
     private readonly IListenerHistoryReader _listeners;
     private readonly SignatureCatalog _catalog;
     private readonly TimeSpan _lookback;
+
+    // Skeleton: removed with the implementation
+#pragma warning disable S4487
+    private readonly ReportRetention _retention;
+#pragma warning restore S4487
     private readonly TimeProvider _clock;
 
     #endregion // Fields
 
     #region Constructors
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ForensicsReporter"/> class without retention periods.
+    /// </summary>
+    /// <param name="records">The reader of stored records</param>
+    /// <param name="incidents">The incident store</param>
+    /// <param name="listeners">The reader of the stored listener comparisons</param>
+    /// <param name="catalog">The signature catalog</param>
+    /// <param name="lookback">The lookback before an outage</param>
+    /// <param name="clock">The clock that stamps the report</param>
+    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+        : this(records, incidents, listeners, catalog, lookback, new ReportRetention(), clock)
+    {
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ForensicsReporter"/> class.
@@ -53,13 +72,15 @@ public sealed class ForensicsReporter
     /// <param name="listeners">The reader of the stored listener comparisons</param>
     /// <param name="catalog">The signature catalog</param>
     /// <param name="lookback">The lookback before an outage</param>
+    /// <param name="retention">The periods after which agent log lines and snapshots are skipped</param>
     /// <param name="clock">The clock that stamps the report</param>
-    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, ReportRetention retention, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(incidents);
         ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(retention);
         ArgumentNullException.ThrowIfNull(clock);
 
         _records = records;
@@ -67,6 +88,7 @@ public sealed class ForensicsReporter
         _listeners = listeners;
         _catalog = catalog;
         _lookback = lookback;
+        _retention = retention;
         _clock = clock;
     }
 

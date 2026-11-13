@@ -92,6 +92,11 @@ public sealed class ForensicsAnalysis
     /// </summary>
     public static IReadOnlyList<string> SystemLogSources => _systemLogSources;
 
+    /// <summary>
+    /// Gets the start of the period in which log lines are still kept; an outage in an unobserved hour before it is not judged; <c>null</c> for no limit.
+    /// </summary>
+    public DateTimeOffset? JudgedFrom { get; init; }
+
     #endregion // Properties
 
     #region Methods

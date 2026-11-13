@@ -522,5 +522,51 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 68, Level = LogLevel.Information, Message = "agent clock in step {AgentId}")]
     internal static partial void AgentClockInStep(this ILogger logger, string agentId);
 
+    /// <summary>
+    /// Logs a retention fold pass that folded values.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="values">The metric values folded</param>
+    /// <param name="buckets">The buckets written</param>
+    [LoggerMessage(EventId = 69, Level = LogLevel.Information, Message = "retention rollup {Values} {Buckets}")]
+    internal static partial void RetentionRolledUp(this ILogger logger, int values, int buckets);
+
+    // The plan fixes this 11-parameter signature (10 counts and the logger): reported to the Lead as a conflict with S107
+#pragma warning disable S107
+    /// <summary>
+    /// Logs a retention removal pass that removed or held data.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="metricValues">The raw metric values removed</param>
+    /// <param name="logLines">The log lines removed</param>
+    /// <param name="snapshots">The snapshot records removed</param>
+    /// <param name="events">The event records removed</param>
+    /// <param name="gaps">The gap rows removed</param>
+    /// <param name="fiveMinuteValues">The 5-minute buckets removed</param>
+    /// <param name="hourlyValues">The hourly buckets removed</param>
+    /// <param name="templateHours">The template hours removed</param>
+    /// <param name="incidents">The incidents removed</param>
+    /// <param name="holds">The holds removed</param>
+    [LoggerMessage(EventId = 70, Level = LogLevel.Information, Message = "retention removal {MetricValues} {LogLines} {Snapshots} {Events} {Gaps} {FiveMinuteValues} {HourlyValues} {TemplateHours} {Incidents} {Holds}")]
+    internal static partial void RetentionRemoved(this ILogger logger, int metricValues, int logLines, int snapshots, int events, int gaps, int fiveMinuteValues, int hourlyValues, int templateHours, int incidents, int holds);
+#pragma warning restore S107
+
+    /// <summary>
+    /// Logs that a retention step found the database busy.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="operation">The operation: fold, scan or remove</param>
+    [LoggerMessage(EventId = 71, Level = LogLevel.Warning, Message = "retention step busy {Operation}")]
+    internal static partial void RetentionStepBusy(this ILogger logger, string operation);
+
+    /// <summary>
+    /// Logs that a retention step failed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="operation">The operation: fold, scan or remove</param>
+    /// <param name="error">The error message of the store</param>
+    [LoggerMessage(EventId = 72, Level = LogLevel.Error, Message = "retention step failed {Operation} {Error}")]
+    internal static partial void RetentionStepFailed(this ILogger logger, string operation, string error);
+
     #endregion // Methods
 }

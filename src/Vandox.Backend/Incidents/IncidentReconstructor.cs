@@ -53,6 +53,16 @@ public sealed class IncidentReconstructor
     /// </summary>
     public ILogger? Logger { get; init; }
 
+    /// <summary>
+    /// Gets the start of the log period; a kill cluster whose window starts before it is rebuilt only when a hold or an import keeps it; <c>null</c> for no limit.
+    /// </summary>
+    public DateTimeOffset? LogPeriodStart { get; init; }
+
+    /// <summary>
+    /// Gets the store that holds the retention holds; <c>null</c> for none.
+    /// </summary>
+    public IRetentionStore? Holds { get; init; }
+
     #endregion // Properties
 
     #region Constructors
