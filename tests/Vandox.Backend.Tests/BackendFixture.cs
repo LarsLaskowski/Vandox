@@ -149,10 +149,11 @@ internal sealed class BackendFixture : IDisposable
     /// <param name="stop">Stops the service</param>
     /// <param name="wait">Stops the wait for the start</param>
     /// <param name="clock">The clock of the service, <c>null</c> for the real one</param>
+    /// <param name="built">Called with the service provider of every attempt it builds, once per attempt, so a caller keeps the last one; <c>null</c> for none</param>
     /// <returns>A task that returns the task of the run</returns>
     /// <exception cref="InvalidOperationException">Every attempt ended before it reported its start</exception>
     /// <exception cref="TimeoutException">An attempt neither reported its start nor ended within 60 seconds</exception>
-    internal async Task<Task<int>> StartServiceAsync(CancellationToken stop, CancellationToken wait, TimeProvider? clock = null)
+    internal async Task<Task<int>> StartServiceAsync(CancellationToken stop, CancellationToken wait, TimeProvider? clock = null, Action<IServiceProvider>? built = null)
     {
         var failures = new StringBuilder();
         var lastExitCode = 0;
@@ -163,6 +164,7 @@ internal sealed class BackendFixture : IDisposable
             var hooks = new ServeHooks
                         {
                             Clock = clock,
+                            Built = built,
                             Started = _ => started.TrySetResult()
                         };
             var run = RunAsync([], hooks, stop);
@@ -188,6 +190,29 @@ internal sealed class BackendFixture : IDisposable
         }
 
         throw new InvalidOperationException($"the service stopped before it started in {MaxAttempts} attempts, last exit code {lastExitCode}:\n{failures}");
+    }
+
+    /// <summary>
+    /// Waits until the service reports its start, and throws with the exit code and the standard error when the run ends first.
+    /// </summary>
+    /// <param name="started">Completes when the service reports its start</param>
+    /// <param name="run">The task of the run</param>
+    /// <param name="wait">Stops the wait</param>
+    /// <returns>A task that completes when the service has started</returns>
+    /// <exception cref="InvalidOperationException">The run ended before it reported its start</exception>
+    /// <exception cref="TimeoutException">The run neither reported its start nor ended within 60 seconds</exception>
+    internal async Task WaitForStartAsync(Task started, Task<int> run, CancellationToken wait)
+    {
+        await Task.WhenAny(started, run).WaitAsync(TimeSpan.FromSeconds(StartTimeoutSeconds), wait).ConfigureAwait(false);
+
+        if (started.IsCompleted)
+        {
+            return;
+        }
+
+        var exitCode = await run.ConfigureAwait(false);
+
+        throw new InvalidOperationException($"the service stopped before it started, exit code {exitCode}, standard error:\n{Error}");
     }
 
     /// <summary>

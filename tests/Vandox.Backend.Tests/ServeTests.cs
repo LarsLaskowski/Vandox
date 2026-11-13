@@ -68,14 +68,7 @@ public class ServeTests
         // Arrange
         using var fixture = new BackendFixture();
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var hooks = new ServeHooks
-                    {
-                        Started = _ => started.TrySetResult()
-                    };
-        var run = fixture.RunAsync([], hooks, stop.Token);
-
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+        var run = await StartAsync(fixture, stop.Token);
 
         using var client = CreateClient();
 
@@ -198,7 +191,10 @@ public class ServeTests
                         Started = addresses => started.TrySetResult(addresses)
                     };
         var run = fixture.RunAsync([], hooks, stop.Token);
-        var addresses = await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        await fixture.WaitForStartAsync(started.Task, run, TestContext.CancellationToken);
+
+        var addresses = await started.Task;
 
         using var client = new HttpClient
                            {
@@ -943,15 +939,7 @@ public class ServeTests
 
         IServiceProvider? services = null;
 
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var hooks = new ServeHooks
-                    {
-                        Built = provider => services = provider,
-                        Started = _ => started.TrySetResult()
-                    };
-        var run = fixture.RunAsync([], hooks, stop.Token);
-
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+        var run = await StartAsync(fixture, stop.Token, built: provider => services = provider);
 
         Assert.IsNotNull(services, "the Built hook ran before the service started");
 
@@ -992,15 +980,7 @@ public class ServeTests
 
         IServiceProvider? services = null;
 
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var hooks = new ServeHooks
-                    {
-                        Built = provider => services = provider,
-                        Started = _ => started.TrySetResult()
-                    };
-        var run = fixture.RunAsync([], hooks, stop.Token);
-
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+        var run = await StartAsync(fixture, stop.Token, built: provider => services = provider);
 
         Assert.IsNotNull(services, "the Built hook ran before the service started");
 
@@ -1705,10 +1685,11 @@ public class ServeTests
     /// <param name="fixture">The fixture</param>
     /// <param name="stop">Stops the run</param>
     /// <param name="clock">The clock of the service, <c>null</c> for the real one</param>
+    /// <param name="built">Called with the service provider of every attempt, <c>null</c> for none</param>
     /// <returns>A task that returns the task of the run</returns>
-    private Task<Task<int>> StartAsync(BackendFixture fixture, CancellationToken stop, TimeProvider? clock = null)
+    private Task<Task<int>> StartAsync(BackendFixture fixture, CancellationToken stop, TimeProvider? clock = null, Action<IServiceProvider>? built = null)
     {
-        return fixture.StartServiceAsync(stop, TestContext.CancellationToken, clock);
+        return fixture.StartServiceAsync(stop, TestContext.CancellationToken, clock, built);
     }
 
     /// <summary>
