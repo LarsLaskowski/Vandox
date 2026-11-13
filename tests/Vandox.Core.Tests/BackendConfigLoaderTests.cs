@@ -899,5 +899,34 @@ public class BackendConfigLoaderTests
         }
     }
 
+    /// <summary>
+    /// The seven periods are read from the <c>retention</c> section, quoted or not and with the bounds and <c>unlimited</c>, and a key the section leaves out keeps its default.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public void BackendConfigLoaderReadsRetentionSection()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var full = directory.Write("full.yaml", "retention:\n  raw: 1d\n  rollups_5m: \"9999d\"\n  rollups_1h: unlimited\n  logs: 7d\n  snapshots: 14d\n  events: 400d\n  incidents: 365d\n");
+        var partial = directory.Write("partial.yaml", "retention:\n  logs: 60d\n");
+
+        // Act
+        var fullConfig = BackendConfigLoader.Load(full, []);
+        var partialConfig = BackendConfigLoader.Load(partial, []);
+
+        // Assert
+        Assert.AreEqual("1d", fullConfig.Retention.Raw, "retention.raw");
+        Assert.AreEqual("9999d", fullConfig.Retention.FiveMinuteRollups, "quoted retention.rollups_5m");
+        Assert.AreEqual("unlimited", fullConfig.Retention.HourlyRollups, "retention.rollups_1h");
+        Assert.AreEqual("7d", fullConfig.Retention.Logs, "retention.logs");
+        Assert.AreEqual("14d", fullConfig.Retention.Snapshots, "retention.snapshots");
+        Assert.AreEqual("400d", fullConfig.Retention.Events, "retention.events");
+        Assert.AreEqual("365d", fullConfig.Retention.Incidents, "retention.incidents");
+        Assert.AreEqual("60d", partialConfig.Retention.Logs, "retention.logs of the partial section");
+        Assert.AreEqual("30d", partialConfig.Retention.Raw, "retention.raw keeps its default");
+        Assert.AreEqual("unlimited", partialConfig.Retention.Incidents, "retention.incidents keeps its default");
+    }
+
     #endregion // Methods
 }
