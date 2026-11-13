@@ -62,13 +62,15 @@ sudo -i
 ```
 
 Read the home directory of your login (`sudo -i` makes `~` root's home, so it is read from the account) and pack the script's log
-and its rotated copies. The glob is expanded in `/var/log`, only `sysmonitor.log*` is packed, and your login, not root, writes the
+and its rotated copies. The glob is expanded in `/var/log`, only `sysmonitor.log*` is packed, and your login (not root, unless you are root) writes the
 archive with mode `0600`; `${SUDO_USER:?}` and `${home:?}` stop a line whose variable was lost:
 
 ```
 home=$(getent passwd "${SUDO_USER:?}" | cut -d: -f6) && [ -n "$home" ]
 set -o pipefail && (cd /var/log && tar -czf - sysmonitor.log*) | runuser -u "${SUDO_USER:?}" -- sh -c 'umask 077 && cat > "$1"' sh "${home:?}/sysmonitor-before-retirement.tar.gz"
 ```
+
+If you log in as `root`, `SUDO_USER` is `root` after `sudo -i` and the archive is written by root into `/root` (mode `0600`); the `scp` of the next block then has to log in as `root` on the server to read it. Logged in as root without `sudo -i`, `SUDO_USER` is not set and the pack line stops: run `sudo -i` first.
 
 Copy it to the backend host and import it (on the backend host, as in steps 6 and 7 of the installation guide):
 
