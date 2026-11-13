@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Sockets;
 
+using Microsoft.Extensions.DependencyInjection;
+
+using Vandox.Storage;
+
 namespace Vandox.Backend.Tests;
 
 /// <summary>
@@ -117,6 +121,79 @@ public class BackendFixtureTests
         Assert.DoesNotContain("attempt 4", exception.Message, "there are three attempts in total");
         Assert.Contains("web.trusted_proxies", exception.Message, "the message holds the configuration error");
         Assert.Contains("exit code 1", exception.Message, "the message holds the exit code");
+    }
+
+    /// <summary>
+    /// A start with a built action passes it the service provider of the run that started, which resolves services while the run listens.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public async Task BackendFixtureStartServiceAsyncPassesTheStartedRunsProviderToBuilt()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        using var holder = new TcpListener(IPAddress.Loopback, fixture.WebPort);
+        var providers = new List<IServiceProvider>();
+
+        holder.Start();
+
+        // Act
+        var run = await fixture.StartServiceAsync(stop.Token, TestContext.CancellationToken, built: providers.Add);
+        var searcher = providers[^1].GetService<ILogSearcher>();
+
+        await stop.CancelAsync();
+
+        var exitCode = await run;
+
+        // Assert
+        Assert.HasCount(2, providers, "the action is called once per attempt: the failed one and the one that started");
+        Assert.IsNotNull(searcher, "the last provider resolves services while the run listens");
+        Assert.AreEqual(0, exitCode, "the returned run stopped cleanly");
+    }
+
+    /// <summary>
+    /// A wait whose run ends before the start throws with the exit code and the standard error.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task BackendFixtureWaitForStartAsyncThrowsWithTheOutputWhenTheRunEnds()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        fixture.UseTrustedProxies("not-an-address");
+
+        var run = fixture.RunAsync([], null, TestContext.CancellationToken);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => fixture.WaitForStartAsync(started.Task, run, TestContext.CancellationToken));
+
+        // Assert
+        Assert.StartsWith("the service stopped before it started, exit code 1, standard error:\n", exception.Message, "the message names the exit code");
+        Assert.Contains("web.trusted_proxies", exception.Message, "the message holds the standard error");
+    }
+
+    /// <summary>
+    /// A wait returns once the start task completes, while the run is still going.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task BackendFixtureWaitForStartAsyncReturnsWhenTheServiceStarts()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var run = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Act
+        await fixture.WaitForStartAsync(Task.CompletedTask, run.Task, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(run.Task.IsCompleted, "the run was not awaited");
     }
 
     #endregion // Methods

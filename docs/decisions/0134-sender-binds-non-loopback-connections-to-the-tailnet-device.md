@@ -50,7 +50,6 @@ and the unit's address allow-list stays as a second layer. The behavior, the fai
 - The binding acts on the address, so it needs the address to be the configured one: `backend.url` takes only an IP address
   (record 0192), and a loopback address is exempt only as that literal, never as a name server's answer.
 - The control was measured on the CI runner's systemd 249 with stand-in links, for IPv4 and IPv6, including a stand-in without
-  routes while a provider route covers the tailnet range. The run on the production server (issue #372) passed: the route named
-  `tailscale0`, and the unit's `IPEgressPackets` stayed 0 while `tailscaled` was stopped.
+  routes while a provider route covers the tailnet range; the run on the production server is the maintainer's (issue #372).
 - The server's egress check reads the unit's IP accounting (`IPEgressPackets`) while `tailscaled` is stopped, not a packet capture
   on the uplink: `tcpdump` is not a documented tool of the server, and the count covers every interface without the uplink's name.
