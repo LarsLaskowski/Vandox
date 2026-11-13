@@ -32,3 +32,4 @@ are quoted in full.
 | 2026-11-13 10:01 | 7 Gate stamp | Orchestrator | PASS on 7d7da473cf41e19fc000e4f318175643f27f5369 (tier trivial): Format check pass; Analyzer gate pass; Test with coverage pass; Coverage gate pass; decision-check.py pass; scope-check.py pass |
 | 2026-11-13 10:02 | 9 PR approval | Orchestrator | approved by checklist |
 | 2026-11-13 10:02 | 8 Review delta | Reviewer | VERDICT: APPROVE on 7d7da473cf41e19fc000e4f318175643f27f5369. Root-login paragraph checked against sudo -i and the SUDO_USER guard; no fenced line changed (opus/medium · 2,642 tokens · 3 tool uses · 28 s · 8 in · 1,252 out · 197,514 cache read · 99,754 cache write · 281,672 weighted · continued) |
+| 2026-11-13 10:02 | 9 PR approval | Orchestrator | approved by checklist (stamp 7d7da473cf41 verified, latest review round clean, no Proposed decision records, no open decision) |
