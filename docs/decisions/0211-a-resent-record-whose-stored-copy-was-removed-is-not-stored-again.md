@@ -23,7 +23,8 @@ resend would be stored a second time, counted as an arrival by the agent timelin
 ## Decision
 
 The batch writer skips an agent record whose number lies between the stream's `floor_seq` and `max_seq` and in no sequence gap that is
-not closed, before its insert: the record is acknowledged with its batch and neither stored nor folded. The rules are in
+not closed, before its insert, judged against the stream and gap rows as loaded before the batch's own records move them: the record
+is acknowledged with its batch and neither stored nor folded. The rules are in
 [Storage writing](../areas/storage-writing.md).
 
 ## Consequences
@@ -31,4 +32,7 @@ not closed, before its insert: the record is acknowledged with its batch and nei
 - The check costs a gap lookup only for numbers at or below the highest one, which the agent sends only on a resend or a backfill
   into a gap.
 - A number in a closed gap was filled and is a resend; a number in an open or final gap still fills it, as today.
+- An open or final sequence gap is never removed by retention (record 0209), so a late fill is never mistaken for a resend.
+- Residual: a number below `floor_seq` (a backfill below the first number received) is not covered; its resend after removal is stored
+  and folded again. It needs an acknowledgement lost for longer than the period, or a token holder.
 - A stream row must therefore never be removed while its agent has records (already a rule of [Storage](../areas/storage.md)).

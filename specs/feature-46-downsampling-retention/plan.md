@@ -22,37 +22,41 @@ See [spec.md](spec.md), *Problem*: nothing is ever removed, and no rollups exist
 | 8 | The report counts an hour observed from lines of source `journal`/`syslog`; agent journal lines have source `journal`; every outage counts in the time-of-day rule | `forensics-report.md:34-38, 66`, `agent-log-shipping.md:41`, `ForensicsAnalysis.cs:217` | confirmed |
 | 9 | No hosted background service exists in `vandoxd`; the store is disposed only after the app (`await using` around `ServeAsync`) | `ServeCommand.cs:95-101, 166`; no `BackgroundService` in `src/` | confirmed |
 | 10 | The database runs without `auto_vacuum`; deleted pages are reused, the file does not shrink | no `vacuum` in `src/Vandox.Storage`; SQLite documentation (`PRAGMA auto_vacuum`, default NONE) | confirmed |
-| 11 | Async waiters of `SemaphoreSlim` are released in FIFO order, so a queued ingest write runs before the next retention step | to verify: Tester, step 5, test of AC6 (fails if a second step overtakes the queued write) | unverified |
+| 11 | Async waiters of `SemaphoreSlim` are released in FIFO order, so a queued ingest write runs before the next retention step | Security's scratch measurement: 0 overtakes in 2,000 runs; AC6's test keeps it | confirmed |
 | 12 | The bundled SQLite of Microsoft.Data.Sqlite offers the `dbstat` table, used to size the allowance of N3 | to verify: Tester, step 5; without it the allowance is the summed `length()` of the kept tables' columns plus 25 % | unverified |
 | 13 | Records of origin `import` are told apart by `records.origin`, and `StoredRecord.Record.Origin` carries it to the reporter | `SchemaMigrator.cs:23`, `DataRecord.cs:13` | confirmed |
 | 14 | Record 0177 is released (v0.2.0) and expects retention to let ingest resume at the floor | `git tag --contains` → `v0.2.0`; `0177:39`; amended by 0212 | confirmed |
-| 15 | Record 0107 (released) asks retention to move or keep notes; spec keeps them | `0107:88`; spec E7 | confirmed |
+| 17 | Only `records(kind, captured_at)` serves a removal by time; `origin` is not indexed; `gaps` has no index on `to_at` | `SchemaMigrator.cs:36`, `:260-263` | confirmed |
+| 18 | Time gaps are stored `open`; `final` is computed when read | `AgentTimeline.cs:792-806`, `GapReadSql.cs:12-14` | confirmed |
+| 19 | A metric's labels can reach about 200 KB of stored JSON per row | `wire-format.md:93, 98, 154` (Security's count) | confirmed |
+| 20 | Only the kernel writes a `kernel_event` OOM kill: the collector takes kernel-transport entries of facility 0, and `/dev/kmsg` writes get another facility; any local process can write a journal line that the catalog reads as a kill | `agent-kernel-events.md:56-61, 183`; `agent-log-shipping.md:244`, `log-signatures.md:110-115` | confirmed |
+| 21 | `BackendConfig.Keys()` lists every key and tests enumerate it | `BackendConfig.cs:59-62`, `BackendConfigLoaderTests.cs:46, 184-193, 789-796` | confirmed |
 | 16 | A tool file under `tools/` appears in no coverage report (no test assembly loads it), as for `BackfillBenchmark.cs` | `ls tests` (no tool references); earlier benchmark PRs passed the gate | confirmed |
 
 ## Tests per criterion
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `RetentionPeriodTryParseAcceptsDaysAndUnlimited`, `RetentionPeriodTryParseRefusesOtherForms` (`0d`, `10000d`, `30`, `30D`, `1y`, `+30d`, ` 30d`, `030d`, `Unlimited`, empty) | `tests/Vandox.Core.Tests/RetentionPeriodTests.cs` |
+| AC1 | `RetentionPeriodTryParseAcceptsDaysAndUnlimited`, `RetentionPeriodTryParseRefusesOtherForms` (`0d`, `10000d`, `30`, `30D`, `1y`, `+30d`, a leading and a trailing space, `030d`, full-width and Arabic-Indic digits, `Unlimited`, `UNLIMITED`, `unlimited` with a trailing space, empty) | `tests/Vandox.Core.Tests/RetentionPeriodTests.cs` |
 | AC1 | `RetentionConfigDefaultsMatchTheSpec`, `RetentionConfigDefaultsAreValidPeriods` | `tests/Vandox.Core.Tests/RetentionConfigTests.cs` |
 | AC1 | `LoadRefusesInvalidRetentionPeriodWithReason` (each of the seven keys, exact E1 text), `LoadReadsRetentionSection` | `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs` |
 | AC1 | `RetentionServiceCreatePolicyReadsEveryKey` (unlimited → null, kill window from `incidents.*`) | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
 | AC2 | `FoldRollupsMatchesComputationFromAllValues` (several series and labels, both tiers, ties of last by time then record ID), `FoldRollupsEmptyLabelsAndNullLabelsAreOneSeries` | `tests/Vandox.Storage.Tests/SqliteStoreRollupTests.cs` |
 | AC2 | `RetentionServiceFoldsWithinFiveMinutesOfABucketEnd` (`FakeTimeProvider`) | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
-| AC3 | `FoldRollupsCorrectsBucketsWithRawValuesStored`, `FoldRollupsMergesIntoBucketsWhoseRawValuesWereRemoved`, `FoldRollupsTouchesOnlyBucketsOfNewRows`, `FoldRollupsSkipsBucketsPastTheirTier` | `tests/Vandox.Storage.Tests/SqliteStoreRollupTests.cs` |
-| AC3 | `WriteBatchSkipsResendWhoseCopyWasRemoved` (bucket unchanged, nothing stored, batch acknowledged), `WriteBatchStoresNumberInOpenOrFinalGap` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
+| AC3 | `FoldRollupsCorrectsBucketsWithRawValuesStored`, `FoldRollupsMergesIntoBucketsWhoseRawValuesWereRemoved`, `FoldRollupsTouchesOnlyBucketsOfNewRows`, `FoldRollupsSkipsBucketsPastTheirTier`, `FoldRollupsStopsAtTheLabelByteBudget` (rows with labels at the wire limit escaped to six bytes per character: at most budget plus one row read, watermark committed, next step continues) | `tests/Vandox.Storage.Tests/SqliteStoreRollupTests.cs` |
+| AC3 | `WriteBatchSkipsResendWhoseCopyWasRemoved` (bucket unchanged, nothing stored, batch acknowledged), `WriteBatchStoresNumberInOpenOrFinalGap`, `WriteBatchMixedResendFillAndNewStoresOnlyFillAndNew` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC4 | `RemoveExpiredKeepsOneSecondBeforeAndRemovesOneSecondAfter` (each kind), `RemoveExpiredKeepsIncidentsByDefault`, `RemoveExpiredRemovesExpiredIncidentWithoutNote`, `RemoveExpiredKeepsExpiredIncidentWithNote`, `RemoveExpiredKeepsFutureCaptureTime` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC5 | `RemoveExpiredNeverRemovesMetricsAboveTheWatermark`, `RemoveExpiredFailedStepLeavesDatabaseUnchanged` (a test trigger raises on delete), `RemoveExpiredBusyStepThrowsAndChangesNothing` (second connection holds `BEGIN IMMEDIATE`), `RemoveExpiredKeepsTheHighestRecordId`, `MigrationFromVersion13FoldsBeforeRemoval` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC5 | `RetentionServiceLogsBusyAndContinuesNextPass`, `RetentionServiceStopsBetweenSteps` | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
 | AC5 | `ServeRunsRetentionServiceOnlyInTheService`, `CommandsOtherThanServeRemoveNothing` (import, incidents, report, templates on a store with expired data) | `tests/Vandox.Backend.Tests/ServeTests.cs`, `tests/Vandox.Backend.Tests/CommandLineTests.cs` |
-| AC6 | `WriteBatchWaitsAtMostOneRetentionStep` (store step hook; the queued batch runs before the next step), `RemoveExpiredStepTouchesAtMostTheStepBound`, `FoldRollupsStepReadsAtMostTheStepBound` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
+| AC6 | `WriteBatchWaitsAtMostOneRetentionStep` (store step hook; the queued batch runs before the next step; imported lines and held windows below the horizon), `RemoveExpiredStepTouchesAtMostTheStepBound`, `RemoveExpiredReachesRowsBehindKeptRows` (imported and held rows below the horizon, more than one step's worth, before removable ones), `RemoveExpiredQueriesUseIndexSearches` (`EXPLAIN QUERY PLAN` of every removal statement shows `SEARCH`, no `SCAN`), `FoldRollupsStepReadsAtMostTheStepBound` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC6 | manual: Product Manager, `--retention` scenario of the storage benchmark published from the branch head (`docs/BENCHMARKS.md`, *Retention steps*) on the DS918+ SSD volume, before step 9: median removal and fold step at or below the median batch of the same run | — |
 | AC7 | `RetentionKeepsSizeWithinAllowanceUnderConstantLoad` (P = 2 days, hourly passes, metrics every 10 s for 20 series, log lines, snapshots, one event and one gap per hour) | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
 | AC8 | `SearchReturnsNoRemovedLine`, `RemoveExpiredReportsNoGapForRemovedNumbers`, `RemoveExpiredKeepsTemplateHoursHoldingLines`, `RemoveExpiredRemovesTemplateHoursPastHourlyPeriod` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
-| AC8 | `RebuildKeepsStatisticsOfHoursWithoutStoredLines`, `RebuildRecountsHoursWithStoredLines` | `tests/Vandox.Storage.Tests/SqliteStoreTemplateRebuildTests.cs` |
-| AC9 | `RemoveExpiredKeepsImportedRecords`, `RemoveExpiredKeepsEventsUntilEventsPeriod` (each event kind, closed and final gap rows, open gap never), `RemoveExpiredKeepsListenerFindingsWithTheirSnapshots`, `RemoveExpiredKeepsNewestConnectionMarkPerAgent`, `RemoveExpiredKeepsRecordsInIncidentWindowsAndHolds` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
-| AC10 | `RetentionServiceLogsRollupAndRemovalCounts`, `RetentionServiceLogsNothingForAPassWithoutChange`, `RetentionServiceLogsFailedStepWithOperation` | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
-| AC11 | `ScanHoldsWindowOfCatalogKill`, `ScanHoldsWindowOfKernelEventKill`, `ScanCatchesLateLines`, `IncidentAfterRemovalEqualsIncidentBefore` (real store, reconstructor run on an unchanged copy and after removal) | `tests/Vandox.Backend.Tests/KillHoldScannerTests.cs` |
+| AC8 | `RebuildKeepsStatisticsOfHoursBeforeTheLogPeriod`, `RebuildKeepsStatisticsOfPartlyRemovedHours`, `RebuildRecountsHoursInTheLogPeriod`, `RebuildWithoutLogPeriodRecountsAll` | `tests/Vandox.Storage.Tests/SqliteStoreTemplateRebuildTests.cs` |
+| AC9 | `RemoveExpiredKeepsImportedRecords`, `RemoveExpiredKeepsEventsUntilEventsPeriod` (each event kind), `RemoveExpiredRemovesGapRowsOnlyPastTheGapHorizon` (closed sequence gap, time gap stored open that reads final, both past the longest period; with `events` shorter than `raw` kept until `raw` passes; never in a window or hold), `RemoveExpiredNeverRemovesOpenOrFinalSequenceGap`, `RemoveExpiredKeepsListenerFindingsWithTheirSnapshots`, `RemoveExpiredKeepsNewestConnectionMarkPerAgent`, `RemoveExpiredKeepsRecordsInIncidentWindowsAndHolds` | `tests/Vandox.Storage.Tests/SqliteStoreRetentionTests.cs` |
+| AC10 | `RetentionServiceLogsRollupAndRemovalCounts`, `RetentionServiceLogsNothingForAPassWithoutChange`, `RetentionServiceLogsFailedStepWithOperation` (the line holds no stored message or label text) | `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
+| AC11 | `ScanHoldsWindowOfKernelEventKill`, `ScanMakesNoHoldFromCatalogKillLine`, `ScanCatchesLateKernelEvents`, `SaveMergesOverlappingStoredHolds`, `IncidentAfterRemovalEqualsIncidentBefore` (real store, reconstructor run on an unchanged copy and after removal) | `tests/Vandox.Backend.Tests/KillHoldScannerTests.cs` |
 | AC12 | `ReportSkipsAgentLinesAndSnapshotsPastTheirPeriods`, `ReportKeepsImportedHours` | `tests/Vandox.Backend.Tests/ForensicsReporterTests.cs` |
 | AC12 | `AddIncidentDoesNotJudgeOutageInUnobservedHourBeforeHorizon`, `AddIncidentJudgesAsBeforeWithoutHorizon` | `tests/Vandox.Core.Tests/ForensicsAnalysisTests.cs` |
 
@@ -66,48 +70,59 @@ else with the spec's E1 reason `must be a whole number of days from 1d to 9999d,
 **Schema step 14 (Storage).** `metric_rollups_5m` and `metric_rollups_1h` (`STRICT`, `WITHOUT ROWID`): `source`, `name`, `labels`
 (text, `''` for none), `bucket` (start, ns), `min_value`, `max_value`, `sum_value` (REAL), `count` (INTEGER ≥ 1), `last_value`,
 `last_at`, `last_record_id`; primary key `(source, name, labels, bucket)`, index on `bucket`. `retention_holds`: `id`, `started_at`,
-`ended_at` (`CHECK (ended_at > started_at)`), index on `started_at`. `meta` keys `rollup_after_id`, `kill_scan_before`,
-`kill_scan_after_id` (absent = 0 / minimum). `StorageLimits.SchemaVersion` becomes 14.
+`ended_at` (`CHECK (ended_at > started_at)`), index on `started_at`; stored holds never overlap. Indexes `records_removable` on
+`records(kind, captured_at)` where `origin <> 'import'` and `gaps_to_at` on `gaps(to_at)`. `meta` keys `rollup_after_id` and
+`kill_scan_after_id` (absent = 0). `StorageLimits.SchemaVersion` becomes 14.
 
 **Fold step (record 0208).** Under the writer lock, one transaction: read at most `StorageLimits.RollupStepRows` (10,000) `metrics`
-rows with `record_id > rollup_after_id` in record ID order, fold each into its 5-minute and hourly bucket (min, max, sum, count; last
+rows with `record_id > rollup_after_id` in record ID order, stopping after the row that takes the summed UTF-8 length of the labels
+read past `StorageLimits.RollupStepLabelBytes` (2 MiB; the first row is always taken), fold each into its 5-minute and hourly bucket (min, max, sum, count; last
 by `(captured_at, record_id)`), upsert the touched buckets, set `rollup_after_id`. A bucket already past its tier's period is not
-created. All origins are folded.
+created. All origins are folded. Worst case held per step: 2 MiB plus one row of labels (about 200 KB) and at most 20,000 bucket
+entries.
 
-**Kill scan (record 0210), in the Backend.** `KillHoldScanner` runs before each removal pass. Target `T` = the latest finite removal
-horizon among raw, logs, snapshots and events (`now − period`) plus `window_before`. (a) Forward: `log_line` and `kernel_event` records
-with `kill_scan_before <= captured_at < T` in capture order (then ID), pages of 1,000, one `SignatureDetector` across the pages; (b)
-late: records of those kinds with ID above `kill_scan_after_id` and capture time below `kill_scan_before`, in capture order, a fresh
-detector. Each `oom_kill` event or `kernel_event` of type `oom_kill` gives `[kill − before, kill + after]`; overlapping windows merge.
-Holds and the new position (`kill_scan_before = T`, `kill_scan_after_id` = highest record ID read when the pass began) are saved per
-page in one write. 
+**Kill scan (record 0210), in the Backend.** `KillHoldScanner` runs before each removal pass. It reads, on a reader connection outside
+the writer lock, the `kernel_event` records with ID above `kill_scan_after_id` (a range of the row ID, pages of 1,000); each of type
+`oom_kill` gives `[captured − before, captured + after]`. `SaveKillScanAsync` merges each new hold with the stored holds it overlaps
+into one row and sets `kill_scan_after_id` to the highest record ID that existed when the pass began, in one write per page. A log
+line that reads as a kill makes no hold (any local process can write one, fact 20).
 
 **Removal step (records 0209, 0210, 0212).** One step removes at most `StorageLimits.RemovalStepRecords` (5,000) records of one
-kind, or as many rows of one derived table, in one transaction, in this order until nothing is left: raw metrics, log lines,
-snapshots, events, gap rows, 5-minute rollups, hourly rollups, template hours, incidents, holds. A record is removed only when all
-hold: origin is not `import`; `captured_at < min(now − period of its kind, kill_scan_before − window_before)`; `id <=
-kill_scan_after_id`; for metrics `record_id <= rollup_after_id`; `id` is not the highest record ID; its capture time lies in no stored
-incident's window and no hold; a connection snapshot is not the agent's newest mark and has no listener finding (`new_count > 0`,
-`changed_count > 0`, or a comparison with `finding = 1`), which move it to the events period. Kinds: `metric` → raw; `log_line` →
-logs; `process_snapshot`, `connection_snapshot`, `mariadb_status` → snapshots; `kernel_event`, `service_state`, `backup_run`, `gap` →
-events. Per record, in order: `log_fts` `delete` command with the old message, `log_lines`/`metrics`, `connection_marks`,
-`listener_comparisons`, `records`; `agent_sample_times` rows below the raw horizon go in the metric steps. Gap rows: `closed` or
-`final` with `to_at` before the events horizon; `open` never. Template hours and source hours: `hour` before `now − rollups_1h` where
-no stored log line of that source lies in that hour; a template with no hour left is removed (its `count`, `first_seen`, `last_seen`
-are history and stay unchanged otherwise). Incidents: `ended_at` before `now − incidents` and no row in `incident_notes`. Holds:
-`ended_at` before the same horizon. `agent_streams` and `agent_clock_samples` are never touched. No `VACUUM`.
+kind, or as many rows of one derived table, and examines at most `StorageLimits.RemovalStepExamined` (20,000) index entries and 1,000
+windows, in one transaction, in this order until nothing is left: raw metrics, log lines, snapshots, events, gap rows, 5-minute
+rollups, hourly rollups, template hours, incidents, holds. A pass carries a cursor (kind, capture time, ID) from step to step, so a kept
+row is examined once per pass. Records are walked through `records_removable` (imported rows are not in it) in capture order from the
+cursor up to `now − period of its kind`, in the ranges between the stored incident windows and holds: a window is found as the one
+with the greatest `started_at` at or below the position, and the walk seeks past its end. A walked record is removed unless `id >
+kill_scan_after_id`, or for metrics `record_id > rollup_after_id`, or it is the highest record ID, or it is a connection snapshot that
+is the agent's newest mark or has a listener finding (`new_count > 0`, `changed_count > 0`, or a comparison with `finding = 1`), which
+moves it to the events period. Kinds: `metric` → raw; `log_line` → logs; `process_snapshot`, `connection_snapshot`, `mariadb_status` →
+snapshots; `kernel_event`, `service_state`, `backup_run` → events; `gap` records → the gap horizon. Per record, in order: `log_fts`
+`delete` command with the old message, `log_lines`/`metrics`, `connection_marks`, `listener_comparisons`, `records`;
+`agent_sample_times` rows below the raw horizon go in the metric steps. **Gap horizon** (Security B4): `now −` the longest of
+`events`, `raw`, `logs`, `snapshots`, `rollups_5m`, `rollups_1h`, none while one is unlimited. Gap rows through `gaps_to_at`: a
+sequence gap only when `closed`, a time gap when its read state (`GapReadSql.State`) is `closed` or `final`, `to_at` before the gap
+horizon, and its span overlaps no incident window or hold; a sequence gap that is `open` or `final` is never removed. Template hours
+and source hours: `hour` before `now − rollups_1h` where no stored log line of that source lies in that hour; a template with no hour
+left is removed (its `count`, `first_seen`, `last_seen` stay unchanged otherwise). Incidents: `ended_at` before `now − incidents` and
+no row in `incident_notes`. Holds: `ended_at` before the same horizon. `agent_streams` and `agent_clock_samples` are never touched. No
+`VACUUM`.
 
 **Resend after removal (record 0211).** `AgentTimeline.WasReceived(seq)` is true for `floor_seq <= seq <= max_seq` when no
-non-closed sequence gap contains `seq`; `SqliteStore.WriteBatchAsync` skips such records before the insert (not stored, not placed,
-counted in `WriteResult` as duplicates, as a conflict is today).
+non-closed sequence gap contains `seq`, decided per record against the stream and gap rows as loaded, before the batch's own walk
+(`Prepare` moves `max_seq` and closes gaps, `SqliteStore.cs:503`); `SqliteStore.WriteBatchAsync` skips such records before the insert
+(not stored, not placed, counted in `WriteResult` as duplicates, as a conflict is today). A number below `floor_seq` is not covered
+(residual in record 0211).
 
-**Template rebuild.** `TemplateRebuilder` clears only the template and source hours of `(source, hour)` pairs that hold a stored log
-line, recounts the stored lines, and keeps the rest; templates are recomputed from their remaining hours; a template without hours is
-removed. The run marker rules stay.
+**Template rebuild (DA 4).** With a finite `retention.logs`, `vandoxd templates` passes `keepBefore` = the first full hour after `now
+− retention.logs`: `TemplateRebuilder` clears only template and source hours at or after it, recounts the stored lines captured at or
+after it, and keeps every earlier hour (also partly removed and kill-hold hours); a template's `count`, `first_seen`, `last_seen` are
+recomputed from its hours; a template without hours is removed. With `unlimited` it rebuilds everything as today. The run marker
+rules stay.
 
 **Service (Backend).** `RetentionService : BackgroundService`, registered only by `ServeCommand`. It runs at start and on a 5-minute
 timer of the injected `TimeProvider`: fold steps until a step reports no more; when an hour has passed since the last removal pass
-(or none ran yet), the kill scan, then removal steps until none is left. Between steps it checks the stopping token; a step itself is
+(or none ran yet), the kill scan, then removal steps until none is left, carrying the step's cursor. Between steps it checks the stopping token; a step itself is
 never cancelled once it holds the lock (the writer is never interrupted). A `StoreException` for a busy database logs the warning and
 ends the pass; any other `StoreException` logs the error and ends the pass; the next timer tick retries.
 
@@ -122,20 +137,22 @@ its clock and skips lines and process snapshots of origin other than `import` ca
 logs horizon): an outage whose first kill is before it and whose kill hour is not observed is counted as an outage but in no rule.
 No new text. `ReportService` and `ReportCommand` pass the configured periods.
 
-**Benchmark.** `tools/Vandox.StorageBenchmark --retention [--size N]`: writes five batches of N records, ages them by a fixed clock,
+**Benchmark.** `tools/Vandox.StorageBenchmark --retention [--size N]`: writes five batches of N records plus imported lines and held
+windows below the horizon (as many as one step examines), ages them by a fixed clock,
 times five fold and five removal steps and prints the three medians.
 
 ## Options considered
 
 - Rollups in the write transaction, or recompute from raw on dirty marks: lost to folding by watermark (record 0208).
-- Remove by receive time or every origin alike; drop events with the raw data: lost to the Product Manager's answers (record 0209).
-- Freeze old incidents or reconstruct them inside the job: lost to holds (record 0210).
+- Freeze old incidents or reconstruct them inside the job: lost to holds (record 0210). Holds from catalog kill lines too: dropped,
+  any local process can forge them (Security B3).
+- Partial index `where origin = 'agent'` (Security's proposal): `backend` is a valid origin under the same periods (record 0209), so
+  `origin <> 'import'`.
+- Refusing `events` shorter than a data period at load: rejected, the gap horizon makes every valid setting safe (Security B4).
 - Tombstones per removed record, or accept duplicates: lost to the stream check (record 0211).
 - Vacuum after removal or switching `auto_vacuum`: lost to plain deletes, #55 owns shrinking (record 0212).
-- A `vandoxd retention` sub-command run by the operator's scheduler: the container has no scheduler, and a second process waits on
-  the 5-second busy timeout while ingest answers `503`; inside the service the steps queue on the one writer lock with ingest.
-- Steps bounded by a time budget instead of a row count: not testable without a real clock; the row bound plus the reference-host
-  measurement (AC6) gives the same guarantee.
+- A `vandoxd retention` sub-command: the container has no scheduler, and a second process meets ingest only through the busy timeout.
+- Steps bounded by a time budget: untestable without a real clock; the row bounds plus the AC6 measurement suffice.
 
 ## Affected projects and types
 
@@ -143,9 +160,9 @@ times five fold and five removal steps and prints the three medians.
 | ------- | ----------- | ------ |
 | Vandox.Core | `Configuration/RetentionConfig.cs`, `RetentionPeriod.cs` (new); `BackendConfig.cs`, `BackendConfigLoader.cs` | section, parsing, validation |
 | Vandox.Core | `Reports/ForensicsAnalysis.cs` | `JudgedFrom` |
-| Vandox.Storage | `IRetentionStore.cs`, `IRollupReader.cs`, `RetentionPolicy.cs`, `RollupTier.cs`, `RollupBucket.cs`, `RollupQuery.cs`, `RollupStepResult.cs`, `RemovalStepResult.cs`, `KillScanQuery.cs`, `KillScanProgress.cs`, `RetentionHold.cs`, `RollupFolder.cs`, `RetentionRemover.cs`, `RetentionQueries.cs` (new) | the store side |
-| Vandox.Storage | `SqliteStore.cs`, `SchemaMigrator.cs`, `StorageLimits.cs`, `AgentTimeline.cs`, `TemplateRebuilder.cs` | interfaces, step 14, constants, resend skip, rebuild |
-| Vandox.Backend | `Retention/RetentionService.cs`, `Retention/KillHoldScanner.cs`, `Reports/ReportRetention.cs` (new); `Hosting/ServeCommand.cs`, `Hosting/BackendLog.cs`, `Reports/ForensicsReporter.cs`, `Reports/ReportService.cs`, `Cli/ReportCommand.cs` | job, wiring, logs, report |
+| Vandox.Storage | `IRetentionStore.cs`, `IRollupReader.cs`, `RetentionPolicy.cs`, `RollupTier.cs`, `RollupBucket.cs`, `RollupQuery.cs`, `RollupStepResult.cs`, `RemovalStepResult.cs`, `KillScanQuery.cs`, `KillScanProgress.cs`, `RetentionHold.cs`, `RemovalCursor.cs`, `RollupFolder.cs`, `RetentionRemover.cs`, `RetentionQueries.cs` (new) | the store side |
+| Vandox.Storage | `SqliteStore.cs`, `SchemaMigrator.cs`, `StorageLimits.cs`, `AgentTimeline.cs`, `TemplateRebuilder.cs`, `GapReadSql.cs` (read) | interfaces, step 14, constants, resend skip, rebuild |
+| Vandox.Backend | `Retention/RetentionService.cs`, `Retention/KillHoldScanner.cs`, `Reports/ReportRetention.cs` (new); `Hosting/ServeCommand.cs`, `Hosting/BackendLog.cs`, `Reports/ForensicsReporter.cs`, `Reports/ReportService.cs`, `Cli/ReportCommand.cs`, `Cli/TemplatesCommand.cs` | job, wiring, logs, report |
 | tools | `Vandox.StorageBenchmark/RetentionBenchmark.cs` (new), `Program.cs` | `--retention` |
 | deploy | `backend/vandoxd.yaml` | commented `retention:` section |
 
@@ -171,7 +188,7 @@ Storage (Vandox.Storage):
   `Task<KillScanProgress> KillScanProgressAsync(CancellationToken cancellationToken)`,
   `Task<IReadOnlyList<StoredRecord>> ScanRecordsAsync(KillScanQuery query, CancellationToken cancellationToken)`,
   `Task SaveKillScanAsync(IReadOnlyList<RetentionHold> holds, KillScanProgress progress, CancellationToken cancellationToken)`,
-  `Task<RemovalStepResult> RemoveExpiredAsync(RetentionPolicy policy, DateTimeOffset now, CancellationToken cancellationToken)`
+  `Task<RemovalStepResult> RemoveExpiredAsync(RetentionPolicy policy, DateTimeOffset now, RemovalCursor? cursor, CancellationToken cancellationToken)`
 - `interface IRollupReader`, implemented by SqliteStore: `Task<IReadOnlyList<RollupBucket>> RollupsAsync(RollupQuery query, CancellationToken cancellationToken)`
 - `class RetentionPolicy`: `RetentionPolicy.Raw: TimeSpan?`, `RetentionPolicy.FiveMinuteRollups: TimeSpan?`,
   `RetentionPolicy.HourlyRollups: TimeSpan?`, `RetentionPolicy.Logs: TimeSpan?`, `RetentionPolicy.Snapshots: TimeSpan?`,
@@ -188,23 +205,24 @@ Storage (Vandox.Storage):
 - `class RemovalStepResult`: `RemovalStepResult.MetricValues: int`, `RemovalStepResult.LogLines: int`, `RemovalStepResult.Snapshots: int`,
   `RemovalStepResult.EventRecords: int`, `RemovalStepResult.Gaps: int`, `RemovalStepResult.FiveMinuteValues: int`,
   `RemovalStepResult.HourlyValues: int`, `RemovalStepResult.TemplateHours: int`, `RemovalStepResult.RemovedIncidents: int`,
-  `RemovalStepResult.Holds: int`, `RemovalStepResult.More: bool`
-- `class KillScanQuery`: `KillScanQuery.From: DateTimeOffset`, `KillScanQuery.To: DateTimeOffset`, `KillScanQuery.AboveId: long`,
-  `KillScanQuery.AfterCapturedAt: DateTimeOffset`, `KillScanQuery.AfterId: long`, `KillScanQuery.Limit: int`
-- `class KillScanProgress`: `KillScanProgress.ScannedBefore: DateTimeOffset`, `KillScanProgress.ScannedId: long`,
-  `KillScanProgress.HighestId: long`
+  `RemovalStepResult.Holds: int`, `RemovalStepResult.More: bool`, `RemovalStepResult.Next: RemovalCursor?`
+- `class KillScanQuery`: `KillScanQuery.AboveId: long`, `KillScanQuery.Limit: int` (kind kernel_event, read on a reader connection)
+- `class KillScanProgress`: `KillScanProgress.ScannedId: long`, `KillScanProgress.HighestId: long`
+- `class RemovalCursor`: `RemovalCursor.Kind: string`, `RemovalCursor.CapturedAt: DateTimeOffset`, `RemovalCursor.Id: long`
 - `class RetentionHold`: `RetentionHold.Start: DateTimeOffset`, `RetentionHold.End: DateTimeOffset`
-- `StorageLimits.RollupStepRows: internal const int = 10000`, `StorageLimits.RemovalStepRecords: internal const int = 5000`,
+- `StorageLimits.RollupStepRows: internal const int = 10000`, `StorageLimits.RemovalStepRecords: internal const int = 5000`, `StorageLimits.RemovalStepExamined: internal const int = 20000`,
+  `StorageLimits.RollupStepLabelBytes: internal const int = 2097152`,
   `StorageLimits.SchemaVersion: const int = 14` (changed)
 - `internal bool WasReceived(long seq)` on AgentTimeline
+- `public Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, DateTimeOffset? keepBefore, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)` on SqliteStore (new overload; the old one passes null)
 - `SqliteStore.RetentionStepStarted: internal Func<Task>?` ({ get; set; }, test hook of AC6, called with the lock held)
 
 Backend (Vandox.Backend.Retention, Vandox.Backend.Reports, Vandox.Backend.Hosting):
 
-- `class RetentionService` (a BackgroundService): `public RetentionService(IRetentionStore store, RetentionPolicy policy, SignatureCatalog catalog, TimeProvider clock, ILogger logger)`,
+- `class RetentionService` (a BackgroundService): `public RetentionService(IRetentionStore store, RetentionPolicy policy, TimeProvider clock, ILogger logger)`,
   `internal Task RollUpAsync(CancellationToken cancellationToken)`, `internal Task RemoveAsync(CancellationToken cancellationToken)`,
   `internal static RetentionPolicy CreatePolicy(BackendConfig config)`
-- `class KillHoldScanner` (internal): `internal KillHoldScanner(IRetentionStore store, SignatureCatalog catalog)`,
+- `class KillHoldScanner` (internal): `internal KillHoldScanner(IRetentionStore store)`,
   `internal Task<int> ScanAsync(RetentionPolicy policy, DateTimeOffset now, CancellationToken cancellationToken)` (the holds added)
 - `class ReportRetention`: `ReportRetention.Logs: TimeSpan?`, `ReportRetention.Snapshots: TimeSpan?`
 - `public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, ReportRetention retention, TimeProvider clock)`
@@ -225,7 +243,8 @@ ForensicsReporter.cs, ForensicsAnalysis.cs, BackendLog.cs, AgentTimeline.cs.
 `CommandLineTests.cs`. A retention store double for `RetentionServiceTests` (`ScriptedRetentionStore`, Backend tests) is the Tester's,
 with its *Test doubles* row reported for `.squad/project.md`.
 
-Existing call sites of changed signatures: `ForensicsReporter` keeps its constructor, so `ForensicsReporterTests.cs:502` and
+Existing call sites of changed signatures: `BackendConfig.Keys()` gains the seven `retention.*` keys (Dev); the Tester adapts
+`BackendConfigLoaderTests.cs:46` (the loop over all keys), `:184-193` and `:789-796`. `ForensicsReporter` keeps its constructor, so `ForensicsReporterTests.cs:502` and
 `ReportPageTests.cs:74` need no change. `SchemaMigrator` tests that assert the version 13 (`SqliteStoreOpenTests`) are adapted by the
 Tester. `TemplateRebuilderTests`/`SqliteStoreTemplateRebuildTests` cases that expect a full clear keep passing (every hour of their data
 holds lines); the Tester confirms.
@@ -250,7 +269,7 @@ All by the Dev, after the code is green:
   and holds, folding, step bounds, pass timing, busy and failure, shutdown, log lines, E8), links records 0208-0212; `docs/areas/README.md`:
   its index row.
 - `docs/areas/storage.md`: *Retention (planned)* replaced by a short paragraph linking `retention.md`; schema version 14; the tables
-  `metric_rollups_5m`, `metric_rollups_1h`, `retention_holds` and the `meta` keys; migration step **14**; *Implementation* names
+  `metric_rollups_5m`, `metric_rollups_1h`, `retention_holds`, the indexes `records_removable` and `gaps_to_at` and the `meta` keys; migration step **14**; *Implementation* names
   `RollupFolder`, `RetentionRemover`; related decisions 0208-0212.
 - `docs/areas/storage-writing.md`: line 44 (deletes keep `log_fts`, now done by retention); deduplication: the resend rule of record
   0211; line 179 (notes: kept, record 0209); template rebuild keeps hours without stored lines.
@@ -258,7 +277,9 @@ All by the Dev, after the code is green:
 - `docs/areas/configuration-options.md`: the seven `retention.*` rows and a paragraph with the form and the E1 error text.
 - `docs/areas/log-templates.md` lines 66-67 and 123-124: the statistics follow `retention.rollups_1h`, kept while an hour holds a line;
   rebuild behavior.
-- `docs/areas/incidents.md` lines 113 and 119-120: windows and kill holds are kept (record 0210); forged kills residual.
+- `docs/areas/incidents.md` lines 113 and 119-120: windows of stored incidents and holds of `kernel_event` kills are kept (record 0210);
+  the corrected residual: any local process can write lines that become stored incidents once `vandoxd incidents` runs, and their
+  windows are kept as long as the incidents (pending the Product Manager, *Security review* B3).
 - `docs/areas/forensics-report.md`: *Observed hours* and *What it reads*: agent lines and snapshots past their periods are skipped; an
   outage before the logs horizon in an unobserved hour is in no rule.
 - `docs/areas/ingest-endpoint.md` line 149: retention bounds the database by age but frees no space on the volume (record 0212).
@@ -302,3 +323,36 @@ All by the Dev, after the code is green:
 
 Spec *Out of scope*. Follow-up issue: "[Backend] Rollups of process and connection snapshots per program" (#50 needs memory per
 program beyond 30 days).
+
+## Challenge
+
+- DA 1 (major, removal not bounded): accepted. Partial index `records_removable` (`origin <> 'import'`, so imported rows are never
+  walked), a walk between windows that seeks past each window's end, holds merged with stored overlapping holds on save (so one lookup
+  of the greatest `started_at` decides), a cursor per pass, at most 20,000 entries and 1,000 windows examined per step. Tests
+  `RemoveExpiredReachesRowsBehindKeptRows` and `RemoveExpiredQueriesUseIndexSearches`; AC6's test and the benchmark get imported lines
+  and held windows below the horizon.
+- DA 2 (minor, time gaps stored open): accepted. Time gaps are judged by their read state (`GapReadSql.State`); tested with a stored-open,
+  read-final time gap; an open or final sequence gap is never removed (also Security B4).
+- DA 3 (minor, `BackendConfig.Keys()`): accepted; call sites named under *Test files*, keys added by the Dev (task 3).
+- DA 4 (minor, rebuild of partly kept hours): accepted. The rebuild keeps every hour before the first full hour of the log period and
+  recounts only later ones; spec S7 and AC8 amended; `RebuildKeepsStatisticsOfPartlyRemovedHours`.
+- DA 5 (minor, area document name): accepted; `docs/areas/retention.md` in spec and plan.
+
+## Security review
+
+- B1 (fold step unbounded in bytes): accepted. `RollupStepLabelBytes` (2 MiB of labels, at least one row) bounds a step; worst case
+  stated in *Approach* and in `retention.md`; `FoldRollupsStopsAtTheLabelByteBudget`.
+- B2 (removal work unbounded, no gap index): accepted, as DA 1, plus `gaps_to_at`.
+- B3 (forged kills, wrong actor): partly decided, partly escalated. Holds now come only from agent `kernel_event` OOM kills, which only
+  the kernel writes (fact 20) or a token holder forges (bounded by `ingest.min_free`); a log line that reads as a kill makes no hold
+  (spec S9, AC11 amended; `ScanMakesNoHoldFromCatalogKillLine`). Record 0210 now names the actor. Still open: windows of *stored
+  incidents*, which `vandoxd incidents` builds from log lines any local process can write — the Product Manager's Q1 c answer was given
+  with the wrong actor, so the corrected residual goes back to the Product Manager.
+- B4 (`events` shorter than a data period): accepted. Gap horizon = the longest of all finite periods; never inside a window or hold;
+  open and final sequence gaps never removed, so `WasReceived` cannot swallow a late fill. Spec N8, AC9 amended; tests named in AC9.
+- N1: accepted; decided against the rows as loaded, before the batch's walk (*Approach*, record 0211);
+  `WriteBatchMixedResendFillAndNewStoresOnlyFillAndNew`.
+- N2: accepted as a residual in record 0211 and `storage-writing.md`: a number below `floor_seq` whose copy was removed and is resent is
+  stored and folded again; it needs a lost acknowledgement kept past the period or a token holder.
+- N3: accepted; the scan reads on a reader connection by a row-ID range (*Approach*).
+- N4, N5: accepted; cases added to `RetentionPeriodTryParseRefusesOtherForms` and `RetentionServiceLogsFailedStepWithOperation`.

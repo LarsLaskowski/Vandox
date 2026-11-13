@@ -35,5 +35,7 @@ in [Retention and rollups](../areas/retention.md).
 
 - A value is folded exactly once: a resend after its stored copy was removed must not be stored again (record 0211).
 - The average is a floating-point sum in arrival order, so it equals a recomputation within rounding, not bit for bit.
+- A step is bounded by rows and by the bytes of the labels it reads (a label set can reach about 200 KB), so a forged batch of
+  large labels cannot make one step hold more than a few MiB.
 - Buckets are current only up to the last step (at most 5 minutes behind); a reader of #47 sees the newest bucket grow.
 - Revisit if a rollup needs a statistic that does not merge (a median or a percentile): that would need the raw values or a sketch.

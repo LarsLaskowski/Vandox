@@ -37,5 +37,7 @@ kept beyond it, is in [Retention and rollups](../areas/retention.md).
 - The template statistics count as hourly values; an hour that still holds a stored line keeps them, and `vandoxd templates` recounts
   only such hours and keeps the others, so a rebuild after a change of the normalization rules leaves old templates in expired hours.
 - An incident with a note is never removed (record 0107 asks retention to move or keep notes).
+- Gap records and gap rows follow the longest finite period of all data kinds and rollups, never a shorter `events` alone, and an
+  open or final sequence gap is never removed, so a span with data or rollups keeps its gaps.
 - A forged capture time far in the future keeps its record until then; the free-space floor `ingest.min_free` bounds the effect.
 - Several agents (#89) would keep the same periods per agent.
