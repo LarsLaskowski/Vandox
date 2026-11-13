@@ -30,7 +30,10 @@ public partial class SqliteStoreRetentionTests
     private const string KeptTables = "metric_rollups_5m:source,name,labels,bucket,min_value,max_value,sum_value,count,last_value,last_at,last_record_id;"
                                       + "metric_rollups_1h:source,name,labels,bucket,min_value,max_value,sum_value,count,last_value,last_at,last_record_id;"
                                       + "log_templates:id,source,program,template,first_seen,last_seen,count;log_template_hours:template_id,hour,count;log_source_hours:source,hour,count;"
-                                      + "gaps:id,agent_id,kind,cause,state,first_seq,last_seq,from_seq,to_seq,from_at,to_at,detected_at,changed_at";
+                                      + "gaps:id,agent_id,kind,cause,state,first_seq,last_seq,from_seq,to_seq,from_at,to_at,detected_at,changed_at;"
+                                      + "records:id,kind,origin,source,agent_id,seq,captured_at,received_at,boot_id,clock_offset_ns,data,live";
+
+    private const string KeptRecordKinds = " WHERE kind IN ('kernel_event', 'service_state', 'backup_run', 'gap')";
 
     #endregion // Constants
 
@@ -46,7 +49,7 @@ public partial class SqliteStoreRetentionTests
     #region Methods
 
     /// <summary>
-    /// An agent record resent after its stored copy was removed is acknowledged as a duplicate, not stored again and not merged into its bucket, and no gap is reported.
+    /// An agent record resent after its stored copy was removed is acknowledged as a duplicate, not stored again and not merged into its bucket, and adds, changes or drops no gap.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -66,6 +69,7 @@ public partial class SqliteStoreRetentionTests
 
         var removed = await CountAsync(directory, "SELECT count(*) FROM records WHERE seq BETWEEN 1 AND 5");
         var buckets = await RollupRowsAsync(directory);
+        var gapsBefore = await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken);
 
         // Act
         var result = await store.WriteBatchAsync(TimelineSamples.Resend(old, now.AddSeconds(1)), TestContext.CancellationToken);
@@ -80,7 +84,8 @@ public partial class SqliteStoreRetentionTests
         Assert.AreEqual(new WriteResult(0, 5), result, "the resend is acknowledged as five duplicates");
         Assert.AreEqual(0L, stored, "nothing of the resend is stored");
         Assert.AreSequenceEqual(buckets, await RollupRowsAsync(directory), "the buckets are unchanged");
-        Assert.IsEmpty(gaps, "no gap is reported");
+        Assert.IsEmpty(TimelineSamples.SequenceGaps(gaps), "no sequence gap is reported");
+        Assert.AreEqual(TimelineSamples.Fingerprint(gapsBefore), TimelineSamples.Fingerprint(gaps), "the resend adds, changes or drops no gap");
     }
 
     /// <summary>
@@ -141,10 +146,15 @@ public partial class SqliteStoreRetentionTests
         // Act
         var result = await store.WriteBatchAsync(TimelineSamples.Batch(now.AddSeconds(1), TimelineSamples.Metric(9, now), TimelineSamples.Metric(2, Samples.Base.AddSeconds(58)), TimelineSamples.Metric(4, Samples.Base.AddSeconds(100))), TestContext.CancellationToken);
         var stored = await RowsAsync(directory, "SELECT seq FROM records WHERE agent_id = 'agent-1' ORDER BY seq");
+        var gaps = await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken);
+        var sequenceGaps = TimelineSamples.SequenceGaps(gaps);
 
         // Assert
-        Assert.AreEqual(new WriteResult(2, 1), result, "the fill and the new number are stored, the resend is a duplicate");
+        Assert.AreEqual(2, result.Stored, "the fill and the new number are stored");
+        Assert.AreEqual(1, result.Duplicates, "the resend is a duplicate");
         Assert.AreSequenceEqual(["4", "7", "9"], stored, "the removed number 2 is not stored again");
+        Assert.Contains(gap => gap.StartsWith("8-8 ", StringComparison.Ordinal), sequenceGaps, $"the jump to 9 opens the gap 8-8: {string.Join("; ", sequenceGaps)}");
+        Assert.DoesNotContain(gap => gap.Kind == GapKind.Sequence && gap.FirstSeq <= 4 && gap.LastSeq >= 4, gaps, $"no sequence gap contains the filled number 4: {string.Join("; ", sequenceGaps)}");
     }
 
     /// <summary>
@@ -679,7 +689,7 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Under a constant load with raw values, log lines and snapshots kept for one period P, the file grows from P to 2P by at most the kept summaries, events, gaps and template statistics written in that span (their summed column lengths plus 25 %) plus 10 % of its size at P.
+    /// Under a constant agent load with raw values, log lines and snapshots kept for one period P, the file grows from P to 2P by at most the kept summaries, events, gaps and template statistics written in that span (the summed lengths of their columns and index entries plus 25 %) plus 10 % of its size at P.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -703,11 +713,11 @@ public partial class SqliteStoreRetentionTests
                      };
 
         // Act
-        await SimulateAsync(store, policy, 0, LoadHours);
+        await SimulateAsync(store, policy, 0, LoadHours * 4);
 
         var sizeAtP = await FileBytesAsync(directory);
         var keptAtP = await KeptBytesAsync(directory);
-        var removed = await SimulateAsync(store, policy, LoadHours, 2 * LoadHours);
+        var removed = await SimulateAsync(store, policy, LoadHours * 4, LoadHours * 8);
         var sizeAt2P = await FileBytesAsync(directory);
         var keptAt2P = await KeptBytesAsync(directory);
         var allowance = ((keptAt2P - keptAtP) * 1.25) + (sizeAtP * 0.1);
@@ -770,7 +780,7 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// After the records of an agent were removed no sequence gap is reported for their numbers, and the next batch is no new start.
+    /// After the records of an agent were removed no sequence gap is reported for their numbers, the time gaps stay as they were, and the next batch is no new start.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -785,19 +795,136 @@ public partial class SqliteStoreRetentionTests
         await store.WriteBatchAsync(TimelineSamples.Run(1, 10, Samples.Base.AddSeconds(60)), TestContext.CancellationToken);
         await store.WriteBatchAsync(TimelineSamples.Run(11, 1, now), TestContext.CancellationToken);
 
+        var timeGapsBefore = TimelineSamples.TimeGaps(await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken));
+
         // Act
         await RetentionSamples.RetainAsync(store, RetentionSamples.Defaults(), now, [], TestContext.CancellationToken);
 
         var removed = await CountAsync(directory, "SELECT count(*) FROM records WHERE seq <= 10");
+        var timeGapsAfter = TimelineSamples.TimeGaps(await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken));
         var next = await store.WriteBatchAsync(TimelineSamples.Run(12, 1, now.AddSeconds(60)), TestContext.CancellationToken);
         var gaps = await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken);
         var live = await TimelineSamples.LiveOfAsync(RetentionSamples.DatabasePath(directory.Path), TimelineSamples.AgentId, TestContext.CancellationToken);
 
         // Assert
         Assert.AreEqual(0L, removed, "the ten records were removed");
-        Assert.IsEmpty(gaps, "no gap is reported for the removed numbers");
-        Assert.AreEqual(0, next.Timeline!.Opened, "the next batch opens no gap");
+        Assert.IsEmpty(TimelineSamples.SequenceGaps(gaps), "no sequence gap is reported for the removed numbers");
+        Assert.HasCount(1, timeGapsBefore, "the silence from the old records to the latest one is a time gap");
+        Assert.AreEqual(TimelineSamples.Fingerprint(timeGapsBefore), TimelineSamples.Fingerprint(timeGapsAfter), "the pass leaves the time gaps as they were");
+        Assert.AreEqual(0, next.Timeline?.Opened ?? 0, "the next batch opens no gap");
         Assert.IsTrue(live[12], "the next record is live, not a new start");
+    }
+
+    /// <summary>
+    /// A removal pass deletes the sample times below the raw horizon except each agent's newest and stores the horizon as the sample-time floor; with an unlimited raw period nothing is pruned and no floor is stored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task SqliteStoreRemoveExpiredPrunesSampleTimesBelowTheRawHorizonKeepingTheNewest()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        using var unlimitedDirectory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        await using var unlimitedStore = await SqliteStore.OpenAsync(unlimitedDirectory.Path, TestContext.CancellationToken);
+        var now = Samples.Base.AddDays(31);
+        var horizon = now.AddDays(-30);
+        var defaults = RetentionSamples.Defaults();
+        var unlimited = new RetentionPolicy
+                        {
+                            Raw = null,
+                            FiveMinuteRollups = defaults.FiveMinuteRollups,
+                            HourlyRollups = defaults.HourlyRollups,
+                            Logs = defaults.Logs,
+                            Snapshots = defaults.Snapshots,
+                            Events = defaults.Events,
+                            KillWindowBefore = defaults.KillWindowBefore,
+                            KillWindowAfter = defaults.KillWindowAfter
+                        };
+
+        await WriteSampleTimesAsync(store, now);
+        await WriteSampleTimesAsync(unlimitedStore, now);
+
+        // Act
+        await RetentionSamples.RetainAsync(store, defaults, now, [], TestContext.CancellationToken);
+        await RetentionSamples.RetainAsync(unlimitedStore, unlimited, now, [], TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0L, await CountAsync(directory, $"SELECT count(*) FROM agent_sample_times WHERE agent_id = 'agent-1' AND captured_at < {RetentionSamples.Ns(horizon)}"), "the sample times of agent-1 below the horizon are pruned");
+        Assert.AreEqual(3L, await CountAsync(directory, $"SELECT count(*) FROM agent_sample_times WHERE agent_id = 'agent-1' AND captured_at >= {RetentionSamples.Ns(horizon)}"), "the sample times of agent-1 above the horizon stay");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(Samples.Base.AddSeconds(13))], await RowsAsync(directory, "SELECT captured_at FROM agent_sample_times WHERE agent_id = 'agent-2'"), "agent-2, all of whose times lie below the horizon, keeps exactly its newest");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(horizon)], await RowsAsync(directory, "SELECT value FROM meta WHERE key = 'sample_time_floor'"), "the floor is the raw horizon");
+        Assert.AreEqual(12L, await CountAsync(unlimitedDirectory, "SELECT count(*) FROM agent_sample_times"), "with raw unlimited no sample time is pruned");
+        Assert.AreEqual(0L, await CountAsync(unlimitedDirectory, "SELECT count(*) FROM meta WHERE key = 'sample_time_floor'"), "with raw unlimited no floor is stored");
+    }
+
+    /// <summary>
+    /// An agent that returns after a silence longer than the raw period, with continuous numbers, gets a time gap from its last sample time before the silence to its new one.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task SqliteStoreWriteBatchAfterSilencePastTheRawPeriodOpensTimeGap()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var now = Samples.Base.AddDays(31);
+        var back = now.AddHours(1);
+
+        await store.WriteBatchAsync(TimelineSamples.Run(1, 3, Samples.Base.AddSeconds(60)), TestContext.CancellationToken);
+        await RetentionSamples.RetainAsync(store, RetentionSamples.Defaults(), now, [], TestContext.CancellationToken);
+
+        // Act
+        var result = await store.WriteBatchAsync(TimelineSamples.Run(4, 1, back), TestContext.CancellationToken);
+        var gaps = await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken);
+        var timeGaps = TimelineSamples.TimeGaps(gaps);
+
+        // Assert
+        Assert.AreEqual(1, result.Stored, "the record after the silence is stored");
+        Assert.IsEmpty(TimelineSamples.SequenceGaps(gaps), "the numbers are continuous");
+        Assert.HasCount(1, timeGaps, "the silence is one time gap");
+        Assert.AreEqual(Samples.Base.AddSeconds(59), timeGaps[0].From, "the gap starts at the last sample time before the silence");
+        Assert.AreEqual(back.AddSeconds(-1), timeGaps[0].To, "the gap ends at the new sample time");
+    }
+
+    /// <summary>
+    /// A late value below the sample-time floor that lies in no time gap adds no time gap; one that lies inside a stored time gap splits it there.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreWriteBatchLateValueBelowTheSampleFloorOpensNoTimeGap()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var now = Samples.Base.AddDays(31);
+        var inGap = Samples.Base.AddHours(2);
+
+        await store.WriteBatchAsync(TimelineSamples.OldRun(1, 60, Samples.Base, Samples.Base.AddMinutes(1)), TestContext.CancellationToken);
+        await store.WriteBatchAsync(TimelineSamples.OldRun(70, 60, Samples.Base.AddHours(5), Samples.Base.AddHours(5).AddMinutes(1)), TestContext.CancellationToken);
+        await store.WriteBatchAsync(TimelineSamples.Run(130, 1, now), TestContext.CancellationToken);
+        await RetentionSamples.RetainAsync(store, RetentionSamples.Defaults(), now, [], TestContext.CancellationToken);
+
+        var before = TimelineSamples.TimeGaps(await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken));
+
+        // Act
+        var noGap = await store.WriteBatchAsync(TimelineSamples.Batch(now.AddSeconds(1), TimelineSamples.Metric(62, Samples.Base.AddMilliseconds(30500))), TestContext.CancellationToken);
+        var afterNoGap = TimelineSamples.TimeGaps(await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken));
+        var split = await store.WriteBatchAsync(TimelineSamples.Batch(now.AddSeconds(2), TimelineSamples.Metric(65, inGap)), TestContext.CancellationToken);
+        var afterSplit = TimelineSamples.TimeGaps(await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken));
+
+        // Assert
+        Assert.Contains(gap => gap.From < inGap && gap.To > inGap, before, "a stored time gap contains the second late value");
+        Assert.AreEqual(1, noGap.Stored, "the late value in no gap is stored, a fill of the sequence gap");
+        Assert.AreEqual(TimelineSamples.Fingerprint(before), TimelineSamples.Fingerprint(afterNoGap), "the late value in no gap adds, changes or drops no time gap");
+        Assert.AreEqual(1, split.Stored, "the late value in the time gap is stored");
+        Assert.DoesNotContain(gap => gap.From < inGap && gap.To > inGap, afterSplit, "no time gap contains the late value any more");
+        Assert.Contains(gap => gap.To == inGap, afterSplit, "one part of the split gap ends at the late value");
+        Assert.Contains(gap => gap.From == inGap, afterSplit, "the other part starts at the late value");
+        Assert.HasCount(before.Count + 1, afterSplit, "the split adds one part and no other gap");
     }
 
     /// <summary>
@@ -1273,31 +1400,38 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Creates the records of one hour of the constant load: metrics every 10 seconds per series, a log line a minute, a process and a MariaDB snapshot every 10 minutes, one service state and one gap record.
+    /// Creates the agent batch of one quarter hour of the constant load, numbered on from the previous ones: metrics every 10 seconds per series, a log line a minute, a process and a MariaDB snapshot, and in the first quarter of each hour one service state and one gap record (two more log lines in the others, so each batch has as many records).
     /// </summary>
-    /// <param name="hour">The hours after <see cref="Samples.Base"/></param>
-    /// <returns>The records</returns>
-    private static DataRecord[] LoadOf(int hour)
+    /// <param name="quarter">The quarter hours after <see cref="Samples.Base"/></param>
+    /// <returns>The batch, received at the end of the quarter hour</returns>
+    private static RecordBatch LoadOf(int quarter)
     {
-        var start = Samples.Base.AddHours(hour);
-        var metrics = Enumerable.Range(0, LoadSeries * 360).Select(index => RetentionSamples.Metric(RecordOrigin.Backend, start.AddSeconds(index / LoadSeries * 10), $"series{index % LoadSeries}", index % 13));
-        var lines = Enumerable.Range(0, 60).Select(index => RetentionSamples.Line(RecordOrigin.Backend, start.AddMinutes(index), $"request {(hour * 60) + index} served in {index % 17} ms"));
-        var snapshots = Enumerable.Range(0, 6).SelectMany(index => new[] { RetentionSamples.OfKind(RecordKind.ProcessSnapshot, RecordOrigin.Backend, start.AddMinutes(index * 10)), RetentionSamples.OfKind(RecordKind.MariaDbStatus, RecordOrigin.Backend, start.AddMinutes(index * 10)) });
+        var start = Samples.Base.AddMinutes(quarter * 15);
+        var metrics = Enumerable.Range(0, LoadSeries * 90).Select(index => RetentionSamples.Metric(RecordOrigin.Agent, start.AddSeconds(index / LoadSeries * 10), $"series{index % LoadSeries}", index % 13));
+        var lines = Enumerable.Range(0, 15).Select(index => RetentionSamples.Line(RecordOrigin.Agent, start.AddMinutes(index).AddSeconds(1), $"request {(quarter * 15) + index} served in {index % 17} ms"));
+        DataRecord[] snapshots = [RetentionSamples.OfKind(RecordKind.ProcessSnapshot, RecordOrigin.Agent, start.AddSeconds(2)), RetentionSamples.OfKind(RecordKind.MariaDbStatus, RecordOrigin.Agent, start.AddSeconds(3))];
+        DataRecord[] hourly = quarter % 4 == 0
+                                  ? [RetentionSamples.OfKind(RecordKind.ServiceState, RecordOrigin.Agent, start.AddMinutes(7).AddSeconds(4)), TimelineSamples.AgentGap(0, start.AddMinutes(11).AddSeconds(5), GapCause.Unknown, 0, 0)]
+                                  : [RetentionSamples.Line(RecordOrigin.Agent, start.AddMinutes(7).AddSeconds(4), "cache warmed"), RetentionSamples.Line(RecordOrigin.Agent, start.AddMinutes(11).AddSeconds(5), "cache warmed")];
+        var records = metrics.Concat(lines).Concat(snapshots).Concat(hourly).OrderBy(record => record.CapturedAt).ToArray();
+        var first = (ulong)(quarter * records.Length) + 1;
 
-        return [.. metrics, .. lines, .. snapshots, RetentionSamples.OfKind(RecordKind.ServiceState, RecordOrigin.Backend, start.AddMinutes(30)), RetentionSamples.OfKind(RecordKind.Gap, RecordOrigin.Backend, start.AddMinutes(45))];
+        for (var index = 0; index < records.Length; index++)
+        {
+            records[index].Seq = first + (ulong)index;
+        }
+
+        return TimelineSamples.Batch(start.AddMinutes(15), records);
     }
 
     /// <summary>
-    /// Builds the query that sums the lengths of every column of the kept tables and of the event and gap records.
+    /// Builds the query that lists the columns of every index entry of a table, leaving out the primary key of a table without row ID, which is the table itself.
     /// </summary>
+    /// <param name="table">The table</param>
     /// <returns>The query</returns>
-    private static string KeptBytesQuery()
+    private static string IndexColumnsQuery(string table)
     {
-        var tables = KeptTables.Split(';').Select(entry => entry.Split(':')).Select(parts => $"(SELECT coalesce(sum({string.Join(" + ", parts[1].Split(',').Select(column => $"coalesce(length({column}), 0)"))}), 0) FROM {parts[0]})");
-        var records = "(SELECT coalesce(sum(coalesce(length(id), 0) + coalesce(length(kind), 0) + coalesce(length(origin), 0) + coalesce(length(source), 0) + coalesce(length(captured_at), 0) + coalesce(length(received_at), 0) + coalesce(length(data), 0)), 0) "
-                      + "FROM records WHERE kind IN ('kernel_event', 'service_state', 'backup_run', 'gap'))";
-
-        return $"SELECT {string.Join(" + ", tables)} + {records}";
+        return $"SELECT ii.name FROM pragma_index_list('{table}') AS il JOIN pragma_index_info(il.name) AS ii WHERE ii.name IS NOT NULL AND NOT (il.origin = 'pk' AND (SELECT wr FROM pragma_table_list('{table}')) = 1)";
     }
 
     /// <summary>
@@ -1561,6 +1695,21 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
+    /// Writes metric values of two agents: agent-1 five below the raw horizon and three just before now, agent-2 four below the horizon.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="now">The time of the pass</param>
+    /// <returns>A task that completes when the batches are stored</returns>
+    private async Task WriteSampleTimesAsync(SqliteStore store, DateTimeOffset now)
+    {
+        var other = Enumerable.Range(0, 4).Select(index => TimelineSamples.Metric((ulong)index + 1, Samples.Base.AddSeconds(10 + index))).ToArray();
+
+        await store.WriteBatchAsync(TimelineSamples.OldRun(1, 5, Samples.Base.AddSeconds(55), Samples.Base.AddMinutes(1)), TestContext.CancellationToken);
+        await store.WriteBatchAsync(TimelineSamples.BatchOf("agent-2", TimelineSamples.BootId, Samples.Base.AddMinutes(1), other), TestContext.CancellationToken);
+        await store.WriteBatchAsync(TimelineSamples.Run(6, 3, now), TestContext.CancellationToken);
+    }
+
+    /// <summary>
     /// Saves an incident and a note for it.
     /// </summary>
     /// <param name="store">The store</param>
@@ -1602,22 +1751,22 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Writes the load of each hour of a span and runs a fold, a kill scan mark and a removal pass at the end of each hour.
+    /// Writes the load of each quarter hour of a span and runs a fold, a kill scan mark and a removal pass at the end of each, so a period holds 48 passes as 2 days of hourly passes do.
     /// </summary>
     /// <param name="store">The store</param>
     /// <param name="policy">The policy</param>
-    /// <param name="fromHour">The first hour</param>
-    /// <param name="toHour">The hour after the last one</param>
+    /// <param name="fromQuarter">The first quarter hour</param>
+    /// <param name="toQuarter">The quarter hour after the last one</param>
     /// <returns>A task that returns the metric values the passes removed</returns>
-    private async Task<int> SimulateAsync(SqliteStore store, RetentionPolicy policy, int fromHour, int toHour)
+    private async Task<int> SimulateAsync(SqliteStore store, RetentionPolicy policy, int fromQuarter, int toQuarter)
     {
         var removed = 0;
 
-        for (var hour = fromHour; hour < toHour; hour++)
+        for (var quarter = fromQuarter; quarter < toQuarter; quarter++)
         {
-            await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, LoadOf(hour));
+            await store.WriteBatchAsync(LoadOf(quarter), TestContext.CancellationToken);
 
-            var steps = await RetentionSamples.RetainAsync(store, policy, Samples.Base.AddHours(hour + 1), [], TestContext.CancellationToken);
+            var steps = await RetentionSamples.RetainAsync(store, policy, Samples.Base.AddMinutes((quarter + 1) * 15), [], TestContext.CancellationToken);
 
             removed += steps.Sum(step => step.MetricValues);
         }
@@ -1636,13 +1785,24 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Sums the lengths of every column of the rollup, template and gap tables and of the event and gap records.
+    /// Sums the lengths of every column of the rollup, template and gap tables and of the event and gap records, and of the columns of each of their index entries.
     /// </summary>
     /// <param name="directory">The store directory</param>
     /// <returns>A task that returns the bytes</returns>
-    private Task<long> KeptBytesAsync(TempDirectory directory)
+    private async Task<long> KeptBytesAsync(TempDirectory directory)
     {
-        return CountAsync(directory, KeptBytesQuery());
+        var total = 0L;
+
+        foreach (var parts in KeptTables.Split(';').Select(entry => entry.Split(':')))
+        {
+            var indexColumns = await RowsAsync(directory, IndexColumnsQuery(parts[0]));
+            var columns = parts[1].Split(',').Concat(indexColumns).Select(column => $"coalesce(length({column}), 0)");
+            var filter = parts[0] == "records" ? KeptRecordKinds : string.Empty;
+
+            total += await CountAsync(directory, $"SELECT coalesce(sum({string.Join(" + ", columns)}), 0) FROM {parts[0]}{filter}");
+        }
+
+        return total;
     }
 
     /// <summary>
