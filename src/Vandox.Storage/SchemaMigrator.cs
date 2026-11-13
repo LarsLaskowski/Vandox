@@ -269,6 +269,53 @@ internal static class SchemaMigrator
                                                               c => c.CommandText = "ALTER TABLE listener_comparisons ADD COLUMN changed_count INTEGER NOT NULL DEFAULT 0 CHECK (changed_count >= 0)",
                                                               c => c.CommandText = "ALTER TABLE listener_comparisons ADD COLUMN changed_listeners TEXT",
                                                               c => c.CommandText = "CREATE INDEX connection_marks_changes ON connection_marks(captured_at DESC, agent_id, seq DESC) WHERE new_count = 0 AND changed_count > 0"
+                                                          ]),
+                                                      new(14,
+                                                          [
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE metric_rollups_5m (
+                                                                                     source TEXT NOT NULL,
+                                                                                     name TEXT NOT NULL,
+                                                                                     labels TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     min_value REAL NOT NULL,
+                                                                                     max_value REAL NOT NULL,
+                                                                                     sum_value REAL NOT NULL,
+                                                                                     count INTEGER NOT NULL CHECK (count >= 1),
+                                                                                     last_value REAL NOT NULL,
+                                                                                     last_at INTEGER NOT NULL,
+                                                                                     last_record_id INTEGER NOT NULL,
+                                                                                     PRIMARY KEY (source, name, labels, bucket)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX metric_rollups_5m_bucket ON metric_rollups_5m(bucket)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE metric_rollups_1h (
+                                                                                     source TEXT NOT NULL,
+                                                                                     name TEXT NOT NULL,
+                                                                                     labels TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     min_value REAL NOT NULL,
+                                                                                     max_value REAL NOT NULL,
+                                                                                     sum_value REAL NOT NULL,
+                                                                                     count INTEGER NOT NULL CHECK (count >= 1),
+                                                                                     last_value REAL NOT NULL,
+                                                                                     last_at INTEGER NOT NULL,
+                                                                                     last_record_id INTEGER NOT NULL,
+                                                                                     PRIMARY KEY (source, name, labels, bucket)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX metric_rollups_1h_bucket ON metric_rollups_1h(bucket)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE retention_holds (
+                                                                                     id INTEGER PRIMARY KEY,
+                                                                                     started_at INTEGER NOT NULL,
+                                                                                     ended_at INTEGER NOT NULL CHECK (ended_at > started_at)
+                                                                                   ) STRICT
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX retention_holds_started_at ON retention_holds(started_at)",
+                                                              c => c.CommandText = "CREATE INDEX records_removable ON records(kind, captured_at) WHERE origin <> 'import'",
+                                                              c => c.CommandText = "CREATE INDEX gaps_to_at ON gaps(to_at)"
                                                           ])
                                                   ];
 

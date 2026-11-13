@@ -160,18 +160,24 @@ internal sealed class AgentTimeline : IDisposable
         }
     }
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S2325, RH2003
     /// <summary>
-    /// Returns whether a sequence number was received.
+    /// Returns whether a sequence number was received: it lies from the lowest stored number up to the highest and in no sequence gap
+    /// that is open or final. A record of such a number that is not stored was removed by the retention job and is not stored again.
+    /// Call it before <see cref="Prepare"/>, which moves the highest number and closes gaps.
     /// </summary>
     /// <param name="seq">The sequence number</param>
     /// <returns>True when the number was received</returns>
     internal bool WasReceived(long seq)
     {
-        throw new NotImplementedException();
+        if (_known == false || seq < _floor || seq > _max)
+        {
+            return false;
+        }
+
+        var gap = Seek(AgentTimelineQueries.FindGap, seq);
+
+        return gap is null || gap.Value.Last < seq;
     }
-#pragma warning restore S2325, RH2003
 
     /// <summary>
     /// Writes the changed rows and the stream state.
