@@ -7,9 +7,8 @@ Status: Approved by Lead
 
 `vandoxd` keeps every stored record forever ([Storage](../../docs/areas/storage.md), *Retention (planned)*), so the database grows
 without bound until ingest stops at the free-space floor `ingest.min_free` ([Ingest endpoint](../../docs/areas/ingest-endpoint.md)).
-The operator wants years of history at a bounded database size: old raw values summarized into 5-minute and hourly values, old data
-removed by configurable periods, without ingest ever waiting on that work. The history views of v0.3.0 (#47, #49) read those
-summaries; this feature produces them.
+The operator wants years of history at a bounded size: raw values summarized into 5-minute and hourly values, old data removed by
+configurable periods, ingest never waiting on it. The history views (#47, #49) read those summaries.
 
 ## Scenarios
 
@@ -30,12 +29,14 @@ summaries; this feature produces them.
   1,095 days), and `vandoxd templates` recounts only the hours that begin at or after the start of the log period (`now −
   retention.logs`) and keeps the statistics of every earlier hour.
 - S8: Given the default periods, when agent data passes its period, then imported records stay; OOM kills, boots, service states,
-  backup runs, gap records, gap rows and listener findings stay for 1,095 days (`retention.events`); and every record whose capture
-  time lies in the window of a stored incident stays as long as that incident.
-- S9: Given an OOM kill no incident covers yet (`vandoxd incidents` was not run), when the data around it passes its period, then every
-  record captured in the kill's window (`incidents.window_before` before it to `incidents.window_after` after it) stays as long as an
-  incident of it would, so a later run still builds the full incident. A kill here is an agent `kernel_event` OOM kill, which only the
-  kernel (or a holder of the agent token) can produce; a log line that merely reads as an OOM kill makes no hold.
+  backup runs, gap records, gap rows and listener findings stay for 1,095 days (`retention.events`).
+- S9: Given an agent `kernel_event` OOM kill, which only the kernel (or a holder of the agent token) can produce, when the data around
+  it passes its period, then every record captured in its window (`incidents.window_before` before it to `incidents.window_after` after
+  it) stays as long as an incident of it would, whether `vandoxd incidents` has built that incident or not; a later run still builds
+  the full incident. A log line that merely reads as an OOM kill keeps nothing.
+- S11: Given a stored incident without such a kill (built from log lines only), when its window data passes its periods, then that data
+  is removed, the incident itself stays, and a later run of `vandoxd incidents` leaves every incident whose window starts before the log
+  period (`now − retention.logs`) unchanged unless its whole window is kept by S9.
 - S10: Given log lines or process snapshots of agent data removed, when the forensics report runs, then an hour older than
   `retention.logs` is unknown even where a kept window still holds lines, so base rates use only hours kept under their own period and
   imported hours; an outage whose kill lies in such an hour is listed but not judged.
@@ -85,7 +86,7 @@ summaries; this feature produces them.
   its operation and error, never stored text.
 - N8: The guarantee *No data gaps unless explicitly recorded* ([`.squad/project.md`](../../.squad/project.md)) holds after removal:
   gap records and closed or final gap rows stay until the longest finite period among events, raw, logs, snapshots and both rollups
-  has passed (none while one is `unlimited`), and never inside a stored incident's window or a hold; a sequence gap that is not closed
+  has passed (none while one is `unlimited`), and never inside a window kept by S9; a sequence gap that is not closed
   is never removed, so a summarized span never reads as normal and a late fill is never taken for a resend (Q1 b).
 
 ## Acceptance criteria
@@ -108,10 +109,11 @@ summaries; this feature produces them.
   numbers, the template statistics of expired hours remain, and `vandoxd templates` keeps the statistics of every hour before the log
   period while recounting the later ones (S7, E3, E10, E12).
 - AC9: Past every period, imported records stay; `kernel_event`, `service_state`, `backup_run` and `gap` records, gap rows and listener
-  findings (with the snapshot records they belong to) stay until past `retention.events`, gap records and gap rows as N8 says; records captured inside a stored incident's
-  window stay while the incident is stored (S8, N8).
-- AC11: Records in the window of an agent `kernel_event` OOM kill no stored incident covers stay past their periods, and `vandoxd incidents` run afterwards builds
-  the same incident as before the removal (S9); a log line read as an OOM kill makes no hold (S9).
+  findings (with the snapshot records they belong to) stay until past `retention.events`, gap records and gap rows as N8 says (S8, N8).
+- AC11: Records in the window of an agent `kernel_event` OOM kill stay past their periods while an incident of it would be kept, and
+  `vandoxd incidents` run afterwards builds the same incident as before the removal; a log line read as an OOM kill keeps nothing (S9).
+- AC13: The window data of a stored incident without a `kernel_event` kill is removed by the periods while the incident stays, and a
+  later `vandoxd incidents` run changes no incident whose window starts before the log period and is not wholly kept (S11).
 - AC12: After removal the forensics report counts no hour older than `retention.logs` of agent data as observed and judges no outage in
   such an hour; imported hours count as before (S10).
 - AC10: A pass that changed data writes the N7 log line; a failed step its error (N7).
@@ -120,32 +122,26 @@ summaries; this feature produces them.
 
 - Reading the summaries in charts and choosing a resolution (#47, #49), showing gaps (#54), live incidents (#53).
 - Shrinking the file, vacuum, backup (#55) (E8).
-- Summaries of process or connection snapshots (memory per program over a year, #50 may need them: a follow-up issue).
-- A command to remove imported data on demand; several agents (#89).
+- Summaries of process or connection snapshots (a follow-up issue for #50).
+- Removing imported data on demand; several agents (#89).
 
 ## Open questions
 
 - Q1 a, imported data. Answered: kept outside the periods (Product Manager, 2026-11-13).
 - Q1 b, events, gaps and listener findings. Answered: kept 1,095 days under the new key `retention.events` (Product Manager,
   2026-11-13).
-- Q1 c, raw data inside a kept incident's window. Answered: kept as long as the incident (Product Manager, 2026-11-13); the residual of
-  forged kills is in record 0210.
+- Q1 c, raw data inside a kept incident's window. Answered: (Product Manager, 2026-11-13, option B after Security
+  B3) kept only for kills an agent `kernel_event` confirms; other window data follows the periods (S9, S11, record 0210).
 - Answered: the UI stack is .NET Blazor, not Go templates (records 0073, 0197); this feature has no UI.
 - Answered: "snapshots" are the `process_snapshot`, `connection_snapshot` and `mariadb_status` records, "raw data" the `metric` values
   (wire format records), the template statistics count as hourly values ([Storage](../../docs/areas/storage.md)).
-- Answered: incidents are unlimited by default and configurable (the issue); the residual of forged incidents is recorded in the plan's
-  decision record.
+- Answered: incidents are unlimited by default and configurable (the issue).
 
 ## Area documents
 
-- New `docs/areas/retention.md` (*Retention and rollups*): the periods and what each covers, bucket rules, recomputation, pass timing, failure and
-  shutdown behavior, the log line; [Storage](../../docs/areas/storage.md) *Retention (planned)* replaced by a link and the schema rows.
-- [Configuration options](../../docs/areas/configuration-options.md): the `retention.*` keys, form and error.
-- [Storage writing](../../docs/areas/storage-writing.md): marking buckets from the write path; deletes keep `log_fts` and derived rows.
-- [Storage reading](../../docs/areas/storage-reading.md): the summary reader for #47.
-- [Log templates](../../docs/areas/log-templates.md), [Incidents](../../docs/areas/incidents.md),
-  [Forensics report](../../docs/areas/forensics-report.md), [Ingest endpoint](../../docs/areas/ingest-endpoint.md): behavior after
-  removal (the rebuild, re-runs, observed hours, the floor sentence of E8); `docs/ARCHITECTURE.md` retention table no longer planned.
+New `docs/areas/retention.md` (*Retention and rollups*): periods, what outlives them, rollups, passes, failures, log lines. Updated:
+Storage, Storage writing (the resend rule), Storage reading (the rollup reader), Configuration options, Log templates, Incidents (S11),
+Forensics report (S10), Ingest endpoint (E8); the full list is in the plan's *Documentation updates*.
 
 ## Challenge
 
@@ -168,3 +164,4 @@ summaries; this feature produces them.
 - Amended while planning (plan challenge and Security plan review, step 2): S7, AC8 (the rebuild keeps hours before the log period,
   DA 4), S9, AC11 (holds only from agent `kernel_event` OOM kills, Security B3), N8, AC9 (the gap horizon, Security B4, DA 2), the
   area document name (DA 5), E11 (open or final gaps, plan fact 4).
+- Amended after the Product Manager's answer to B3 (option B): S8, S9, new S11, N8, AC9, AC11, new AC13.
