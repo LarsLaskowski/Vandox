@@ -237,7 +237,7 @@ func numberedSteps(section string) []string {
 	return steps
 }
 
-func TestAgentReadme_TailscaleIngestProbeWaitsForTheBackendUpgrade(t *testing.T) {
+func TestAgentReadme_TailscaleIngestProbeRanInTheRc1Run_AC4(t *testing.T) {
 	t.Parallel()
 
 	var holding []string
@@ -251,7 +251,13 @@ func TestAgentReadme_TailscaleIngestProbeWaitsForTheBackendUpgrade(t *testing.T)
 		t.Fatalf("%d numbered steps hold `tailscale exit-node list`, want 1", len(holding))
 	}
 
-	containsAll(t, holding[0], "the step with the probes", "not yet run", "upgraded to v0.2.0")
+	containsAll(t, holding[0], "the step with the probes", "v0.2.0-rc.1", "404")
+
+	for _, stale := range []string{"not yet run", "upgraded to v0.2.0"} {
+		if strings.Contains(holding[0], stale) {
+			t.Errorf("AC4 the step with the probes holds %q, want the 401 stated as verified by the v0.2.0-rc.1 run", stale)
+		}
+	}
 }
 
 func TestAgentReadme_ChecksOnTheServerHoldNoOpenTailscaleIssue(t *testing.T) {
@@ -276,11 +282,19 @@ func TestAgentReadme_ChecksOnTheServerHoldNoOpenTailscaleIssue(t *testing.T) {
 
 		if strings.HasPrefix(row, "| tailscale checks |") {
 			probes++
-			containsAll(t, row, "the row of the Tailscale checks", "upgraded to v0.2.0")
+			containsAll(t, row, "the row of the Tailscale checks", "settled", "no exit nodes found")
+
+			if strings.Contains(row, "upgraded to v0.2.0") {
+				t.Errorf("AC4 the row of the Tailscale checks still defers the 401 to an upgrade to v0.2.0, want the deferral marked settled")
+			}
 		}
 	}
 
 	if probes != 1 {
 		t.Errorf("%q has %d rows of the Tailscale checks, want 1", checksHeading, probes)
+	}
+
+	if strings.Contains(collapse(sectionOf(t, readme, checksHeading)), "v0.2.0-rc.1") == false {
+		t.Errorf("AC4 %q lacks a note naming the v0.2.0-rc.1 run, want the result added beside the recorded rows", checksHeading)
 	}
 }

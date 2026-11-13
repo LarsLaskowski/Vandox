@@ -60,7 +60,7 @@ the second sample on, its five rates.
   separated by spaces; reads and writes completed (fields 1 and 5), sectors read and written (fields 3 and 7, units of 512 bytes) and the
   milliseconds with I/O in flight (field 10) become `disk_reads_total`, `disk_read_bytes_total`, `disk_writes_total`,
   `disk_written_bytes_total` and `disk_io_time_seconds_total`, label `device` the entry's name. The I/O of a `dm-*`, `md*` or `loop*`
-  volume is recorded only as the I/O of its member disks; a comparison with the legacy script (#45) compares per disk.
+  volume is recorded only as the I/O of its member disks; a comparison with the legacy script compares per disk.
 - **Rates.** A rate (`cpu_percent`, `vmstat_per_second`, the five disk rates) is the increase since the previous successful sample of the
   same collector divided by the seconds between the two runs' start times (`disk_busy_percent`: the increase of the I/O milliseconds
   divided by those milliseconds, times 100). There is no rate in the first sample after the agent started, for a counter that fell, for a
@@ -151,7 +151,7 @@ rules (`processes.programs`, [Configuration options](configuration-options.md)) 
 rule's `program`, with `append_next_word` followed by `/` and the word after the prefix in the cleaned command line (up to the next
 space, cut so the program has at most 1,024 bytes at a character boundary; an empty word leaves the program). The default rule list is
 empty, so the names match the legacy log. The titles `php-fpm: pool ...`, `spamd` and `amavisd` are the forms those programs document,
-not captured from a Plesk server; the parallel run of #45 checks them.
+not captured from a Plesk server; the agent has run on the production Plesk server since v0.2.0-rc.1, and a name that differs there is reported as an issue and then examined.
 
 ### Readers (security area 10)
 

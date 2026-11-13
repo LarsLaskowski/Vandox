@@ -164,7 +164,7 @@ The `system` collector decides the mode after each successful `system` sample, f
   at least 10.00;
 - it turns **off** only when `MemAvailable` is at least 15 % of `MemTotal` (20 × `MemAvailable` ≥ 3 × `MemTotal`) and `some avg10` is
   below 5.00 or the memory pressure file is not available;
-- otherwise it keeps its mode. The products are exact (128 bits, no floating point). The thresholds are fixed, not options, until the parallel run of #45 shows a reason.
+- otherwise it keeps its mode. The products are exact (128 bits, no floating point). The thresholds are fixed, not options; the agent has run on the production Plesk server since v0.2.0-rc.1, and a finding there is reported as an issue and then examined.
 
 The mode starts off. Only a change switches the scheduler (*Scheduling*) and the sender ([Agent sending](agent-sending.md)) and logs one
 info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`, `mem_available_bytes` and, when the pressure

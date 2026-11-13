@@ -198,6 +198,9 @@ To remove the agent, run the bundle's `uninstall.sh` (`--purge` also deletes the
 [`docs/INSTALL.md`](docs/INSTALL.md). The unit lets the agent reach only localhost and the tailnet, so the backend URL names the
 backend's tailnet **IP address**; the agent and the script refuse a host name, a MagicDNS name included. What the scripts check and change: [Agent installation](docs/areas/agent-installation.md).
 
+A server that still runs the legacy monitoring script keeps its history and retires the script as
+[`docs/RETIRE_LEGACY_MONITORING.md`](docs/RETIRE_LEGACY_MONITORING.md) shows.
+
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
 
@@ -293,7 +296,8 @@ lockout.
 **Ingest port and Tailscale.** The ingest port 8081 is published on `INGEST_BIND_ADDRESS` only, the address the agents reach at
 `http://<tailnet address>:8081` (their `backend.url`). This needs **Tailscale in TUN mode** on the Docker host; userspace-networking
 mode is not supported ([Network and security model](docs/areas/network-and-security-model.md)). The Synology package runs in
-userspace mode by default; `docs/INSTALL.md` shows how to switch it to TUN mode. What to look for (the Synology and userspace
+userspace mode by default; `docs/INSTALL.md` shows how to switch it to TUN mode. What to look for (the `v0.2.0-rc.1` run verified the Synology
+switch to TUN mode with its boot-up task and that the container came back after a NAS reboot; the rest of the Synology and userspace
 behavior below is reported, not verified on a host):
 
 - `docker compose up` stops with `set INGEST_BIND_ADDRESS to this host's tailnet address ...`: the variable is missing from `.env`.
@@ -301,7 +305,8 @@ behavior below is reported, not verified on a host):
   not have the address in `INGEST_BIND_ADDRESS`, because Tailscale is down or runs in userspace mode. Switch to TUN mode or fix the
   address, then `docker compose up -d`.
 - After a reboot the container is not running although Tailscale is up: Docker may have started it before Tailscale brought up its
-  address. Run `docker compose up -d` once Tailscale is up.
+  address. Run `docker compose up -d` once Tailscale is up. (On the Synology host of the `v0.2.0-rc.1` run the container came back by
+  itself after a NAS reboot.)
 - The agent logs `token refused`: check the backend's log for `ingest agent refused` (the presented `agent_id` differs from
   `ingest.agent_id`) and `ingest token refused` (wrong token); `ingest disabled` at start names what is missing
   ([Ingest endpoint](docs/areas/ingest-endpoint.md)).

@@ -384,8 +384,8 @@ sleepers were started: that is not the 250 of the criterion, so no verdict is st
 54.07, 53.84 and 56.07 ms: median 55.5 ms, range 53.3 to 67.3 ms. One such snapshot every 15 seconds under memory pressure is 0.37 % of one core, in wall time (derived). The
 agent's mean CPU on the server is 0.42 % of one core over 24 hours without sending (*Agent footprint*).
 One episode of memory pressure mode on the server (2026-11-08 00:36:27 to 00:36:37, 10 s) shows that an episode occurs and ends by itself; its CPU cost cannot be separated from the
-total, so it is evidence only, not a measurement of cost. The peak under sustained pressure and the thresholds stay with #45
-([Agent system metrics](areas/agent-system-metrics.md), *Processes*).
+total, so it is evidence only, not a measurement of cost. The peak under sustained pressure is not yet confirmed by a long-term measurement on the server, and the thresholds are fixed
+([Agent system metrics](areas/agent-system-metrics.md), *Processes*); a finding there is reported as an issue and then examined.
 
 ## Connection snapshot
 
@@ -507,7 +507,7 @@ Product Manager accepted them on 2026-10-30 (0133):
 - the agent did not send: the backend of the server, `vandoxd` v0.1.0, has no ingest API and answers `404`, and the agent behaved as specified (shared backoff, records kept);
 - the stats of the previous agent instance (before the restart on 2026-10-29) are lost.
 
-The footprint while the agent sends and backfills is the run below; the peak under sustained memory pressure stays with #45.
+The footprint while the agent sends and backfills is the run below; the peak under sustained memory pressure is not yet confirmed by a long-term measurement on the server.
 
 ### While sending
 
