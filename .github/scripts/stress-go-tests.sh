@@ -10,10 +10,11 @@ readonly TEST_TIMEOUT="30m"
 
 # Each entry is "<package path> <TestName>", grouped by the reason it is listed (docs/UNIT_TESTS.md).
 readonly LISTED=(
-  # Failed intermittently in CI (#329, #336).
+  # Failed intermittently in CI (#329, #336, #414).
   "internal/sender TestHTTPTransport_ReadsAtMostFourKiBOfBody"
   "internal/connstats TestConnections_ManySocketsStayWithinCaps"
   "internal/scheduler TestScheduler_TriggerWhileStuckRecordsGap"
+  "internal/scheduler TestScheduler_TriggerReplacesNextRunUnderPressure_AC1"
   # The verdict is a ratio of measured durations.
   "internal/wire TestDecoder_TimeIsInProportionToTheLine"
   "internal/logstages TestClassifyMail_TimeGrowsLinearlyWithTheLengthOfTheMessage"
