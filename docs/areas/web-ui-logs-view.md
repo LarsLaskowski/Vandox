@@ -110,10 +110,11 @@ that are escaped, which are longer when written out. A page keeps the capped tex
 
 ## Limits and errors
 
-- **Memory per circuit.** A line holds up to 16,384 characters of message and up to 2,048 characters in each of source, host and
-  program, about 45 KiB, so a search page of 100 lines with an expanded context of 11 lines is about **5 MiB** in the worst case (a
-  typical line is a few hundred bytes), and the template page, with up to 200 rows of four capped short fields and a chart of at most
-  2,160 points, about **3.1 MiB**. The number of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
+- **Memory per circuit.** The characters are held as runs, at most 256 a field. With the runs, a message takes up to 56 KiB and a host or
+  program up to 24 KiB (bounds pinned by tests); the source is at most 128 ASCII characters, never escaped, one run. A line takes about
+  104 KiB, so a search page of 100 lines with an expanded context of 11 lines is about **11 MiB** in the worst case (a typical line is
+  a few hundred bytes), and the template page, with up to 200 rows of a template text and a program of up to 24 KiB each and a chart of
+  at most 2,160 points, about **9.5 MiB**. The number of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
 - Template numbers change when `vandoxd templates` rebuilds the statistics, so a stored template link can point to another template or to
   none; the page reports an unknown number.
 - Every stored source can be chosen in the form, because the data model allows a source only letters, digits and `. _ : / @ + -` and at
@@ -122,6 +123,7 @@ that are escaped, which are longer when written out. A page keeps the capped tex
 ## Related decisions
 
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view takes its filters from the address, searches in bounded pages and caps external text.
+- [0207](../decisions/0207-incidents-view-shows-each-external-text-in-at-most-16-runs-logs-view-keeps-256.md) — why the logs view keeps 256 runs a field while the incidents view takes 16, and the memory figures with the run cost.
 
 ## Not here
 

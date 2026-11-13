@@ -83,7 +83,7 @@ public sealed class IncidentRowView
         var growth = hypothesis.GrowthKnown
                          ? hypothesis.Growth.Select(item => new ProgramAmountView
                                                             {
-                                                                Program = LogText.Runs(item.Program, LogText.MaxShortChars),
+                                                                Program = LogText.Runs(item.Program, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
                                                                 Amount = IncidentsView.Growth(item.GrowthBytes)
                                                             })
                                             .ToList()
@@ -96,7 +96,7 @@ public sealed class IncidentRowView
                    FirstKillAt = summary.FirstKillAt,
                    Duration = IncidentsView.Duration(summary.LastKillAt - summary.FirstKillAt),
                    KillCount = summary.KillCount,
-                   Victim = LogText.Runs(summary.FirstVictim, LogText.MaxShortChars),
+                   Victim = LogText.Runs(summary.FirstVictim, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
                    MoreKills = summary.KillCount > 1,
                    Growth = growth,
                    GrowthState = GrowthText(hypothesis, growth.Count),

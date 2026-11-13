@@ -182,7 +182,7 @@ public sealed class IncidentDetailView
                    GrowthState = IncidentRowView.GrowthText(hypothesis, growth.Count),
                    Consumers = hypothesis.Consumers.Select(item => Amount(item.Program, IncidentsView.Mib(item.RssBytes))).ToList(),
                    Backup = IncidentRowView.BackupText(hypothesis),
-                   BackupPrograms = hypothesis.BackupPrograms.Select(name => LogText.Runs(name, LogText.MaxShortChars)).ToList(),
+                   BackupPrograms = hypothesis.BackupPrograms.Select(name => LogText.Runs(name, LogText.MaxShortChars, IncidentsView.MaxTextRuns)).ToList(),
                    RecentBootAt = hypothesis.RecentBootAt,
                    SnapshotCount = hypothesis.SnapshotCount,
                    ServiceEvents = hypothesis.ServiceEvents,
@@ -244,7 +244,7 @@ public sealed class IncidentDetailView
     {
         return new ProgramAmountView
                {
-                   Program = LogText.Runs(program, LogText.MaxShortChars),
+                   Program = LogText.Runs(program, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
                    Amount = amount
                };
     }
@@ -260,8 +260,8 @@ public sealed class IncidentDetailView
                {
                    At = kill.At,
                    LogsHref = IncidentsView.LogsHref(kill.At),
-                   Host = LogText.Runs(kill.Host, LogText.MaxShortChars),
-                   Victim = LogText.Runs(kill.VictimCommand, LogText.MaxShortChars),
+                   Host = LogText.Runs(kill.Host, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
+                   Victim = LogText.Runs(kill.VictimCommand, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
                    Pid = kill.VictimPid is null ? string.Empty : Number(kill.VictimPid.Value),
                    AnonRss = kill.AnonRssBytes is null or < 0 ? string.Empty : IncidentsView.Mib((ulong)kill.AnonRssBytes.Value),
                    OomScoreAdj = kill.OomScoreAdj is null ? string.Empty : Number(kill.OomScoreAdj.Value)
@@ -282,9 +282,9 @@ public sealed class IncidentDetailView
                    At = entry.At,
                    LogsHref = IncidentsView.LogsHref(entry.At),
                    Marker = Marker(entry.Type),
-                   Type = LogText.Runs(entry.Type, LogText.MaxShortChars),
-                   Host = LogText.Runs(entry.Host, LogText.MaxShortChars),
-                   Texts = texts.Select(text => LogText.Runs(text, IncidentsView.MaxTimelineTextChars)).ToList(),
+                   Type = LogText.Runs(entry.Type, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
+                   Host = LogText.Runs(entry.Host, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
+                   Texts = texts.Select(text => LogText.Runs(text, IncidentsView.MaxTimelineTextChars, IncidentsView.MaxTextRuns)).ToList(),
                    LineCount = entry.LineCount
                };
     }
@@ -301,9 +301,9 @@ public sealed class IncidentDetailView
 
         return new ExtremeRowView
                {
-                   Name = LogText.Runs($"{metric.Name}{labels}", LogText.MaxShortChars),
-                   Extreme = LogText.Runs(metric.Extreme, LogText.MaxShortChars),
-                   Source = LogText.Runs(metric.Source, LogText.MaxShortChars),
+                   Name = LogText.Runs($"{metric.Name}{labels}", LogText.MaxShortChars, IncidentsView.MaxTextRuns),
+                   Extreme = LogText.Runs(metric.Extreme, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
+                   Source = LogText.Runs(metric.Source, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
                    At = metric.At,
                    LogsHref = IncidentsView.LogsHref(metric.At),
                    Value = bytes ? IncidentsView.Mib((ulong)metric.Value) : Number(metric.Value)
@@ -324,9 +324,9 @@ public sealed class IncidentDetailView
     {
         return new IncidentTemplateView
                {
-                   Source = LogText.Runs(source, LogText.MaxShortChars),
-                   Program = LogText.Runs(program, LogText.MaxShortChars),
-                   Template = LogText.Runs(template, LogText.MaxShortChars),
+                   Source = LogText.Runs(source, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
+                   Program = LogText.Runs(program, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
+                   Template = LogText.Runs(template, LogText.MaxShortChars, IncidentsView.MaxTextRuns),
                    At = at,
                    LogsHref = IncidentsView.LogsHref(at),
                    Count = count,

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 
+using Vandox.Backend.Incidents;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Reports;
 
@@ -11,6 +12,15 @@ namespace Vandox.Backend.Tests;
 [TestClass]
 public partial class LogTextTests
 {
+    #region Properties
+
+    /// <summary>
+    /// Gets or sets the context of the running test.
+    /// </summary>
+    public TestContext TestContext { get; set; } = null!;
+
+    #endregion // Properties
+
     #region Fields
 
     private static readonly string _bidi = char.ConvertFromUtf32(0x202e);
@@ -363,6 +373,94 @@ public partial class LogTextTests
     }
 
     /// <summary>
+    /// A text of 1,024 characters retains at most 6,144 bytes with its runs of the incidents view at the 2,048-character cap, and a text of the 512-character timeline cap at most 3,072 bytes, even when plain and escaped characters alternate.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public void LogTextRunsOfAlternatingIncidentFieldRetainBoundedHeap()
+    {
+        // Arrange
+        const long limit = 6144;
+
+        _ = RetainedRunsPerText(1, 1024, true, LogText.MaxShortChars, IncidentsView.MaxTextRuns);
+
+        // Act
+        var alternating = RetainedRunsPerText(2560, 1024, true, LogText.MaxShortChars, IncidentsView.MaxTextRuns);
+        var plain = RetainedRunsPerText(2560, 1024, false, LogText.MaxShortChars, IncidentsView.MaxTextRuns);
+
+        // Assert
+        TestContext.WriteLine($"incident field: alternating {alternating} bytes, plain {plain} bytes");
+        Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating field of 1,024 characters");
+        Assert.IsLessThan(alternating, plain, "a plain field costs less than an alternating one, so the measurement sees the runs");
+    }
+
+    /// <summary>
+    /// A timeline text of 1,024 characters retains at most 3,072 bytes with its runs of the incidents view at the 512-character cap, even when plain and escaped characters alternate.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public void LogTextRunsOfAlternatingTimelineTextRetainBoundedHeap()
+    {
+        // Arrange
+        const long limit = 3072;
+
+        _ = RetainedRunsPerText(1, 1024, true, IncidentsView.MaxTimelineTextChars, IncidentsView.MaxTextRuns);
+
+        // Act
+        var alternating = RetainedRunsPerText(2560, 1024, true, IncidentsView.MaxTimelineTextChars, IncidentsView.MaxTextRuns);
+        var plain = RetainedRunsPerText(2560, 1024, false, IncidentsView.MaxTimelineTextChars, IncidentsView.MaxTextRuns);
+
+        // Assert
+        TestContext.WriteLine($"timeline text: alternating {alternating} bytes, plain {plain} bytes");
+        Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating timeline text of 1,024 characters");
+        Assert.IsLessThan(alternating, plain, "a plain text costs less than an alternating one, so the measurement sees the runs");
+    }
+
+    /// <summary>
+    /// A message of 16,384 characters retains at most 57,344 bytes with its runs of the logs view at 256 runs, even when plain and escaped characters alternate.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public void LogTextRunsOfAlternatingLogMessageRetainBoundedHeap()
+    {
+        // Arrange
+        const long limit = 57344;
+
+        _ = RetainedRunsPerText(1, 16384, true, LogText.MaxChars, LogText.MaxRuns);
+
+        // Act
+        var alternating = RetainedRunsPerText(256, 16384, true, LogText.MaxChars, LogText.MaxRuns);
+        var plain = RetainedRunsPerText(256, 16384, false, LogText.MaxChars, LogText.MaxRuns);
+
+        // Assert
+        TestContext.WriteLine($"log message: alternating {alternating} bytes, plain {plain} bytes");
+        Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating message of 16,384 characters");
+        Assert.IsLessThan(alternating, plain, "a plain message costs less than an alternating one, so the measurement sees the runs");
+    }
+
+    /// <summary>
+    /// A host or program of 1,024 characters retains at most 24,576 bytes with its runs of the logs view at 256 runs and the 2,048-character cap, even when plain and escaped characters alternate.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public void LogTextRunsOfAlternatingLogFieldRetainBoundedHeap()
+    {
+        // Arrange
+        const long limit = 24576;
+
+        _ = RetainedRunsPerText(1, 1024, true, LogText.MaxShortChars, LogText.MaxRuns);
+
+        // Act
+        var alternating = RetainedRunsPerText(2560, 1024, true, LogText.MaxShortChars, LogText.MaxRuns);
+        var plain = RetainedRunsPerText(2560, 1024, false, LogText.MaxShortChars, LogText.MaxRuns);
+
+        // Assert
+        TestContext.WriteLine($"log field: alternating {alternating} bytes, plain {plain} bytes");
+        Assert.IsLessThanOrEqualTo(limit, alternating, "the retained runs of one alternating field of 1,024 characters");
+        Assert.IsLessThan(alternating, plain, "a plain field costs less than an alternating one, so the measurement sees the runs");
+    }
+
+    /// <summary>
     /// Builds a text whose characters alternate between two characters.
     /// </summary>
     /// <param name="length">The length in characters</param>
@@ -414,6 +512,34 @@ public partial class LogTextTests
         var after = HeapSampler.RetainedBytes();
 
         GC.KeepAlive(kept);
+
+        return (after - before) / count;
+    }
+
+    /// <summary>
+    /// Measures the heap that the runs of texts retain, without the source texts: each source is built once, its runs are kept, and the source is released.
+    /// </summary>
+    /// <param name="count">The number of texts</param>
+    /// <param name="length">The length of each text in characters, all of one byte in UTF-8</param>
+    /// <param name="alternating">Whether plain and escaped characters alternate, or the text is plain</param>
+    /// <param name="maxChars">The output cap</param>
+    /// <param name="maxRuns">The run cap</param>
+    /// <returns>The retained bytes of the runs of one text</returns>
+    private static long RetainedRunsPerText(int count, int length, bool alternating, int maxChars, int maxRuns)
+    {
+        var text = alternating ? Alternating(length, 'a', (char)1) : new string('a', length);
+        var before = HeapSampler.RetainedBytes();
+        var kept = new List<IReadOnlyList<TextRun>>(count);
+
+        for (var index = 0; index < count; index++)
+        {
+            kept.Add(LogText.Runs(text, maxChars, maxRuns));
+        }
+
+        var after = HeapSampler.RetainedBytes();
+
+        GC.KeepAlive(kept);
+        GC.KeepAlive(text);
 
         return (after - before) / count;
     }

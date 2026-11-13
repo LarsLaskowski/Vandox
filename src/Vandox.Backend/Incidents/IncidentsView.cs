@@ -53,6 +53,11 @@ public static class IncidentsView
     public const int MaxTimelineTextChars = 512;
 
     /// <summary>
+    /// The most runs of an external text of the incidents view; the last one holds the rest.
+    /// </summary>
+    public const int MaxTextRuns = 16;
+
+    /// <summary>
     /// The title of the list page.
     /// </summary>
     public const string ListTitle = "Incidents";
