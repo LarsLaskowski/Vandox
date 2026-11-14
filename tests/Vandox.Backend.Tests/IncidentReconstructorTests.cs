@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Incidents;
+using Vandox.Backend.Retention;
 using Vandox.Core.Incidents;
 using Vandox.Core.Model;
 using Vandox.Core.Signatures;
@@ -566,6 +567,68 @@ public class IncidentReconstructorTests
     }
 
     /// <summary>
+    /// A cluster whose window starts before the log period and whose imported kills reach past the log period's start plus the kill window is
+    /// built and saved with every kill: the origin of each kill decides, not its capture time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunBuildsImportedClusterReachingIntoTheLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var start = _late - _logPeriod;
+        var kills = new[] { start, start.AddMinutes(80), start.AddMinutes(160) };
+
+        await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, kills.Select(at => IncidentSamples.Kill(at)).ToArray());
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.IsGreaterThan(start + _before + _after, kills[^1], "the last kill lies past the log period's start plus the kill window");
+        Assert.AreSequenceEqual([start], stored.Select(row => row.Incident.FirstKillAt), "the cluster of imported kills is saved");
+        Assert.AreEqual(3L, stored[0].Incident.KillCount, "with every kill");
+        Assert.AreEqual(start - _before, stored[0].Incident.Start, "its window starts before the log period");
+        Assert.AreEqual(1L, result.Created, "one incident is created");
+        Assert.AreEqual(0L, result.Unchanged, "nothing is left unchanged");
+    }
+
+    /// <summary>
+    /// A cluster of an agent kill before the log period whose kernel event is captured 40 seconds after or before the kill's log line is built and
+    /// saved with the hold the scanner made from the kernel event.
+    /// </summary>
+    /// <param name="offsetSeconds">Seconds from the log line to the kernel event, negative before it</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    [DataRow(40)]
+    [DataRow(-40)]
+    public async Task IncidentReconstructorRunBuildsHeldClusterWhoseKernelEventIsSecondsApart(int offsetSeconds)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(0)), AgentRecords.OomKill(At(0).AddSeconds(offsetSeconds)));
+        await new KillHoldScanner(store).ScanAsync(Policy(), _late, TestContext.CancellationToken);
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([At(0)], stored.Select(row => row.Incident.FirstKillAt), "the held cluster is saved");
+        Assert.AreEqual(At(-60), stored[0].Incident.Start, "its window starts before the kill line");
+        Assert.AreEqual(At(30), stored[0].Incident.End, "its window ends after the kill line");
+        Assert.AreEqual(1L, result.Created, "one incident is created");
+        Assert.AreEqual(0L, result.Unchanged, "nothing is left unchanged");
+    }
+
+    /// <summary>
     /// Without a log period, agent kills of any age are built as before: a stored incident takes a new kill in its window, and an old cluster outside every hold is saved.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -638,6 +701,25 @@ public class IncidentReconstructorTests
     private static DateTimeOffset At(int minutes)
     {
         return IncidentSamples.Base.AddMinutes(minutes);
+    }
+
+    /// <summary>
+    /// Creates the default retention policy with the reconstructor's kill window.
+    /// </summary>
+    /// <returns>The policy</returns>
+    private static RetentionPolicy Policy()
+    {
+        return new RetentionPolicy
+               {
+                   Raw = TimeSpan.FromDays(30),
+                   FiveMinuteRollups = TimeSpan.FromDays(365),
+                   HourlyRollups = TimeSpan.FromDays(1095),
+                   Logs = _logPeriod,
+                   Snapshots = TimeSpan.FromDays(30),
+                   Events = TimeSpan.FromDays(1095),
+                   KillWindowBefore = _before,
+                   KillWindowAfter = _after
+               };
     }
 
     /// <summary>

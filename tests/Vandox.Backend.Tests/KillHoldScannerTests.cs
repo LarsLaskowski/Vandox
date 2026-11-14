@@ -28,6 +28,8 @@ public class KillHoldScannerTests
 
     private static readonly TimeSpan _after = TimeSpan.FromMinutes(30);
 
+    private static readonly TimeSpan _margin = TimeSpan.FromMinutes(5);
+
     #endregion // Constants
 
     #region Properties
@@ -64,7 +66,7 @@ public class KillHoldScannerTests
 
         // Assert
         Assert.AreEqual(1, added, "one hold added");
-        Assert.AreSequenceEqual([(_kill - _before, _kill + _after)], holds, "the hold spans the kill's window");
+        Assert.AreSequenceEqual([Hold(_kill)], holds, "the hold spans the kill's window and the margin");
         Assert.AreEqual(1002L, progress.HighestId, "the highest stored record ID");
         Assert.AreEqual(progress.HighestId, progress.ScannedId, "the scan reached the highest record ID");
     }
@@ -122,7 +124,7 @@ public class KillHoldScannerTests
         // Assert
         Assert.AreEqual(1, added, "the late kill adds one hold");
         Assert.AreEqual(0, again, "a scan without new records adds none");
-        Assert.AreSequenceEqual([(late - _before, late + _after), (_kill - _before, _kill + _after)], holds, "the hold of the late kill beside the earlier one, none twice");
+        Assert.AreSequenceEqual([Hold(late), Hold(_kill)], holds, "the hold of the late kill beside the earlier one, none twice");
     }
 
     /// <summary>
@@ -151,7 +153,7 @@ public class KillHoldScannerTests
         var holds = await AllHoldsAsync(store);
 
         // Assert
-        Assert.AreSequenceEqual([(_kill - _before, overlapping + _after), (apart - _before, apart + _after)], holds, "the overlapping windows are one hold, the other kill has its own");
+        Assert.AreSequenceEqual([(Hold(_kill).Start, Hold(overlapping).End), Hold(apart)], holds, "the overlapping windows are one hold, the other kill has its own");
     }
 
     /// <summary>
@@ -204,11 +206,11 @@ public class KillHoldScannerTests
 
         // Assert
         Assert.AreEqual(2, added, "two holds added");
-        Assert.AreSequenceEqual([(StorableTime.Min, first + _after), (last - _before, StorableTime.Max)], holds, "each hold ends at the edge of the storable range");
+        Assert.AreSequenceEqual([(StorableTime.Min, Hold(first).End), (Hold(last).Start, StorableTime.Max)], holds, "each hold ends at the edge of the storable range");
     }
 
     /// <summary>
-    /// With a finite incident period, a kill whose window ended before <c>now − incidents</c> makes no hold, a kill whose window ends in the period does, and both are scanned.
+    /// With a finite incident period, a kill whose hold ended before <c>now − incidents</c> makes no hold, a kill whose hold ends in the period does, and both are scanned.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -220,8 +222,8 @@ public class KillHoldScannerTests
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
         var agent = new AgentRecords();
         var period = TimeSpan.FromDays(100);
-        var expired = _now - period - _after - TimeSpan.FromMinutes(1);
-        var edge = _now - period - _after;
+        var expired = _now - period - _after - _margin - TimeSpan.FromMinutes(1);
+        var edge = _now - period - _after - _margin;
         var policy = Policy(period);
 
         await agent.WriteAsync(store, _now, TestContext.CancellationToken, AgentRecords.OomKill(expired), AgentRecords.OomKill(edge.AddHours(5)), AgentRecords.OomKill(edge));
@@ -233,17 +235,53 @@ public class KillHoldScannerTests
 
         // Assert
         Assert.AreEqual(2, added, "two holds added");
-        Assert.AreSequenceEqual([(edge - _before, edge + _after), (edge.AddHours(5) - _before, edge.AddHours(5) + _after)], holds, "the holds of the kills whose window ends at or after the start of the incident period");
+        Assert.AreSequenceEqual([Hold(edge), Hold(edge.AddHours(5))], holds, "the holds of the kills whose hold ends at or after the start of the incident period");
         Assert.AreEqual(progress.HighestId, progress.ScannedId, "the expired kill is scanned all the same");
     }
 
     /// <summary>
-    /// The incident of an agent kernel OOM kill whose window data has passed every period is built the same after the removal as on an unchanged copy, while the data outside the window is removed.
+    /// The hold of a kernel event of an OOM kill captured 40 seconds after or before the kill's log line spans the kernel event's window
+    /// and the 5-minute margin, so it contains the whole window of the log line.
     /// </summary>
+    /// <param name="offsetSeconds">Seconds from the log line to the kernel event, negative before it</param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
     [TestCategory("AC11")]
-    public async Task KillHoldScannerIncidentAfterRemovalEqualsIncidentBefore()
+    [DataRow(40)]
+    [DataRow(-40)]
+    public async Task KillHoldScannerScanHoldCoversWindowOfKillLineSecondsApart(int offsetSeconds)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+        var kernelEvent = _kill.AddSeconds(offsetSeconds);
+
+        await agent.WriteAsync(store, _now, TestContext.CancellationToken, AgentRecords.KillLine(_kill), AgentRecords.OomKill(kernelEvent));
+
+        // Act
+        var added = await new KillHoldScanner(store).ScanAsync(Policy(), _now, TestContext.CancellationToken);
+        var holds = await AllHoldsAsync(store);
+
+        // Assert
+        Assert.AreEqual(1, added, "one hold added");
+        Assert.AreSequenceEqual([(kernelEvent - _before - _margin, kernelEvent + _after + _margin)], holds, "the hold spans the kernel event's window and the margin");
+        Assert.IsLessThanOrEqualTo(_kill - _before, holds[0].Start, "the hold starts at or before the window of the kill line");
+        Assert.IsGreaterThanOrEqualTo(_kill + _after, holds[0].End, "the hold ends at or after the window of the kill line");
+    }
+
+    /// <summary>
+    /// The incident of an agent kernel OOM kill whose window data has passed every period is built the same after the removal as on an unchanged copy, while the data outside the window is removed; also when the
+    /// kernel event is captured 40 seconds after or before the kill's log line.
+    /// </summary>
+    /// <param name="offsetSeconds">Seconds from the log line to the kernel event, negative before it</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC11")]
+    [DataRow(0)]
+    [DataRow(40)]
+    [DataRow(-40)]
+    public async Task KillHoldScannerIncidentAfterRemovalEqualsIncidentBefore(int offsetSeconds)
     {
         // Arrange
         using var unchangedDirectory = new TempDirectory();
@@ -252,8 +290,8 @@ public class KillHoldScannerTests
         await using var removed = await SqliteStore.OpenAsync(removedDirectory.Path, TestContext.CancellationToken);
         var policy = Policy();
 
-        await WriteHistoryAsync(unchanged);
-        await WriteHistoryAsync(removed);
+        await WriteHistoryAsync(unchanged, offsetSeconds);
+        await WriteHistoryAsync(removed, offsetSeconds);
         await new KillHoldScanner(unchanged).ScanAsync(policy, _now, TestContext.CancellationToken);
         await FoldAllAsync(removed, policy);
         await new KillHoldScanner(removed).ScanAsync(policy, _now, TestContext.CancellationToken);
@@ -295,6 +333,16 @@ public class KillHoldScannerTests
     }
 
     /// <summary>
+    /// Returns the hold of a kill: its window widened by the margin on both sides.
+    /// </summary>
+    /// <param name="at">The capture time of the kernel event</param>
+    /// <returns>The start and end of the hold</returns>
+    private static (DateTimeOffset Start, DateTimeOffset End) Hold(DateTimeOffset at)
+    {
+        return (at - _before - _margin, at + _after + _margin);
+    }
+
+    /// <summary>
     /// Returns a time relative to the kill.
     /// </summary>
     /// <param name="minutes">Minutes after the kill, negative before it</param>
@@ -308,8 +356,9 @@ public class KillHoldScannerTests
     /// Creates the agent history around the kill: lines, snapshots and metrics in its window and three hours before and after it, the kill line and its kernel event. It ends on a connection snapshot, which the
     /// removal keeps as the record with the highest ID and the counts of the test do not include.
     /// </summary>
+    /// <param name="offsetSeconds">Seconds from the kill line to its kernel event, negative before it</param>
     /// <returns>The records</returns>
-    private static DataRecord[] History()
+    private static DataRecord[] History(int offsetSeconds)
     {
         return [
                    IncidentSamples.Line(At(-180), "cron", "heartbeat ok", "journal", "journal"),
@@ -324,7 +373,7 @@ public class KillHoldScannerTests
                    IncidentSamples.Metric(At(-10), "mem_available_bytes", 300),
                    IncidentSamples.Metric(At(-5), "swap_used_bytes", 100),
                    AgentRecords.KillLine(At(0)),
-                   AgentRecords.OomKill(At(0)),
+                   AgentRecords.OomKill(At(0).AddSeconds(offsetSeconds)),
                    IncidentSamples.Line(At(5), "systemd", "mariadb.service: Failed with result 'oom-kill'.", "journal", "journal"),
                    IncidentSamples.Line(At(120), "cron", "heartbeat ok", "journal", "journal"),
                    IncidentSamples.Line(At(180), "cron", "heartbeat ok", "journal", "journal"),
@@ -349,10 +398,11 @@ public class KillHoldScannerTests
     /// Writes the agent history.
     /// </summary>
     /// <param name="store">The store</param>
+    /// <param name="offsetSeconds">Seconds from the kill line to its kernel event, negative before it</param>
     /// <returns>A task that completes when the history is stored</returns>
-    private Task WriteHistoryAsync(SqliteStore store)
+    private Task WriteHistoryAsync(SqliteStore store, int offsetSeconds)
     {
-        return new AgentRecords().WriteAsync(store, _now, TestContext.CancellationToken, History());
+        return new AgentRecords().WriteAsync(store, _now, TestContext.CancellationToken, History(offsetSeconds));
     }
 
     /// <summary>

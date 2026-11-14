@@ -35,6 +35,18 @@ public partial class SqliteStoreRetentionTests
 
     private const string KeptRecordKinds = " WHERE kind IN ('kernel_event', 'service_state', 'backup_run', 'gap')";
 
+    private const int LoadPeriods = 3;
+
+    private const int LoadLines = 60;
+
+    private const int LoadSnapshots = 15;
+
+    private const int LoadPrograms = 24;
+
+    private const string FullTextBytes = "SELECT coalesce(sum(length(block)), 0) FROM log_fts_data";
+
+    private static readonly string[] _boundedKinds = [RecordKind.Metric, RecordKind.LogLine, RecordKind.ProcessSnapshot, RecordKind.MariaDbStatus, RecordKind.ServiceState];
+
     #endregion // Constants
 
     #region Properties
@@ -689,7 +701,9 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Under a constant agent load with raw values, log lines and snapshots kept for one period P, the file grows from P to 2P by at most the kept summaries, events, gaps and template statistics written in that span (the summed lengths of their columns and index entries plus 25 %) plus 10 % of its size at P.
+    /// Under a constant agent load with raw values, log lines, snapshots and service states kept for one period P, over three periods: after every pass each kind holds at most what its period plus one
+    /// pass interval brought; the file grows from P to 3P by at most the kept summaries, events, gaps and template statistics written in that span (the summed lengths of their columns and index entries plus
+    /// 25 %) plus 10 % of its size at P; and the full-text index at 3P is at most 1.25 times its size at P.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -707,24 +721,27 @@ public partial class SqliteStoreRetentionTests
                          HourlyRollups = RetentionSamples.Days(1095),
                          Logs = period,
                          Snapshots = period,
-                         Events = RetentionSamples.Days(1095),
+                         Events = period,
                          KillWindowBefore = TimeSpan.FromHours(1),
                          KillWindowAfter = TimeSpan.FromMinutes(30)
                      };
 
         // Act
-        await SimulateAsync(store, policy, 0, LoadHours * 4);
+        await SimulateAsync(directory, store, policy, 0, LoadHours * 4);
 
         var sizeAtP = await FileBytesAsync(directory);
         var keptAtP = await KeptBytesAsync(directory);
-        var removed = await SimulateAsync(store, policy, LoadHours * 4, LoadHours * 8);
-        var sizeAt2P = await FileBytesAsync(directory);
-        var keptAt2P = await KeptBytesAsync(directory);
-        var allowance = ((keptAt2P - keptAtP) * 1.25) + (sizeAtP * 0.1);
+        var fullTextAtP = await CountAsync(directory, FullTextBytes);
+        var removed = await SimulateAsync(directory, store, policy, LoadHours * 4, LoadHours * 4 * LoadPeriods);
+        var sizeAtEnd = await FileBytesAsync(directory);
+        var keptAtEnd = await KeptBytesAsync(directory);
+        var fullTextAtEnd = await CountAsync(directory, FullTextBytes);
+        var allowance = ((keptAtEnd - keptAtP) * 1.25) + (sizeAtP * 0.1);
 
         // Assert
-        Assert.IsGreaterThan(0, removed, "the passes between P and 2P remove values");
-        Assert.IsLessThanOrEqualTo(sizeAtP + allowance, (double)sizeAt2P, $"size at P {sizeAtP} bytes, at 2P {sizeAt2P} bytes, allowance {allowance:F0} bytes");
+        Assert.IsGreaterThan(0, removed, "the passes after P remove records");
+        Assert.IsLessThanOrEqualTo(sizeAtP + allowance, (double)sizeAtEnd, $"size at P {sizeAtP} bytes, at {LoadPeriods}P {sizeAtEnd} bytes, allowance {allowance:F0} bytes");
+        Assert.IsLessThanOrEqualTo(fullTextAtP * 1.25, (double)fullTextAtEnd, $"log_fts_data at P {fullTextAtP} bytes, at {LoadPeriods}P {fullTextAtEnd} bytes");
     }
 
     /// <summary>
@@ -925,6 +942,49 @@ public partial class SqliteStoreRetentionTests
         Assert.Contains(gap => gap.To == inGap, afterSplit, "one part of the split gap ends at the late value");
         Assert.Contains(gap => gap.From == inGap, afterSplit, "the other part starts at the late value");
         Assert.HasCount(before.Count + 1, afterSplit, "the split adds one part and no other gap");
+    }
+
+    /// <summary>
+    /// A removal step that ends within the sample times of an agent, more than one step bound of them below the raw horizon, has already raised the sample-time floor to the horizon; a late value in the range
+    /// that step deleted, written before the next step, then adds no sample time and opens no time gap.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreRemoveExpiredRaisesTheSampleFloorBeforeTheFirstPrune()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var now = Samples.Base.AddDays(31);
+        var horizon = now.AddDays(-30);
+        var policy = RetentionSamples.Defaults();
+        var late = Samples.Base.AddSeconds(99);
+
+        await WriteOldSampleTimesAsync(store, StorageLimits.RemovalStepExamined + 5000);
+        await store.WriteBatchAsync(TimelineSamples.Run((ulong)StorageLimits.RemovalStepExamined + 5101, 1, now), TestContext.CancellationToken);
+        await RetentionSamples.FoldAllAsync(store, policy, now, TestContext.CancellationToken);
+        await RetentionSamples.MarkScannedAsync(store, [], TestContext.CancellationToken);
+
+        var below = await CountAsync(directory, $"SELECT count(*) FROM agent_sample_times WHERE captured_at < {RetentionSamples.Ns(horizon)}");
+        var before = TimelineSamples.TimeGaps(await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken));
+
+        // Act
+        var first = await store.RemoveExpiredAsync(policy, now, null, TestContext.CancellationToken);
+        var floor = await RowsAsync(directory, "SELECT value FROM meta WHERE key = 'sample_time_floor'");
+        var left = await CountAsync(directory, $"SELECT count(*) FROM agent_sample_times WHERE captured_at < {RetentionSamples.Ns(horizon)}");
+        var written = await store.WriteBatchAsync(TimelineSamples.Batch(now.AddSeconds(1), TimelineSamples.Metric(100, late)), TestContext.CancellationToken);
+        var after = TimelineSamples.TimeGaps(await TimelineSamples.GapsOfAsync(store, TimelineSamples.AgentId, string.Empty, TestContext.CancellationToken));
+        var lateTimes = await CountAsync(directory, $"SELECT count(*) FROM agent_sample_times WHERE captured_at = {RetentionSamples.Ns(late)}");
+
+        // Assert
+        Assert.IsGreaterThan((long)StorageLimits.RemovalStepExamined, below, "more sample times lie below the horizon than one step examines");
+        Assert.IsTrue(first.More, "the first step ends before the pass is done");
+        Assert.IsGreaterThan(0L, left, "the first step ends within the sample times below the horizon");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(horizon)], floor, "the floor is at the raw horizon after the first step");
+        Assert.AreEqual(1, written.Stored, "the late value is stored, a fill of the sequence gap");
+        Assert.AreEqual(0L, lateTimes, "the late value below the floor adds no sample time");
+        Assert.AreEqual(TimelineSamples.Fingerprint(before), TimelineSamples.Fingerprint(after), "the late value adds, changes or drops no time gap");
     }
 
     /// <summary>
@@ -1400,7 +1460,8 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Creates the agent batch of one quarter hour of the constant load, numbered on from the previous ones: metrics every 10 seconds per series, a log line a minute, a process and a MariaDB snapshot, and in the first quarter of each hour one service state and one gap record (two more log lines in the others, so each batch has as many records).
+    /// Creates the agent batch of one quarter hour of the constant load, numbered on from the previous ones: metrics every 10 seconds per series, a log line every 15 seconds, a process snapshot a minute and a
+    /// MariaDB snapshot, and in the first quarter of each hour one service state and one gap record (two more log lines in the others, so each batch has as many records).
     /// </summary>
     /// <param name="quarter">The quarter hours after <see cref="Samples.Base"/></param>
     /// <returns>The batch, received at the end of the quarter hour</returns>
@@ -1408,8 +1469,8 @@ public partial class SqliteStoreRetentionTests
     {
         var start = Samples.Base.AddMinutes(quarter * 15);
         var metrics = Enumerable.Range(0, LoadSeries * 90).Select(index => RetentionSamples.Metric(RecordOrigin.Agent, start.AddSeconds(index / LoadSeries * 10), $"series{index % LoadSeries}", index % 13));
-        var lines = Enumerable.Range(0, 15).Select(index => RetentionSamples.Line(RecordOrigin.Agent, start.AddMinutes(index).AddSeconds(1), $"request {(quarter * 15) + index} served in {index % 17} ms"));
-        DataRecord[] snapshots = [RetentionSamples.OfKind(RecordKind.ProcessSnapshot, RecordOrigin.Agent, start.AddSeconds(2)), RetentionSamples.OfKind(RecordKind.MariaDbStatus, RecordOrigin.Agent, start.AddSeconds(3))];
+        var lines = Enumerable.Range(0, LoadLines).Select(index => RetentionSamples.Line(RecordOrigin.Agent, start.AddSeconds((index * 15) + 1), LoadMessage((quarter * LoadLines) + index)));
+        var snapshots = Enumerable.Range(0, LoadSnapshots).Select(index => LoadProcesses(start.AddMinutes(index).AddSeconds(2), quarter + index)).Append(RetentionSamples.OfKind(RecordKind.MariaDbStatus, RecordOrigin.Agent, start.AddSeconds(3)));
         DataRecord[] hourly = quarter % 4 == 0
                                   ? [RetentionSamples.OfKind(RecordKind.ServiceState, RecordOrigin.Agent, start.AddMinutes(7).AddSeconds(4)), TimelineSamples.AgentGap(0, start.AddMinutes(11).AddSeconds(5), GapCause.Unknown, 0, 0)]
                                   : [RetentionSamples.Line(RecordOrigin.Agent, start.AddMinutes(7).AddSeconds(4), "cache warmed"), RetentionSamples.Line(RecordOrigin.Agent, start.AddMinutes(11).AddSeconds(5), "cache warmed")];
@@ -1422,6 +1483,66 @@ public partial class SqliteStoreRetentionTests
         }
 
         return TimelineSamples.Batch(start.AddMinutes(15), records);
+    }
+
+    /// <summary>
+    /// Creates the message of a log line of the constant load, with words that differ from line to line, as request paths and session IDs do.
+    /// </summary>
+    /// <param name="line">The number of the line</param>
+    /// <returns>The message</returns>
+    private static string LoadMessage(int line)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"GET /shop/item/{line} session s{line * 7919:x8} worker w{line % 8} served from cache {(line % 3 == 0 ? "miss" : "hit")} upstream u{line % 5} in {line % 97} ms bytes {line * 31 % 65536}");
+    }
+
+    /// <summary>
+    /// Creates a process snapshot of the agent with several programs.
+    /// </summary>
+    /// <param name="at">The capture time</param>
+    /// <param name="seed">Varies the sizes of the programs</param>
+    /// <returns>The record</returns>
+    private static DataRecord LoadProcesses(DateTimeOffset at, int seed)
+    {
+        return new DataRecord
+               {
+                   Origin = RecordOrigin.Agent,
+                   Source = "processes",
+                   CapturedAt = at,
+                   Data = new ProcessSnapshot
+                          {
+                              Complete = true,
+                              Programs = Enumerable.Range(0, LoadPrograms)
+                                                   .Select(index => new ProgramAggregate
+                                                                    {
+                                                                        Program = $"program-{index}",
+                                                                        Count = (uint)(1 + (index % 4)),
+                                                                        CpuPercent = (seed + index) % 100,
+                                                                        RssBytes = (ulong)(4096 * (1 + seed + index))
+                                                                    })
+                                                   .ToList()
+                          }
+               };
+    }
+
+    /// <summary>
+    /// Counts the records of each kind whose count is bounded by its period in the batch of each quarter hour of an hour.
+    /// </summary>
+    /// <returns>The counts per kind of the quarters 0 to 3 of an hour</returns>
+    private static Dictionary<string, int>[] LoadKindCounts()
+    {
+        return Enumerable.Range(0, 4).Select(quarter => LoadOf(quarter).Records.GroupBy(record => record.Kind).ToDictionary(group => group.Key, group => group.Count())).ToArray();
+    }
+
+    /// <summary>
+    /// Gets how many records of a kind the batches of one period plus one pass interval up to a quarter hour hold.
+    /// </summary>
+    /// <param name="counts">The counts per kind of the quarters of an hour</param>
+    /// <param name="kind">The kind</param>
+    /// <param name="quarter">The last quarter hour</param>
+    /// <returns>The bound</returns>
+    private static int PeriodBound(Dictionary<string, int>[] counts, string kind, int quarter)
+    {
+        return Enumerable.Range(Math.Max(0, quarter - (LoadHours * 4)), Math.Min(quarter + 1, (LoadHours * 4) + 1)).Sum(index => counts[index % 4].GetValueOrDefault(kind));
     }
 
     /// <summary>
@@ -1710,6 +1831,24 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
+    /// Writes metric values of the agent captured one second apart from <see cref="Samples.Base"/>, numbered from 1 with number 100 missing, in batches of 5,000 values.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="count">The number of values after the first 99</param>
+    /// <returns>A task that completes when the batches are stored</returns>
+    private async Task WriteOldSampleTimesAsync(SqliteStore store, int count)
+    {
+        await store.WriteBatchAsync(TimelineSamples.OldRun(1, 99, Samples.Base, Samples.Base.AddSeconds(100)), TestContext.CancellationToken);
+
+        for (var offset = 0; offset < count; offset += 5000)
+        {
+            var size = Math.Min(5000, count - offset);
+
+            await store.WriteBatchAsync(TimelineSamples.OldRun(101 + (ulong)offset, size, Samples.Base.AddSeconds(100 + offset), Samples.Base.AddSeconds(100 + offset + size)), TestContext.CancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Saves an incident and a note for it.
     /// </summary>
     /// <param name="store">The store</param>
@@ -1751,15 +1890,18 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Writes the load of each quarter hour of a span and runs a fold, a kill scan mark and a removal pass at the end of each, so a period holds 48 passes as 2 days of hourly passes do.
+    /// Writes the load of each quarter hour of a span and runs a fold, a kill scan mark and a removal pass at the end of each, so a period holds 48 passes as 2 days of hourly passes do; after each pass every
+    /// kind bounded by its period holds at most what its period plus one pass interval brought.
     /// </summary>
+    /// <param name="directory">The store directory</param>
     /// <param name="store">The store</param>
     /// <param name="policy">The policy</param>
     /// <param name="fromQuarter">The first quarter hour</param>
     /// <param name="toQuarter">The quarter hour after the last one</param>
-    /// <returns>A task that returns the metric values the passes removed</returns>
-    private async Task<int> SimulateAsync(SqliteStore store, RetentionPolicy policy, int fromQuarter, int toQuarter)
+    /// <returns>A task that returns the records the passes removed</returns>
+    private async Task<int> SimulateAsync(TempDirectory directory, SqliteStore store, RetentionPolicy policy, int fromQuarter, int toQuarter)
     {
+        var counts = LoadKindCounts();
         var removed = 0;
 
         for (var quarter = fromQuarter; quarter < toQuarter; quarter++)
@@ -1768,10 +1910,32 @@ public partial class SqliteStoreRetentionTests
 
             var steps = await RetentionSamples.RetainAsync(store, policy, Samples.Base.AddMinutes((quarter + 1) * 15), [], TestContext.CancellationToken);
 
-            removed += steps.Sum(step => step.MetricValues);
+            removed += steps.Sum(step => step.MetricValues + step.LogLines + step.Snapshots + step.EventRecords);
+
+            await AssertKindsWithinPeriodAsync(directory, counts, quarter);
         }
 
         return removed;
+    }
+
+    /// <summary>
+    /// Asserts that every kind bounded by its period holds at most what its period plus one pass interval brought.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="counts">The counts per kind of the quarters of an hour</param>
+    /// <param name="quarter">The quarter hour of the pass</param>
+    /// <returns>A task that completes when every kind is checked</returns>
+    private async Task AssertKindsWithinPeriodAsync(TempDirectory directory, Dictionary<string, int>[] counts, int quarter)
+    {
+        var stored = await RowsAsync(directory, "SELECT kind, count(*) FROM records GROUP BY kind");
+        var byKind = stored.Select(row => row.Split('|')).ToDictionary(parts => parts[0], parts => long.Parse(parts[1], CultureInfo.InvariantCulture));
+
+        foreach (var kind in _boundedKinds)
+        {
+            var bound = PeriodBound(counts, kind, quarter);
+
+            Assert.IsLessThanOrEqualTo((long)bound, byKind.GetValueOrDefault(kind), $"after the pass of quarter {quarter} the {kind} records are within their period plus one pass interval ({bound})");
+        }
     }
 
     /// <summary>

@@ -295,6 +295,51 @@ public class SqliteStoreRollupTests
     }
 
     /// <summary>
+    /// Sums that overflow are clamped to the largest finite value: two values of +1e308 folded in one step and two of −1e308 folded into the
+    /// same bucket in the next step leave finite sums, and the second step succeeds and advances the watermark.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task SqliteStoreFoldRollupsClampsOverflowingSumsAndAdvances()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = RetentionSamples.Defaults();
+        var now = Samples.Base.AddHours(1);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          RetentionSamples.Metric(RecordOrigin.Backend, Samples.Base.AddSeconds(10), "huge", 1e308),
+                                          RetentionSamples.Metric(RecordOrigin.Backend, Samples.Base.AddSeconds(20), "huge", 1e308));
+
+        var first = await store.FoldRollupsAsync(policy, now, TestContext.CancellationToken);
+        var firstSums = await SumsAsync(directory.Path);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          RetentionSamples.Metric(RecordOrigin.Backend, Samples.Base.AddSeconds(30), "huge", -1e308),
+                                          RetentionSamples.Metric(RecordOrigin.Backend, Samples.Base.AddSeconds(40), "huge", -1e308));
+
+        // Act
+        var second = await store.FoldRollupsAsync(policy, now, TestContext.CancellationToken);
+        var secondSums = await SumsAsync(directory.Path);
+        var watermark = await RetentionSamples.CountAsync(directory.Path, "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'rollup_after_id'", TestContext.CancellationToken);
+        var highest = await RetentionSamples.CountAsync(directory.Path, "SELECT max(record_id) FROM metrics", TestContext.CancellationToken);
+        var counts = await RetentionSamples.CountAsync(directory.Path, "SELECT (SELECT sum(count) FROM metric_rollups_5m) + (SELECT sum(count) FROM metric_rollups_1h)", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(2, first.Values, "the first step folds the two positive values");
+        Assert.AreSequenceEqual([double.MaxValue, double.MaxValue], firstSums, "the sum of the first step is clamped to the largest finite value in both tiers");
+        Assert.AreEqual(2, second.Values, "the second step folds the two negative values");
+        Assert.IsFalse(second.More, "nothing is left after the second step");
+        Assert.AreEqual(highest, watermark, "the watermark advances to the last folded row");
+        Assert.AreSequenceEqual([0.0, 0.0], secondSums, "the clamped sums of both steps add up to a finite sum in both tiers");
+        Assert.AreEqual(8L, counts, "both tiers count the four values");
+    }
+
+    /// <summary>
     /// Creates the labels of a cpu metric.
     /// </summary>
     /// <param name="cpu">The cpu label</param>
@@ -466,6 +511,33 @@ public class SqliteStoreRollupTests
         lines.Sort(StringComparer.Ordinal);
 
         return lines;
+    }
+
+    /// <summary>
+    /// Reads the stored sums of the 5-minute and then the hourly buckets.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <returns>A task that returns the sums</returns>
+    private async Task<List<double>> SumsAsync(string directory)
+    {
+        var sums = new List<double>();
+
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Mode=ReadOnly;Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT sum_value FROM metric_rollups_5m UNION ALL SELECT sum_value FROM metric_rollups_1h";
+
+        await using var reader = await command.ExecuteReaderAsync(TestContext.CancellationToken);
+
+        while (await reader.ReadAsync(TestContext.CancellationToken))
+        {
+            sums.Add(reader.GetDouble(0));
+        }
+
+        return sums;
     }
 
     /// <summary>
