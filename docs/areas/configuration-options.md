@@ -264,7 +264,8 @@ section, keeps the defaults, which ship the journal at `info` and more severe an
   another digit script, an upper-case `D` or `Unlimited`, a missing unit (`30`) and any other unit (`1y`, `12h`) are rejected. The
   error reads `retention.<key>: must be a whole number of days from 1d to 9999d, such as 30d, or unlimited`, with the key's own name
   (for example `retention.logs`). `retention.raw` covers metric values, `retention.snapshots` process, connection and MariaDB status
-  snapshots, `retention.events` kernel events, service states, backup runs, gap records and rows and listener findings, and the rollup
+  snapshots, `retention.events` kernel events, service states, backup runs and listener findings (gap records and rows stay until the longest of
+  the periods other than `incidents` has passed, for good while one of them is `unlimited`), and the rollup
   keys the 5-minute and hourly buckets (the hourly period also the template statistics).
 - `import.time_zone` has no default: the value is `null` when the key is absent, also with an `import:` section that is null or only
   holds comments. A value that is no zone ID, and an empty value, is refused with the reason `must be a time zone of the IANA time

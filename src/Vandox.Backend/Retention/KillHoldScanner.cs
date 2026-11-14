@@ -15,6 +15,11 @@ internal sealed class KillHoldScanner
     /// </summary>
     internal const int PageSize = 1000;
 
+    /// <summary>
+    /// The margin added to both ends of a kill window, so that the lines the incident reads around the kill stay inside the hold.
+    /// </summary>
+    internal static readonly TimeSpan WindowMargin = TimeSpan.FromMinutes(5);
+
     #endregion // Constants
 
     #region Fields
@@ -107,7 +112,7 @@ internal sealed class KillHoldScanner
     }
 
     /// <summary>
-    /// Creates the hold of a kill: its window before and after the capture time.
+    /// Creates the hold of a kill: its window before and after the capture time, each end widened by the margin.
     /// </summary>
     /// <param name="record">The kernel event of the kill</param>
     /// <param name="policy">The policy with the kill window</param>
@@ -116,8 +121,8 @@ internal sealed class KillHoldScanner
     {
         var at = record.Record.CapturedAt;
 
-        var start = at - policy.KillWindowBefore;
-        var end = at + policy.KillWindowAfter;
+        var start = at - policy.KillWindowBefore - WindowMargin;
+        var end = at + policy.KillWindowAfter + WindowMargin;
 
         return new RetentionHold
                {

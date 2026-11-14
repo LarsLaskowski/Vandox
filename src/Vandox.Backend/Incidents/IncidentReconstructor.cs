@@ -121,7 +121,7 @@ public sealed class IncidentReconstructor
                         To = StorableTime.Max
                     };
 
-        var agentLines = new HashSet<long>();
+        var agentLines = new RecentAgentLines();
         var openHasAgentKill = false;
 
         async Task OnClusterAsync(KillCluster? cluster, bool hasAgentKill)
@@ -136,7 +136,7 @@ public sealed class IncidentReconstructor
         {
             foreach (var detected in closed.Where(item => item.SignatureId == IncidentSignatures.OomKill))
             {
-                var agentKill = IsAgentKill(detected, agentLines);
+                var agentKill = agentLines.ContainsAny(detected.RecordIds);
                 var cluster = clusterer.Add(detected);
                 var closedHasAgentKill = openHasAgentKill;
 
@@ -155,13 +155,10 @@ public sealed class IncidentReconstructor
                                     {
                                         result.LinesRead++;
 
-                                        if (IsAgentLineOfInterest(record))
-                                        {
-                                            agentLines.Add(record.Id);
-                                        }
-
+                                        agentLines.Add(record);
                                         detector.Add(record.Id, record.Record, closed);
                                         await DrainAsync().ConfigureAwait(false);
+                                        agentLines.ForgetBefore(record.Record.CapturedAt);
                                     },
                                     cancellationToken)
                          .ConfigureAwait(false);
@@ -218,27 +215,6 @@ public sealed class IncidentReconstructor
                    From = cluster.Start,
                    To = cluster.End
                };
-    }
-
-    /// <summary>
-    /// Determines whether a record is a line of the agent captured so early that a cluster before the log period may contain it as a kill.
-    /// </summary>
-    /// <param name="record">The record</param>
-    /// <returns><c>true</c> when the line is tracked</returns>
-    private bool IsAgentLineOfInterest(StoredRecord record)
-    {
-        return LogPeriodStart is { } start && record.Record.Origin != RecordOrigin.Import && record.Record.CapturedAt < start + _before + _after;
-    }
-
-    /// <summary>
-    /// Determines whether a kill does not come from an imported record: a line of the agent, or a kill too late to be tracked.
-    /// </summary>
-    /// <param name="kill">The detected kill</param>
-    /// <param name="agentLines">The IDs of the tracked lines of the agent</param>
-    /// <returns><c>true</c> when the kill is not imported</returns>
-    private bool IsAgentKill(DetectedEvent kill, HashSet<long> agentLines)
-    {
-        return LogPeriodStart is { } start && (kill.CapturedAt >= start + _before + _after || kill.RecordIds.Any(agentLines.Contains));
     }
 
     /// <summary>

@@ -77,7 +77,7 @@ internal sealed class RollupBucketTotals
     {
         Minimum = Math.Min(Minimum, value);
         Maximum = Math.Max(Maximum, value);
-        Sum += value;
+        Sum = Math.Clamp(Sum + value, -double.MaxValue, double.MaxValue);
         Count++;
 
         if (capturedAt > LastAt || (capturedAt == LastAt && id > LastId))

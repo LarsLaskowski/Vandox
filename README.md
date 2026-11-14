@@ -111,7 +111,7 @@ the file and of the secrets in [Configuration and secrets](docs/areas/configurat
 | `retention.rollups_1h` | `1095d` | How long the hourly rollups and the log template statistics are kept. |
 | `retention.logs` | `90d` | How long log lines are kept. |
 | `retention.snapshots` | `30d` | How long process, connection and MariaDB status snapshots are kept. |
-| `retention.events` | `1095d` | How long kernel events, service states, backup runs, gaps and listener findings are kept. |
+| `retention.events` | `1095d` | How long kernel events, service states, backup runs and listener findings are kept; gaps stay until the longest of the periods other than `incidents` has passed, for good while one of them is `unlimited`. |
 | `retention.incidents` | `unlimited` | How long incidents (without a note) are kept. |
 
 **Secrets**

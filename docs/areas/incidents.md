@@ -82,13 +82,13 @@ connection snapshot gives no peak (`connections` null).
   *Incident notes*). A re-run never deletes or rewrites a note.
 - A stored incident that no rebuilt one overlaps is **kept** as it is, because its lines may have expired.
 - **Windows kept by retention.** The service removes log lines, snapshots and metric values past their periods ([Retention and rollups](retention.md)).
-  It keeps every record captured in the window of an OOM kill that the agent's kernel collector reported (a `kernel_event` of origin
+  It keeps every record captured in the window of an OOM kill, with a margin of 5 minutes at both ends, that the agent's kernel collector reported (a `kernel_event` of origin
   `agent`), as long as an incident of it would be kept, so a re-run builds the same incident after the removal. The window of a stored
   incident keeps nothing by itself, and a log line that merely reads as an OOM kill keeps nothing: the window data of such an incident
   follows the periods while the incident stays.
 - **The re-run rule.** With a finite `retention.logs`, a re-run takes the start of the log period (now minus `retention.logs`) and the
   stored holds. A kill cluster whose window starts before that start is built and saved only when one hold contains its whole window or
-  every kill of it comes from imported lines (imported data is never removed); otherwise it is skipped: the stored incidents it
+  every kill of it comes from imported lines (imported data is never removed; a kill is an agent kill when one of its lines is a non-imported line captured within 2 minutes of the line that closed it); otherwise it is skipped: the stored incidents it
   overlaps stay unchanged, no incident is saved for it, and it counts as `unchanged` in the summary (`kept` never reads negative). A
   cluster in the log period is built as always. With `retention.logs` `unlimited` a re-run rebuilds as before.
 - Every incident is saved in its own transaction: an interrupted run keeps what it saved, and the next run completes it.
@@ -102,7 +102,8 @@ connection snapshot gives no peak (`connections` null).
 ## Limits and errors
 
 - **Memory** does not grow with the number of lines, kills or incidents: one page of up to 1,000 log lines of the pass over all lines
-  (held while an incident it closes is built, about 40 MiB at the model caps) and one page of the incident's window, two detectors, one
+  (held while an incident it closes is built, about 40 MiB at the model caps) and the IDs of the agent lines of the last 2 minutes read (the
+  origin of a kill is judged from them; lines of any other age are forgotten) and one page of the incident's window, two detectors, one
   open incident and its builder (at most 1,000 timeline entries within 4 MiB, two program maps of at most 4,096 entries each, one
   connection peak, 20 + 20 templates). The largest single read is one process snapshot, read as UTF-8 bytes; one forged at every cap (a
   legacy monitoring log with 4,096 processes and programs, all texts such that the stored JSON escapes them to six bytes per character,

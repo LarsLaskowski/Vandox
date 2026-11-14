@@ -286,12 +286,17 @@ internal sealed class RetentionRemover
     }
 
     /// <summary>
-    /// Deletes each agent's sample times below the raw horizon except its newest, then raises the sample-time floor to the horizon.
+    /// Deletes each agent's sample times below the raw horizon except its newest, after raising the sample-time floor to the horizon.
     /// </summary>
     /// <param name="horizon">The raw horizon in nanoseconds</param>
     /// <returns><c>true</c> when every agent is pruned, <c>false</c> when the bound of the step ended the work</returns>
     private bool PruneSampleTimes(long horizon)
     {
+        if (_session.ReadNumber(RetentionQueries.SampleFloorKey) < horizon)
+        {
+            _session.WriteNumber(RetentionQueries.SampleFloorKey, horizon);
+        }
+
         var agent = string.Empty;
 
         while (NextAgent(agent) is { } next)
@@ -302,11 +307,6 @@ internal sealed class RetentionRemover
             {
                 return false;
             }
-        }
-
-        if (_session.ReadNumber(RetentionQueries.SampleFloorKey) < horizon)
-        {
-            _session.WriteNumber(RetentionQueries.SampleFloorKey, horizon);
         }
 
         return true;

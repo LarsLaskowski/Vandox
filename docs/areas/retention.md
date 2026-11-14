@@ -43,17 +43,18 @@ needs in [Storage writing](storage-writing.md).
   missing.
 - A removed record never reads as a gap and is never reported as a new start: the stream row of the agent stays.
 - The sample times of an agent (`agent_sample_times`) below the raw horizon are removed, except the newest row of each agent, and the
-  stored **sample-time floor** is raised to that horizon in the same transaction. A sample time below the floor only narrows, splits
+  stored **sample-time floor** is raised to that horizon first, before the first delete of the step (never lowered). A sample time below the floor only narrows, splits
   or closes the time gap that contains it; it adds no row and opens no time gap ([Storage writing](storage-writing.md), *Time gaps*).
   With `retention.raw` `unlimited` nothing is removed and no floor is stored.
 
 ## Windows of OOM kills
 
 - Before it removes anything, the job reads the `kernel_event` records of origin `agent` stored since its last scan. Each of type
-  `oom_kill` becomes a **hold**: the window from `incidents.window_before` before the kill to `incidents.window_after` after it.
+  `oom_kill` becomes a **hold**: the window from `incidents.window_before` before the kill to `incidents.window_after` after it, each end widened by a margin of
+  5 minutes (the lines an incident reads around its kill stay inside the hold, clamped to the storable range).
   Holds that overlap are merged into one. The scan runs in pages of 1,000 records on a reader connection and stores the holds of a
   page with its progress in one write; a record stored after a scan, whatever its capture time, is caught by the next one.
-- No record captured inside a hold is removed while the hold's end is within `retention.incidents`, so an incident of the kill can
+- No record captured inside a hold is removed while the hold's end (margin included) is within `retention.incidents`, so an incident of the kill can
   still be built in full by `vandoxd incidents`. A hold is removed with `retention.incidents` like an incident, except that a stored
   incident with a note that overlaps it keeps it.
 - Only the agent's `kernel_event` kills make a hold: the kernel writes them, and a journal line that merely reads as an OOM kill
@@ -69,7 +70,8 @@ needs in [Storage writing](storage-writing.md).
   folded. A value is folded exactly once.
 - A bucket holds the minimum, maximum, sum and count of its values and the last value with its capture time (the latest capture
   time, ties by the higher record ID). The average a reader sees is the sum over the count, a floating-point sum in arrival order, so
-  it equals a recomputation within rounding.
+  it equals a recomputation within rounding. A sum is clamped to the range of a double (plus or minus `double.MaxValue`), in the fold
+  and in the merge into a stored bucket, so it never becomes infinite.
 - A bucket is available at most 5 minutes after it ends. The newest bucket grows until its values are all folded.
 - A late value (an agent backfill, an import) whose bucket exists is merged into it, whether the bucket's raw values are still stored
   or already removed: minimum, maximum, count and average become exact for all values seen, and the last value changes only if the

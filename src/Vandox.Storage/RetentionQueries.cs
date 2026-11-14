@@ -49,7 +49,7 @@ internal static class RetentionQueries
     internal const string UpsertFiveMinutes = "INSERT INTO metric_rollups_5m(source, name, labels, bucket, min_value, max_value, sum_value, count, last_value, last_at, last_record_id) "
                                               + "VALUES ($source, $name, $labels, $bucket, $min, $max, $sum, $count, $last, $lastAt, $lastId) "
                                               + "ON CONFLICT(source, name, labels, bucket) DO UPDATE SET min_value = min(min_value, excluded.min_value), max_value = max(max_value, excluded.max_value), "
-                                              + "sum_value = sum_value + excluded.sum_value, count = count + excluded.count, "
+                                              + "sum_value = MIN(MAX(sum_value + excluded.sum_value, $low), $high), count = count + excluded.count, "
                                               + "last_value = CASE WHEN excluded.last_at > last_at OR (excluded.last_at = last_at AND excluded.last_record_id > last_record_id) THEN excluded.last_value ELSE last_value END, "
                                               + "last_record_id = CASE WHEN excluded.last_at > last_at OR (excluded.last_at = last_at AND excluded.last_record_id > last_record_id) THEN excluded.last_record_id ELSE last_record_id END, "
                                               + "last_at = max(last_at, excluded.last_at)";
@@ -60,7 +60,7 @@ internal static class RetentionQueries
     internal const string UpsertHourly = "INSERT INTO metric_rollups_1h(source, name, labels, bucket, min_value, max_value, sum_value, count, last_value, last_at, last_record_id) "
                                          + "VALUES ($source, $name, $labels, $bucket, $min, $max, $sum, $count, $last, $lastAt, $lastId) "
                                          + "ON CONFLICT(source, name, labels, bucket) DO UPDATE SET min_value = min(min_value, excluded.min_value), max_value = max(max_value, excluded.max_value), "
-                                         + "sum_value = sum_value + excluded.sum_value, count = count + excluded.count, "
+                                         + "sum_value = MIN(MAX(sum_value + excluded.sum_value, $low), $high), count = count + excluded.count, "
                                          + "last_value = CASE WHEN excluded.last_at > last_at OR (excluded.last_at = last_at AND excluded.last_record_id > last_record_id) THEN excluded.last_value ELSE last_value END, "
                                          + "last_record_id = CASE WHEN excluded.last_at > last_at OR (excluded.last_at = last_at AND excluded.last_record_id > last_record_id) THEN excluded.last_record_id ELSE last_record_id END, "
                                          + "last_at = max(last_at, excluded.last_at)";
@@ -81,7 +81,7 @@ internal static class RetentionQueries
     /// Reads the kernel events above a record ID, for the kill scan.
     /// </summary>
     internal const string ScanKernelEvents = "SELECT r.id, r.kind, r.origin, r.source, r.agent_id, r.seq, r.captured_at, r.received_at, r.boot_id, r.clock_offset_ns, r.data, "
-                                             + "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, r.live FROM records AS r WHERE r.kind = 'kernel_event' AND r.id > $after ORDER BY r.id LIMIT $limit";
+                                             + "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, r.live FROM records AS r WHERE +r.kind = 'kernel_event' AND r.id > $after ORDER BY r.id LIMIT $limit";
 
     /// <summary>
     /// Reads the holds that overlap a range.

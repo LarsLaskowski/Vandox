@@ -159,6 +159,8 @@ internal static class RollupFolder
                      .Set("$min", totals.Minimum)
                      .Set("$max", totals.Maximum)
                      .Set("$sum", totals.Sum)
+                     .Set("$low", -double.MaxValue)
+                     .Set("$high", double.MaxValue)
                      .Set("$count", totals.Count)
                      .Set("$last", totals.Last)
                      .Set("$lastAt", totals.LastAt)
