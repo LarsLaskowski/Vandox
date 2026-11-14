@@ -5,7 +5,7 @@ go 1.27
 tool golang.org/x/vuln/cmd/govulncheck
 
 require (
-	github.com/klauspost/compress v1.20.3
+	github.com/klauspost/compress v1.20.4
 	go.yaml.in/yaml/v3 v3.0.6
 )
 
