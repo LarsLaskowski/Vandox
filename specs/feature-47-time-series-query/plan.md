@@ -50,7 +50,7 @@ Store reads: `SqliteStoreTimeSeriesTests`; engine: `TimeSeriesServiceTests` (rea
 | AC8 | `QueryAsyncInvalidQueryRefusedBeforeStoreRead` (table of the six exact texts, a `CountingTimeSeriesReader` that must see zero calls), `QueryAsyncStorableEdgesReadWithoutError` (from = `StorableTime.Min`, to and query time = `StorableTime.Max`: every derived bound clamped, no window error) | `TimeSeriesServiceTests.cs` |
 | AC9 | `QueryAsyncCancelledThrowsWithoutResult` | `TimeSeriesServiceTests.cs` |
 | AC9 | `EveryCallHoldsTheGateOnlyWhileItRuns`, `CancelledWaitForSlotThrowsAndHoldsNothing` | `tests/Vandox.Backend.Tests/GatedTimeSeriesReaderTests.cs` |
-| AC9 | `ServeRegistersTimeSeriesServiceOverTheGate` | `tests/Vandox.Backend.Tests/ServeTests.cs` |
+| AC9 | `ServeSharesOneReaderGateBetweenLogsAndIncidents` | `tests/Vandox.Backend.Tests/ServeTests.cs` |
 | AC10 | manual: Product Manager, DS918+ SSD volume, `tools/Vandox.StorageBenchmark --query` published from the stamped branch head by the *Procedure* of `docs/BENCHMARKS.md` (as for #46); fallback if the Product Manager cannot publish: the orchestrator publishes it in the session and attaches the zipped folder to the early draft PR. Development-host run: Dev, step 6, recorded as order of magnitude | — |
 | AC11 | `ConstructorRefusesBridgedPointWithValue`, `ConstructorRefusesBridgeCountMismatch`, `ConstructorRefusesBridgedStackedSeries` | `tests/Vandox.Backend.Tests/ChartDataTests.cs` |
 | AC11 | `RenderAsyncPassesBridgedIndexesOnCreateAndUpdate` | `tests/Vandox.Backend.Tests/ChartInteropTests.cs` |
