@@ -18,7 +18,7 @@ WORKDIR /src
 
 # Restore first, so the layer is reused while only code changes.
 COPY .editorconfig global.json Directory.Build.props Directory.Packages.props Vandox.slnx ./
-COPY .squad/dotnet-rules.globalconfig .squad/
+COPY .squad/dotnet-rules.globalconfig .squad/dotnet-rules-pending.globalconfig .squad/
 COPY src/Vandox.Core/Vandox.Core.csproj src/Vandox.Core/
 COPY src/Vandox.Storage/Vandox.Storage.csproj src/Vandox.Storage/
 COPY src/Vandox.Import/Vandox.Import.csproj src/Vandox.Import/
