@@ -21,6 +21,15 @@ public partial class LogTextTests
 
     #endregion // Properties
 
+    #region Constants
+
+    /// <summary>
+    /// The number of attempts of a heap measurement.
+    /// </summary>
+    private const int MeasurementAttempts = 5;
+
+    #endregion // Constants
+
     #region Fields
 
     private static readonly string _bidi = char.ConvertFromUtf32(0x202e);
@@ -499,6 +508,19 @@ public partial class LogTextTests
     /// <returns>The retained bytes of one text</returns>
     private static long RetainedPerText(int count, int length, bool alternating, int maxRuns)
     {
+        return Median(() => RetainedPerTextOnce(count, length, alternating, maxRuns));
+    }
+
+    /// <summary>
+    /// Measures once the heap that texts of the given length retain together with their runs.
+    /// </summary>
+    /// <param name="count">The number of texts</param>
+    /// <param name="length">The length of each text in characters, all of one byte in UTF-8</param>
+    /// <param name="alternating">Whether plain and escaped characters alternate, or the text is plain</param>
+    /// <param name="maxRuns">The run cap</param>
+    /// <returns>The retained bytes of one text</returns>
+    private static long RetainedPerTextOnce(int count, int length, bool alternating, int maxRuns)
+    {
         var before = HeapSampler.RetainedBytes();
         var kept = new List<(string Text, IReadOnlyList<TextRun> Runs)>(count);
 
@@ -527,6 +549,20 @@ public partial class LogTextTests
     /// <returns>The retained bytes of the runs of one text</returns>
     private static long RetainedRunsPerText(int count, int length, bool alternating, int maxChars, int maxRuns)
     {
+        return Median(() => RetainedRunsPerTextOnce(count, length, alternating, maxChars, maxRuns));
+    }
+
+    /// <summary>
+    /// Measures once the heap that the runs of texts retain, without the source texts.
+    /// </summary>
+    /// <param name="count">The number of texts</param>
+    /// <param name="length">The length of each text in characters, all of one byte in UTF-8</param>
+    /// <param name="alternating">Whether plain and escaped characters alternate, or the text is plain</param>
+    /// <param name="maxChars">The output cap</param>
+    /// <param name="maxRuns">The run cap</param>
+    /// <returns>The retained bytes of the runs of one text</returns>
+    private static long RetainedRunsPerTextOnce(int count, int length, bool alternating, int maxChars, int maxRuns)
+    {
         var text = alternating ? Alternating(length, 'a', (char)1) : new string('a', length);
         var before = HeapSampler.RetainedBytes();
         var kept = new List<IReadOnlyList<TextRun>>(count);
@@ -542,6 +578,26 @@ public partial class LogTextTests
         GC.KeepAlive(text);
 
         return (after - before) / count;
+    }
+
+    /// <summary>
+    /// Takes a measurement five times and returns the median. Arrays that the coverage collector or the thread pool free in the background move a single
+    /// measurement up or down at random; a real leak raises every attempt, so the median still exceeds the limit.
+    /// </summary>
+    /// <param name="measure">The measurement</param>
+    /// <returns>The median of five measurements</returns>
+    private static long Median(Func<long> measure)
+    {
+        var values = new long[MeasurementAttempts];
+
+        for (var attempt = 0; attempt < values.Length; attempt++)
+        {
+            values[attempt] = measure();
+        }
+
+        Array.Sort(values);
+
+        return values[values.Length / 2];
     }
 
     #endregion // Methods
