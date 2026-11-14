@@ -80,6 +80,12 @@ home network; the views ([Logs view](web-ui-logs-view.md), [Incidents view](web-
   value of each series itself in the legend. Every series of a stacked chart has a value at every time; a gap is refused as a programming
   error: `The stacked series '<label>' has no value at point <i>.` The series colors are six custom properties, `--vandox-chart-1` to
   `--vandox-chart-6`, in the light and the dark values; the series after the sixth reuse them in order.
+- A series can mark points as **between samples**: a point that has no value of its own because only another series was sampled there.
+  The line is drawn through such a point (the chart gives the library an undefined cell), while a gap (a missing value that is not
+  bridged) still breaks it. A bridged point has no value, so that a value is not hidden; a stacked series bridges none. The bridge
+  flags are empty (none) or one per time. Refused as programming errors, with the texts
+  `The series '<label>' has <n> bridge flags for <m> points in time.`, `The series '<label>' has a value at bridged point <i>.` and
+  `The stacked series '<label>' cannot bridge points.`
 
 ### External text
 
@@ -103,6 +109,8 @@ IDs) is shown only through one display that writes it as text, never as markup, 
 - **At most two store calls of the logs view, the incidents view and the report page run at once across the whole service**, whatever the
   number of pages and users open; a further call waits for a slot within its own deadline. The store has four reader connections, so two
   stay free for `/healthz` and every other reader.
+- The time-series query ([Time-series queries](time-series-query.md)) shares this gate: each of its store reads takes one slot for that
+  call, as the views' calls do.
 - The slot is held per store call (a read of many snapshots takes it once per snapshot). Saving a note does not use it.
 - A store call that a view's deadline or the leaving of its page cancels is interrupted in the store
   ([Storage](storage.md), *Database file and connections*).
@@ -197,9 +205,9 @@ The ingest listener serves none of this: every UI path, static file and the live
 `Vandox.Backend`: a Blazor Web App in the Interactive Server render mode over SignalR (`Components/App.razor`,
 `Components/Layout/MainLayout.razor`); every page below `Components/Pages` carries `[Authorize]` (`Pages/_Imports.razor`).
 Charts: `Components/Charts` (`TimeSeriesChart`, `ChartData`; a stacked chart is `ChartData` with `stacked: true`, drawn by `createStacked`
-in `js/charts.js`). External text: `Components/Logs/ExternalText` with the runs of `Logs/LogText` (`LogText.Runs`, `LogText.Escape`,
+in `js/charts.js`, which sets the bridged cells to `undefined`; `ChartSeries.Bridged`, `ChartData.ToBridges`). External text: `Components/Logs/ExternalText` with the runs of `Logs/LogText` (`LogText.Runs`, `LogText.Escape`,
 `LogText.MaxShortChars`) and `Logs/TextRun`. The read gate: `Logs/WebReaderGate`, taken by `GatedLogExplorer`, `GatedIncidentBrowser`,
-`GatedRecordReader`, `GatedIncidentStore` and `GatedListenerHistoryReader`. Headers: `Hosting/SecurityHeadersMiddleware`;
+`GatedRecordReader`, `GatedIncidentStore`, `GatedListenerHistoryReader` and `GatedTimeSeriesReader` (`TimeSeries/`). Headers: `Hosting/SecurityHeadersMiddleware`;
 `Hosting/ServeCommand`; `wwwroot/`; `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework script
 independently of the sources, as the image build restores before copying them (record 0098). The source scan is `WebSourceScanner` in
 `WebUiContentTests` (tests); in component code (`.razor`, `.cs` under `Components/`) it forbids `MarkupString`, `AddMarkupContent` and

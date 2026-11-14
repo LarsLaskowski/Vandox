@@ -32,18 +32,15 @@ public static class Program
     /// <summary>
     /// Runs the measurement.
     /// </summary>
-    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c>, or <c>--log-lines N</c> or <c>--search-lines N</c> with optionally <c>--size N</c>, or <c>--backfill</c> or <c>--retention</c> with optionally <c>--size N</c></param>
+    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c>, or <c>--log-lines N</c> or <c>--search-lines N</c> with optionally <c>--size N</c>, or <c>--backfill</c> or <c>--retention</c> with optionally <c>--size N</c>, or <c>--query</c></param>
     /// <returns>The exit code: 0 on success, 1 on a failure, 2 on a usage error</returns>
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length >= 2 && args[1] == BackfillBenchmark.Option)
-        {
-            return await RunBackfillAsync(args).ConfigureAwait(false);
-        }
+        var scenario = SelectScenario(args);
 
-        if (args.Length >= 2 && args[1] == RetentionBenchmark.Option)
+        if (scenario is not null)
         {
-            return await RunRetentionAsync(args).ConfigureAwait(false);
+            return await scenario(args).ConfigureAwait(false);
         }
 
         if (TryParse(args, out var directory, out var batches, out var size, out var warmup, out var logLines, out var searchLines))
@@ -120,6 +117,57 @@ public static class Program
         }
 
         await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> --backfill [--size N]").ConfigureAwait(false);
+
+        return UsageError;
+    }
+
+    /// <summary>
+    /// Selects the scenario that the second argument selects.
+    /// </summary>
+    /// <param name="args">The arguments</param>
+    /// <returns>The scenario to run, <c>null</c> when the arguments select none</returns>
+    private static Func<string[], Task<int>>? SelectScenario(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            return null;
+        }
+
+        return args[1] switch
+               {
+                   BackfillBenchmark.Option => RunBackfillAsync,
+                   QueryBenchmark.Option => RunQueryAsync,
+                   RetentionBenchmark.Option => RunRetentionAsync,
+                   _ => null
+               };
+    }
+
+    /// <summary>
+    /// Runs the time-series query measurement: <c>&lt;directory&gt; --query</c>.
+    /// </summary>
+    /// <param name="args">The arguments</param>
+    /// <returns>The exit code: 0 on success, 1 on a failure, 2 on a usage error</returns>
+    private static async Task<int> RunQueryAsync(string[] args)
+    {
+        if (Directory.Exists(args[0]) && args.Length == 2)
+        {
+            using var stop = new CancellationTokenSource();
+
+            try
+            {
+                await QueryBenchmark.RunAsync(args[0], stop.Token).ConfigureAwait(false);
+
+                return 0;
+            }
+            catch (Exception exception) when (exception is IOException or StoreException or UnauthorizedAccessException)
+            {
+                await Console.Error.WriteLineAsync($"failed: {exception.GetType().Name}: {exception.Message}").ConfigureAwait(false);
+
+                return 1;
+            }
+        }
+
+        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> --query").ConfigureAwait(false);
 
         return UsageError;
     }

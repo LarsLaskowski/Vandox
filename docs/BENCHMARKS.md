@@ -175,6 +175,44 @@ The run on the DS918+ SSD volume is recorded above (Product Manager, database be
 (median 246 ms; steps 1 and 2 remove 0 values while they walk past the imported and the held values, steps 3 to 5 remove 5,000 each). The fold step (88 ms) and
 the removal step (246 ms) are at or below the median batch (1246 ms), so AC6 is met.
 
+## Time-series query
+
+Criterion (issue #47, AC10): **the reference workload runs in under one second, median of five runs, on the reference host** (the SSD
+volume). It is the one-year query of [Time-series queries](areas/time-series-query.md): the service reads the rollups of eight series, one of
+them `cpu_percent` with its eight modes (15 lines), at a target of 1,000 points, with the markers and gaps of the year. Only a run on the
+reference host counts against the criterion.
+
+### Procedure
+
+Publish the tool and run it on the reference host as for the retention steps (self-contained on the DS918+):
+
+```bash
+dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --query
+```
+
+`--query` takes no other option. In a fresh database under a fixed clock (2026-12-01 12:00 UTC) the program writes, through the store's batch
+write, 15 metric lines (`system`: `cpu_percent` with the labels `mode` of eight modes, `mem_available_bytes`, `swap_used_bytes`, `load1`,
+`load5`, `load15`, `filesystem_used_percent`; `self`: `agent_rss_bytes`), one value per line a minute for the last 30 days and one every 15
+minutes before, back to a year before the clock; the hourly `service_state` re-records of 10 units over the year (87,600 records), a backup run
+a day (a start and an end record), 50 OOM kills and 1,000 gap records. It folds every value into the rollups and then queries the 8 series
+for the year at 1,000 points through `TimeSeriesService` over the store: one query that is not counted, then five that are timed. It prints the
+times, the shape of the result and the median, and whether it is under one second.
+
+The values older than 30 days are written every 15 minutes, not at the agent's default intervals (30 and 60 seconds): a query reads
+rollup buckets, and the hourly buckets that a one-year query reads are the same in number, so the older density only makes the fold of the
+setup shorter; the raw values of the last 30 days are written every minute. The database holds about 1.2 million records.
+
+### Results
+
+| Host | Date | Volume | Median query | Times | Verdict |
+| ---- | ---- | ------ | -----------: | ----- | ------- |
+| development host (4 logical CPUs, Ubuntu 24.04, .NET 11.0.0), not the reference host | 2026-11-14 | local disk | 791 ms | 791, 957, 762, 858, 731 ms | order of magnitude only |
+| DS918+ (reference host) | not run yet | SSD volume | | | open (task 13, Product Manager) |
+
+The development-host run wrote 1,219,780 records in 27 s, folded 1,130,400 values in 8 s, and answered with a 12-hour step, 730 times, 15 lines,
+1,000 markers (cut) and 1,000 gaps (cut). The DS918+ is slower than the development host; the row of the reference host is written in
+from the Product Manager's run.
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):

@@ -117,7 +117,7 @@ way, and agents of the hosting provider are never disabled or changed
   rebuilds the log template statistics from the stored log lines
   ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)); `vandoxd report`
   writes the forensics report of the stored data as Markdown to standard output
-  ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md)). The running service also runs the retention job, a hosted service that folds metric values into 5-minute and hourly rollups and removes expired data in bounded steps ([Retention and rollups](areas/retention.md); no other command removes data). Two Kestrel listeners serve
+  ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md)). The running service also runs the retention job, a hosted service that folds metric values into 5-minute and hourly rollups and removes expired data in bounded steps ([Retention and rollups](areas/retention.md); no other command removes data). The time-series service (`TimeSeriesService` over `ITimeSeriesReader`, behind the views' read gate) answers the views' queries for metric lines with their gaps and markers in process, without an HTTP route ([Time-series queries](areas/time-series-query.md); [0214](decisions/0214-time-series-queries-share-one-resolution-and-one-time-axis-with-bridged-samples.md), [0215](decisions/0215-a-service-restart-is-a-rise-of-nrestarts-or-a-new-active-enter-time-of-a-running-or-failed-unit.md), [0216](decisions/0216-time-series-context-is-read-in-fixed-windows-around-the-range.md)). Two Kestrel listeners serve
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
   lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The ingest listener hands only
   `POST /v1/batches` to the ingest endpoint (`Vandox.Backend.Ingest`), which checks the bearer token before it reads the body and the
@@ -472,7 +472,7 @@ Implemented by `src/Vandox.Storage`:
   rules in [Storage reading and log exploration](areas/storage-reading.md), *Log exploration*).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogExplorer` (the logs view), `ILogTemplateReader`,
-  `IImportTracker`, `IIncidentStore` and `IIncidentBrowser` (the incidents view: summaries, one incident, notes), `IRetentionStore` (the retention job: fold, kill scan, removal, holds) and `IRollupReader` (the rollup buckets of a series); a consumer that depends on the store's semantics is tested against the real store.
+  `IImportTracker`, `IIncidentStore` and `IIncidentBrowser` (the incidents view: summaries, one incident, notes), `IRetentionStore` (the retention job: fold, kill scan, removal, holds), `IRollupReader` (the rollup buckets of a series) and `ITimeSeriesReader` (the reads of the time-series query); a consumer that depends on the store's semantics is tested against the real store.
 - **Write throughput** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
 
