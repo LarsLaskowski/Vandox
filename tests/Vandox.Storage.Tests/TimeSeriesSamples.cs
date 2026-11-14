@@ -515,6 +515,34 @@ internal static class TimeSeriesSamples
     }
 
     /// <summary>
+    /// Inserts start records of backup runs directly, one per second, each a run of its own at the boot ID of none.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="first">The capture time and start of the first run</param>
+    /// <param name="count">The number of runs</param>
+    /// <param name="cancellationToken">Cancels the statement</param>
+    /// <returns>A task that completes when the records are stored</returns>
+    internal static async Task InsertBackupStartsAsync(string directory, DateTimeOffset first, int count, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statement is a test-owned literal
+        command.CommandText = "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < $count) "
+                              + "INSERT INTO records(kind, origin, source, captured_at, received_at, data) "
+                              + "SELECT 'backup_run', 'backend', 'backups', $first + i * 1000000000, $first + i * 1000000000, "
+                              + "json_object('phase', 'start', 'boot_id', '', 'started_at', strftime('%Y-%m-%dT%H:%M:%SZ', $first / 1000000000 + i, 'unixepoch'), 'command', 'pzstd') FROM n";
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("$count", count);
+        command.Parameters.AddWithValue("$first", StorageTime.ToNanoseconds(first));
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// Creates the policy of the default periods with a raw period.
     /// </summary>
     /// <param name="raw">The raw period, or <c>null</c> for unlimited</param>

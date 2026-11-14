@@ -25,6 +25,7 @@ public class SeriesGapTests
     [DataRow("filesystem", "system", "clock_offset_seconds", false)]
     [DataRow("filesystem", "agent", "filesystem_used_bytes", false)]
     [DataRow("clock", "system", "clock_offset_seconds", true)]
+    [DataRow("clock", "agent", "clock_offset_seconds", false)]
     [DataRow("clock", "system", "cpu_percent", false)]
     [DataRow("clock", "system", "filesystem_used_bytes", false)]
     [DataRow("system", "system", "cpu_percent", true)]

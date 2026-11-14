@@ -1568,6 +1568,410 @@ public class TimeSeriesServiceTests
     }
 
     /// <summary>
+    /// A time of the axis that lies inside a gap concerning a line, outside every interval between its values, is a gap point of that line.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task QueryAsyncRawTimeInsideGapOutsideLineIntervalsIsGap()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store,
+                                           string.Empty,
+                                           string.Empty,
+                                           TestContext.CancellationToken,
+                                           TimeSeriesSamples.Metric(_mem.Source, _mem.Name, At(0).AddMinutes(3), 1),
+                                           TimeSeriesSamples.Metric(_mem.Source, _mem.Name, At(0).AddMinutes(4), 2),
+                                           TimeSeriesSamples.Metric(_rss.Source, _rss.Name, At(0).AddMinutes(1), 3));
+        await InsertGapAsync(directory.Path, "agent-1", GapState.Final, 0, 2, 1);
+        await InsertGapAsync(directory.Path, "agent-1", GapState.Final, 20, 21, 5);
+
+        // Act
+        var result = await RunAsync(store, At(1), At(0), At(0).AddMinutes(30), 1000, null, _mem, _rss);
+
+        // Assert
+        Assert.AreEqual("1,3,4", string.Join(",", result.Times.Select(Minutes)), "the axis holds the three sample times");
+        Assert.AreEqual("GVV", States(result.Lines[0]), "the first time of the memory line lies inside the first gap and before its first value");
+        Assert.AreEqual("VBB", States(result.Lines[1]), "the later times of the other line lie outside both gaps");
+    }
+
+    /// <summary>
+    /// A break between two values starts at the earlier of the start of a gap inside it and the first whole aligned five-minute span.
+    /// </summary>
+    /// <param name="gapStart">The start of the gap in minutes</param>
+    /// <param name="expected">The expected time added to the axis in minutes</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    [DataRow(2, 2)]
+    [DataRow(7, 5)]
+    [DataRow(12, 5)]
+    public async Task QueryAsyncRawBreakStartsAtEarlierOfGapAndAlignedSpan(int gapStart, int expected)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store,
+                                           string.Empty,
+                                           string.Empty,
+                                           TestContext.CancellationToken,
+                                           TimeSeriesSamples.Metric(_mem.Source, _mem.Name, At(0), 1),
+                                           TimeSeriesSamples.Metric(_mem.Source, _mem.Name, At(0).AddMinutes(20), 2));
+        await InsertGapAsync(directory.Path, "agent-1", GapState.Final, gapStart, gapStart + 1, 1);
+
+        // Act
+        var result = await RunAsync(store, At(1), At(0), At(0).AddMinutes(30), 1000, null, _mem);
+
+        // Assert
+        Assert.AreEqual($"0,{expected},20", string.Join(",", result.Times.Select(Minutes)), "one time is added at the earlier start");
+        Assert.AreEqual("VGV", States(result.Lines[0]), "the line breaks between its values");
+    }
+
+    /// <summary>
+    /// Two values one tick apart inside a gap have no time between them, so no time is added and both stay values.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task QueryAsyncRawValuesOneTickApartInsideGapAddNoTime()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store,
+                                           string.Empty,
+                                           string.Empty,
+                                           TestContext.CancellationToken,
+                                           TimeSeriesSamples.Metric(_mem.Source, _mem.Name, At(0), 1),
+                                           TimeSeriesSamples.Metric(_mem.Source, _mem.Name, At(0).AddTicks(1), 2));
+        await InsertGapAsync(directory.Path, "agent-1", GapState.Final, 0, 2, 1);
+
+        // Act
+        var result = await RunAsync(store, At(1), At(0), At(0).AddMinutes(10), 1000, null, _mem);
+
+        // Assert
+        Assert.HasCount(2, result.Times, "no time fits between the two values");
+        Assert.AreEqual("VV", States(result.Lines[0]), "both are values");
+        Assert.HasCount(1, result.Gaps, "the gap is listed");
+    }
+
+    /// <summary>
+    /// A gap that is still open at the query time ends at the query time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task QueryAsyncOpenGapEndIsClippedToQueryTime()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await InsertGapAsync(directory.Path, "agent-1", GapState.Open, 10, 300, 1);
+
+        // Act
+        var result = await RunAsync(store, At(1), At(0), At(0.5), 1000, null, _mem);
+
+        // Assert
+        Assert.AreSequenceEqual(["agent-1|sequence|open|10-60|no_data|"], result.Gaps.Select(DescribeGap).ToList(), "the end after the query time is the query time");
+    }
+
+    /// <summary>
+    /// A gap record whose span cannot be parsed is left out, whichever end is bad, while a valid one is listed.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task QueryAsyncGapRecordWithUnparseableSpanIsLeftOut()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "gap", At(0).AddMinutes(10), $"{{\"from\":\"not a time\",\"to\":\"{Iso(At(0).AddMinutes(10))}\",\"cause\":\"no_data\",\"collector\":\"\"}}", TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "gap", At(0).AddMinutes(11), $"{{\"from\":\"{Iso(At(0).AddMinutes(10))}\",\"to\":\"not a time\",\"cause\":\"no_data\",\"collector\":\"\"}}", TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "gap", At(0).AddMinutes(12), $"{{\"from\":\"{Iso(At(0).AddMinutes(11))}\",\"to\":\"{Iso(At(0).AddMinutes(12))}\",\"cause\":\"no_data\",\"collector\":\"systemd\"}}", TestContext.CancellationToken);
+
+        // Act
+        var result = await RunAsync(store, At(2), At(0), At(1), 1000, null, _mem);
+
+        // Assert
+        Assert.AreSequenceEqual(["|record|final|11-12|no_data|systemd"], result.Gaps.Select(DescribeGap).ToList(), "only the record with a valid span is listed");
+    }
+
+    /// <summary>
+    /// A kernel event of an unknown type gives no marker, and boot events without a boot ID are one marker each.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task QueryAsyncUnknownKernelEventGivesNoMarkerAndBootsWithoutIdAreNotMerged()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "kernel_event", At(0).AddMinutes(1), "{\"type\":\"mystery\"}", TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "kernel_event", At(0).AddMinutes(2), "{\"type\":\"boot\",\"boot\":{\"boot_id\":\"\"}}", TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "kernel_event", At(0).AddMinutes(3), "{\"type\":\"boot\",\"boot\":{\"boot_id\":\"\"}}", TestContext.CancellationToken);
+
+        // Act
+        var result = await RunAsync(store, At(2), At(0), At(1), 1000, null, _mem);
+
+        // Assert
+        Assert.AreSequenceEqual([At(0).AddMinutes(2), At(0).AddMinutes(3)], result.Markers.Select(marker => marker.At).ToList(), "the unknown type is no marker; the two boots without an ID are two markers");
+        Assert.IsTrue(result.Markers.All(marker => marker.Kind == MarkerKind.Boot), "both are boot markers");
+    }
+
+    /// <summary>
+    /// Of 2,001 service changes read, the first 2,000 are used and the marker list is complete only up to the capture time of the 2,001st.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task QueryAsyncMoreThanTwoThousandServiceChangesUseFirstTwoThousand()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var reader = new CountingTimeSeriesReader(store);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.WriteAsync(store,
+                                           string.Empty,
+                                           FirstBoot,
+                                           TestContext.CancellationToken,
+                                           TimeSeriesSamples.Service("kept.service", "active", null, 0, At(-1)),
+                                           TimeSeriesSamples.Service("edge.service", "active", null, 0, At(-1)),
+                                           TimeSeriesSamples.Service("kept.service", "active", null, 1, At(0.5)),
+                                           TimeSeriesSamples.Service("edge.service", "active", null, 1, At(2)));
+        await TimeSeriesSamples.InsertServiceStatesAsync(directory.Path, "fill-%04d.service", At(1), 1999, TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertServiceStatesAsync(directory.Path, "late-%03d.service", At(3), 5, TestContext.CancellationToken);
+
+        // Act
+        var result = await RunAsync(reader, At(12), At(0), At(10), 1000, null, _mem);
+
+        // Assert
+        Assert.AreSequenceEqual(["kept.service"], result.Markers.Where(marker => marker.Kind == MarkerKind.ServiceRestart).Select(marker => marker.Text).ToList(), "the restart of the 2,001st change is not used");
+        Assert.AreEqual(At(2), result.MarkersCompleteUntil, "the list is complete up to the capture time of the 2,001st change");
+        Assert.AreSequenceEqual([2001], reader.LimitsOf(nameof(ITimeSeriesReader.ServiceChangesAsync)).ToList(), "2,001 changes are asked for");
+        Assert.AreSequenceEqual([2000], reader.LimitsOf(nameof(ITimeSeriesReader.PreviousServiceStatesAsync)).ToList(), "the previous states of the 2,000 used units are asked for");
+    }
+
+    /// <summary>
+    /// A rise of the restart counter is a restart also across a boot, and without a moved enter time it is timed at the capture time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task QueryAsyncCounterRiseAcrossBootIsRestartAtCaptureTime()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, TimeSeriesSamples.Service(Unit, "active", null, 0, At(1)));
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, SecondBoot, TestContext.CancellationToken, TimeSeriesSamples.Boot(At(1.5), SecondBoot), TimeSeriesSamples.Service(Unit, "active", null, 1, At(2)));
+
+        // Act
+        var result = await RunAsync(store, At(12), At(0), At(10), 1000, null, _mem);
+
+        // Assert
+        var found = result.Markers.Where(marker => marker.Kind == MarkerKind.ServiceRestart).ToList();
+
+        Assert.HasCount(1, found, "one restart");
+        Assert.AreEqual(At(2), found[0].At, "the time of the capture, the enter time did not move");
+        Assert.AreEqual(SecondBoot, found[0].BootId, "the boot of the new record");
+    }
+
+    /// <summary>
+    /// Two records with different boot IDs end a run of the enter-time rule only when both boot IDs are known.
+    /// </summary>
+    /// <param name="previousBoot">The boot ID of the previous record, empty for none</param>
+    /// <param name="boot">The boot ID of the new record, empty for none</param>
+    /// <param name="expected">The number of restart markers</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [DataRow("", SecondBoot, 1)]
+    [DataRow(FirstBoot, "", 1)]
+    [DataRow("", "", 1)]
+    [DataRow(FirstBoot, SecondBoot, 0)]
+    public async Task QueryAsyncDifferingBootIdsCountOnlyWhenBothKnown(string previousBoot, string boot, int expected)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, previousBoot, TestContext.CancellationToken, TimeSeriesSamples.Service(Unit, "active", At(-5), 0, At(1)));
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, boot, TestContext.CancellationToken, TimeSeriesSamples.Service(Unit, "active", At(1.5), 0, At(2)));
+
+        // Act
+        var result = await RunAsync(store, At(12), At(0), At(10), 1000, null, _mem);
+
+        // Assert
+        Assert.AreEqual(expected, result.Markers.Count(marker => marker.Kind == MarkerKind.ServiceRestart), "restart markers");
+    }
+
+    /// <summary>
+    /// A moved enter time is a restart when the new record has the capture time of the previous one, without a read of the boots.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task QueryAsyncMovedEnterTimeAtSameCaptureTimeIsRestart()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var reader = new CountingTimeSeriesReader(store);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, TimeSeriesSamples.Service(Unit, "active", At(-5), 0, At(1)), TimeSeriesSamples.Service(Unit, "active", At(0.5), 0, At(1)));
+
+        // Act
+        var result = await RunAsync(reader, At(12), At(0), At(10), 1000, null, _mem);
+
+        // Assert
+        var found = result.Markers.Where(marker => marker.Kind == MarkerKind.ServiceRestart).ToList();
+
+        Assert.HasCount(1, found, "one restart");
+        Assert.AreEqual(At(0.5), found[0].At, "the time of the new enter time");
+        Assert.AreEqual(0, reader.CountOf(nameof(ITimeSeriesReader.BootTimesAsync)), "no boot is looked for between two records of one capture time");
+    }
+
+    /// <summary>
+    /// A previous enter time that cannot be parsed is no earlier enter time, so a valid one is not a move.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task QueryAsyncServiceRestartIgnoresUnparseablePreviousEnterTime()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "service_state", At(1), ForgedState("not a time"), TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "service_state", At(2), ForgedState(Iso(At(1.5))), TestContext.CancellationToken);
+
+        // Act
+        var result = await RunAsync(store, At(12), At(0), At(10), 1000, null, _mem);
+
+        // Assert
+        Assert.IsEmpty(result.Markers.Where(marker => marker.Kind == MarkerKind.ServiceRestart).ToList(), "no earlier enter time to move from");
+    }
+
+    /// <summary>
+    /// A backup run that ended before the range is no marker, and an end record without a time the run was gone by is no end.
+    /// </summary>
+    /// <param name="scenario">The arranged records</param>
+    /// <param name="expected">The described markers</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [DataRow("endedBeforeRange", "")]
+    [DataRow("endWithoutGoneBy", "Running|1|-|none")]
+    [DataRow("goneBeforeStartWithoutSighting", "Ended|1|1|none")]
+    public async Task QueryAsyncBackupRunOfForgedEndRecords(string scenario, string expected)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+
+        if (scenario == "endedBeforeRange")
+        {
+            await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, Start(-3, -3), End(-3, -2.5, -2, -2.5));
+        }
+        else
+        {
+            await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, Start(1, 1));
+
+            var gone = scenario == "endWithoutGoneBy" ? string.Empty : $",\"gone_by\":\"{Iso(At(0.5))}\"";
+
+            await TimeSeriesSamples.InsertRecordAsync(directory.Path, "backup_run", At(1.5), $"{{\"phase\":\"end\",\"boot_id\":\"{FirstBoot}\",\"started_at\":\"{Iso(At(1))}\"{gone}}}", TestContext.CancellationToken);
+        }
+
+        // Act
+        var result = await RunAsync(store, At(12), At(0), At(10), 1000, null, _mem);
+
+        // Assert
+        Assert.AreEqual(expected, string.Join(";", result.Markers.Where(marker => marker.Kind == MarkerKind.BackupRun).Select(DescribeBackup)), "the backup markers: end state, start, end, last sighting in hours");
+    }
+
+    /// <summary>
+    /// Of more backup runs than fit ten pages, at most 1,001 are processed, 1,000 are kept and the marker list is complete only up to the last page read less one day.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task QueryAsyncBackupRunsProcessAtMostThousandAndOne()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var reader = new CountingTimeSeriesReader(store);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+        await TimeSeriesSamples.InsertBackupStartsAsync(directory.Path, At(1), 10020, TestContext.CancellationToken);
+
+        // Act
+        var result = await RunAsync(reader, At(72), At(0), At(48), 1000, null, _mem);
+
+        // Assert
+        Assert.HasCount(TimeSeriesService.MaxMarkers, result.Markers, "the markers are cut at the cap");
+        Assert.AreEqual(At(1).AddSeconds(999), result.Markers[^1].At, "the earliest runs are kept");
+        Assert.AreEqual(1001, reader.CountOf(nameof(ITimeSeriesReader.BootTimesAsync)), "one boot look-up for each of the 1,001 runs processed");
+        Assert.AreEqual(At(1).AddSeconds(10009).AddDays(-1), result.MarkersCompleteUntil, "ten pages of 1,001 records were read, less the one-day window");
+    }
+
+    /// <summary>
+    /// A series with more than 64 label sets keeps 64 lines and is named as cut.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task QueryAsyncSeriesWithMoreThanSixtyFourLabelSetsIsCut()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.InsertLabelSetsAsync(directory.Path, 70, At(0), TestContext.CancellationToken);
+
+        // Act
+        var result = await RunAsync(store, At(3), At(0), At(0).AddMinutes(10), 1000, StepPolicy(), new SeriesKey("system", "load"));
+
+        // Assert
+        Assert.HasCount(TimeSeriesService.MaxLines, result.Lines, "the lines are cut at the cap");
+        Assert.AreEqual("{\"set\":\"0063\"}", result.Lines[^1].Labels, "the first 64 label sets in byte order are kept");
+        Assert.AreSequenceEqual(["load"], result.CutSeries.Select(key => key.Name).ToList(), "the series that lost lines");
+    }
+
+    /// <summary>
+    /// Formats an instant as a UTC time text with seconds.
+    /// </summary>
+    /// <param name="instant">The instant</param>
+    /// <returns>The text</returns>
+    private static string Iso(DateTimeOffset instant)
+    {
+        return instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Gets an instant a number of hours after <see cref="Samples.Base"/>.
     /// </summary>
     /// <param name="hours">The hours</param>

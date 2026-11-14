@@ -379,6 +379,39 @@ public class SqliteStoreTimeSeriesTests
     }
 
     /// <summary>
+    /// A day-step read that starts at the smallest storable time clamps the start of the first step instead of overflowing, and aligns the later steps to the day.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public async Task RollupStepsAsyncAlignsDayStepsNearSmallestStorableTime()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var later = StorableTime.Min.AddDays(1.5);
+
+        await TimeSeriesSamples.InsertBucketAsync(directory.Path, Labelled("a"), StorableTime.Min.AddHours(1), 1, 1, 1, TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertBucketAsync(directory.Path, Labelled("a"), later, 2, 1, 2, TestContext.CancellationToken);
+
+        // Act
+        var page = await store.RollupStepsAsync(StepQuery(RollupTier.FiveMinutes, "load", StorableTime.Min, StorableTime.Min.AddDays(3), TimeSpan.FromDays(1)), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, page.Lines, "one line");
+        Assert.HasCount(2, page.Lines[0].Points, "two steps hold a bucket");
+
+        var first = page.Lines[0].Points[0];
+        var second = page.Lines[0].Points[1];
+
+        Assert.AreEqual(StorableTime.Min, first.At, "the step that starts before the smallest storable time starts at it");
+        Assert.AreEqual(1, first.Last, "the value of the first bucket");
+        Assert.AreEqual(0, (second.At - DateTimeOffset.UnixEpoch).Ticks % TimeSpan.TicksPerDay, "the later step starts at a UTC day");
+        Assert.IsTrue(second.At <= later && later < second.At.AddDays(1), "the step holds its bucket");
+        Assert.AreEqual(2, second.Last, "the value of the second bucket");
+    }
+
+    /// <summary>
     /// A step read of the hourly tier merges hour buckets into steps of one and of two hours and leaves out steps without a bucket.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
