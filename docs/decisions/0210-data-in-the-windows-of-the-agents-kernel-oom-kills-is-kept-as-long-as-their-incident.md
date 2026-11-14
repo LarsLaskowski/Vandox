@@ -49,5 +49,9 @@ rollups](../areas/retention.md).
   `kernel_event` its receipt minus the delay; the 5-minute margin covers that offset. A kill whose kernel event is delayed further
   leaves its incident unchanged on a re-run and may lose the edge of its window.
 - A kill without a `kernel_event` (an agent that did not run its kernel collector) gets no hold; its window follows the periods.
+- Residual of the re-run (accepted, step 8): to tell agent kills from imported ones, a re-run holds the IDs of the agent lines captured
+  in the last 2 minutes read, so its memory grows with the density of those lines, not with their number. Only a holder of the agent
+  token can store many lines of one capture time, `ingest.min_free` bounds them, and only the command run by hand is affected. A cap
+  was not taken: past it, imported kills would be skipped, against the rule the Product Manager chose (spec S11).
 - The forensics report counts no agent hour past `retention.logs` as observed, even inside a kept window, so kept windows do not
   weigh the base rates (spec S10).

@@ -88,7 +88,7 @@ connection snapshot gives no peak (`connections` null).
   follows the periods while the incident stays.
 - **The re-run rule.** With a finite `retention.logs`, a re-run takes the start of the log period (now minus `retention.logs`) and the
   stored holds. A kill cluster whose window starts before that start is built and saved only when one hold contains its whole window or
-  every kill of it comes from imported lines (imported data is never removed; a kill is an agent kill when one of its lines is a non-imported line captured within 2 minutes of the line that closed it); otherwise it is skipped: the stored incidents it
+  every kill of it comes from imported lines (imported data is never removed; a kill is an agent kill when one of the lines it was detected from is not imported); otherwise it is skipped: the stored incidents it
   overlaps stay unchanged, no incident is saved for it, and it counts as `unchanged` in the summary (`kept` never reads negative). A
   cluster in the log period is built as always. With `retention.logs` `unlimited` a re-run rebuilds as before.
 - Every incident is saved in its own transaction: an interrupted run keeps what it saved, and the next run completes it.
@@ -103,7 +103,9 @@ connection snapshot gives no peak (`connections` null).
 
 - **Memory** does not grow with the number of lines, kills or incidents: one page of up to 1,000 log lines of the pass over all lines
   (held while an incident it closes is built, about 40 MiB at the model caps) and the IDs of the agent lines of the last 2 minutes read (the
-  origin of a kill is judged from them; lines of any other age are forgotten) and one page of the incident's window, two detectors, one
+  origin of a kill is judged from them; lines of any other age are forgotten; how many there are follows how densely lines were captured,
+  not how many are stored, so a holder of the agent token who stores many lines of one capture time, bounded by `ingest.min_free`, makes
+  this run hold all their IDs at once: record 0210, issue #457) and one page of the incident's window, two detectors, one
   open incident and its builder (at most 1,000 timeline entries within 4 MiB, two program maps of at most 4,096 entries each, one
   connection peak, 20 + 20 templates). The largest single read is one process snapshot, read as UTF-8 bytes; one forged at every cap (a
   legacy monitoring log with 4,096 processes and programs, all texts such that the stored JSON escapes them to six bytes per character,
