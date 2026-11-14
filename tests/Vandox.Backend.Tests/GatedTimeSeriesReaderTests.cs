@@ -53,59 +53,22 @@ public class GatedTimeSeriesReaderTests
     /// Every member of the reader waits for the only slot of the gate, holds it while the inner read runs and frees it afterwards: the second call of the same
     /// member reaches the inner reader only after the first one ended, with its own token, and a free slot is available afterwards.
     /// </summary>
-    /// <param name="member">The index of the member</param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
     [TestCategory("AC9")]
-    [DataRow(0)]
-    [DataRow(1)]
-    [DataRow(2)]
-    [DataRow(3)]
-    [DataRow(4)]
-    [DataRow(5)]
-    [DataRow(6)]
-    [DataRow(7)]
-    [DataRow(8)]
-    [DataRow(9)]
-    public async Task EveryCallHoldsTheGateOnlyWhileItRuns(int member)
+    public async Task EveryCallHoldsTheGateOnlyWhileItRuns()
     {
         // Arrange
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        using var inner = new ProbeTimeSeriesReader
-                          {
-                              Hold = release.Task
-                          };
-        using var gate = new WebReaderGate(1);
-        using var secondSource = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
-
-        var reader = new GatedTimeSeriesReader(inner, gate);
-        var first = Call(reader, member, TestContext.CancellationToken);
-
-        await inner.WaitForEntryAsync(TestContext.CancellationToken);
-
-        var second = Call(reader, member, secondSource.Token);
+        var problems = new List<string>();
 
         // Act
-        await Task.Delay(100, TestContext.CancellationToken);
-
-        var whileHeld = inner.Calls.Count;
-
-        release.SetResult();
-
-        await first.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
-        await second.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
-
-        var free = await gate.RunAsync(() => Task.FromResult(true), TestContext.CancellationToken);
+        for (var member = 0; member < _memberNames.Length; member++)
+        {
+            await CheckMemberAsync(member, problems);
+        }
 
         // Assert
-        Assert.AreEqual(1, whileHeld, $"{_memberNames[member]}: the inner reader sees one of the two calls while the slot is taken");
-        Assert.AreEqual(1, inner.MaxInFlight, $"{_memberNames[member]}: never more than one call in flight");
-        Assert.HasCount(2, inner.Calls, $"{_memberNames[member]}: the second call ran after the slot was free");
-        Assert.AreEqual(_memberNames[member], inner.Calls[0].Name, "the call reaches the same member of the inner reader");
-        Assert.AreEqual(_memberNames[member], inner.Calls[1].Name, "the second call reaches the same member of the inner reader");
-        Assert.AreEqual(secondSource.Token, inner.Calls[1].Token, "the token of the call reaches the inner reader");
-        Assert.IsTrue(free, "the slot is free after both calls ended");
+        Assert.IsEmpty(problems, string.Join("; ", problems));
     }
 
     /// <summary>
@@ -186,6 +149,20 @@ public class GatedTimeSeriesReaderTests
     }
 
     /// <summary>
+    /// Adds a line to the problems when the condition holds.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="violated">Whether the expectation is violated</param>
+    /// <param name="text">The line</param>
+    private static void AddProblem(List<string> problems, bool violated, string text)
+    {
+        if (violated)
+        {
+            problems.Add(text);
+        }
+    }
+
+    /// <summary>
     /// Makes one call of a member of the reader.
     /// </summary>
     /// <param name="reader">The reader</param>
@@ -207,6 +184,47 @@ public class GatedTimeSeriesReaderTests
                    8 => reader.KernelEventsAsync(_range, cancellationToken),
                    _ => reader.BackupRunsAsync(_range, cancellationToken)
                };
+    }
+
+    /// <summary>
+    /// Checks that one member holds the only slot of a gate while its inner read runs and frees it afterwards.
+    /// </summary>
+    /// <param name="member">The index of the member</param>
+    /// <param name="problems">Receives a line per violated expectation</param>
+    /// <returns>A task that completes when the member was checked</returns>
+    private async Task CheckMemberAsync(int member, List<string> problems)
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var inner = new ProbeTimeSeriesReader
+                          {
+                              Hold = release.Task
+                          };
+        using var gate = new WebReaderGate(1);
+        using var secondSource = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var reader = new GatedTimeSeriesReader(inner, gate);
+        var first = Call(reader, member, TestContext.CancellationToken);
+
+        await inner.WaitForEntryAsync(TestContext.CancellationToken);
+
+        var second = Call(reader, member, secondSource.Token);
+        var whileHeld = inner.Calls.Count;
+
+        release.SetResult();
+
+        await first.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+        await second.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        var free = await gate.RunAsync(() => Task.FromResult(true), TestContext.CancellationToken);
+        var name = _memberNames[member];
+
+        AddProblem(problems, whileHeld != 1, $"{name}: the inner reader sees {whileHeld} calls while the slot is taken, not 1");
+        AddProblem(problems, inner.MaxInFlight != 1, $"{name}: {inner.MaxInFlight} calls in flight at once");
+        AddProblem(problems, inner.Calls.Count != 2, $"{name}: {inner.Calls.Count} calls reached the inner reader, not 2");
+        AddProblem(problems, inner.Calls.Any(call => call.Name != name), $"{name}: a call reached another member of the inner reader");
+        AddProblem(problems, inner.Calls.Count == 2 && inner.Calls[1].Token != secondSource.Token, $"{name}: the token of the call does not reach the inner reader");
+        AddProblem(problems, free == false, $"{name}: the slot is not free after both calls ended");
     }
 
     #endregion // Methods
