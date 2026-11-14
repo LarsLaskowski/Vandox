@@ -10,8 +10,6 @@ public sealed class GatedTimeSeriesReader : ITimeSeriesReader
 {
     #region Fields
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
     /// <summary>
     /// The reader to call.
     /// </summary>
@@ -21,7 +19,6 @@ public sealed class GatedTimeSeriesReader : ITimeSeriesReader
     /// The gate of the reads.
     /// </summary>
     private readonly WebReaderGate _gate;
-#pragma warning restore S4487
 
     #endregion // Fields
 
@@ -34,6 +31,9 @@ public sealed class GatedTimeSeriesReader : ITimeSeriesReader
     /// <param name="gate">The gate of the reads</param>
     public GatedTimeSeriesReader(ITimeSeriesReader inner, WebReaderGate gate)
     {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(gate);
+
         _inner = inner;
         _gate = gate;
     }
@@ -42,95 +42,65 @@ public sealed class GatedTimeSeriesReader : ITimeSeriesReader
 
     #region ITimeSeriesReader
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<LinePage> RawValuesAsync(RawValueQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.RawValuesAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<LinePage> RollupStepsAsync(RollupStepQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.RollupStepsAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<IReadOnlyList<AgentGap>> GapsInRangeAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.GapsInRangeAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<DateTimeOffset?> EarliestUnfoldedAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.EarliestUnfoldedAsync(cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<IReadOnlyList<ServiceStateRow>> ServiceChangesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.ServiceChangesAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<IReadOnlyList<ServiceStateRow>> PreviousServiceStatesAsync(IReadOnlyList<string> units, DateTimeOffset before, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.PreviousServiceStatesAsync(units, before, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<IReadOnlyList<BootTime>> BootTimesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.BootTimesAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<IReadOnlyList<GapRecordRow>> GapRecordsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.GapRecordsAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<IReadOnlyList<KernelEventRow>> KernelEventsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.KernelEventsAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<IReadOnlyList<BackupRunRow>> BackupRunsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.BackupRunsAsync(query, cancellationToken), cancellationToken);
     }
-#pragma warning restore RH2003
 
     #endregion // ITimeSeriesReader
 }

@@ -66,6 +66,7 @@ public sealed class ChartInterop : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(data);
 
         var columns = data.ToColumns();
+        var bridges = data.ToBridges();
 
         // One render at a time: a later render waits for the earlier one, so the chart is created once, and the disposal
         // waits for a pending create and then tears down the chart it made.
@@ -80,7 +81,7 @@ public sealed class ChartInterop : IAsyncDisposable
 
             if (_chart is not null)
             {
-                await _chart.InvokeVoidAsync("update", cancellationToken, [columns]).ConfigureAwait(false);
+                await _chart.InvokeVoidAsync("update", cancellationToken, [columns, bridges]).ConfigureAwait(false);
 
                 return true;
             }
@@ -89,7 +90,7 @@ public sealed class ChartInterop : IAsyncDisposable
 
             var labels = data.Series.Select(series => series.Label).ToArray();
 
-            _chart = await _module.InvokeAsync<IJSObjectReference>(data.Stacked ? "createStacked" : "create", cancellationToken, [host, title, labels, columns]).ConfigureAwait(false);
+            _chart = await _module.InvokeAsync<IJSObjectReference>(data.Stacked ? "createStacked" : "create", cancellationToken, [host, title, labels, columns, bridges]).ConfigureAwait(false);
 
             return true;
         }
