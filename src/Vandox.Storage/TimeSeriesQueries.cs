@@ -139,6 +139,8 @@ internal static class TimeSeriesQueries
                                        + "COALESCE(CAST(json_extract(data, '$.gone_by') AS TEXT), ''), COALESCE(CAST(json_extract(data, '$.command') AS TEXT), '') "
                                        + "FROM records WHERE kind = 'backup_run' AND (captured_at, id) > ($from, $after) AND captured_at < $to ORDER BY captured_at, id LIMIT $limit";
 
+    private const string FromParameter = "$from";
+    private const string ToParameter = "$to";
     private const int MaxRawTimes = 10000;
     private const int MaxLineLimit = 1024;
     private const long FiveMinutesNs = 300_000_000_000;
@@ -217,8 +219,8 @@ internal static class TimeSeriesQueries
     {
         return new Dictionary<string, object>
                {
-                   ["$from"] = StorageTime.ToNanoseconds(query.From),
-                   ["$to"] = StorageTime.ToNanoseconds(query.To),
+                   [FromParameter] = StorageTime.ToNanoseconds(query.From),
+                   [ToParameter] = StorageTime.ToNanoseconds(query.To),
                    ["$after"] = query.AfterId,
                    ["$limit"] = (long)query.Limit
                };
@@ -233,8 +235,8 @@ internal static class TimeSeriesQueries
     {
         return new Dictionary<string, object>
                {
-                   ["$from"] = StorageTime.ToNanoseconds(query.From),
-                   ["$to"] = StorageTime.ToNanoseconds(query.To),
+                   [FromParameter] = StorageTime.ToNanoseconds(query.From),
+                   [ToParameter] = StorageTime.ToNanoseconds(query.To),
                    ["$limit"] = (long)query.Limit
                };
     }
@@ -286,17 +288,20 @@ internal static class TimeSeriesQueries
     internal static ServiceStateRow ReadServiceChange(SqliteDataReader reader)
     {
         var unit = reader.GetString(0);
-        var previous = reader.GetInt64(6) == 1
-                           ? null
-                           : new ServiceStateRow
-                             {
-                                 Unit = unit,
-                                 ActiveState = reader.GetString(7),
-                                 ActiveEnterAt = reader.IsDBNull(8) ? null : reader.GetString(8),
-                                 CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(9)),
-                                 Restarts = reader.GetInt64(10),
-                                 BootId = reader.GetString(11)
-                             };
+        ServiceStateRow? previous = null;
+
+        if (reader.GetInt64(6) != 1)
+        {
+            previous = new ServiceStateRow
+                       {
+                           Unit = unit,
+                           ActiveState = reader.GetString(7),
+                           ActiveEnterAt = reader.IsDBNull(8) ? null : reader.GetString(8),
+                           CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(9)),
+                           Restarts = reader.GetInt64(10),
+                           BootId = reader.GetString(11)
+                       };
+        }
 
         return ReadServiceState(reader, previous);
     }
@@ -419,8 +424,8 @@ internal static class TimeSeriesQueries
         command.CommandText = RawValues;
         command.Parameters.AddWithValue("$source", query.Source);
         command.Parameters.AddWithValue("$name", query.Name);
-        command.Parameters.AddWithValue("$from", StorageTime.ToNanoseconds(query.From));
-        command.Parameters.AddWithValue("$to", StorageTime.ToNanoseconds(query.To));
+        command.Parameters.AddWithValue(FromParameter, StorageTime.ToNanoseconds(query.From));
+        command.Parameters.AddWithValue(ToParameter, StorageTime.ToNanoseconds(query.To));
 
         var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
@@ -624,8 +629,8 @@ internal static class TimeSeriesQueries
                              ["$source"] = query.Source,
                              ["$name"] = query.Name,
                              ["$labels"] = labels,
-                             ["$from"] = window.From,
-                             ["$to"] = window.To
+                             [FromParameter] = window.From,
+                             [ToParameter] = window.To
                          };
         var buckets = await ReaderQuery.ReadAsync(connection,
                                                   query.Tier == RollupTier.FiveMinutes ? BucketsFiveMinutes : BucketsHourly,
@@ -654,16 +659,7 @@ internal static class TimeSeriesQueries
                 continue;
             }
 
-            var newer = bucket.LastAt > merged.LastAt || (bucket.LastAt == merged.LastAt && bucket.LastId > merged.LastId);
-
-            merged = (merged.Bucket,
-                      Math.Min(merged.Min, bucket.Min),
-                      Math.Max(merged.Max, bucket.Max),
-                      ClampSum(merged.Sum + bucket.Sum),
-                      merged.Count + bucket.Count,
-                      newer ? bucket.Last : merged.Last,
-                      newer ? bucket.LastAt : merged.LastAt,
-                      newer ? bucket.LastId : merged.LastId);
+            merged = MergeBuckets(merged, bucket);
         }
 
         if (step != long.MinValue)
@@ -672,6 +668,27 @@ internal static class TimeSeriesQueries
         }
 
         return points;
+    }
+
+    /// <summary>
+    /// Merges a bucket into the merged buckets of its step.
+    /// </summary>
+    /// <param name="merged">The merged buckets</param>
+    /// <param name="bucket">The bucket</param>
+    /// <returns>The merged buckets including the bucket</returns>
+    private static (long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId) MergeBuckets((long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId) merged,
+                                                                                                                                     (long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId) bucket)
+    {
+        var newer = bucket.LastAt > merged.LastAt || (bucket.LastAt == merged.LastAt && bucket.LastId > merged.LastId);
+
+        return (merged.Bucket,
+                Math.Min(merged.Min, bucket.Min),
+                Math.Max(merged.Max, bucket.Max),
+                ClampSum(merged.Sum + bucket.Sum),
+                merged.Count + bucket.Count,
+                newer ? bucket.Last : merged.Last,
+                newer ? bucket.LastAt : merged.LastAt,
+                newer ? bucket.LastId : merged.LastId);
     }
 
     /// <summary>
