@@ -185,6 +185,7 @@ marked planned.
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `CountingClock` (Storage tests) | the clock |
 | database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `ListLogger` (Backend tests) | store, readers |
+| retention store (C#) | `ScriptedRetentionStore` (Backend tests): scripted fold and removal steps (results, exceptions or gated tasks), scripted kernel events and scan progress, failing saves, every call recorded in order with waiters, `Busy`/`Failed` store exceptions with an inner `SqliteException` (5 or 10); `AgentRecords` writes agent batches with sequence numbers | `IRetentionStore`, agent records |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
 | Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |

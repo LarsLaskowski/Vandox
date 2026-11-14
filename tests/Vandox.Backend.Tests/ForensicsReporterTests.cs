@@ -409,6 +409,77 @@ public class ForensicsReporterTests
     }
 
     /// <summary>
+    /// Agent log lines older than the log period and agent process snapshots older than the snapshot period are skipped: they count in no line, observed hour or snapshot of the head.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public async Task ForensicsReporterReportSkipsAgentLinesAndSnapshotsPastTheirPeriods()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store,
+                               _now,
+                               TestContext.CancellationToken,
+                               IncidentSamples.Line(_now.AddDays(-5).AddMinutes(10), "cron", "job one", "journal", "journal"),
+                               IncidentSamples.Processes(_now.AddDays(-3), ("mariadbd", 100 * Mib)),
+                               IncidentSamples.Processes(_now.AddHours(-30), ("mariadbd", 110 * Mib)),
+                               IncidentSamples.Line(_now.AddDays(-1).AddMinutes(20), "cron", "job two", "journal", "journal"),
+                               IncidentSamples.Processes(_now.AddHours(-12), ("mariadbd", 120 * Mib)));
+
+        // Act
+        var (output, _) = await RunRetainedAsync(store);
+
+        var lines = output[..output.IndexOf("## ", StringComparison.Ordinal)].Split('\n');
+
+        // Assert
+        AssertLine(lines, ReportText.English.LogLines, "1", "2026-10-02 12:20 UTC");
+        AssertLine(lines, ReportText.English.ObservedHours, "1");
+        AssertLine(lines, ReportText.English.Snapshots, "1", "2026-10-03 00:00 UTC");
+        Assert.DoesNotContain("2026-09-28 12:10 UTC", output, "the agent line past the log period is not the first line");
+        Assert.DoesNotContain("2026-09-30 12:00 UTC", output, "the agent snapshot past the snapshot period is not the first snapshot");
+    }
+
+    /// <summary>
+    /// Imported log lines and snapshots count however old they are, beside the agent data still in its period.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public async Task ForensicsReporterReportKeepsImportedHours()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await IncidentSamples.WriteAsync(store,
+                                         TestContext.CancellationToken,
+                                         IncidentSamples.Line(_now.AddDays(-5).AddMinutes(10), "cron", "imported job"),
+                                         IncidentSamples.Processes(_now.AddDays(-3), ("mariadbd", 100 * Mib)));
+        await agent.WriteAsync(store,
+                               _now,
+                               TestContext.CancellationToken,
+                               IncidentSamples.Line(_now.AddDays(-5).AddHours(2), "cron", "agent job one", "journal", "journal"),
+                               IncidentSamples.Processes(_now.AddDays(-3).AddMinutes(5), ("mariadbd", 105 * Mib)),
+                               IncidentSamples.Line(_now.AddDays(-1).AddMinutes(20), "cron", "agent job two", "journal", "journal"));
+
+        // Act
+        var (output, _) = await RunRetainedAsync(store);
+
+        var lines = output[..output.IndexOf("## ", StringComparison.Ordinal)].Split('\n');
+
+        // Assert
+        AssertLine(lines, ReportText.English.LogLines, "2", "2026-09-28 12:10 UTC", "2026-10-02 12:20 UTC");
+        AssertLine(lines, ReportText.English.ObservedHours, "2");
+        AssertLine(lines, ReportText.English.Snapshots, "1", "2026-09-30 12:00 UTC");
+        Assert.DoesNotContain("2026-09-30 12:05 UTC", output, "the agent snapshot past the snapshot period is skipped");
+    }
+
+    /// <summary>
     /// Asserts that a line of the head with the label holds all the given texts.
     /// </summary>
     /// <param name="lines">The lines of the head</param>
@@ -500,6 +571,25 @@ public class ForensicsReporterTests
     {
         var output = new StringWriter();
         var reporter = new ForensicsReporter(records, incidents, listeners ?? new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, lookback ?? TimeSpan.FromHours(1), new FakeTimeProvider(_now));
+        var result = await reporter.RunAsync(new MarkdownReportWriter(output, ReportText.English), TestContext.CancellationToken);
+
+        return (output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal), result);
+    }
+
+    /// <summary>
+    /// Runs the reporter with a log period of two days and a snapshot period of one day.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <returns>A task that returns the report with line feeds and the result</returns>
+    private async Task<(string Output, ReportResult Result)> RunRetainedAsync(SqliteStore store)
+    {
+        var output = new StringWriter();
+        var retention = new ReportRetention
+                        {
+                            Logs = TimeSpan.FromDays(2),
+                            Snapshots = TimeSpan.FromDays(1)
+                        };
+        var reporter = new ForensicsReporter(store, store, new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, TimeSpan.FromHours(1), retention, new FakeTimeProvider(_now));
         var result = await reporter.RunAsync(new MarkdownReportWriter(output, ReportText.English), TestContext.CancellationToken);
 
         return (output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal), result);

@@ -5,12 +5,14 @@ using System.Text;
 
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
 using Vandox.Backend.Incidents;
 using Vandox.Backend.Ingest;
 using Vandox.Backend.Logs;
+using Vandox.Backend.Retention;
 using Vandox.Backend.Security;
 using Vandox.Storage;
 
@@ -965,6 +967,44 @@ public class ServeTests
         Assert.AreEqual(LogsView.MaxConcurrentQueries, fields.OfType<SemaphoreSlim>().Concat(fields.OfType<WebReaderGate>().SelectMany(FieldValues).OfType<SemaphoreSlim>()).Single().CurrentCount, "the slots of an idle gate, held by the explorer or by the gate it shares");
         Assert.AreSame<object>(store, fields.OfType<ILogExplorer>().Single(), "the gate wraps the store");
         Assert.AreSame(TimeProvider.System, clock, "the pages get the system clock");
+    }
+
+    /// <summary>
+    /// The service runs one retention job as a hosted service, over the store, with the service's clock and the configured periods.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task ServeRunsRetentionServiceOnlyInTheService()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 13, 12, 0, 0, TimeSpan.Zero));
+
+        IServiceProvider? services = null;
+
+        var run = await StartAsync(fixture, stop.Token, clock, provider => services = provider);
+
+        Assert.IsNotNull(services, "the Built hook ran before the service started");
+
+        // Act
+        var jobs = services.GetServices<IHostedService>().OfType<RetentionService>().ToList();
+        var store = services.GetRequiredService<ILogSearcher>();
+        var fields = jobs.Count == 1 ? FieldValues(jobs[0]) : [];
+        var policy = fields.OfType<RetentionPolicy>().SingleOrDefault();
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, jobs, "one retention job is a hosted service");
+        Assert.AreSame<object>(store, fields.OfType<IRetentionStore>().Single(), "the job works on the service's store");
+        Assert.AreSame(clock, fields.OfType<TimeProvider>().Single(), "the job runs on the service's clock");
+        Assert.IsNotNull(policy, "the job holds a policy");
+        Assert.AreEqual(TimeSpan.FromDays(30), policy.Raw, "the policy has the configured raw period");
+        Assert.AreEqual(TimeSpan.FromDays(90), policy.Logs, "the policy has the configured log period");
+        Assert.IsNull(policy.Incidents, "the policy keeps incidents without limit by default");
     }
 
     /// <summary>

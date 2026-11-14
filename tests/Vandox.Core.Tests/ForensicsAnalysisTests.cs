@@ -429,6 +429,45 @@ public class ForensicsAnalysisTests
     }
 
     /// <summary>
+    /// An outage before the horizon whose kill hour is not observed counts as an outage but in no rule, even with a backup snapshot in its lookback; outages in observed hours before it and outages after it are judged as before.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public void ForensicsAnalysisAddIncidentDoesNotJudgeOutageInUnobservedHourBeforeHorizon()
+    {
+        // Arrange
+        var horizon = _base.AddHours(100);
+        var analysis = new ForensicsAnalysis(_hour)
+                       {
+                           JudgedFrom = horizon
+                       };
+        var unobserved = _base.AddHours(74).AddMinutes(50);
+        var afterHorizon = _base.AddHours(110).AddMinutes(50);
+
+        for (var hour = 0; hour < 72; hour++)
+        {
+            analysis.AddLogLine(_base.AddHours(hour).AddMinutes(30), "syslog");
+            analysis.AddProcessSnapshot(_base.AddHours(hour).AddMinutes(20), hour % 24 == 2 ? Snapshot(("web", Mib), ("pzstd", Mib)) : Snapshot(("web", Mib)));
+        }
+
+        analysis.AddProcessSnapshot(unobserved.AddMinutes(-30), Snapshot(("web", Mib), ("pzstd", Mib)));
+        analysis.AddProcessSnapshot(afterHorizon.AddMinutes(-30), Snapshot(("web", Mib), ("pzstd", Mib)));
+        analysis.Seal();
+
+        // Act
+        var summary = Summarized(analysis, [.. DailyAt(2, 50), unobserved, afterHorizon], 1, 1, 1, 2, 3);
+
+        // Assert
+        Assert.AreEqual(5, summary.Incidents, "every outage is counted");
+        Assert.AreEqual(8, summary.Kills, "the kills of every outage are counted");
+        Assert.AreEqual(3, summary.TimeOfDay[2].Matching, "only the three judged outages are in hour 2, not the one in the unobserved hour before the horizon");
+        Assert.AreEqual(1, summary.TimeOfDay[14].Matching, "the outage after the horizon is in hour 14 although its hour is not observed");
+        Assert.AreEqual(4, summary.Backup.Known, "the backup rule knows the three observed outages and the one after the horizon");
+        Assert.AreEqual(4, summary.Backup.Matching, "each of them followed a backup");
+        Assert.AreEqual(afterHorizon, summary.LastOutageAt, "last outage");
+    }
+
+    /// <summary>
     /// Adds 72 observed hours (a log line at minute 30 of each), the snapshots at minute 20 of the hours that have one, the boots, and seals the analysis.
     /// </summary>
     /// <param name="analysis">The analysis</param>
