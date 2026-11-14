@@ -127,20 +127,16 @@ internal static class SeriesMarkerReader
     /// <returns>A task that returns the time up to which the restarts are complete, or <c>null</c></returns>
     private static async Task<DateTimeOffset?> AddRestartsAsync(ITimeSeriesReader reader, SeriesRange range, List<(SeriesMarker Marker, long Id)> items, CancellationToken cancellationToken)
     {
-        IReadOnlyList<ServiceStateRow> rows = await reader.ServiceChangesAsync(new TimeRangeQuery
-                                                                               {
-                                                                                   From = range.From,
-                                                                                   To = range.End,
-                                                                                   Limit = TimeSeriesQueries.MaxServiceLimit
-                                                                               },
-                                                                               cancellationToken).ConfigureAwait(false);
-        DateTimeOffset? bound = null;
-
-        if (rows.Count >= TimeSeriesQueries.MaxServiceLimit)
-        {
-            bound = rows[TimeSeriesQueries.MaxServiceLimit - 1].CapturedAt;
-            rows = rows.Take(TimeSeriesQueries.MaxServiceLimit - 1).ToList();
-        }
+        var read = await reader.ServiceChangesAsync(new TimeRangeQuery
+                                                    {
+                                                        From = range.From,
+                                                        To = range.End,
+                                                        Limit = TimeSeriesQueries.MaxServiceLimit
+                                                    },
+                                                    cancellationToken).ConfigureAwait(false);
+        var full = read.Count >= TimeSeriesQueries.MaxServiceLimit;
+        var rows = read.Take(TimeSeriesQueries.MaxServiceLimit - 1).ToList();
+        DateTimeOffset? bound = full ? read[TimeSeriesQueries.MaxServiceLimit - 1].CapturedAt : null;
 
         var previous = await PreviousAsync(reader, rows, range.From, cancellationToken).ConfigureAwait(false);
 
@@ -318,9 +314,17 @@ internal static class SeriesMarkerReader
     /// <returns>The start</returns>
     private static DateTimeOffset ParsedStart(BackupRunRow row)
     {
-        SeriesTime.TryParse(row.StartedAt, out var start);
+        return SeriesTime.TryParse(row.StartedAt, out var start) ? start : default;
+    }
 
-        return start;
+    /// <summary>
+    /// Parses the time a backup run was found gone.
+    /// </summary>
+    /// <param name="row">The record</param>
+    /// <returns>The time, or <c>null</c> when the record has none that parses</returns>
+    private static DateTimeOffset? ParsedGone(BackupRunRow row)
+    {
+        return SeriesTime.TryParse(row.GoneBy, out var gone) ? gone : null;
     }
 
     /// <summary>
@@ -341,7 +345,7 @@ internal static class SeriesMarkerReader
         }
 
         var command = records.Select(row => row.Command).FirstOrDefault(text => text.Length > 0) ?? string.Empty;
-        var end = records.FirstOrDefault(row => row.Phase == BackupRun.PhaseEnd && SeriesTime.TryParse(row.GoneBy, out _));
+        var end = records.FirstOrDefault(row => row.Phase == BackupRun.PhaseEnd && ParsedGone(row) is not null);
 
         if (end is null)
         {
@@ -356,9 +360,7 @@ internal static class SeriesMarkerReader
             return Backup(records[0], start, command, null, null, boots.Count == 0 ? BackupRunEnd.Running : BackupRunEnd.Unknown);
         }
 
-        SeriesTime.TryParse(end.GoneBy, out var gone);
-
-        var endsAt = Later(start, Earlier(gone, range.Now));
+        var endsAt = Later(start, Earlier(ParsedGone(end) ?? start, range.Now));
 
         if (endsAt <= range.From)
         {

@@ -107,7 +107,7 @@ internal static class SeriesAssembler
         var low = after + 1;
         var high = before - 1;
 
-        if (low > high || axis.GetViewBetween(low, high).Any())
+        if (low > high || axis.GetViewBetween(low, high).Count > 0)
         {
             return;
         }

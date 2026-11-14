@@ -35,7 +35,7 @@ internal static class SeriesGapReader
                                                  row => row.CapturedAt,
                                                  row => row.Id,
                                                  cancellationToken).ConfigureAwait(false);
-        var items = rows.Select(row => (Gap: FromRow(row, range), Order: 0, Id: row.Id)).ToList();
+        var items = rows.Select(row => (Gap: FromRow(row, range), Order: 0, row.Id)).ToList();
 
         foreach (var row in records.Rows)
         {
