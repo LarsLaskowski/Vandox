@@ -133,6 +133,48 @@ the first round pays the start-up of the database): the numbers of a batch are a
 costs a few index seeks. There is no "before" for this scenario, because `origin/main` keeps no gaps; the nearest comparison is the contiguous batch above. The program
 removes its database afterwards and asserts nothing.
 
+## Retention steps
+
+Criterion (issue #46, AC6): one step of the retention job stays within the work of one ingest batch, so ingest waits for at most one step
+([Retention and rollups](areas/retention.md), *The job*). Measured with the `--retention` scenario of the storage benchmark: **the median of
+five fold steps and the median of five removal steps are at or below the median of the five batches of 10,000 records of the same run**, on
+the volume that holds the database. Only a run on the reference host counts against the criterion.
+
+### Procedure
+
+Publish the tool as above and run it on the reference host, on the volume that holds the database (the SSD volume):
+
+```bash
+dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --retention [--size N]
+```
+
+The DS918+ has no .NET 11 runtime installed, so the tool is published self-contained there and run without `dotnet`:
+
+```bash
+dotnet publish tools/Vandox.StorageBenchmark -c Release -r linux-x64 --self-contained -p:DebugType=none -o publish-sc
+publish-sc/Vandox.StorageBenchmark <existing folder on the data volume> --retention
+```
+
+`--retention` cannot be combined with other options but `--size N`, the number of metric points per batch (default 10,000, 1 to 20,000). The
+program writes, in a fresh database, 5,000 imported metric points and 5,000 held ones (agent points inside a stored hold of their window) 80
+and 75 days before a fixed clock, then five batches of `N` agent metric points 60 days before it (the raw period is 30 days); the times of
+the batches are printed. Then it folds the first step, which holds the imported and the held values and is not counted, and times every
+fold step that follows (five at the default size), and times the first five removal steps, which walk past the imported and the held values
+before they remove expired ones. It prints the median batch, the median fold step, the median removal step and whether both steps are at or
+below the batch.
+
+### Results
+
+| Host | Date | Volume | Size | Median batch | Median fold step | Median removal step | Verdict |
+| ---- | ---- | ------ | ---: | -----------: | ---------------: | ------------------: | ------- |
+| development host (4 logical CPUs, Ubuntu 24.04), not the reference host | 2026-11-14 | local disk | 10,000 | 314 ms | 14 ms | 37 ms | order of magnitude only |
+| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained, branch head 24c76b2) | 2026-11-14 | SSD volume (`/volume2`) | 10,000 | 1246 ms | 88 ms | 246 ms | **AC6 met** |
+
+The run on the DS918+ SSD volume is recorded above (Product Manager, database below `/volume2/DockerData/Vandox-Tests/ret1`). Batches 1528, 1315, 1231, 1206, 1246 ms
+(median 1246 ms); fold steps 94, 88, 95, 87, 53 ms (median 88 ms, each folding 10,000 values into 37 to 38 buckets); removal steps 246, 187, 339, 281, 222 ms
+(median 246 ms; steps 1 and 2 remove 0 values while they walk past the imported and the held values, steps 3 to 5 remove 5,000 each). The fold step (88 ms) and
+the removal step (246 ms) are at or below the median batch (1246 ms), so AC6 is met.
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):

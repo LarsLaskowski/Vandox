@@ -30,6 +30,8 @@ internal sealed class AgentTimeline : IDisposable
     private readonly string _agentId;
     private readonly Dictionary<string, TimelineStatement> _statements = [with(StringComparer.Ordinal)];
 
+    private bool _floorRead;
+    private long _sampleFloor;
     private bool _known;
     private long _floor;
     private long _max;
@@ -158,6 +160,25 @@ internal sealed class AgentTimeline : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             AddSampleTime(time, range.Min, range.Max);
         }
+    }
+
+    /// <summary>
+    /// Returns whether a sequence number was received: it lies from the lowest stored number up to the highest and in no sequence gap
+    /// that is open or final. A record of such a number that is not stored was removed by the retention job and is not stored again.
+    /// Call it before <see cref="Prepare"/>, which moves the highest number and closes gaps.
+    /// </summary>
+    /// <param name="seq">The sequence number</param>
+    /// <returns>True when the number was received</returns>
+    internal bool WasReceived(long seq)
+    {
+        if (_known == false || seq < _floor || seq > _max)
+        {
+            return false;
+        }
+
+        var gap = Seek(AgentTimelineQueries.FindGap, seq);
+
+        return gap is null || gap.Value.Last < seq;
     }
 
     /// <summary>
@@ -716,6 +737,13 @@ internal sealed class AgentTimeline : IDisposable
     /// <param name="max">The highest number of a metric at this time in the batch</param>
     private void AddSampleTime(long time, long min, long max)
     {
+        if (time < ReadSampleFloor())
+        {
+            NarrowBelowFloor(time, min, max);
+
+            return;
+        }
+
         var inserted = Statement(AgentTimelineQueries.InsertSampleTime).Set(TimelineParameter.Agent, _agentId).Set(TimelineParameter.Time, time).Set(TimelineParameter.Min, min).Set(TimelineParameter.Max, max).Execute();
 
         if (inserted == 0)
@@ -746,6 +774,39 @@ internal sealed class AgentTimeline : IDisposable
         {
             CreateTimeGap(time, next.Value.Time, max, next.Value.Seq, _receivedNs, true);
         }
+    }
+
+    /// <summary>
+    /// Handles a sample time below the sample-time floor: it narrows, splits or closes the time gap that contains it, but adds no row and opens no gap.
+    /// </summary>
+    /// <param name="time">The capture time in nanoseconds</param>
+    /// <param name="min">The lowest number at the time</param>
+    /// <param name="max">The highest number at the time</param>
+    private void NarrowBelowFloor(long time, long min, long max)
+    {
+        var gap = SeekTimeGap(time);
+
+        if (gap is not null && gap.Value.To > time)
+        {
+            SplitTimeGap(gap.Value, time, min, max);
+        }
+    }
+
+    /// <summary>
+    /// Reads the sample-time floor once per batch.
+    /// </summary>
+    /// <returns>The floor in nanoseconds, or the smallest number when no sample time was ever pruned</returns>
+    private long ReadSampleFloor()
+    {
+        if (_floorRead == false)
+        {
+            using var reader = Statement(AgentTimelineQueries.ReadSampleFloor).Query();
+
+            _sampleFloor = reader.Read() && long.TryParse(reader.GetString(0), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var floor) ? floor : long.MinValue;
+            _floorRead = true;
+        }
+
+        return _sampleFloor;
     }
 
     /// <summary>

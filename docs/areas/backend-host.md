@@ -102,6 +102,11 @@ sub-command in [Log import](log-import.md).
   message is a fixed text.
 - The level is `log.level`; until the configuration is loaded, start-up errors are logged at `info`. The framework's own categories log
   from warning level unless the level is `debug`, so the health probe does not fill the log.
+- The retention job ([Retention and rollups](retention.md)) writes five lines under the logger `retention`, with counts as attributes and
+  never stored text: `retention rollup` (event 69, information, `Values`, `Buckets`), `retention removal records` (70, information,
+  `MetricValues`, `LogLines`, `Snapshots`, `Events`, `Gaps`), `retention removal derived` (73, information, `FiveMinuteValues`,
+  `HourlyValues`, `TemplateHours`, `Incidents`, `Holds`), `retention step busy` (71, warning, `Operation`) and `retention step failed`
+  (72, error, `Operation`, `Error`, the store's error text). A pass that changed nothing writes nothing.
 
 ## Shutdown
 
@@ -110,6 +115,9 @@ finish, the database is closed, the service logs `vandoxd stopped` and exits 0.
 
 - From the stop signal on no ingest write starts, a started write is cancelled by the deadline at the latest, and on every way out
   the service drains the ingest writes in flight before it closes the database ([Ingest endpoint](ingest-endpoint.md), *Stop*).
+- The retention job is a hosted service of the service process only: it folds metric values into rollups and removes expired data in
+  bounded steps from start-up on ([Retention and rollups](retention.md)). The stop signal ends it between steps; a step that has begun
+  commits or rolls back first, and the drain and the close of the database come after it.
 - A second signal ends the process at once. The deadline and the health timeout are constants, not options.
 
 ## Container image
@@ -210,7 +218,7 @@ finish, the database is closed, the service logs `vandoxd stopped` and exits 0.
   and log lines: [Ingest endpoint](ingest-endpoint.md).
 - The configuration file and the secrets: [Configuration and secrets](configuration-and-secrets.md); the options: [Configuration
   options](configuration-options.md).
-- The import sub-command: [Log import](log-import.md). The incident reconstruction, the template statistics and the forensics report
+- The retention job, its periods and its steps: [Retention and rollups](retention.md). The import sub-command: [Log import](log-import.md). The incident reconstruction, the template statistics and the forensics report
   themselves: [Incidents](incidents.md), [Log templates](log-templates.md), [Forensics report](forensics-report.md).
 - The database: [Storage](storage.md). The batch format: [Wire format](wire-format.md). The agent's sending: [Agent
   sending](agent-sending.md).
@@ -222,6 +230,6 @@ finish, the database is closed, the service logs `vandoxd stopped` and exits 0.
 
 `Vandox.Backend` (`Cli/CommandLine`, `Hosting/BackendApp`, `ServeCommand` (the drain in a `finally`), `ListenerRoutes`, `PortRoutingMiddleware`,
 `SecurityHeadersMiddleware`, `HealthEndpoint`, `PingChecker`, `Cli/HealthCheckCommand`, `Cli/StoreCommand`, `Cli/TemplatesCommand`,
-`Logging/JsonLineLogger` with `[LoggerMessage]` methods in `Hosting/BackendLog`; the web UI as a Blazor Web App in the Interactive Server render
+`Retention/RetentionService`, `Logging/JsonLineLogger` with `[LoggerMessage]` methods in `Hosting/BackendLog`; the web UI as a Blazor Web App in the Interactive Server render
 mode), `deploy/backend/` (Dockerfile, compose file, example configuration), `.github/scripts/smoke-test-backend.sh`. The ingest endpoint's
 types are listed in [Ingest endpoint](ingest-endpoint.md), *Implementation*.

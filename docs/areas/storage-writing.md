@@ -33,6 +33,16 @@ endpoint, the log import, `vandoxd templates`, `vandoxd incidents` and the incid
 - **Deduplication:** a record of origin `agent` is identified by (agent ID, sequence number) across all kinds. It is inserted with
   `ON CONFLICT DO NOTHING` and counted as a duplicate; a stored record is never replaced or updated. Records of origin `import` are not
   deduplicated, because log lines have no identity of their own; the import is idempotent per file instead ([Log import](log-import.md)).
+- **Resend after removal.** Retention removes records whose copy an agent may still resend after a lost acknowledgement, so the unique
+  index no longer sees them. A record of origin `agent` whose number lies between the stream's `floor_seq` and `max_seq` and in no
+  sequence gap that is not closed (open or final) is therefore skipped before its insert: it is acknowledged with its batch, neither
+  stored, folded into a rollup nor placed in the timeline, and counted as a duplicate like a conflict. The check is made per record
+  against the stream row and gap rows as loaded before the batch's own records move them, and costs a gap lookup only for a number at or
+  below the highest one. A number in a closed gap was filled and is a resend; a number in an open or final gap still fills it, and
+  retention never removes such a gap, so a late fill is never taken for a resend. Residual: a number below `floor_seq` (the backfill
+  below the first number received) is not covered: once a removal pass has removed its copy — on the next pass for a record already past
+  its period (spec E3) — a resend after a lost acknowledgement is stored and folded again. A holder of the agent token can do the same
+  at will ([Retention and rollups](retention.md)).
 - The rows of `listener_comparisons` and the agent timeline rows (below) are the only rows the batch write path ever updates; a
   `records` row never is.
 
@@ -41,7 +51,7 @@ endpoint, the log import, `vandoxd templates`, `vandoxd incidents` and the incid
 - The write path inserts the message into `log_fts` right after each `log_lines` row, in the same transaction, with no trigger.
   Invariant: every `log_lines` row has exactly one index entry with its message, written in the transaction that wrote the row.
 - The write path of a batch is the only code that inserts into `log_lines`, so a log line is searchable as soon as its batch is
-  committed. Any code that writes or deletes `log_lines` (a repair tool, retention) must maintain `log_fts` in the same transaction.
+  committed. Any code that writes or deletes `log_lines` (a repair tool, retention) must maintain `log_fts` in the same transaction; retention does so with the FTS5 `delete` command and the old message, and ends a step that removed lines with an incremental merge of at most 64 pages ([Retention and rollups](retention.md)).
 
 ### Template statistics
 
@@ -49,13 +59,18 @@ endpoint, the log import, `vandoxd templates`, `vandoxd incidents` and the incid
   [Log templates](log-templates.md)): the template row's `count`, `first_seen` and `last_seen`, the template's hour and the source's hour.
   The counts of a batch are summed per template and hour first, so a batch runs one statement per template, template hour and source
   hour it touches; a batch without log lines runs none. A record that is not stored (a duplicate) is not counted.
-- The template tables are written only by this path and the rebuild below; code that deletes log lines leaves them unchanged.
+- The template tables are written by this path, the rebuild below and retention, which removes only the hours past `retention.rollups_1h` that hold no stored line of their source and the templates left without an hour; code that deletes log lines otherwise leaves them unchanged.
 
 ### Template rebuild
 
-`vandoxd templates` rebuilds the statistics:
+`vandoxd templates` rebuilds the statistics. With a finite `retention.logs` it keeps every hour that ends before the log period and
+recounts the others: it passes the first full hour at or after `now − retention.logs` as the start of the log period, and the clear
+transaction empties the template hours and source hours from that hour on only, then the stored lines captured at or after it are
+counted. The hours before it, also those whose lines were partly or wholly removed, keep their statistics; the `count`, `first_seen`
+and `last_seen` of each template are recomputed from its hours, and a template left without an hour is removed. With `unlimited` it
+rebuilds everything. In detail:
 
-- A clear transaction empties the three template tables (hours first), writes the run marker (the row `template_rebuild` of `meta`,
+- A clear transaction empties the three template tables (or, with a log period, the part described) (hours first), writes the run marker (the row `template_rebuild` of `meta`,
   32 random hexadecimal characters) and reads the high-water ID (the highest record ID). Then the stored log lines up to it are counted in
   batches of at most 10,000 by record ID, one transaction each, with the write path's own counting. Every counting transaction first
   checks that the marker is its own; the finish transaction checks it again and removes it. Lines stored meanwhile have IDs above the
@@ -113,7 +128,10 @@ the agent's gaps, clock samples, sample times and stream row.
   `agent_sample_times`. A time not seen before narrows, splits or closes the time gap that contains it (a part of at most 2 minutes is
   dropped), else creates a gap to the previous and to the next stored time when that span is over 2 minutes (cause `no_data`, stored
   `open`, with the raw capture times). A time gap is stored `open` or `closed` only; the readers report a not-closed time gap as `final`
-  when no open sequence gap overlaps its bounding numbers, so no batch re-evaluates other gaps.
+  when no open sequence gap overlaps its bounding numbers, so no batch re-evaluates other gaps. A capture time below the stored
+  sample-time floor (`meta` key `sample_time_floor`, raised by retention when it removes sample times below the raw horizon) adds no row
+  and opens no time gap; it only narrows, splits or closes the time gap that contains it ([Retention and rollups](retention.md), record
+  0213).
 - The clock rows are written before the inserts and the stream row last.
 - **Bounded work.** A stored record adds at most three gap rows (two unless it is an agent `gap` record), each found by index seeks
   (every statement's query plan is a search, checked by a test), so the work per record does not grow with the number of open gaps. All
@@ -176,7 +194,7 @@ the agent's gaps, clock samples, sample times and stream row.
   `length()` ends at it, so a character check of the table would let a NUL hide characters; the table checks the bytes whatever the text
   holds. A database error is `store: saving note: …`.
 - A note of an incident survives every re-run of `vandoxd incidents` that updates or keeps the incident, and follows it when it is merged.
-  Retention must move or keep notes, as an incident with notes cannot be deleted ([Storage](storage.md), *Retention (planned)*).
+  Retention keeps an incident with a note, as an incident with notes cannot be deleted ([Retention and rollups](retention.md)).
 
 ## Limits and errors
 
@@ -189,6 +207,8 @@ The limits and exact error texts are stated with each rule above. A refused batc
 - [0095](../decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) — why the write path keeps the template statistics in the batch's transaction.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are matched by overlapping windows, kept per number and saved one transaction each.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes are rows per incident number moved in the merge.
+- [0211](../decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md) — why a resend after removal is skipped.
+- [0213](../decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md) — why a sample time below the floor opens no gap.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the write path stores a mark per agent connection
   snapshot and the comparison of each agent start, computed once per batch.
 - [0130](../decisions/0130-live-or-backfilled-is-decided-at-write-time.md) — why the write path classifies each agent record.

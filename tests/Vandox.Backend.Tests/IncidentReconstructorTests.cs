@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Incidents;
+using Vandox.Backend.Retention;
 using Vandox.Core.Incidents;
 using Vandox.Core.Model;
 using Vandox.Core.Signatures;
@@ -23,6 +24,10 @@ public class IncidentReconstructorTests
     private static readonly TimeSpan _before = TimeSpan.FromHours(1);
 
     private static readonly TimeSpan _after = TimeSpan.FromMinutes(30);
+
+    private static readonly TimeSpan _logPeriod = TimeSpan.FromDays(90);
+
+    private static readonly DateTimeOffset _late = IncidentSamples.Base.AddDays(100);
 
     #endregion // Constants
 
@@ -448,6 +453,247 @@ public class IncidentReconstructorTests
     }
 
     /// <summary>
+    /// A stored incident of agent kills whose window starts before the log period stays unchanged, although a new kill in its window would update it, and counts as unchanged.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunLeavesIncidentBeforeLogPeriodUnchanged()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, IncidentSamples.Base.AddDays(1), TestContext.CancellationToken, AgentRecords.KillLine(At(0)));
+        await RunAsync(store, store, new FakeTimeProvider(IncidentSamples.Base.AddDays(1)), []);
+
+        var before = (await ReadAllAsync(store)).Single();
+
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(10), 1111));
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreEqual(1L, result.Unchanged, "the cluster before the log period counts as unchanged");
+        Assert.AreEqual(0L, result.Created + result.Updated + result.Merged, "nothing is created, updated or merged");
+        Assert.HasCount(1, stored, "one incident is stored");
+        Assert.AreEqual(before.Id, stored[0].Id, "the incident keeps its ID");
+        Assert.AreEqual(JsonSerializer.Serialize(before.Incident), JsonSerializer.Serialize(stored[0].Incident), "the incident is unchanged, without the new kill");
+        Assert.AreEqual(before.UpdatedAt, stored[0].UpdatedAt, "updated_at is untouched");
+    }
+
+    /// <summary>
+    /// A cluster of agent kills whose window starts before the log period is not saved without a hold or with a hold of only part of its window, while a cluster in the log period is.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunSavesNoNewAgentIncidentBeforeLogPeriodOutsideHolds()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+        var partlyHeld = At(180);
+        var recent = _late.AddDays(-1);
+
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(0)), AgentRecords.KillLine(partlyHeld), AgentRecords.KillLine(recent));
+        await SaveHoldAsync(store, partlyHeld.AddMinutes(-30), partlyHeld.AddMinutes(30));
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([recent], stored.Select(row => row.Incident.FirstKillAt), "only the incident in the log period is saved");
+        Assert.AreEqual(1L, result.Created, "one incident is created");
+        Assert.AreEqual(2L, result.Unchanged, "the two clusters before the log period count as unchanged");
+    }
+
+    /// <summary>
+    /// A cluster of agent kills before the log period whose whole window lies in a hold is built and saved; one without a hold is not.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunBuildsHeldClusterBeforeLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(0)), AgentRecords.KillLine(At(300)));
+        await SaveHoldAsync(store, At(-120), At(60));
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([At(0)], stored.Select(row => row.Incident.FirstKillAt), "only the held cluster is saved");
+        Assert.AreEqual(At(-60), stored[0].Incident.Start, "its window starts before the kill");
+        Assert.AreEqual(At(30), stored[0].Incident.End, "its window ends after the kill");
+        Assert.AreEqual(1L, result.Created, "one incident is created");
+    }
+
+    /// <summary>
+    /// A cluster before the log period whose kills are all imported is built and saved; one that mixes an imported with an agent kill is not.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunBuildsImportedClusterBeforeLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(At(0)), IncidentSamples.Kill(At(300)));
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(302), 1111));
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([At(0)], stored.Select(row => row.Incident.FirstKillAt), "only the cluster of imported kills is saved");
+        Assert.AreEqual(1L, stored[0].Incident.KillCount, "its kill");
+        Assert.AreEqual(1L, result.Created, "one incident is created");
+    }
+
+    /// <summary>
+    /// A cluster whose window starts before the log period and whose imported kills reach past the log period's start plus the kill window is
+    /// built and saved with every kill: the origin of each kill decides, not its capture time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunBuildsImportedClusterReachingIntoTheLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var start = _late - _logPeriod;
+        var kills = new[] { start, start.AddMinutes(80), start.AddMinutes(160) };
+
+        await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, kills.Select(at => IncidentSamples.Kill(at)).ToArray());
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.IsGreaterThan(start + _before + _after, kills[^1], "the last kill lies past the log period's start plus the kill window");
+        Assert.AreSequenceEqual([start], stored.Select(row => row.Incident.FirstKillAt), "the cluster of imported kills is saved");
+        Assert.AreEqual(3L, stored[0].Incident.KillCount, "with every kill");
+        Assert.AreEqual(start - _before, stored[0].Incident.Start, "its window starts before the log period");
+        Assert.AreEqual(1L, result.Created, "one incident is created");
+        Assert.AreEqual(0L, result.Unchanged, "nothing is left unchanged");
+    }
+
+    /// <summary>
+    /// A cluster of an agent kill before the log period whose kernel event is captured 40 seconds after or before the kill's log line is built and
+    /// saved with the hold the scanner made from the kernel event.
+    /// </summary>
+    /// <param name="offsetSeconds">Seconds from the log line to the kernel event, negative before it</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    [DataRow(40)]
+    [DataRow(-40)]
+    public async Task IncidentReconstructorRunBuildsHeldClusterWhoseKernelEventIsSecondsApart(int offsetSeconds)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(0)), AgentRecords.OomKill(At(0).AddSeconds(offsetSeconds)));
+        await new KillHoldScanner(store).ScanAsync(Policy(), _late, TestContext.CancellationToken);
+
+        // Act
+        var result = await RunRetainedAsync(store);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([At(0)], stored.Select(row => row.Incident.FirstKillAt), "the held cluster is saved");
+        Assert.AreEqual(At(-60), stored[0].Incident.Start, "its window starts before the kill line");
+        Assert.AreEqual(At(30), stored[0].Incident.End, "its window ends after the kill line");
+        Assert.AreEqual(1L, result.Created, "one incident is created");
+        Assert.AreEqual(0L, result.Unchanged, "nothing is left unchanged");
+    }
+
+    /// <summary>
+    /// Without a log period, agent kills of any age are built as before: a stored incident takes a new kill in its window, and an old cluster outside every hold is saved.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunWithoutLogPeriodRebuildsAsBefore()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, IncidentSamples.Base.AddDays(1), TestContext.CancellationToken, AgentRecords.KillLine(At(0)));
+        await RunAsync(store, store, new FakeTimeProvider(IncidentSamples.Base.AddDays(1)), []);
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(10), 1111), AgentRecords.KillLine(At(300)));
+
+        var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, _before, _after, new FakeTimeProvider(_late))
+                            {
+                                Holds = store
+                            };
+
+        // Act
+        var result = await reconstructor.RunAsync(_ => Task.CompletedTask, TestContext.CancellationToken);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([At(0), At(300)], stored.Select(row => row.Incident.FirstKillAt), "both clusters are stored");
+        Assert.AreEqual(2L, stored[0].Incident.KillCount, "the stored incident took the new kill in its window");
+        Assert.AreEqual(1L, result.Updated, "the stored incident is updated");
+        Assert.AreEqual(1L, result.Created, "the old cluster outside every hold is created");
+        Assert.AreEqual(0L, result.Unchanged, "nothing is left unchanged");
+    }
+
+    /// <summary>
+    /// With a log period but no store of holds, a cluster of agent kills before the log period is left unchanged, as no hold can keep it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunWithoutHoldStoreSavesNoAgentIncidentBeforeLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(0)));
+        await SaveHoldAsync(store, At(-120), At(60));
+
+        var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, _before, _after, new FakeTimeProvider(_late))
+                            {
+                                LogPeriodStart = _late - _logPeriod
+                            };
+
+        // Act
+        var result = await reconstructor.RunAsync(_ => Task.CompletedTask, TestContext.CancellationToken);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.IsEmpty(stored, "no incident is saved");
+        Assert.AreEqual(1L, result.Unchanged, "the cluster counts as unchanged");
+        Assert.AreEqual(0L, result.Created, "nothing is created");
+    }
+
+    /// <summary>
     /// Returns a time relative to the first kill of the samples.
     /// </summary>
     /// <param name="minutes">Minutes after the first kill, negative before it</param>
@@ -455,6 +701,25 @@ public class IncidentReconstructorTests
     private static DateTimeOffset At(int minutes)
     {
         return IncidentSamples.Base.AddMinutes(minutes);
+    }
+
+    /// <summary>
+    /// Creates the default retention policy with the reconstructor's kill window.
+    /// </summary>
+    /// <returns>The policy</returns>
+    private static RetentionPolicy Policy()
+    {
+        return new RetentionPolicy
+               {
+                   Raw = TimeSpan.FromDays(30),
+                   FiveMinuteRollups = TimeSpan.FromDays(365),
+                   HourlyRollups = TimeSpan.FromDays(1095),
+                   Logs = _logPeriod,
+                   Snapshots = TimeSpan.FromDays(30),
+                   Events = TimeSpan.FromDays(1095),
+                   KillWindowBefore = _before,
+                   KillWindowAfter = _after
+               };
     }
 
     /// <summary>
@@ -479,6 +744,44 @@ public class IncidentReconstructorTests
 
                                           return Task.CompletedTask;
                                       },
+                                      TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Runs the reconstruction 100 days after the first kill with a log period of 90 days and the store's holds.
+    /// </summary>
+    /// <param name="store">The store that is read and saves the incidents</param>
+    /// <returns>A task that returns the result</returns>
+    private Task<ReconstructionResult> RunRetainedAsync(SqliteStore store)
+    {
+        var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, _before, _after, new FakeTimeProvider(_late))
+                            {
+                                LogPeriodStart = _late - _logPeriod,
+                                Holds = store
+                            };
+
+        return reconstructor.RunAsync(_ => Task.CompletedTask, TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Saves a hold without moving the scan progress.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="start">The start of the hold</param>
+    /// <param name="end">The end of the hold</param>
+    /// <returns>A task that completes when the hold is saved</returns>
+    private async Task SaveHoldAsync(SqliteStore store, DateTimeOffset start, DateTimeOffset end)
+    {
+        var progress = await store.KillScanProgressAsync(TestContext.CancellationToken);
+
+        await store.SaveKillScanAsync([
+                                          new RetentionHold
+                                          {
+                                              Start = start,
+                                              End = end
+                                          }
+                                      ],
+                                      progress,
                                       TestContext.CancellationToken);
     }
 

@@ -4,7 +4,7 @@
 
 An **incident** is one outage reconstructed from the stored data: the OOM kills whose windows overlap, a timeline of the events of the
 window, a structured hypothesis about the cause, metric extremes, the connection peak and the log templates of the window. It is stored
-([Storage writing](storage-writing.md), *Incidents*) and kept without limit. The web UI shows a list and a page per incident, with charts
+([Storage writing](storage-writing.md), *Incidents*) and kept without limit by default (`retention.incidents`, [Retention and rollups](retention.md)). The web UI shows a list and a page per incident, with charts
 of the window, every time linked to the logs of that moment, and a note per incident ([Incidents view](web-ui-incidents-view.md)); the
 [Forensics report](forensics-report.md) lists them.
 
@@ -81,6 +81,16 @@ connection snapshot gives no peak (`connections` null).
   incident that survives, in the same transaction, keeping the number it was written for ([Storage writing](storage-writing.md),
   *Incident notes*). A re-run never deletes or rewrites a note.
 - A stored incident that no rebuilt one overlaps is **kept** as it is, because its lines may have expired.
+- **Windows kept by retention.** The service removes log lines, snapshots and metric values past their periods ([Retention and rollups](retention.md)).
+  It keeps every record captured in the window of an OOM kill, with a margin of 5 minutes at both ends, that the agent's kernel collector reported (a `kernel_event` of origin
+  `agent`), as long as an incident of it would be kept, so a re-run builds the same incident after the removal. The window of a stored
+  incident keeps nothing by itself, and a log line that merely reads as an OOM kill keeps nothing: the window data of such an incident
+  follows the periods while the incident stays.
+- **The re-run rule.** With a finite `retention.logs`, a re-run takes the start of the log period (now minus `retention.logs`) and the
+  stored holds. A kill cluster whose window starts before that start is built and saved only when one hold contains its whole window or
+  every kill of it comes from imported lines (imported data is never removed; a kill is an agent kill when one of the lines it was detected from is not imported); otherwise it is skipped: the stored incidents it
+  overlaps stay unchanged, no incident is saved for it, and it counts as `unchanged` in the summary (`kept` never reads negative). A
+  cluster in the log period is built as always. With `retention.logs` `unlimited` a re-run rebuilds as before.
 - Every incident is saved in its own transaction: an interrupted run keeps what it saved, and the next run completes it.
 - An incident the store refuses (a rule of [Storage writing](storage-writing.md), *Incidents*, such as more than 8 MiB of serialized JSON) is **skipped**: it is logged as
   a warning with its first kill time and the store's text, counted as skipped, and the run goes on.
@@ -92,7 +102,10 @@ connection snapshot gives no peak (`connections` null).
 ## Limits and errors
 
 - **Memory** does not grow with the number of lines, kills or incidents: one page of up to 1,000 log lines of the pass over all lines
-  (held while an incident it closes is built, about 40 MiB at the model caps) and one page of the incident's window, two detectors, one
+  (held while an incident it closes is built, about 40 MiB at the model caps) and the IDs of the agent lines of the last 2 minutes read (the
+  origin of a kill is judged from them; lines of any other age are forgotten; how many there are follows how densely lines were captured,
+  not how many are stored, so a holder of the agent token who stores many lines of one capture time, bounded by `ingest.min_free`, makes
+  this run hold all their IDs at once: record 0210, issue #457) and one page of the incident's window, two detectors, one
   open incident and its builder (at most 1,000 timeline entries within 4 MiB, two program maps of at most 4,096 entries each, one
   connection peak, 20 + 20 templates). The largest single read is one process snapshot, read as UTF-8 bytes; one forged at every cap (a
   legacy monitoring log with 4,096 processes and programs, all texts such that the stored JSON escapes them to six bytes per character,
@@ -110,19 +123,20 @@ connection snapshot gives no peak (`connections` null).
 - Backup recognition covers `pzstd` only; other backup programs are not recognized.
 - **Forged lines make forged incidents**: any local process can write a line that reads as an OOM kill. A flood of kills close
   together merges into one incident whose kept parts are capped; kills spaced more than `before + after` apart make many incidents,
-  each up to 8 MiB and kept without limit, so the disk use from forged lines outlives their retention (issue #46).
+  each up to 8 MiB and kept without limit by default, so the disk use from forged lines outlives their retention until `retention.incidents` is set. A forged **`kernel_event`** needs the agent token, and it keeps the data of its window only (the residual is stated in [Retention and rollups](retention.md), *Windows of OOM kills*).
 - The victim command, hosts, units, timeline texts, programs, commands and templates of an incident are **external text**: whoever shows
   them escapes them (security area 12 of `.squad/project.md`). The terminal output of `vandoxd incidents` writes the victim command of an
   incident's first kill in double quotes, with `"` and `\` escaped by a backslash and line breaks, tabs, control, format and the other
   invisible characters escaped as in the report's code spans ([Forensics report](forensics-report.md), *External text in the report*); its log lines carry only the store's text and the
   first kill time, never input text.
-- The agent's `kernel_event` and `gap` records are not read yet (issue #53). Retention (issue #46) must keep a re-run from replacing
-  a stored incident by a poorer one ([Storage](storage.md), *Retention (planned)*).
+- The agent's `kernel_event` and `gap` records are not read yet by the reconstruction (issue #53); retention reads the `kernel_event`
+  kills only to keep their windows.
 
 ## Related decisions
 
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are rebuilt by a
   sub-command, matched by overlapping windows, given a structured hypothesis from fixed rules and bounded in memory and size.
+- [0210](../decisions/0210-data-in-the-windows-of-the-agents-kernel-oom-kills-is-kept-as-long-as-their-incident.md) — why only the windows of the agent's kernel OOM kills are kept and a re-run leaves older unconfirmed incidents unchanged.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes follow an incident
   through updates and merges and how the web UI shows incidents.
 - [0115](../decisions/0115-connection-collector-proc-net-tables-regular-and-full-snapshots-in-one-record-kind.md) — why the agent's

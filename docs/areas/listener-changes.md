@@ -64,6 +64,12 @@ lowest 64 agent IDs, the latest 20 findings after an agent start, the latest 20 
 agent with changes only. No connection snapshot is read or decoded by the report; the write path decodes the snapshots around an agent
 start when it stores them.
 
+## Retention
+
+- The findings stay stored for `retention.events` (1,095 days by default): a connection snapshot that is the newest mark of its agent,
+  or whose comparison or own report is a finding, follows that period instead of `retention.snapshots`, with its mark and comparison
+  rows; the other connection snapshots follow `retention.snapshots` ([Retention and rollups](retention.md)).
+
 ## Caps
 
 - The head names at most the 64 lowest agent IDs.

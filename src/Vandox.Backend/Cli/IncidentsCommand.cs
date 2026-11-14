@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Hosting;
 using Vandox.Backend.Incidents;
+using Vandox.Backend.Retention;
 using Vandox.Core.Configuration;
 using Vandox.Core.Signatures;
 using Vandox.Storage;
@@ -45,9 +46,12 @@ internal static class IncidentsCommand
     {
         logger.IncidentsStarted();
 
+        var logs = RetentionService.CreatePolicy(config).Logs;
         var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), config.Incidents.GetWindowAfter(), clock)
                             {
-                                Logger = logger
+                                Logger = logger,
+                                LogPeriodStart = logs is { } period ? clock.GetUtcNow() - period : null,
+                                Holds = store
                             };
 
         try

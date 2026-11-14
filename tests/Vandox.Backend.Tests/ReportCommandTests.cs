@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Reports;
 using Vandox.Core.Model;
 using Vandox.Storage;
 
@@ -77,6 +79,40 @@ public class ReportCommandTests
         Assert.Contains("\n## Übersicht\n", output, "the German summary heading, with its umlaut");
         Assert.Contains("### Ausfall #1 am 2026-10-02 04:59 UTC", output, "the German outage heading");
         Assert.DoesNotContain("## Summary", output, "no English heading");
+    }
+
+    /// <summary>
+    /// The command reports with the configured periods: agent log lines older than <c>retention.logs</c> and agent process snapshots older than <c>retention.snapshots</c> are not read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public async Task ReportCommandSkipsAgentDataPastTheConfiguredPeriods()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var hooks = new ServeHooks
+                    {
+                        Clock = new FakeTimeProvider(IncidentSamples.Base.AddDays(2).AddHours(1))
+                    };
+
+        await File.AppendAllTextAsync(fixture.ConfigPath, "retention:\n  logs: 1d\n  snapshots: 1d\n", TestContext.CancellationToken);
+        await StoreAgentDataAsync(fixture.Storage);
+
+        // Act
+        var code = await fixture.RunAsync(["report"], hooks, TestContext.CancellationToken);
+        var output = fixture.Out.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
+        var lines = output.Split('\n');
+        var logLines = lines.Single(line => line.Contains(ReportText.English.LogLines, StringComparison.Ordinal));
+        var snapshots = lines.Single(line => line.Contains(ReportText.English.Snapshots, StringComparison.Ordinal));
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.IsTrue(TextChecks.ContainsNumber(logLines, "1"), $"one log line is read: {logLines}");
+        Assert.Contains("2026-10-04 04:59 UTC", logLines, "the line in the log period is read");
+        Assert.IsTrue(TextChecks.ContainsNumber(snapshots, "1"), $"one snapshot is read: {snapshots}");
+        Assert.Contains("2026-10-04 05:09 UTC", snapshots, "the snapshot in the snapshot period is read");
+        Assert.DoesNotContain("2026-10-02", output, "neither the line nor the snapshot past its period is read");
     }
 
     /// <summary>
@@ -199,6 +235,25 @@ public class ReportCommandTests
         await using var store = await SqliteStore.OpenAsync(directory, TestContext.CancellationToken);
 
         await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(IncidentSamples.Base));
+    }
+
+    /// <summary>
+    /// Stores, as one agent batch, a log line and a process snapshot on the day of the first kill of the samples and two days later, in a new store, and closes it.
+    /// </summary>
+    /// <param name="directory">The storage directory</param>
+    /// <returns>A task that completes when the records are stored</returns>
+    private async Task StoreAgentDataAsync(string directory)
+    {
+        await using var store = await SqliteStore.OpenAsync(directory, TestContext.CancellationToken);
+        var later = IncidentSamples.Base.AddDays(2);
+
+        await new AgentRecords().WriteAsync(store,
+                                            later,
+                                            TestContext.CancellationToken,
+                                            IncidentSamples.Line(IncidentSamples.Base, "cron", "job one", "journal", "journal"),
+                                            IncidentSamples.Processes(IncidentSamples.Base.AddMinutes(10), ("mariadbd", 100)),
+                                            IncidentSamples.Line(later, "cron", "job two", "journal", "journal"),
+                                            IncidentSamples.Processes(later.AddMinutes(10), ("mariadbd", 100)));
     }
 
     /// <summary>

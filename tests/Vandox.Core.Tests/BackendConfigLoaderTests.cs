@@ -41,6 +41,13 @@ public class BackendConfigLoaderTests
         Assert.AreEqual("1GiB", config.Ingest.MinFree, "ingest.min_free");
         Assert.AreEqual("/data", config.Storage.Directory, "storage.directory");
         Assert.AreEqual("info", config.Log.Level, "log.level");
+        Assert.AreEqual("30d", config.Retention.Raw, "retention.raw");
+        Assert.AreEqual("365d", config.Retention.FiveMinuteRollups, "retention.rollups_5m");
+        Assert.AreEqual("1095d", config.Retention.HourlyRollups, "retention.rollups_1h");
+        Assert.AreEqual("90d", config.Retention.Logs, "retention.logs");
+        Assert.AreEqual("30d", config.Retention.Snapshots, "retention.snapshots");
+        Assert.AreEqual("1095d", config.Retention.Events, "retention.events");
+        Assert.AreEqual("unlimited", config.Retention.Incidents, "retention.incidents");
         Assert.IsFalse(config.Secrets.AgentToken.IsSet || config.Secrets.WebPasswordHash.IsSet || config.Secrets.TelegramBotToken.IsSet, "no secret is set");
 
         foreach (var key in BackendConfig.Keys().Where(key => key != "import.time_zone" && key != "ingest.agent_id"))
@@ -178,18 +185,21 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
-    /// The list of keys names the time zone after the other import options and before the incident windows.
+    /// The list of keys names the time zone after the other import options and before the incident windows, and the seven retention periods last.
     /// </summary>
     [TestMethod]
+    [TestCategory("AC1")]
     public void BackendConfigKeysListTimeZone()
     {
         // Act
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreEqual("incidents.window_after", keys[^1], "the window after is the last key");
-        Assert.AreEqual("incidents.window_before", keys[^2], "the window before is the second last key");
-        Assert.AreEqual("import.time_zone", keys[^3], "the time zone is the last import key");
+        Assert.AreEqual("retention.incidents", keys[^1], "the incident period is the last key");
+        Assert.AreEqual("retention.raw", keys[^7], "the raw period is the first retention key");
+        Assert.AreEqual("incidents.window_after", keys[^8], "the window after is the last key before the retention periods");
+        Assert.AreEqual("incidents.window_before", keys[^9], "the window before precedes the window after");
+        Assert.AreEqual("import.time_zone", keys[^10], "the time zone is the last import key");
         Assert.Contains("log.level", keys, "the other keys stay");
     }
 
@@ -783,16 +793,17 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
-    /// The list of keys names the error log paths after <c>log.level</c> and before the time zone, and the incident windows last.
+    /// The list of keys names the error log paths after <c>log.level</c> and before the time zone, then the incident windows and the seven retention periods in file order.
     /// </summary>
     [TestMethod]
+    [TestCategory("AC1")]
     public void BackendConfigKeysListErrorLogPathsBeforeTimeZone()
     {
         // Act
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreSequenceEqual(["web.listen", "web.trusted_proxies", "ingest.listen", "ingest.agent_id", "ingest.min_free", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"], keys, "keys in order");
+        Assert.AreSequenceEqual(["web.listen", "web.trusted_proxies", "ingest.listen", "ingest.agent_id", "ingest.min_free", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after", "retention.raw", "retention.rollups_5m", "retention.rollups_1h", "retention.logs", "retention.snapshots", "retention.events", "retention.incidents"], keys, "keys in order");
     }
 
     /// <summary>
@@ -857,6 +868,64 @@ public class BackendConfigLoaderTests
         var nothing = directory.Write("nothing.yaml", "incidents:\n  window_before: ~\n");
 
         Assert.AreEqual($"config: {nothing}:2: incidents.window_before: has no value", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(nothing, []), "null value").Message, "message of a null value");
+    }
+
+    /// <summary>
+    /// An invalid period of any of the seven retention keys is refused at its line with the fixed E1 text, which does not show the value.
+    /// </summary>
+    /// <param name="key">The key inside the <c>retention</c> section</param>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [DataRow("raw")]
+    [DataRow("rollups_5m")]
+    [DataRow("rollups_1h")]
+    [DataRow("logs")]
+    [DataRow("snapshots")]
+    [DataRow("events")]
+    [DataRow("incidents")]
+    public void BackendConfigLoaderRefusesInvalidRetentionPeriodWithReason(string key)
+    {
+        // Arrange
+        const string reason = "must be a whole number of days from 1d to 9999d, such as 30d, or unlimited";
+        string[] invalid = ["0d", "10000d", "30", "30D", "1y", "24h", "+30d", "-30d", "030d", "1.5d", "\"30d \"", "\" 30d\"", "\"unlimited \"", "Unlimited", "UNLIMITED", "never", $"\"{char.ConvertFromUtf32(0xFF13)}{char.ConvertFromUtf32(0xFF10)}d\"", $"\"{char.ConvertFromUtf32(0x0663)}{char.ConvertFromUtf32(0x0660)}d\""];
+        using var directory = new TempDirectory();
+
+        // Act and assert
+        foreach (var value in invalid)
+        {
+            var path = directory.Write("vandoxd.yaml", $"log:\n  level: info\nretention:\n  {key}: {value}\n");
+
+            Assert.AreEqual($"config: {path}:4: retention.{key}: {reason}", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), $"retention.{key} {value}").Message, $"message for retention.{key} {value}");
+        }
+    }
+
+    /// <summary>
+    /// The seven periods are read from the <c>retention</c> section, quoted or not and with the bounds and <c>unlimited</c>, and a key the section leaves out keeps its default.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public void BackendConfigLoaderReadsRetentionSection()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var full = directory.Write("full.yaml", "retention:\n  raw: 1d\n  rollups_5m: \"9999d\"\n  rollups_1h: unlimited\n  logs: 7d\n  snapshots: 14d\n  events: 400d\n  incidents: 365d\n");
+        var partial = directory.Write("partial.yaml", "retention:\n  logs: 60d\n");
+
+        // Act
+        var fullConfig = BackendConfigLoader.Load(full, []);
+        var partialConfig = BackendConfigLoader.Load(partial, []);
+
+        // Assert
+        Assert.AreEqual("1d", fullConfig.Retention.Raw, "retention.raw");
+        Assert.AreEqual("9999d", fullConfig.Retention.FiveMinuteRollups, "quoted retention.rollups_5m");
+        Assert.AreEqual("unlimited", fullConfig.Retention.HourlyRollups, "retention.rollups_1h");
+        Assert.AreEqual("7d", fullConfig.Retention.Logs, "retention.logs");
+        Assert.AreEqual("14d", fullConfig.Retention.Snapshots, "retention.snapshots");
+        Assert.AreEqual("400d", fullConfig.Retention.Events, "retention.events");
+        Assert.AreEqual("365d", fullConfig.Retention.Incidents, "retention.incidents");
+        Assert.AreEqual("60d", partialConfig.Retention.Logs, "retention.logs of the partial section");
+        Assert.AreEqual("30d", partialConfig.Retention.Raw, "retention.raw keeps its default");
+        Assert.AreEqual("unlimited", partialConfig.Retention.Incidents, "retention.incidents keeps its default");
     }
 
     #endregion // Methods

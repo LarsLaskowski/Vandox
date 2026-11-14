@@ -20,6 +20,10 @@ public class ForensicsAnalysisTests
 
     private static readonly TimeSpan _hour = TimeSpan.FromHours(1);
 
+    private static readonly DateTimeOffset _unobserved = _base.AddHours(74).AddMinutes(50);
+
+    private static readonly DateTimeOffset _afterHorizon = _base.AddHours(110).AddMinutes(50);
+
     #endregion // Constants
 
     #region Methods
@@ -426,6 +430,78 @@ public class ForensicsAnalysisTests
         Assert.AreEqual(Indicator.Yes, cappedBusy.Backup, "a kept backup stays yes");
         Assert.AreEqual(Indicator.Yes, cappedBusy.PanelHigh, "a kept high panel memory stays yes");
         Assert.AreEqual(Indicator.Yes, cappedBusy.Boot, "a kept boot stays yes");
+    }
+
+    /// <summary>
+    /// An outage before the horizon whose kill hour is not observed counts as an outage but in no rule, even with a backup snapshot in its lookback; outages in observed hours before it and outages after it are judged as before.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public void ForensicsAnalysisAddIncidentDoesNotJudgeOutageInUnobservedHourBeforeHorizon()
+    {
+        // Arrange
+        var analysis = new ForensicsAnalysis(_hour)
+                       {
+                           JudgedFrom = _base.AddHours(100)
+                       };
+
+        // Act
+        var summary = SummarizedAroundHorizon(analysis);
+
+        // Assert
+        Assert.AreEqual(5, summary.Incidents, "every outage is counted");
+        Assert.AreEqual(8, summary.Kills, "the kills of every outage are counted");
+        Assert.AreEqual(3, summary.TimeOfDay[2].Matching, "only the three judged outages are in hour 2, not the one in the unobserved hour before the horizon");
+        Assert.AreEqual(1, summary.TimeOfDay[14].Matching, "the outage after the horizon is in hour 14 although its hour is not observed");
+        Assert.AreEqual(4, summary.Backup.Known, "the backup rule knows the three observed outages and the one after the horizon");
+        Assert.AreEqual(4, summary.Backup.Matching, "each of them followed a backup");
+        Assert.AreEqual(_afterHorizon, summary.LastOutageAt, "last outage");
+    }
+
+    /// <summary>
+    /// Without a horizon every outage is judged as before, also the one in an unobserved hour: it counts in its hour and in the backup rule.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public void ForensicsAnalysisAddIncidentJudgesAsBeforeWithoutHorizon()
+    {
+        // Arrange
+        var analysis = new ForensicsAnalysis(_hour);
+
+        // Act
+        var summary = SummarizedAroundHorizon(analysis);
+
+        // Assert
+        Assert.IsNull(analysis.JudgedFrom, "no horizon by default");
+        Assert.AreEqual(5, summary.Incidents, "every outage is counted");
+        Assert.AreEqual(8, summary.Kills, "the kills of every outage are counted");
+        Assert.AreEqual(4, summary.TimeOfDay[2].Matching, "the three outages in observed hours and the one in the unobserved hour are in hour 2");
+        Assert.AreEqual(1, summary.TimeOfDay[14].Matching, "the last outage is in hour 14");
+        Assert.AreEqual(5, summary.Backup.Known, "the backup rule knows every outage");
+        Assert.AreEqual(5, summary.Backup.Matching, "each of them followed a backup");
+        Assert.AreEqual(_afterHorizon, summary.LastOutageAt, "last outage");
+    }
+
+    /// <summary>
+    /// Adds 72 observed hours with a backup snapshot in hour 2 of each day, a backup snapshot before each of the two later outages,
+    /// seals the analysis and summarizes the three daily outages at 02:50, one at 02:50 of the fourth day in an unobserved hour and
+    /// one in hour 14 of the fifth day, with 1, 1, 1, 2 and 3 kills.
+    /// </summary>
+    /// <param name="analysis">The analysis, with or without a horizon</param>
+    /// <returns>The summary</returns>
+    private static ForensicsSummary SummarizedAroundHorizon(ForensicsAnalysis analysis)
+    {
+        for (var hour = 0; hour < 72; hour++)
+        {
+            analysis.AddLogLine(_base.AddHours(hour).AddMinutes(30), "syslog");
+            analysis.AddProcessSnapshot(_base.AddHours(hour).AddMinutes(20), hour % 24 == 2 ? Snapshot(("web", Mib), ("pzstd", Mib)) : Snapshot(("web", Mib)));
+        }
+
+        analysis.AddProcessSnapshot(_unobserved.AddMinutes(-30), Snapshot(("web", Mib), ("pzstd", Mib)));
+        analysis.AddProcessSnapshot(_afterHorizon.AddMinutes(-30), Snapshot(("web", Mib), ("pzstd", Mib)));
+        analysis.Seal();
+
+        return Summarized(analysis, [.. DailyAt(2, 50), _unobserved, _afterHorizon], 1, 1, 1, 2, 3);
     }
 
     /// <summary>

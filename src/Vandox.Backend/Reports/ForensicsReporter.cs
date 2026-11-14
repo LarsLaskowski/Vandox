@@ -39,11 +39,26 @@ public sealed class ForensicsReporter
     private readonly IListenerHistoryReader _listeners;
     private readonly SignatureCatalog _catalog;
     private readonly TimeSpan _lookback;
+    private readonly ReportRetention _retention;
     private readonly TimeProvider _clock;
 
     #endregion // Fields
 
     #region Constructors
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ForensicsReporter"/> class without retention periods.
+    /// </summary>
+    /// <param name="records">The reader of stored records</param>
+    /// <param name="incidents">The incident store</param>
+    /// <param name="listeners">The reader of the stored listener comparisons</param>
+    /// <param name="catalog">The signature catalog</param>
+    /// <param name="lookback">The lookback before an outage</param>
+    /// <param name="clock">The clock that stamps the report</param>
+    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+        : this(records, incidents, listeners, catalog, lookback, new ReportRetention(), clock)
+    {
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ForensicsReporter"/> class.
@@ -53,13 +68,15 @@ public sealed class ForensicsReporter
     /// <param name="listeners">The reader of the stored listener comparisons</param>
     /// <param name="catalog">The signature catalog</param>
     /// <param name="lookback">The lookback before an outage</param>
+    /// <param name="retention">The periods after which agent log lines and snapshots are skipped</param>
     /// <param name="clock">The clock that stamps the report</param>
-    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, ReportRetention retention, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(incidents);
         ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(retention);
         ArgumentNullException.ThrowIfNull(clock);
 
         _records = records;
@@ -67,6 +84,7 @@ public sealed class ForensicsReporter
         _listeners = listeners;
         _catalog = catalog;
         _lookback = lookback;
+        _retention = retention;
         _clock = clock;
     }
 
@@ -87,10 +105,15 @@ public sealed class ForensicsReporter
         ArgumentNullException.ThrowIfNull(writer);
 
         var result = new ReportResult();
-        var analysis = new ForensicsAnalysis(_lookback);
+        var now = _clock.GetUtcNow();
+        var logsFrom = Horizon(now, _retention.Logs);
+        var analysis = new ForensicsAnalysis(_lookback)
+                       {
+                           JudgedFrom = logsFrom
+                       };
 
-        await ReadLinesAsync(analysis, result, cancellationToken).ConfigureAwait(false);
-        await ReadSnapshotsAsync(analysis, result, cancellationToken).ConfigureAwait(false);
+        await ReadLinesAsync(analysis, result, logsFrom, cancellationToken).ConfigureAwait(false);
+        await ReadSnapshotsAsync(analysis, result, Horizon(now, _retention.Snapshots), cancellationToken).ConfigureAwait(false);
         analysis.Seal();
         await PageIncidentsAsync(stored =>
                                  {
@@ -100,7 +123,7 @@ public sealed class ForensicsReporter
                                  },
                                  cancellationToken).ConfigureAwait(false);
 
-        var summary = analysis.Summarize(_clock.GetUtcNow());
+        var summary = analysis.Summarize(now);
 
         summary.Listeners = await ReadListenersAsync(cancellationToken).ConfigureAwait(false);
 
@@ -109,6 +132,28 @@ public sealed class ForensicsReporter
         await writer.WriteNotesAsync(summary, result.IncidentsListed).ConfigureAwait(false);
 
         return result;
+    }
+
+    /// <summary>
+    /// Returns the start of a period.
+    /// </summary>
+    /// <param name="now">The current time</param>
+    /// <param name="period">The period, or <c>null</c> for unlimited</param>
+    /// <returns>The start, or <c>null</c> for unlimited</returns>
+    private static DateTimeOffset? Horizon(DateTimeOffset now, TimeSpan? period)
+    {
+        return period is { } value ? now - value : null;
+    }
+
+    /// <summary>
+    /// Determines whether a record of the agent or the backend lies before the start of its period; imported records are kept.
+    /// </summary>
+    /// <param name="record">The record</param>
+    /// <param name="keptFrom">The start of the period, or <c>null</c> for unlimited</param>
+    /// <returns><c>true</c> when the report skips the record</returns>
+    private static bool IsPastPeriod(StoredRecord record, DateTimeOffset? keptFrom)
+    {
+        return keptFrom is { } from && record.Record.Origin != RecordOrigin.Import && record.Record.CapturedAt < from;
     }
 
     /// <summary>
@@ -159,9 +204,10 @@ public sealed class ForensicsReporter
     /// </summary>
     /// <param name="analysis">The analysis</param>
     /// <param name="result">The counts</param>
+    /// <param name="keptFrom">The start of the log period; lines of the agent before it are skipped; <c>null</c> for none</param>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <returns>A task that completes when the lines are read</returns>
-    private async Task ReadLinesAsync(ForensicsAnalysis analysis, ReportResult result, CancellationToken cancellationToken)
+    private async Task ReadLinesAsync(ForensicsAnalysis analysis, ReportResult result, DateTimeOffset? keptFrom, CancellationToken cancellationToken)
     {
         var detector = new SignatureDetector(_catalog);
         var closed = new List<DetectedEvent>();
@@ -183,6 +229,11 @@ public sealed class ForensicsReporter
                                     LinePage,
                                     record =>
                                     {
+                                        if (IsPastPeriod(record, keptFrom))
+                                        {
+                                            return Task.CompletedTask;
+                                        }
+
                                         result.LinesRead++;
                                         analysis.AddLogLine(record.Record.CapturedAt, record.Record.Source);
                                         detector.Add(record.Id, record.Record, closed);
@@ -201,9 +252,10 @@ public sealed class ForensicsReporter
     /// </summary>
     /// <param name="analysis">The analysis</param>
     /// <param name="result">The counts</param>
+    /// <param name="keptFrom">The start of the snapshot period; snapshots of the agent before it are skipped; <c>null</c> for none</param>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <returns>A task that completes when the snapshots are read</returns>
-    private async Task ReadSnapshotsAsync(ForensicsAnalysis analysis, ReportResult result, CancellationToken cancellationToken)
+    private async Task ReadSnapshotsAsync(ForensicsAnalysis analysis, ReportResult result, DateTimeOffset? keptFrom, CancellationToken cancellationToken)
     {
         var snapshots = new RecordQuery
                         {
@@ -217,7 +269,7 @@ public sealed class ForensicsReporter
                                     SnapshotPage,
                                     record =>
                                     {
-                                        if (record.Record.Data is ProcessSnapshot snapshot)
+                                        if (record.Record.Data is ProcessSnapshot snapshot && IsPastPeriod(record, keptFrom) == false)
                                         {
                                             result.SnapshotsRead++;
                                             analysis.AddProcessSnapshot(record.Record.CapturedAt, snapshot);

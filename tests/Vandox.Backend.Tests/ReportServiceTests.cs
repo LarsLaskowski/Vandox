@@ -181,6 +181,41 @@ public class ReportServiceTests
     }
 
     /// <summary>
+    /// The service reports with the periods it was given: agent log lines and process snapshots past their periods are not read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public async Task ReportServiceSkipsAgentDataPastTheGivenPeriods()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var retention = new ReportRetention
+                        {
+                            Logs = TimeSpan.FromDays(2),
+                            Snapshots = TimeSpan.FromDays(1)
+                        };
+
+        await new AgentRecords().WriteAsync(store,
+                                            _now,
+                                            TestContext.CancellationToken,
+                                            IncidentSamples.Line(_now.AddDays(-3), "cron", "job one", "journal", "journal"),
+                                            IncidentSamples.Line(_now.AddDays(-1), "cron", "job two", "journal", "journal"),
+                                            IncidentSamples.Processes(_now.AddDays(-2), ("mariadbd", 100)),
+                                            IncidentSamples.Processes(_now.AddHours(-12), ("mariadbd", 100)));
+
+        using var service = new ReportService(store, store, new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, TimeSpan.FromHours(1), retention, new FakeTimeProvider(_now));
+
+        // Act
+        var result = await service.RunAsync(Builder(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1L, result.LinesRead, "only the line in the log period is read");
+        Assert.AreEqual(1L, result.SnapshotsRead, "only the snapshot in the snapshot period is read");
+    }
+
+    /// <summary>
     /// Creates the service over a reader and a store, with a fixed clock and a lookback of one hour.
     /// </summary>
     /// <param name="records">The reader</param>

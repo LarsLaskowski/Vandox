@@ -46,9 +46,9 @@ protected, where, and the area documents that state its rules.
    [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
    [agent-sending](../docs/areas/agent-sending.md), [agent-installation](../docs/areas/agent-installation.md).
 9. **File writes and paths derived from external input** — writes stay in the configured directories, follow no link,
-   use restrictive modes; the spool is bounded. `vandox.db` (`src/Vandox.Storage/`), `src/Vandox.Import/`,
+   use restrictive modes; the spool is bounded. Retention deletes in `vandox.db` only through the bounded steps of `RetentionRemover`. `vandox.db` (`src/Vandox.Storage/`), `src/Vandox.Import/`,
    `src/Vandox.Core/IO/`, `spool.directory` (`internal/spool`, `internal/agentstate`), `deploy/agent/install.sh` and
-   `uninstall.sh` — [storage](../docs/areas/storage.md), [log-import](../docs/areas/log-import.md),
+   `uninstall.sh` — [storage](../docs/areas/storage.md), [retention](../docs/areas/retention.md), [log-import](../docs/areas/log-import.md),
    [agent-spool](../docs/areas/agent-spool.md), [agent](../docs/areas/agent.md) (*Agent state*),
    [agent-installation](../docs/areas/agent-installation.md).
 10. **Parsing of external input** — hostile input yields an error or a skipped record, never a crash, unbounded
@@ -185,6 +185,7 @@ marked planned.
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `CountingClock` (Storage tests) | the clock |
 | database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `ListLogger` (Backend tests) | store, readers |
+| retention store (C#) | `ScriptedRetentionStore` (Backend tests): scripted fold and removal steps (results, exceptions or gated tasks), scripted kernel events and scan progress, failing saves, every call recorded in order with waiters, `Busy`/`Failed` store exceptions with an inner `SqliteException` (5 or 10); `AgentRecords` writes agent batches with sequence numbers | `IRetentionStore`, agent records |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
 | Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |

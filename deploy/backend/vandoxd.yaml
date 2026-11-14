@@ -82,3 +82,21 @@ incidents:
   window_before: 1h
   # How long after an OOM kill an incident ends, same format and range as window_before. Default: 30m
   window_after: 30m
+
+retention:
+  # How long each kind of data is kept: a whole number of days from 1d to 9999d, such as 30d, or unlimited.
+  # Raw metric values. Older values are summarized in 5-minute rollups first. Default: 30d
+  raw: 30d
+  # 5-minute rollups of metric values. Default: 365d
+  rollups_5m: 365d
+  # Hourly rollups of metric values. Default: 1095d
+  rollups_1h: 1095d
+  # Log lines read from the agents. Imported log files are never removed. Default: 90d
+  logs: 90d
+  # Snapshots of the monitored server. Default: 30d
+  snapshots: 30d
+  # Kernel events, service states, backup runs and listener findings. Gaps stay until the longest of the periods
+  # other than incidents has passed, for good while one of them is unlimited. Default: 1095d
+  events: 1095d
+  # Incidents. Default: unlimited
+  incidents: unlimited

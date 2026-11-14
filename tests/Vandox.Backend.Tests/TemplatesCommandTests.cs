@@ -1,8 +1,11 @@
 using System.Globalization;
 
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Time.Testing;
 
+using Vandox.Backend.Cli;
 using Vandox.Backend.Hosting;
+using Vandox.Core.Configuration;
 using Vandox.Storage;
 
 namespace Vandox.Backend.Tests;
@@ -14,6 +17,15 @@ namespace Vandox.Backend.Tests;
 [OSCondition(OperatingSystems.Linux)]
 public class TemplatesCommandTests
 {
+    #region Constants
+
+    /// <summary>
+    /// The time the commands run at: one day after the stored lines, so that every line lies in the default log period.
+    /// </summary>
+    private static readonly DateTimeOffset _now = IncidentSamples.Base.AddDays(1);
+
+    #endregion // Constants
+
     #region Properties
 
     /// <summary>
@@ -42,7 +54,7 @@ public class TemplatesCommandTests
         await ExecuteAsync(fixture.Storage, "DELETE FROM log_template_hours", "DELETE FROM log_templates", "DELETE FROM log_source_hours");
 
         // Act
-        var code = await fixture.RunAsync(["templates"], null, TestContext.CancellationToken);
+        var code = await fixture.RunAsync(["templates"], Hooks(_now), TestContext.CancellationToken);
 
         // Assert
         Assert.AreEqual(0, code, "exit code");
@@ -51,6 +63,80 @@ public class TemplatesCommandTests
         Assert.Contains("template rebuild progress", fixture.Error.ToString(), "the progress is logged");
         Assert.IsNotEmpty(expected, "the arranged lines were counted by the write path");
         Assert.AreSequenceEqual(expected, await SnapshotAsync(fixture.Storage), "the tables equal the write path's");
+    }
+
+    /// <summary>
+    /// With a finite log period the command keeps the statistics of the hours before the first full hour of the period and recounts the hours from it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task TemplatesCommandKeepsStatisticsOfHoursBeforeTheLogPeriod()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+
+        await File.AppendAllTextAsync(fixture.ConfigPath, "retention:\n  logs: 1d\n", TestContext.CancellationToken);
+        await StoreLinesAsync(fixture.Storage);
+        await ExecuteAsync(fixture.Storage, "UPDATE log_source_hours SET count = 99");
+
+        // Act
+        var code = await fixture.RunAsync(["templates"], Hooks(IncidentSamples.Base.AddDays(1).AddMinutes(1)), TestContext.CancellationToken);
+        var counts = await RowsAsync(fixture.Storage, "SELECT count FROM log_source_hours ORDER BY hour");
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.AreSequenceEqual(["99", "2"], counts, "the hour 04:00 before the log period keeps its statistics, the hour 05:00 is recounted from its two lines");
+    }
+
+    /// <summary>
+    /// With <c>retention.logs: unlimited</c> the command recounts every hour, however old.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task TemplatesCommandRecountsEveryHourWithLogsUnlimited()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+
+        await File.AppendAllTextAsync(fixture.ConfigPath, "retention:\n  logs: unlimited\n", TestContext.CancellationToken);
+        await StoreLinesAsync(fixture.Storage);
+        await ExecuteAsync(fixture.Storage, "UPDATE log_source_hours SET count = 99");
+
+        // Act
+        var code = await fixture.RunAsync(["templates"], Hooks(IncidentSamples.Base.AddDays(1000)), TestContext.CancellationToken);
+        var counts = await RowsAsync(fixture.Storage, "SELECT count FROM log_source_hours ORDER BY hour");
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.AreSequenceEqual(["1", "2"], counts, "both hours are recounted from their lines");
+    }
+
+    /// <summary>
+    /// The statistics are kept before the first full hour at or after <c>now − retention.logs</c>, and before nothing when log lines are kept without limit.
+    /// </summary>
+    /// <param name="now">The current time, round-trip format</param>
+    /// <param name="logs">The value of <c>retention.logs</c></param>
+    /// <param name="expected">The expected start, round-trip format, or empty for none</param>
+    [TestMethod]
+    [TestCategory("AC8")]
+    [DataRow("2026-10-03T05:29:30.5000000+00:00", "1d", "2026-10-02T06:00:00.0000000+00:00")]
+    [DataRow("2026-10-03T06:00:00.0000000+00:00", "1d", "2026-10-02T06:00:00.0000000+00:00")]
+    [DataRow("2026-10-03T06:00:00.0000001+00:00", "2d", "2026-10-01T07:00:00.0000000+00:00")]
+    [DataRow("2026-10-03T05:29:30.5000000+00:00", "unlimited", "")]
+    public void TemplatesCommandKeepBeforeIsFirstFullHourOfTheLogPeriod(string now, string logs, string expected)
+    {
+        // Arrange
+        var config = new BackendConfig();
+
+        config.Retention.Logs = logs;
+
+        // Act
+        var keepBefore = TemplatesCommand.KeepBefore(config, new FakeTimeProvider(DateTimeOffset.Parse(now, CultureInfo.InvariantCulture)));
+
+        // Assert
+        Assert.AreEqual(expected, keepBefore?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty, "the start of the recounted hours");
     }
 
     /// <summary>
@@ -163,6 +249,19 @@ public class TemplatesCommandTests
         Assert.Contains("\"msg\":\"template rebuild failed\"", fixture.Error.ToString(), "the failure is logged");
         Assert.Contains("store: rebuilding templates: ", fixture.Error.ToString(), "the log carries the store's text");
         Assert.AreEqual(string.Empty, fixture.Out.ToString(), "nothing on standard output");
+    }
+
+    /// <summary>
+    /// Creates the hooks of a run at a fixed time.
+    /// </summary>
+    /// <param name="now">The time of the run</param>
+    /// <returns>The hooks</returns>
+    private static ServeHooks Hooks(DateTimeOffset now)
+    {
+        return new ServeHooks
+               {
+                   Clock = new FakeTimeProvider(now)
+               };
     }
 
     /// <summary>

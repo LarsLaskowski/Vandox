@@ -163,7 +163,7 @@ imported later or later in the same input) stores nothing and is reported as "co
   are skipped as "line before the first entry" (the summary counts them), and MariaDB entries and kernel reports of
   syslog become the stored entry plus lines of their own. A line the earlier copy cut (no final line feed) is stored
   again, complete: the one case in which a line has two records, the cut one and the complete one.
-- A content whose records were removed later (retention, once it exists) keeps its complete state: it is still
+- Imported records are never removed by retention ([Retention and rollups](retention.md)), whatever their age. A content whose records were removed some other way keeps its complete state: it is still
   already imported, a longer content is still continued after it, and the removed part is never restored.
 - A file whose hashed part changes while it is imported fails; the records written before the change was detected
   stay stored under the original hash. Records do not reference their import file, so one import cannot be removed

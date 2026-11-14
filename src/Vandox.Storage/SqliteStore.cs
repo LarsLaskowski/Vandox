@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 
 using Vandox.Core.Incidents;
+using Vandox.Core.Model;
 using Vandox.Core.Templates;
 
 namespace Vandox.Storage;
@@ -10,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IAsyncDisposable
 {
     #region Constants
 
@@ -45,6 +46,21 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// The operation named in the error of a gap or clock read.
     /// </summary>
     private const string TimelineContext = "store: reading agent timeline";
+
+    /// <summary>
+    /// The operation named in the error of a retention read or of saving the kill scan.
+    /// </summary>
+    private const string RetentionContext = "store: retention";
+
+    /// <summary>
+    /// The operation named in the error of a rollup fold.
+    /// </summary>
+    private const string RollupContext = "store: folding rollups";
+
+    /// <summary>
+    /// The operation named in the error of a removal step.
+    /// </summary>
+    private const string RemovalContext = "store: removing expired data";
 
     /// <summary>
     /// The seconds a connection waits for a lock another connection holds, the whole wait (<c>DefaultTimeout</c> retries on top of the busy timeout pragma).
@@ -97,6 +113,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// </summary>
     public bool Created { get; }
 
+    /// <summary>
+    /// Gets or sets a test hook called at the start of each retention step with the writer lock held.
+    /// </summary>
+    internal Func<Task>? RetentionStepStarted { get; set; }
+
     #endregion // Properties
 
     #region Methods
@@ -141,27 +162,29 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
-    /// Rebuilds the template statistics from the stored log lines: empties the three tables, writes the run marker and fixes the
-    /// high-water record ID in one transaction, then counts the lines up to it in batches of at most <paramref name="batchLines"/>,
-    /// one transaction each, and removes the marker; a run whose marker was replaced by another rebuild fails.
+    /// Rebuilds the template statistics like <see cref="RebuildTemplatesAsync(int, Func{long, CancellationToken, Task}?, CancellationToken)"/>,
+    /// but keeps the statistics of hours that end before <paramref name="keepBefore"/> and counts only the lines from that time on.
     /// </summary>
     /// <param name="batchLines">The most log lines one transaction counts, 1 to <see cref="StorageLimits.MaxBatchRecords"/></param>
+    /// <param name="keepBefore">The start of the log period, a full hour; statistics of earlier hours stay; <c>null</c> recounts all</param>
     /// <param name="afterBatch">Called outside the writer lock after each committed batch with the lines counted so far; may be <c>null</c></param>
     /// <param name="cancellationToken">Cancels the rebuild</param>
     /// <returns>A task that returns the result of the rebuild</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="batchLines"/> is outside 1 to <see cref="StorageLimits.MaxBatchRecords"/></exception>
     /// <exception cref="StoreException">The database fails, or another rebuild superseded this one</exception>
-    public async Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)
+    public async Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, DateTimeOffset? keepBefore, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)
     {
         if (batchLines < 1 || batchLines > StorageLimits.MaxBatchRecords)
         {
             throw new ArgumentOutOfRangeException(nameof(batchLines), batchLines, $"batchLines must be 1 to {StorageLimits.MaxBatchRecords}");
         }
 
+        long? keep = keepBefore is null ? null : StorageTime.ToNanoseconds(keepBefore.Value);
+
         try
         {
             var marker = TemplateRebuilder.NewMarker();
-            var highId = await RunWriteAsync(async (transaction, token) => await TemplateRebuilder.ClearAsync(_writer, transaction, marker, token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            var highId = await RunWriteAsync(async (transaction, token) => await TemplateRebuilder.ClearAsync(_writer, transaction, marker, keep, token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
             var after = 0L;
             var lines = 0L;
             var batches = 0;
@@ -174,7 +197,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                                                             {
                                                                 await RequireMarkerAsync(transaction, marker, token).ConfigureAwait(false);
 
-                                                                return await TemplateRebuilder.CountBatchAsync(_writer, transaction, after, highId, batchLines, token).ConfigureAwait(false);
+                                                                return await TemplateRebuilder.CountBatchAsync(_writer, transaction, after, highId, batchLines, keep, token).ConfigureAwait(false);
                                                             },
                                                             cancellationToken).ConfigureAwait(false);
 
@@ -217,6 +240,22 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         {
             throw new StoreException($"store: rebuilding templates: {exception.Message}", exception);
         }
+    }
+
+    /// <summary>
+    /// Rebuilds the template statistics from the stored log lines: empties the three tables, writes the run marker and fixes the
+    /// high-water record ID in one transaction, then counts the lines up to it in batches of at most <paramref name="batchLines"/>,
+    /// one transaction each, and removes the marker; a run whose marker was replaced by another rebuild fails.
+    /// </summary>
+    /// <param name="batchLines">The most log lines one transaction counts, 1 to <see cref="StorageLimits.MaxBatchRecords"/></param>
+    /// <param name="afterBatch">Called outside the writer lock after each committed batch with the lines counted so far; may be <c>null</c></param>
+    /// <param name="cancellationToken">Cancels the rebuild</param>
+    /// <returns>A task that returns the result of the rebuild</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="batchLines"/> is outside 1 to <see cref="StorageLimits.MaxBatchRecords"/></exception>
+    /// <exception cref="StoreException">The database fails, or another rebuild superseded this one</exception>
+    public Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)
+    {
+        return RebuildTemplatesAsync(batchLines, null, afterBatch, cancellationToken);
     }
 
     /// <summary>
@@ -459,6 +498,46 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
+    /// Runs one retention step in one committed writer transaction under the writer lock; a SQLite error, a busy database
+    /// included, ends in a <see cref="StoreException"/> and the transaction is rolled back.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result</typeparam>
+    /// <param name="context">The operation named in an error message</param>
+    /// <param name="announce">Whether the step calls <see cref="RetentionStepStarted"/></param>
+    /// <param name="action">The work of the step</param>
+    /// <param name="cancellationToken">Cancels the wait for the lock and the work between rows</param>
+    /// <returns>A task that returns the result of the step</returns>
+    private async Task<TResult> RunRetentionAsync<TResult>(string context, bool announce, Func<RetentionSession, CancellationToken, TResult> action, CancellationToken cancellationToken)
+    {
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            if (announce && RetentionStepStarted is { } hook)
+            {
+                await hook().ConfigureAwait(false);
+            }
+
+            var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            await using var transactionDisposal = transaction.ConfigureAwait(false);
+            using var session = new RetentionSession(_writer, transaction);
+            var result = action(session, cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            return result;
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"{context}: {exception.Message}", exception);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>
     /// Fails when the run marker of a template rebuild was replaced or removed.
     /// </summary>
     /// <param name="transaction">The open transaction</param>
@@ -500,9 +579,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
             using var timeline = batch.AgentId.Length > 0 ? AgentTimeline.Load(_writer, transaction, batch.AgentId) : null;
 
+            var resent = new HashSet<DataRecord>(timeline is null ? [] : batch.Records.Where(record => record.Origin == RecordOrigin.Agent && timeline.WasReceived((long)record.Seq)), ReferenceEqualityComparer.Instance);
+
             timeline?.Prepare(batch, IsFirstBatchOf(batch.AgentId), cancellationToken);
 
-            var stored = batch.Records.Where(record => writer.Write(batch, record, timeline?.IsLive(record) ?? false, cancellationToken)).ToList();
+            var stored = batch.Records.Where(record => resent.Contains(record) == false && writer.Write(batch, record, timeline?.IsLive(record) ?? false, cancellationToken)).ToList();
 
             writer.WriteTemplates(cancellationToken);
             writer.WriteListenerComparisons(cancellationToken);
@@ -986,6 +1067,151 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IImportTracker
+
+    #region IRetentionStore
+
+    /// <inheritdoc/>
+    public Task<RollupStepResult> FoldRollupsAsync(RetentionPolicy policy, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+
+        return RunRetentionAsync(RollupContext, true, (session, token) => RollupFolder.Fold(session, policy, now, token), cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public async Task<KillScanProgress> KillScanProgressAsync(CancellationToken cancellationToken)
+    {
+        var key = new Dictionary<string, object>
+                  {
+                      ["$key"] = RetentionQueries.KillScanKey
+                  };
+        var scanned = await QueryAsync(RetentionQueries.ReadMeta, key, reader => reader.GetString(0), RetentionContext, cancellationToken).ConfigureAwait(false);
+        var highest = await QueryAsync(RetentionQueries.HighestId, [], reader => reader.GetInt64(0), RetentionContext, cancellationToken).ConfigureAwait(false);
+        var scannedId = 0L;
+
+        if (scanned.Count > 0)
+        {
+            _ = long.TryParse(scanned[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out scannedId);
+        }
+
+        return new KillScanProgress
+               {
+                   ScannedId = scannedId,
+                   HighestId = highest.Count > 0 ? highest[0] : 0
+               };
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<StoredRecord>> ScanRecordsAsync(KillScanQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        RecordQueries.Require(query.AboveId >= 0, "after id must not be negative");
+        RecordQueries.Require(query.Limit >= 1 && query.Limit <= StorageLimits.MaxQueryLimit, $"limit must be between 1 and {StorageLimits.MaxQueryLimit}");
+
+        var parameters = new Dictionary<string, object>
+                         {
+                             ["$after"] = query.AboveId,
+                             ["$limit"] = (long)query.Limit
+                         };
+
+        return QueryAsync(RetentionQueries.ScanKernelEvents, parameters, RecordQueries.Read, RecordsContext, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task SaveKillScanAsync(IReadOnlyList<RetentionHold> holds, KillScanProgress progress, CancellationToken cancellationToken)
+    {
+        RetentionHolds.Validate(holds, progress);
+
+        return RunRetentionAsync(RetentionContext,
+                                 false,
+                                 (session, token) =>
+                                 {
+                                     RetentionHolds.Save(session, holds, progress, token);
+
+                                     return true;
+                                 },
+                                 cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<RemovalStepResult> RemoveExpiredAsync(RetentionPolicy policy, DateTimeOffset now, RemovalCursor? cursor, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+
+        return RunRetentionAsync(RemovalContext, true, (session, token) => RetentionRemover.Step(session, policy, now, cursor, token), cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<RetentionHold>> HoldsAsync(DateTimeOffset rangeStart, DateTimeOffset rangeEnd, CancellationToken cancellationToken)
+    {
+        RecordQueries.Require(StorageTime.InStorableRange(rangeStart) && StorageTime.InStorableRange(rangeEnd), "range must be within the storable range");
+        RecordQueries.Require(rangeStart <= rangeEnd, "range start must not be after its end");
+
+        var parameters = new Dictionary<string, object>
+                         {
+                             ["$start"] = StorageTime.ToNanoseconds(rangeStart),
+                             ["$end"] = StorageTime.ToNanoseconds(rangeEnd)
+                         };
+
+        return QueryAsync(RetentionQueries.ReadHolds,
+                          parameters,
+                          reader => new RetentionHold
+                                    {
+                                        Start = StorageTime.FromNanoseconds(reader.GetInt64(0)),
+                                        End = StorageTime.FromNanoseconds(reader.GetInt64(1))
+                                    },
+                          RetentionContext,
+                          cancellationToken);
+    }
+
+    #endregion // IRetentionStore
+
+    #region IRollupReader
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<RollupBucket>> RollupsAsync(RollupQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        RecordQueries.ValidateWindow(query.From, query.To, query.Limit);
+        RecordQueries.Require(Enum.IsDefined(query.Tier), "unknown tier");
+        RecordQueries.Require(query.Source.Length > 0 && query.Name.Length > 0, "source and name are required");
+
+        var tier = query.Tier;
+        var parameters = new Dictionary<string, object>
+                         {
+                             ["$source"] = query.Source,
+                             ["$name"] = query.Name,
+                             ["$from"] = StorageTime.ToNanoseconds(query.From),
+                             ["$to"] = StorageTime.ToNanoseconds(query.To),
+                             ["$limit"] = (long)query.Limit
+                         };
+
+        return QueryAsync(tier == RollupTier.FiveMinutes ? RetentionQueries.ReadFiveMinutes : RetentionQueries.ReadHourly,
+                          parameters,
+                          reader =>
+                          {
+                              var count = reader.GetInt64(7);
+
+                              return new RollupBucket
+                                     {
+                                         Tier = tier,
+                                         Source = reader.GetString(0),
+                                         Name = reader.GetString(1),
+                                         Labels = reader.GetString(2),
+                                         Start = StorageTime.FromNanoseconds(reader.GetInt64(3)),
+                                         Minimum = reader.GetDouble(4),
+                                         Average = reader.GetDouble(6) / count,
+                                         Maximum = reader.GetDouble(5),
+                                         Last = reader.GetDouble(8),
+                                         LastAt = StorageTime.FromNanoseconds(reader.GetInt64(9)),
+                                         Count = count
+                                     };
+                          },
+                          RetentionContext,
+                          cancellationToken);
+    }
+
+    #endregion // IRollupReader
 
     #region IAsyncDisposable
 

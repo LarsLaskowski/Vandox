@@ -53,6 +53,16 @@ public sealed class IncidentReconstructor
     /// </summary>
     public ILogger? Logger { get; init; }
 
+    /// <summary>
+    /// Gets the start of the log period; a kill cluster whose window starts before it is rebuilt only when a hold or an import keeps it; <c>null</c> for no limit.
+    /// </summary>
+    public DateTimeOffset? LogPeriodStart { get; init; }
+
+    /// <summary>
+    /// Gets the store that holds the retention holds; <c>null</c> for none.
+    /// </summary>
+    public IRetentionStore? Holds { get; init; }
+
     #endregion // Properties
 
     #region Constructors
@@ -111,11 +121,14 @@ public sealed class IncidentReconstructor
                         To = StorableTime.Max
                     };
 
-        async Task OnClusterAsync(KillCluster? cluster)
+        var agentLines = new RecentAgentLines();
+        var openHasAgentKill = false;
+
+        async Task OnClusterAsync(KillCluster? cluster, bool hasAgentKill)
         {
             if (cluster is not null)
             {
-                await ProcessAsync(cluster, saved, result, cancellationToken).ConfigureAwait(false);
+                await ProcessAsync(cluster, hasAgentKill, saved, result, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -123,8 +136,13 @@ public sealed class IncidentReconstructor
         {
             foreach (var detected in closed.Where(item => item.SignatureId == IncidentSignatures.OomKill))
             {
+                var agentKill = agentLines.ContainsAny(detected.RecordIds);
+                var cluster = clusterer.Add(detected);
+                var closedHasAgentKill = openHasAgentKill;
+
                 result.Kills++;
-                await OnClusterAsync(clusterer.Add(detected)).ConfigureAwait(false);
+                openHasAgentKill = cluster is null ? openHasAgentKill || agentKill : agentKill;
+                await OnClusterAsync(cluster, closedHasAgentKill).ConfigureAwait(false);
             }
 
             closed.Clear();
@@ -136,18 +154,21 @@ public sealed class IncidentReconstructor
                                     async record =>
                                     {
                                         result.LinesRead++;
+
+                                        agentLines.Add(record);
                                         detector.Add(record.Id, record.Record, closed);
                                         await DrainAsync().ConfigureAwait(false);
+                                        agentLines.ForgetBefore(record.Record.CapturedAt);
                                     },
                                     cancellationToken)
                          .ConfigureAwait(false);
         detector.Complete(closed);
         await DrainAsync().ConfigureAwait(false);
-        await OnClusterAsync(clusterer.Complete()).ConfigureAwait(false);
+        await OnClusterAsync(clusterer.Complete(), openHasAgentKill).ConfigureAwait(false);
 
         var stored = await _incidents.CountIncidentsAsync(cancellationToken).ConfigureAwait(false);
 
-        result.Kept = stored - (result.Created + result.Updated + result.Unchanged);
+        result.Kept = Math.Max(0, stored - (result.Created + result.Updated + result.Unchanged));
 
         return result;
     }
@@ -200,13 +221,21 @@ public sealed class IncidentReconstructor
     /// Builds and saves the incident of a cluster.
     /// </summary>
     /// <param name="cluster">The cluster</param>
+    /// <param name="hasAgentKill">Whether a kill of the cluster does not come from an imported record</param>
     /// <param name="saved">Called with the saved incident</param>
     /// <param name="result">The counts</param>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <returns>A task that completes when the incident is saved or skipped</returns>
-    private async Task ProcessAsync(KillCluster cluster, Func<SavedIncident, Task> saved, ReconstructionResult result, CancellationToken cancellationToken)
+    private async Task ProcessAsync(KillCluster cluster, bool hasAgentKill, Func<SavedIncident, Task> saved, ReconstructionResult result, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (await IsLeftUnchangedAsync(cluster, hasAgentKill, cancellationToken).ConfigureAwait(false))
+        {
+            result.Unchanged++;
+
+            return;
+        }
 
         var builder = new IncidentBuilder(cluster, _before, _after);
 
@@ -233,6 +262,31 @@ public sealed class IncidentReconstructor
             result.Skipped++;
             Logger?.IncidentSkipped(incident.FirstKillAt.ToString("O", CultureInfo.InvariantCulture), exception.Message);
         }
+    }
+
+    /// <summary>
+    /// Determines whether a cluster is left as it is: its window starts before the log period, where agent data is removed, and neither one
+    /// hold keeps its whole window nor are all its kills imported. The stored incidents it overlaps stay unchanged.
+    /// </summary>
+    /// <param name="cluster">The cluster</param>
+    /// <param name="hasAgentKill">Whether a kill of the cluster does not come from an imported record</param>
+    /// <param name="cancellationToken">The cancellation token</param>
+    /// <returns>A task that returns <c>true</c> when the cluster is not built</returns>
+    private async Task<bool> IsLeftUnchangedAsync(KillCluster cluster, bool hasAgentKill, CancellationToken cancellationToken)
+    {
+        if (LogPeriodStart is not { } start || cluster.Start >= start || hasAgentKill == false)
+        {
+            return false;
+        }
+
+        if (Holds is null)
+        {
+            return true;
+        }
+
+        var holds = await Holds.HoldsAsync(cluster.Start, cluster.End, cancellationToken).ConfigureAwait(false);
+
+        return holds.Any(hold => hold.Start <= cluster.Start && hold.End >= cluster.End) == false;
     }
 
     /// <summary>
