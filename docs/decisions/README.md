@@ -250,4 +250,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0211 | A resent agent record whose stored copy was removed is not stored again | Accepted | 2026-11-13 |
 | 0212 | Retention frees space inside the database file, not on the volume | Accepted | 2026-11-13 |
 | 0213 | Agent sample times follow the raw period, below a floor that opens no time gap | Accepted | 2026-11-13 |
+| 0214 | Time-series queries share one resolution and one time axis, raw samples bridged between other lines' times | Proposed | 2026-11-14 |
+| 0215 | A service restart is a rise of NRestarts, or a new active-enter time of a running or failed unit with no boot between | Proposed | 2026-11-14 |
+| 0216 | The time-series query reads gap records and backup runs in fixed windows around the range | Proposed | 2026-11-14 |
 <!-- project:end index -->
