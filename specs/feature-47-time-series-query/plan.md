@@ -232,7 +232,7 @@ All by the Dev, after the code is green:
   "Marker texts (SeriesMarker.Text: victim command, unit, backup command), line labels (SeriesLine.Labels), boot IDs and gap
   collectors are external text from the agent, returned as stored; a view shows them, and a chart label built from them, only as
   [Web UI](web-ui.md) *External text* writes external text."
-- `docs/areas/storage-reading.md`: *Scope* names time-series reads; new section *Time-series reads* with the seven reads, limits and
+- `docs/areas/storage-reading.md`: *Scope* names time-series reads; new section *Time-series reads* with the ten reads, limits (each read refuses a limit above its own maximum: 1,001 for gap rows and the event projections, 2,001 for service changes; `PreviousServiceStatesAsync` refuses more than 2,001 units, takes them as one bound JSON parameter, and limits the 10,000 most recent `service_state` rows before `from` before it filters them by unit) and
   orders (UTF-8 byte order of labels, 1,024 label sets examined, pages of 1,001 projected rows, ten pages per kind, the
   10,000-row backward scan for previous unit states).
 - `docs/areas/web-ui.md`: *Charts* — the *between samples* state and the three new error texts; *Store reads of the views* — the
@@ -305,3 +305,57 @@ Their area link resolves once the Dev adds `docs/areas/time-series-query.md`; `d
 ## Out of scope / follow-ups
 
 See spec *Out of scope*. A view needing log-shipping gaps reported more than seven days late revisits record 0216.
+
+## Security notes
+
+All six of my findings are resolved in the revised plan, and I'm approving it. The revision adds no blocking issue; I have two small non-blocking notes.
+
+I reviewed the revised `/home/user/Vandox/specs/feature-47-time-series-query/plan.md` (new *Security review* section, *Approach*, *Bounds*, *Signatures*, *Tests per criterion*) and the spec diff against `c8eed5f`, at branch head `69c21c9`. I ran no new measurement: last round's probe of the bundled SQLite 3.53.4 (json_extract on a missing member gives NULL; the window sort spills to a temp file) still covers what the revision relies on.
+
+## Previous findings
+
+- **S1 (event reads kept whole decoded records) — resolved.**
+  - Gap records, kernel events and backup runs are now read through projections (`GapRecordsAsync`, `KernelEventsAsync`, `BackupRunsAsync`). These never carry the payload or `message`.
+  - Reads come in pages of at most 1,001 rows, at most ten pages per kind, and a larger limit is refused.
+  - The engine no longer takes an `IRecordReader`.
+  - The bound holds: about 10,010 rows × about 2.5 KiB per kind. The longest stored fields are the 1 KiB `victim_command` and backup `command` (`Check.RequiredShort`) and the 256-byte unit.
+  - Pinned by `QueryAsyncEventReadsUseAtMostTenPagesOfOneThousandOne` and `EventReadsRefuseLimitOverOneThousandOne`.
+
+- **S2 (unbounded backward search for a unit's previous record) — resolved.**
+  - `PreviousServiceStatesAsync` now does one backward scan of at most 10,000 `service_state` rows. A unit not found within it has no previous record, so it counts as no restart.
+  - Spec E12 and N2 and record 0215 state this.
+  - The test row "previous record beyond the 10,000 rows examined" in `QueryAsyncServiceRestartRules` tells a cap on rows examined apart from a `LIMIT` on rows that match. That makes the bound testable (see note 1).
+
+- **S3 (unbounded added axis times) — resolved.** A time is added only when the current axis has none in the interval. That gives at most one per interval and at most 2 × target − 1 times in total. Stated in *Raw points*, *Bounds* and N2; pinned by `QueryAsyncRawGapAcrossSixtyFourLinesAddsOneTime`.
+
+- **S4 (forged payload times) — resolved.**
+  - A restart is timed at its new `active_enter_at` only when that lies within `[from, end)` and not after its capture time; otherwise it is timed at the capture time, which always lies in the range.
+  - A backup with `started_at >= end` is dropped, and its `EndsAt`/`LastSeenAt` are clamped to `now`.
+  - A gap record's end is clipped to `now`, and a span that does not parse is skipped.
+  - Test rows are in `QueryAsyncRestartTime` and `QueryAsyncBackupRunSpans`.
+  - This now holds AC5 and AC6/E2 even against forged values that pass the storable-range check.
+
+- **S5 (external-text paragraph) — resolved.** The paragraph is in *Documentation updates*, verbatim. The *External text* heading exists in `docs/areas/web-ui.md:84`.
+
+- **S6 (derived windows outside the storable range) — resolved.** Every derived bound is clamped to [`StorableTime.Min`, `StorableTime.Max`], and N2 takes the suggested wording. Pinned by `QueryAsyncStorableEdgesReadWithoutError`.
+
+## Is the revision introducing new issues?
+
+Checked:
+- The restart prefilter's `IS NOT` comparison: a NULL against a present value is now a change. That only widens the C# check; it does not skip it.
+- `records.boot_id` comes from the envelope the backend stored, and is only compared for equality.
+- `restarts` is read as `long` from a `uint`.
+- Paging uses `AfterId` on (capture time, ID), so a page of 1,001 rows that share one capture time still moves forward.
+- Units may only contain `[A-Za-z0-9:_.@\-]` (`ServiceState.cs:59`), so the `json_each` units list cannot break out of its JSON array.
+
+1. [NON-BLOCKING] **Neither the per-read maximums nor the "rows examined" meaning are stated precisely.**
+   - The refused limit ("a limit over 1,001 is refused") is stated for the event reads only. `ServiceChangesAsync` uses `TimeRangeQuery` with limit 2,001, and `PreviousServiceStatesAsync` takes a units list whose length nothing bounds: up to 2,001 names today, from the rows of one `ServiceChangesAsync` page.
+   - "A single backward scan of at most 10,000 `service_state` rows … filtered to the units" can still be built as a `LIMIT` on the rows that match, which scans the whole history for a unit that is not found.
+   - Smallest fix: in *Event reads* or *Markers*, and in the storage-reading section, add verbatim:
+     "Each read refuses a limit above its own maximum: 1,001 for gap rows and the event projections, 2,001 for
+     service changes; `PreviousServiceStatesAsync` refuses more than 2,001 units, takes them as one bound JSON
+     parameter, and limits the 10,000 most recent `service_state` rows before `from` before it filters them by unit."
+   - In addition, the Tester builds the "beyond the 10,000 rows examined" row with 10,000 rows of other units between the previous record and `from`.
+   - Recommendation: fix now; it is one sentence plus test data.
+
+2. [NON-BLOCKING] **One line in *Documentation updates* is out of date.** The storage-reading entry still says "the seven reads", but there are now ten. Smallest fix: replace "with the ten reads" with "with the ten reads", verbatim. Recommendation: fix now.
