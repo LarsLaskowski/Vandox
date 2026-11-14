@@ -1,9 +1,9 @@
 # Project
 
 What the squad needs to know beyond the stack; read by the Lead, the Devil's Advocate, Security, the Tester and the
-Reviewer. The agent `vandox-agent` is Go (`cmd/vandox-agent`, `internal/`), the backend `vandoxd` .NET 11 with
-Blazor (`src/Vandox.*`, records 0073, 0197). Not template-managed: `adopt-template` creates it once; a product PR updates
-it when the change makes an entry untrue (`.squad/routing.md`, *Scope of a product PR*).
+Reviewer. Agent: Go (`cmd/vandox-agent`, `internal/`); backend: .NET with Blazor (`src/Vandox.*`); records 0073, 0197.
+Not template-managed; a product PR updates an entry the change makes untrue (`.squad/routing.md`, *Scope of a product
+PR*).
 
 Every entry points: it names files or endpoints and links the area document (`docs/areas/README.md`) or record that
 states the rules; values, limits and sequences stand only there. `config-check.py` warns past `PROJECT_MAX_WORDS`
@@ -145,8 +145,8 @@ known-variable list, the secrets table in `README.md`
 
 **A wire format field or record kind** touches (record 0075):
 - `internal/model`, `internal/wire`, `src/Vandox.Core/Model`, `src/Vandox.Core/Wire`
-- the golden batches `testdata/wire/all-kinds.jsonl` and `replaced-text.jsonl` (`VANDOX_UPDATE_GOLDEN=1 go test
-  ./internal/wire`), read by `internal/wire/golden_test.go` and `WireContractTests`
+- the golden batches `testdata/wire/all-kinds.jsonl` and `replaced-text.jsonl`,
+  read by `internal/wire/golden_test.go` and `WireContractTests`
 - [wire-format](../docs/areas/wire-format.md) or [wire-format-records](../docs/areas/wire-format-records.md); a
   version change follows record 0043
 
@@ -164,7 +164,7 @@ tailnet) touches:
 **A file a decision record constrains** — `.github/dependabot.yml`, a workflow, `.golangci.yml`,
 `deploy/backend/Dockerfile`, `deploy/backend/docker-compose.yml` — touches:
 - the records found by topic: `grep -l -i -E 'dependabot|workflow|dockerfile|compose|golangci|ci\.yml'
-  docs/decisions/0*.md` (among them 0037, 0041, 0047, 0052, 0060, 0112)
+  docs/decisions/0*.md`
 - a contradicted record: edited (unreleased) or superseded (released) in the same pull request, or the change dropped
 
 ## Test doubles
@@ -185,7 +185,7 @@ marked planned.
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `CountingClock` (Storage tests) | the clock |
 | database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `ListLogger` (Backend tests) | store, readers |
-| retention store (C#) | `ScriptedRetentionStore` (Backend tests): scripted fold and removal steps (results, exceptions or gated tasks), scripted kernel events and scan progress, failing saves, every call recorded in order with waiters, `Busy`/`Failed` store exceptions with an inner `SqliteException` (5 or 10); `AgentRecords` writes agent batches with sequence numbers | `IRetentionStore`, agent records |
+| retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
 | Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
