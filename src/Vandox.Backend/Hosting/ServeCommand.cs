@@ -14,6 +14,7 @@ using Vandox.Backend.Ingest;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Reports;
+using Vandox.Backend.Retention;
 using Vandox.Backend.Security;
 using Vandox.Core.Configuration;
 using Vandox.Core.Signatures;
@@ -250,6 +251,7 @@ internal static class ServeCommand
         builder.Services.AddSingleton(provider => CreateReportService(store, config, provider.GetRequiredService<WebReaderGate>(), provider.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.AddSingleton(provider => CreateIngestEndpoint(store, config, hooks, loggerFactory, provider));
+        builder.Services.AddHostedService(provider => new RetentionService(store, RetentionService.CreatePolicy(config), provider.GetRequiredService<TimeProvider>(), provider.GetRequiredService<ILoggerFactory>().CreateLogger("retention")));
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
         WebAuthentication.AddServices(builder.Services, verifier, hooks.Clock ?? TimeProvider.System, loggerFactory);
@@ -315,7 +317,7 @@ internal static class ServeCommand
     /// <returns>The service</returns>
     private static ReportService CreateReportService(SqliteStore store, BackendConfig config, WebReaderGate gate, TimeProvider clock)
     {
-        return new ReportService(new GatedRecordReader(store, gate), new GatedIncidentStore(store, gate), new GatedListenerHistoryReader(store, gate), BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), clock);
+        return new ReportService(new GatedRecordReader(store, gate), new GatedIncidentStore(store, gate), new GatedListenerHistoryReader(store, gate), BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), ReportRetention.From(config), clock);
     }
 
     /// <summary>

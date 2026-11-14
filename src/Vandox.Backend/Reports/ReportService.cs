@@ -20,6 +20,8 @@ public sealed class ReportService : IDisposable
 
     private readonly TimeSpan _lookback;
 
+    private readonly ReportRetention _retention;
+
     private readonly TimeProvider _clock;
 
     private readonly SemaphoreSlim _slot = new(1, 1);
@@ -29,7 +31,7 @@ public sealed class ReportService : IDisposable
     #region Constructors
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ReportService"/> class.
+    /// Initializes a new instance of the <see cref="ReportService"/> class without retention periods.
     /// </summary>
     /// <param name="records">The reader of stored records</param>
     /// <param name="incidents">The incident store</param>
@@ -38,11 +40,27 @@ public sealed class ReportService : IDisposable
     /// <param name="lookback">The lookback before an outage</param>
     /// <param name="clock">The clock that stamps the report</param>
     public ReportService(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+        : this(records, incidents, listeners, catalog, lookback, new ReportRetention(), clock)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ReportService"/> class.
+    /// </summary>
+    /// <param name="records">The reader of stored records</param>
+    /// <param name="incidents">The incident store</param>
+    /// <param name="listeners">The reader of the stored listener comparisons</param>
+    /// <param name="catalog">The signature catalog</param>
+    /// <param name="lookback">The lookback before an outage</param>
+    /// <param name="retention">The periods after which agent log lines and snapshots are skipped</param>
+    /// <param name="clock">The clock that stamps the report</param>
+    public ReportService(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, ReportRetention retention, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(incidents);
         ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(retention);
         ArgumentNullException.ThrowIfNull(clock);
 
         _records = records;
@@ -50,6 +68,7 @@ public sealed class ReportService : IDisposable
         _listeners = listeners;
         _catalog = catalog;
         _lookback = lookback;
+        _retention = retention;
         _clock = clock;
     }
 
@@ -71,7 +90,7 @@ public sealed class ReportService : IDisposable
 
         try
         {
-            var reporter = new ForensicsReporter(_records, _incidents, _listeners, _catalog, _lookback, _clock);
+            var reporter = new ForensicsReporter(_records, _incidents, _listeners, _catalog, _lookback, _retention, _clock);
 
             return await reporter.RunAsync(writer, cancellationToken).ConfigureAwait(false);
         }

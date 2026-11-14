@@ -523,6 +523,15 @@ internal static partial class BackendLog
     internal static partial void AgentClockInStep(this ILogger logger, string agentId);
 
     /// <summary>
+    /// Logs the metric values and buckets a retention fold pass folded.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="values">The metric values folded</param>
+    /// <param name="buckets">The buckets written</param>
+    [LoggerMessage(EventId = 69, Level = LogLevel.Information, Message = "retention rollup {Values} {Buckets}")]
+    internal static partial void RetentionRolledUp(this ILogger logger, long values, long buckets);
+
+    /// <summary>
     /// Logs the records a retention removal pass removed.
     /// </summary>
     /// <param name="logger">The logger</param>

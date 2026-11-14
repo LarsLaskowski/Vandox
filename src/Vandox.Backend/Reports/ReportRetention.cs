@@ -1,3 +1,6 @@
+using Vandox.Backend.Retention;
+using Vandox.Core.Configuration;
+
 namespace Vandox.Backend.Reports;
 
 /// <summary>
@@ -5,6 +8,26 @@ namespace Vandox.Backend.Reports;
 /// </summary>
 public sealed class ReportRetention
 {
+    #region Methods
+
+    /// <summary>
+    /// Creates the periods of a configuration.
+    /// </summary>
+    /// <param name="config">The backend configuration</param>
+    /// <returns>The periods</returns>
+    internal static ReportRetention From(BackendConfig config)
+    {
+        var policy = RetentionService.CreatePolicy(config);
+
+        return new ReportRetention
+               {
+                   Logs = policy.Logs,
+                   Snapshots = policy.Snapshots
+               };
+    }
+
+    #endregion // Methods
+
     #region Properties
 
     /// <summary>

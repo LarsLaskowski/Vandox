@@ -3,6 +3,8 @@ using System.Globalization;
 using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Retention;
+using Vandox.Core.Configuration;
 using Vandox.Storage;
 
 namespace Vandox.Backend.Cli;
@@ -27,7 +29,7 @@ internal static class TemplatesCommand
     /// <returns>The exit code: 0 when the statistics are rebuilt, 1 otherwise</returns>
     internal static Task<int> RunAsync(string configPath, IEnumerable<KeyValuePair<string, string>> environment, TextWriter stdout, TextWriter stderr, ServeHooks hooks, CancellationToken cancellationToken)
     {
-        return StoreCommand.RunAsync(configPath, environment, stderr, hooks, logger => logger.TemplateRebuildInterrupted(), (store, _, logger, _) => RebuildAsync(store, logger, stdout, cancellationToken), cancellationToken);
+        return StoreCommand.RunAsync(configPath, environment, stderr, hooks, logger => logger.TemplateRebuildInterrupted(), (store, config, logger, clock) => RebuildAsync(store, KeepBefore(config, clock), logger, stdout, cancellationToken), cancellationToken);
     }
 
     /// <summary>
@@ -41,20 +43,40 @@ internal static class TemplatesCommand
     }
 
     /// <summary>
+    /// Returns the start of the log period as a full hour: the statistics of the hours before it stay, as their lines may be removed.
+    /// </summary>
+    /// <param name="config">The configuration</param>
+    /// <param name="clock">The clock</param>
+    /// <returns>The first full hour at or after <c>now - retention.logs</c>, or <c>null</c> when log lines are kept without limit</returns>
+    internal static DateTimeOffset? KeepBefore(BackendConfig config, TimeProvider clock)
+    {
+        if (RetentionService.CreatePolicy(config).Logs is not { } period)
+        {
+            return null;
+        }
+
+        var start = clock.GetUtcNow() - period;
+        var hours = (start.UtcTicks + TimeSpan.TicksPerHour - 1) / TimeSpan.TicksPerHour;
+
+        return new DateTimeOffset(hours * TimeSpan.TicksPerHour, TimeSpan.Zero);
+    }
+
+    /// <summary>
     /// Rebuilds the statistics and writes the summary.
     /// </summary>
     /// <param name="store">The store</param>
+    /// <param name="keepBefore">The start of the log period as a full hour, or <c>null</c> to recount everything</param>
     /// <param name="logger">The logger</param>
     /// <param name="stdout">Standard output</param>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <returns>The exit code</returns>
-    private static async Task<int> RebuildAsync(SqliteStore store, ILogger logger, TextWriter stdout, CancellationToken cancellationToken)
+    private static async Task<int> RebuildAsync(SqliteStore store, DateTimeOffset? keepBefore, ILogger logger, TextWriter stdout, CancellationToken cancellationToken)
     {
         logger.TemplateRebuildStarted();
 
         try
         {
-            var result = await store.RebuildTemplatesAsync(StorageLimits.TemplateRebuildBatchLines, (lines, _) => ReportProgress(logger, lines), cancellationToken).ConfigureAwait(false);
+            var result = await store.RebuildTemplatesAsync(StorageLimits.TemplateRebuildBatchLines, keepBefore, (lines, _) => ReportProgress(logger, lines), cancellationToken).ConfigureAwait(false);
 
             await stdout.WriteAsync(FormatSummary(result), CancellationToken.None).ConfigureAwait(false);
 

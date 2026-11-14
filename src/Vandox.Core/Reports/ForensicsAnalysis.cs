@@ -45,6 +45,7 @@ public sealed class ForensicsAnalysis
     private DateTimeOffset? _firstSnapshotAt;
     private DateTimeOffset? _lastSnapshotAt;
     private long _incidents;
+    private long _judged;
     private long _kills;
     private DateTimeOffset? _firstOutageAt;
     private DateTimeOffset? _lastOutageAt;
@@ -219,9 +220,16 @@ public sealed class ForensicsAnalysis
 
         _incidents++;
         _kills = long.MaxValue - _kills < kills ? long.MaxValue : _kills + kills;
-        _hourOutages[incident.FirstKillAt.UtcDateTime.Hour]++;
         _firstOutageAt = Earlier(_firstOutageAt, incident.FirstKillAt);
         _lastOutageAt = Later(_lastOutageAt, incident.FirstKillAt);
+
+        if (IsJudged(incident.FirstKillAt) == false)
+        {
+            return;
+        }
+
+        _judged++;
+        _hourOutages[incident.FirstKillAt.UtcDateTime.Hour]++;
         Tally(_outagesWith, _outagesKnown, BackupIndex, activities.Backup);
         Tally(_outagesWith, _outagesKnown, BootIndex, activities.Boot);
         Tally(_outagesWith, _outagesKnown, PanelIndex, activities.PanelHigh);
@@ -239,7 +247,7 @@ public sealed class ForensicsAnalysis
 
         var hourLevel = ReportLimits.SignificanceLevel / HoursPerDay;
         var timeOfDay = Enumerable.Range(0, HoursPerDay)
-                                  .Select(hour => RecurrenceRules.Evaluate(_hourOutages[hour], _incidents, _observed.HoursOfDay[hour], _observed.Count, hourLevel))
+                                  .Select(hour => RecurrenceRules.Evaluate(_hourOutages[hour], _judged, _observed.HoursOfDay[hour], _observed.Count, hourLevel))
                                   .ToList();
         var snapshotLimit = _series.Truncated ? UnknownReason.TooManySnapshots : Runs();
 
@@ -343,6 +351,23 @@ public sealed class ForensicsAnalysis
                    Matching = matching,
                    Known = known
                };
+    }
+
+    /// <summary>
+    /// Determines whether an outage counts in the rules: not when it lies before the judged period in an hour that is not observed.
+    /// </summary>
+    /// <param name="at">The time of the first kill</param>
+    /// <returns><c>true</c> when the outage is judged</returns>
+    private bool IsJudged(DateTimeOffset at)
+    {
+        if (JudgedFrom is not { } from || at >= from)
+        {
+            return true;
+        }
+
+        var hourStart = DateTimeOffset.UnixEpoch.AddTicks(ObservedHours.HourOf(at) * TimeSpan.TicksPerHour);
+
+        return _observed.Covers(hourStart, hourStart.AddHours(1));
     }
 
     /// <summary>
