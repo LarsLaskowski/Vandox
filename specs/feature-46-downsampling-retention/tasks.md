@@ -16,4 +16,4 @@ Plan: [plan.md](plan.md)
 | 9 | G3 | Service loop, scanner, wiring in `ServeCommand`, report horizons in `ReportService` and `ReportCommand`, `keepBefore` in `TemplatesCommand`, the re-run rule in `IncidentReconstructor` and `IncidentsCommand` | `src/Vandox.Backend/` , `src/Vandox.Core/Reports/ForensicsAnalysis.cs` | AC1, AC2, AC5, AC10, AC11, AC12, AC13 | 8 | Dev | [x] |
 | 10 | G4 | `--retention` benchmark scenario (no new API) | `tools/Vandox.StorageBenchmark/RetentionBenchmark.cs`, `Program.cs` | AC6 | 9 | Dev | [x] |
 | 11 | G4 | Documentation updates of the plan, example file and README | `docs/areas/retention.md`, `docs/areas/README.md`, `docs/areas/*.md` listed, `docs/ARCHITECTURE.md`, `docs/BENCHMARKS.md`, `README.md`, `deploy/backend/vandoxd.yaml`; `.squad/project.md` text reported | AC1, AC6, AC9 | 10 | Dev | [x] |
-| 12 | PM | Run the `--retention` scenario on the DS918+ SSD volume and report the medians | — | AC6 | 10 | Product Manager | [ ] |
+| 12 | PM | Run the `--retention` scenario on the DS918+ SSD volume and report the medians | — | AC6 | 10 | Product Manager | [x] |
