@@ -90,6 +90,129 @@ public class SqliteStoreTimeSeriesTests
     }
 
     /// <summary>
+    /// A raw read folds a stored <c>{}</c> labels text into the line of the missing labels.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public async Task RawValuesAsyncFoldsStoredEmptyObjectLabelsIntoEmptyLabelSet()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, TimeSeriesSamples.Metric(Source, "cpu", Samples.Base, 1));
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, TimeSeriesSamples.Metric(Source, "cpu", Samples.Base.AddSeconds(30), 2));
+        await TimeSeriesSamples.SetLastLabelsToEmptyObjectAsync(directory.Path, TestContext.CancellationToken);
+
+        // Act
+        var page = await store.RawValuesAsync(RawQuery("cpu", 100, 64), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, page.Lines, "the stored {} and the missing labels are one label set");
+        Assert.AreEqual(string.Empty, page.Lines[0].Labels, "the line has the empty label set");
+        Assert.AreEqual("0s x1, 30s x1", TimeSeriesSamples.Describe(page.Lines[0]), "both samples are points of the one line");
+    }
+
+    /// <summary>
+    /// A raw read that meets its label sets in descending order evicts the largest one beyond the limit and keeps the smallest ones.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public async Task RawValuesAsyncEvictsLargestLabelSetWhenLabelSetsArriveDescending()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store,
+                                           string.Empty,
+                                           string.Empty,
+                                           TestContext.CancellationToken,
+                                           Enumerable.Range(0, 5).Select(index => TimeSeriesSamples.Metric(Source, "cpu", Samples.Base.AddSeconds(index), index, TimeSeriesSamples.Mode($"mode{4 - index}"))).ToArray());
+
+        // Act
+        var page = await store.RawValuesAsync(RawQuery("cpu", 100, 2), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(page.LinesCut, "five label sets exceed a limit of two");
+        Assert.AreSequenceEqual(["{\"mode\":\"mode0\"}", "{\"mode\":\"mode1\"}"], page.Lines.Select(line => line.Labels).ToList(), "the two smallest label sets are returned although they arrive last");
+    }
+
+    /// <summary>
+    /// A raw read refuses a limit of times or lines outside its range and takes the bounds.
+    /// </summary>
+    /// <param name="maxTimes">The limit of distinct times</param>
+    /// <param name="maxLines">The line limit</param>
+    /// <param name="refused">Whether the read is refused</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [DataRow(0, 64, true)]
+    [DataRow(10001, 64, true)]
+    [DataRow(1, 64, false)]
+    [DataRow(10000, 64, false)]
+    [DataRow(100, 0, true)]
+    [DataRow(100, 1025, true)]
+    [DataRow(100, 1, false)]
+    [DataRow(100, 1024, false)]
+    public async Task RawValuesAsyncRefusesLimitsOutsideTheirRange(int maxTimes, int maxLines, bool refused)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = RawQuery("cpu", maxTimes, maxLines);
+
+        // Act
+        var exception = refused ? await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.RawValuesAsync(query, TestContext.CancellationToken), "a limit outside its range") : null;
+        var page = refused ? null : await store.RawValuesAsync(query, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(refused, exception is not null, "refused or read");
+        Assert.IsTrue(exception is null || exception.Message.StartsWith("store: invalid query: max ", StringComparison.Ordinal), "the text names the limit");
+        Assert.IsTrue(page is null || page.Lines.Count == 0, "the empty store has no line");
+    }
+
+    /// <summary>
+    /// A step read refuses a step that is not a whole multiple of the tier bucket, not positive or longer than 36,500 days, and takes the bounds; a line limit outside 1 to 1,024 is refused.
+    /// </summary>
+    /// <param name="tier">The tier</param>
+    /// <param name="stepMinutes">The step in minutes</param>
+    /// <param name="maxLines">The line limit</param>
+    /// <param name="refused">Whether the read is refused</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC2")]
+    [DataRow(RollupTier.FiveMinutes, 7, 64, true)]
+    [DataRow(RollupTier.FiveMinutes, 0, 64, true)]
+    [DataRow(RollupTier.FiveMinutes, -5, 64, true)]
+    [DataRow(RollupTier.Hour, 90, 64, true)]
+    [DataRow(RollupTier.Hour, 52560060, 64, true)]
+    [DataRow(RollupTier.FiveMinutes, 5, 0, true)]
+    [DataRow(RollupTier.FiveMinutes, 5, 1025, true)]
+    [DataRow(RollupTier.FiveMinutes, 5, 1, false)]
+    [DataRow(RollupTier.FiveMinutes, 5, 1024, false)]
+    [DataRow(RollupTier.Hour, 120, 64, false)]
+    [DataRow(RollupTier.Hour, 52560000, 64, false)]
+    public async Task RollupStepsAsyncRefusesInvalidStepAndLineLimit(RollupTier tier, int stepMinutes, int maxLines, bool refused)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = StepQuery(tier, "load", Samples.Base, Samples.Base.AddHours(4), TimeSpan.FromMinutes(stepMinutes), maxLines);
+
+        // Act
+        var exception = refused ? await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.RollupStepsAsync(query, TestContext.CancellationToken), "an invalid step or limit") : null;
+        var page = refused ? null : await store.RollupStepsAsync(query, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(refused, exception is not null, "refused or read");
+        Assert.IsTrue(exception is null || exception.Message.StartsWith("store: invalid query: ", StringComparison.Ordinal), "the text names the rule of a query");
+        Assert.IsTrue(page is null || page.Lines.Count == 0, "the empty store has no line");
+    }
+
+    /// <summary>
     /// A raw read that meets one distinct time more than the limit stops there and says so.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -753,6 +876,27 @@ public class SqliteStoreTimeSeriesTests
         Assert.AreSequenceEqual(["a.service@2 active r2 enter=1.75 prev=none", "b.service@0.5 failed r0 enter=none prev=none"], ordered.Select(Describe).ToList(), "the latest record before the time per unit; a record at the time and a unit without a record are not returned");
         Assert.AreEqual(SecondBoot, ordered[0].BootId, "the boot ID of the record");
         Assert.AreEqual(FirstBoot, ordered[1].BootId, "the boot ID of the other record");
+    }
+
+    /// <summary>
+    /// The previous-state read of no unit returns an empty list although the store holds service records.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task PreviousServiceStatesAsyncReturnsEmptyListForNoUnits()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, TimeSeriesSamples.Service("a.service", "active", null, 1, Samples.Base.AddHours(1)));
+
+        // Act
+        var rows = await store.PreviousServiceStatesAsync([], Samples.Base.AddHours(3), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(rows, "no unit asked for, no row returned");
     }
 
     /// <summary>

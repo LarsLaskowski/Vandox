@@ -356,6 +356,27 @@ internal static class TimeSeriesSamples
     }
 
     /// <summary>
+    /// Sets the labels text of the latest stored metric to the text <c>{}</c>, which the write path never stores.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="cancellationToken">Cancels the statement</param>
+    /// <returns>A task that completes when the row is changed</returns>
+    internal static async Task SetLastLabelsToEmptyObjectAsync(string directory, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statement is a test-owned literal
+        command.CommandText = "UPDATE metrics SET labels = '{}' WHERE record_id = (SELECT MAX(record_id) FROM metrics)";
+#pragma warning restore CA2100
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// Inserts a record directly with a payload text that no validated write would store.
     /// </summary>
     /// <param name="directory">The store directory</param>
