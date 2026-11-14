@@ -566,6 +566,71 @@ public class IncidentReconstructorTests
     }
 
     /// <summary>
+    /// Without a log period, agent kills of any age are built as before: a stored incident takes a new kill in its window, and an old cluster outside every hold is saved.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunWithoutLogPeriodRebuildsAsBefore()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, IncidentSamples.Base.AddDays(1), TestContext.CancellationToken, AgentRecords.KillLine(At(0)));
+        await RunAsync(store, store, new FakeTimeProvider(IncidentSamples.Base.AddDays(1)), []);
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(10), 1111), AgentRecords.KillLine(At(300)));
+
+        var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, _before, _after, new FakeTimeProvider(_late))
+                            {
+                                Holds = store
+                            };
+
+        // Act
+        var result = await reconstructor.RunAsync(_ => Task.CompletedTask, TestContext.CancellationToken);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.AreSequenceEqual([At(0), At(300)], stored.Select(row => row.Incident.FirstKillAt), "both clusters are stored");
+        Assert.AreEqual(2L, stored[0].Incident.KillCount, "the stored incident took the new kill in its window");
+        Assert.AreEqual(1L, result.Updated, "the stored incident is updated");
+        Assert.AreEqual(1L, result.Created, "the old cluster outside every hold is created");
+        Assert.AreEqual(0L, result.Unchanged, "nothing is left unchanged");
+    }
+
+    /// <summary>
+    /// With a log period but no store of holds, a cluster of agent kills before the log period is left unchanged, as no hold can keep it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentReconstructorRunWithoutHoldStoreSavesNoAgentIncidentBeforeLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+
+        await agent.WriteAsync(store, _late, TestContext.CancellationToken, AgentRecords.KillLine(At(0)));
+        await SaveHoldAsync(store, At(-120), At(60));
+
+        var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, _before, _after, new FakeTimeProvider(_late))
+                            {
+                                LogPeriodStart = _late - _logPeriod
+                            };
+
+        // Act
+        var result = await reconstructor.RunAsync(_ => Task.CompletedTask, TestContext.CancellationToken);
+        var stored = await ReadAllAsync(store);
+
+        // Assert
+        Assert.IsEmpty(stored, "no incident is saved");
+        Assert.AreEqual(1L, result.Unchanged, "the cluster counts as unchanged");
+        Assert.AreEqual(0L, result.Created, "nothing is created");
+    }
+
+    /// <summary>
     /// Returns a time relative to the first kill of the samples.
     /// </summary>
     /// <param name="minutes">Minutes after the first kill, negative before it</param>

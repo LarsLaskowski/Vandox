@@ -480,6 +480,49 @@ public class ForensicsReporterTests
     }
 
     /// <summary>
+    /// The reporter judges from the start of the log period: an outage before it in an unobserved hour is listed but counts in no rule, while
+    /// without periods it counts in the backup rule as before.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC12")]
+    public async Task ForensicsReporterJudgesFromTheStartOfTheLogPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var before = _now.AddDays(-3).AddHours(-7);
+        var after = _now.AddDays(-1).AddHours(-7);
+
+        await IncidentSamples.WriteAsync(store,
+                                         TestContext.CancellationToken,
+                                         IncidentSamples.Processes(before.AddMinutes(-30), ("web", Mib), ("pzstd", Mib)),
+                                         IncidentSamples.Processes(after.AddMinutes(-30), ("web", Mib), ("pzstd", Mib)));
+        await SaveAsync(store, Outage(before, "mariadbd"), Outage(after, "mariadbd"));
+
+        // Act
+        var (retained, retainedResult) = await RunRetainedAsync(store);
+        var (unlimited, _) = await RunAsync(store, store);
+
+        // Assert
+        Assert.AreEqual(2, retainedResult.IncidentsListed, "both outages are listed");
+        Assert.AreSequenceEqual(["1", "1"], BackupCounts(retained), "only the outage after the start of the log period counts in the backup rule");
+        Assert.AreSequenceEqual(["2", "2"], BackupCounts(unlimited), "without periods both outages count in the backup rule");
+    }
+
+    /// <summary>
+    /// Returns the matching and known outages of the backup rule from the table of the activities.
+    /// </summary>
+    /// <param name="output">The report</param>
+    /// <returns>The two counts as text</returns>
+    private static List<string> BackupCounts(string output)
+    {
+        var row = output.Split('\n').Single(line => line.StartsWith($"| {ReportText.English.Backup} |", StringComparison.Ordinal));
+
+        return row.Split('|').Skip(2).Take(2).Select(cell => cell.Trim()).ToList();
+    }
+
+    /// <summary>
     /// Asserts that a line of the head with the label holds all the given texts.
     /// </summary>
     /// <param name="lines">The lines of the head</param>

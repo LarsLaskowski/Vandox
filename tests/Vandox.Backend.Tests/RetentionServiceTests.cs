@@ -92,6 +92,25 @@ public class RetentionServiceTests
     }
 
     /// <summary>
+    /// A period the loader would refuse makes the policy throw instead of standing for a period it does not name.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public void RetentionServiceCreatePolicyThrowsOnInvalidPeriod()
+    {
+        // Arrange
+        var config = new BackendConfig();
+
+        config.Retention.Logs = "0d";
+
+        // Act
+        var exception = Assert.ThrowsExactly<InvalidOperationException>(() => RetentionService.CreatePolicy(config), "an invalid period throws");
+
+        // Assert
+        Assert.AreEqual("retention: a period of the configuration is not valid", exception.Message, "the message names no stored or configured text");
+    }
+
+    /// <summary>
     /// The running service folds at start and then on every 5-minute tick of its clock, so a bucket is folded at most 5 minutes after it ends; it scans the kills and removes at start, after the fold, and again once an hour has passed.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -377,6 +396,109 @@ public class RetentionServiceTests
         Assert.IsFalse(stoppedDuringStep, "the stop waits for the running step");
         Assert.HasCount(1, store.FoldTimes, "no fold step after the stop, although the step reported more");
         Assert.IsEmpty(store.Cursors, "no removal step after the stop");
+    }
+
+    /// <summary>
+    /// A store error without an SQLite cause is logged as a failed step, not as a busy database.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC10")]
+    public async Task RetentionServiceLogsStoreErrorWithoutSqliteCauseAsFailure()
+    {
+        // Arrange
+        var store = new ScriptedRetentionStore();
+        var events = new ListLogger();
+
+        store.AddFold(new StoreException("store: folding rollups: invalid row"));
+
+        using var service = new RetentionService(store, Policy(), new FakeTimeProvider(_start), events);
+
+        // Act
+        await service.RollUpAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["retention step failed fold store: folding rollups: invalid row"], events.Messages, "the failure with the store's message");
+        Assert.AreSequenceEqual([(LogLevel.Error, new EventId(72))], events.Entries, "its level and event ID");
+    }
+
+    /// <summary>
+    /// A removal pass stopped after a step that reported more runs no further step and logs the counts of the step that was done.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC10")]
+    public async Task RetentionServiceStopsBetweenRemovalSteps()
+    {
+        // Arrange
+        var store = new ScriptedRetentionStore();
+        var events = new ListLogger();
+        using var stopping = new CancellationTokenSource();
+
+        store.AddRemoval(async () =>
+                         {
+                             await stopping.CancelAsync();
+
+                             return new RemovalStepResult
+                                    {
+                                        MetricValues = 3,
+                                        More = true
+                                    };
+                         });
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             MetricValues = 5
+                         });
+
+        using var service = new RetentionService(store, Policy(), new FakeTimeProvider(_start), events);
+
+        // Act
+        await service.RemoveAsync(stopping.Token);
+
+        // Assert
+        Assert.HasCount(1, store.Cursors, "no removal step after the stop, although the step reported more");
+        Assert.AreSequenceEqual(["retention removal records 3 0 0 0 0"], events.Messages, "the counts of the step that was done");
+    }
+
+    /// <summary>
+    /// A step that ends because the service stops ends its pass without a log line and without a further step: a fold step, and the kill scan before the removal steps.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC10")]
+    public async Task RetentionServiceStepCancelledByTheStopEndsThePassWithoutLog()
+    {
+        // Arrange
+        var store = new ScriptedRetentionStore
+                    {
+                        ScanProgress = new KillScanProgress
+                                       {
+                                           ScannedId = 0,
+                                           HighestId = 5
+                                       }
+                    };
+        var events = new ListLogger();
+        using var stopping = new CancellationTokenSource();
+
+        store.AddFold(async () =>
+                      {
+                          await stopping.CancelAsync();
+
+                          throw new OperationCanceledException(stopping.Token);
+                      });
+        store.AddFold(1, 1, false);
+
+        using var service = new RetentionService(store, Policy(), new FakeTimeProvider(_start), events);
+
+        // Act
+        await service.RollUpAsync(stopping.Token);
+        await service.RemoveAsync(stopping.Token);
+
+        // Assert
+        Assert.HasCount(1, store.FoldTimes, "no fold step after the cancelled one");
+        Assert.IsEmpty(store.ScanQueries, "the scan reads no page once the service stops");
+        Assert.IsEmpty(store.Cursors, "no removal step once the service stops");
+        Assert.IsEmpty(events.Messages, "no line for passes ended by the stop");
     }
 
     /// <summary>

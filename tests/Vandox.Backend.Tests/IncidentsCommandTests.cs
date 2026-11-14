@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
 using Vandox.Core.Model;
@@ -54,6 +55,55 @@ public class IncidentsCommandTests
         Assert.Contains("incident reconstruction started", firstLog, "the start is logged to standard error");
         Assert.AreEqual(0, second, "exit code of the second run");
         Assert.AreEqual("#1 unchanged 2026-10-02T04:59:00Z kills=1 victim=\"mariadbd\"\n" + Summary(0, 0, 1), secondOutput, "standard output of the second run");
+    }
+
+    /// <summary>
+    /// The command passes the start of the log period and the stored holds: of two agent kills before the log period only the one whose window a hold keeps becomes an incident, the other counts as unchanged.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentsCommandBuildsOnlyHeldAgentKillsBeforeTheLogPeriod()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var held = IncidentSamples.Base.AddHours(5);
+
+        await StoreAgentKillsAsync(fixture.Storage, held);
+
+        // Act
+        var code = await fixture.RunAsync(["incidents"], Hooks(IncidentSamples.Base.AddDays(100)), TestContext.CancellationToken);
+        var output = Normalize(fixture.Out.ToString());
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.StartsWith("#1 created 2026-10-02T09:59:00Z kills=1 victim=\"mariadbd\"\n", output, "only the held kill becomes an incident");
+        Assert.Contains(string.Concat(Row("  created:", 1), Row("  updated:", 0), Row("  unchanged:", 1)), output, "the kill outside the holds counts as unchanged");
+        Assert.DoesNotContain("04:59:00Z", output, "the kill outside the holds is not listed");
+    }
+
+    /// <summary>
+    /// With <c>retention.logs: unlimited</c> the command builds every agent kill, however old, as before.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC13")]
+    public async Task IncidentsCommandBuildsEveryAgentKillWithLogsUnlimited()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+
+        await File.AppendAllTextAsync(fixture.ConfigPath, "retention:\n  logs: unlimited\n", TestContext.CancellationToken);
+        await StoreAgentKillsAsync(fixture.Storage, IncidentSamples.Base.AddHours(5));
+
+        // Act
+        var code = await fixture.RunAsync(["incidents"], Hooks(IncidentSamples.Base.AddDays(100)), TestContext.CancellationToken);
+        var output = Normalize(fixture.Out.ToString());
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.StartsWith("#1 created 2026-10-02T04:59:00Z kills=1 victim=\"mariadbd\"\n#2 created 2026-10-02T09:59:00Z kills=1 victim=\"mariadbd\"\n", output, "both kills become incidents");
+        Assert.Contains(string.Concat(Row("  created:", 2), Row("  updated:", 0), Row("  unchanged:", 0)), output, "nothing is left unchanged");
     }
 
     /// <summary>
@@ -169,6 +219,19 @@ public class IncidentsCommandTests
     }
 
     /// <summary>
+    /// Creates the hooks of a run at a fixed time.
+    /// </summary>
+    /// <param name="now">The time of the run</param>
+    /// <returns>The hooks</returns>
+    private static ServeHooks Hooks(DateTimeOffset now)
+    {
+        return new ServeHooks
+               {
+                   Clock = new FakeTimeProvider(now)
+               };
+    }
+
+    /// <summary>
     /// Builds the summary that the command prints for one kill.
     /// </summary>
     /// <param name="created">The number of created incidents</param>
@@ -223,6 +286,32 @@ public class IncidentsCommandTests
         await using var store = await SqliteStore.OpenAsync(directory, TestContext.CancellationToken);
 
         await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(IncidentSamples.Base), IncidentSamples.Kill(IncidentSamples.Base.AddHours(3)));
+    }
+
+    /// <summary>
+    /// Stores two journal kill lines of the agent, at the first kill of the samples and at a later time, and a hold of two hours
+    /// before to one hour after the later one, in a new store and closes it.
+    /// </summary>
+    /// <param name="directory">The storage directory</param>
+    /// <param name="held">The time of the kill in the hold</param>
+    /// <returns>A task that completes when the records and the hold are stored</returns>
+    private async Task StoreAgentKillsAsync(string directory, DateTimeOffset held)
+    {
+        await using var store = await SqliteStore.OpenAsync(directory, TestContext.CancellationToken);
+
+        await new AgentRecords().WriteAsync(store, IncidentSamples.Base.AddDays(1), TestContext.CancellationToken, AgentRecords.KillLine(IncidentSamples.Base), AgentRecords.KillLine(held));
+
+        var progress = await store.KillScanProgressAsync(TestContext.CancellationToken);
+
+        await store.SaveKillScanAsync([
+                                          new RetentionHold
+                                          {
+                                              Start = held.AddHours(-2),
+                                              End = held.AddHours(1)
+                                          }
+                                      ],
+                                      progress,
+                                      TestContext.CancellationToken);
     }
 
     /// <summary>

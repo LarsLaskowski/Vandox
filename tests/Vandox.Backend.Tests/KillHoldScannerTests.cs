@@ -155,6 +155,89 @@ public class KillHoldScannerTests
     }
 
     /// <summary>
+    /// An imported kernel event of an OOM kill makes no hold: holds come only from the agent's kernel collector.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public async Task KillHoldScannerScanMakesNoHoldFromImportedKernelEventKill()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var imported = AgentRecords.OomKill(_kill);
+
+        imported.Origin = RecordOrigin.Import;
+        await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, imported);
+
+        // Act
+        var added = await new KillHoldScanner(store).ScanAsync(Policy(), _now, TestContext.CancellationToken);
+        var holds = await AllHoldsAsync(store);
+        var progress = await store.KillScanProgressAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, added, "no hold added");
+        Assert.IsEmpty(holds, "no hold stored");
+        Assert.AreEqual(progress.HighestId, progress.ScannedId, "the imported kill is scanned all the same");
+    }
+
+    /// <summary>
+    /// The hold of a kill at the edge of the storable range ends at that edge instead of beyond it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public async Task KillHoldScannerScanClampsHoldsToTheStorableRange()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+        var first = StorableTime.Min.AddMinutes(1);
+        var last = StorableTime.Max.AddMinutes(-1);
+
+        await agent.WriteAsync(store, _now, TestContext.CancellationToken, AgentRecords.OomKill(first), AgentRecords.OomKill(last));
+
+        // Act
+        var added = await new KillHoldScanner(store).ScanAsync(Policy(), _now, TestContext.CancellationToken);
+        var holds = await AllHoldsAsync(store);
+
+        // Assert
+        Assert.AreEqual(2, added, "two holds added");
+        Assert.AreSequenceEqual([(StorableTime.Min, first + _after), (last - _before, StorableTime.Max)], holds, "each hold ends at the edge of the storable range");
+    }
+
+    /// <summary>
+    /// With a finite incident period, a kill whose window ended before <c>now − incidents</c> makes no hold, a kill whose window ends in the period does, and both are scanned.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public async Task KillHoldScannerScanMakesNoHoldPastTheIncidentPeriod()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var agent = new AgentRecords();
+        var period = TimeSpan.FromDays(100);
+        var expired = _now - period - _after - TimeSpan.FromMinutes(1);
+        var edge = _now - period - _after;
+        var policy = Policy(period);
+
+        await agent.WriteAsync(store, _now, TestContext.CancellationToken, AgentRecords.OomKill(expired), AgentRecords.OomKill(edge.AddHours(5)), AgentRecords.OomKill(edge));
+
+        // Act
+        var added = await new KillHoldScanner(store).ScanAsync(policy, _now, TestContext.CancellationToken);
+        var holds = await AllHoldsAsync(store);
+        var progress = await store.KillScanProgressAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(2, added, "two holds added");
+        Assert.AreSequenceEqual([(edge - _before, edge + _after), (edge.AddHours(5) - _before, edge.AddHours(5) + _after)], holds, "the holds of the kills whose window ends at or after the start of the incident period");
+        Assert.AreEqual(progress.HighestId, progress.ScannedId, "the expired kill is scanned all the same");
+    }
+
+    /// <summary>
     /// The incident of an agent kernel OOM kill whose window data has passed every period is built the same after the removal as on an unchanged copy, while the data outside the window is removed.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -193,8 +276,9 @@ public class KillHoldScannerTests
     /// <summary>
     /// Creates the default policy with the reconstructor's window.
     /// </summary>
+    /// <param name="incidents">The incident period, <c>null</c> for unlimited</param>
     /// <returns>The policy</returns>
-    private static RetentionPolicy Policy()
+    private static RetentionPolicy Policy(TimeSpan? incidents = null)
     {
         return new RetentionPolicy
                {
@@ -204,6 +288,7 @@ public class KillHoldScannerTests
                    Logs = TimeSpan.FromDays(90),
                    Snapshots = TimeSpan.FromDays(30),
                    Events = TimeSpan.FromDays(1095),
+                   Incidents = incidents,
                    KillWindowBefore = _before,
                    KillWindowAfter = _after
                };
@@ -220,7 +305,8 @@ public class KillHoldScannerTests
     }
 
     /// <summary>
-    /// Creates the agent history around the kill: lines, snapshots and metrics in its window and three hours before and after it, the kill line and its kernel event.
+    /// Creates the agent history around the kill: lines, snapshots and metrics in its window and three hours before and after it, the kill line and its kernel event. It ends on a connection snapshot, which the
+    /// removal keeps as the record with the highest ID and the counts of the test do not include.
     /// </summary>
     /// <returns>The records</returns>
     private static DataRecord[] History()
@@ -241,9 +327,9 @@ public class KillHoldScannerTests
                    AgentRecords.OomKill(At(0)),
                    IncidentSamples.Line(At(5), "systemd", "mariadb.service: Failed with result 'oom-kill'.", "journal", "journal"),
                    IncidentSamples.Line(At(120), "cron", "heartbeat ok", "journal", "journal"),
-                   IncidentSamples.Connections(At(180), 3, "apache2"),
                    IncidentSamples.Line(At(180), "cron", "heartbeat ok", "journal", "journal"),
-                   IncidentSamples.Processes(At(180), ("mariadbd", 100))
+                   IncidentSamples.Processes(At(180), ("mariadbd", 100)),
+                   IncidentSamples.Connections(At(180), 3, "apache2")
                ];
     }
 

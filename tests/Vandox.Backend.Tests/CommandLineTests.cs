@@ -1,6 +1,11 @@
 using System.Globalization;
 
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Time.Testing;
+
 using Vandox.Backend.Cli;
+using Vandox.Backend.Hosting;
+using Vandox.Storage;
 
 namespace Vandox.Backend.Tests;
 
@@ -10,6 +15,15 @@ namespace Vandox.Backend.Tests;
 [TestClass]
 public class CommandLineTests
 {
+    #region Properties
+
+    /// <summary>
+    /// Gets or sets the context of the running test.
+    /// </summary>
+    public TestContext TestContext { get; set; } = null!;
+
+    #endregion // Properties
+
     #region Methods
 
     /// <summary>
@@ -415,6 +429,47 @@ public class CommandLineTests
     }
 
     /// <summary>
+    /// The commands other than <c>serve</c> (import, incidents, report, templates) remove nothing on a store whose agent data has passed every
+    /// period: they fold no value, save no hold and leave every agent record and its row in place.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [OSCondition(OperatingSystems.Linux)]
+    public async Task CommandLineCommandsOtherThanServeRemoveNothing()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var hooks = new ServeHooks
+                    {
+                        Clock = new FakeTimeProvider(IncidentSamples.Base.AddDays(400)),
+                        Parsers = [new LineParser("test")]
+                    };
+
+        Directory.CreateDirectory(logs);
+        await File.WriteAllTextAsync(Path.Combine(logs, "a.log"), "LOG one\n", TestContext.CancellationToken);
+        await StoreExpiredAgentDataAsync(fixture.Storage);
+
+        var before = await StoredAsync(fixture.Storage);
+
+        // Act
+        var codes = new List<int>
+                    {
+                        await fixture.RunAsync(["import", logs], hooks, TestContext.CancellationToken),
+                        await fixture.RunAsync(["incidents"], hooks, TestContext.CancellationToken),
+                        await fixture.RunAsync(["report"], hooks, TestContext.CancellationToken),
+                        await fixture.RunAsync(["templates"], hooks, TestContext.CancellationToken)
+                    };
+        var after = await StoredAsync(fixture.Storage);
+
+        // Assert
+        Assert.AreSequenceEqual([0, 0, 0, 0], codes, "every command succeeds");
+        Assert.HasCount(10, before, "the arranged agent records and the counts of the derived tables");
+        Assert.AreSequenceEqual(before, after, "every agent record and its row stay, and nothing is folded or held");
+    }
+
+    /// <summary>
     /// Builds a text from code points.
     /// </summary>
     /// <param name="codePoints">The code points</param>
@@ -422,6 +477,59 @@ public class CommandLineTests
     private static string Chars(params int[] codePoints)
     {
         return string.Concat(codePoints.Select(char.ConvertFromUtf32));
+    }
+
+    /// <summary>
+    /// Stores, as one agent batch, a log line, a kill line, a process and a connection snapshot, a metric value and the kernel event of an
+    /// OOM kill, all captured at the first kill of the samples, in a new store, and closes it.
+    /// </summary>
+    /// <param name="directory">The storage directory</param>
+    /// <returns>A task that completes when the records are stored</returns>
+    private async Task StoreExpiredAgentDataAsync(string directory)
+    {
+        await using var store = await SqliteStore.OpenAsync(directory, TestContext.CancellationToken);
+        var at = IncidentSamples.Base;
+
+        await new AgentRecords().WriteAsync(store,
+                                            at.AddDays(1),
+                                            TestContext.CancellationToken,
+                                            IncidentSamples.Line(at.AddMinutes(-10), "cron", "job one", "journal", "journal"),
+                                            AgentRecords.KillLine(at),
+                                            IncidentSamples.Processes(at.AddMinutes(-5), ("mariadbd", 100)),
+                                            IncidentSamples.Connections(at.AddMinutes(-5), 3, "apache2"),
+                                            IncidentSamples.Metric(at.AddMinutes(-5), "mem_available_bytes", 300),
+                                            AgentRecords.OomKill(at));
+    }
+
+    /// <summary>
+    /// Reads every agent record with the number of its metric and log line rows, and the row counts of the rollups and the holds.
+    /// </summary>
+    /// <param name="directory">The storage directory</param>
+    /// <returns>A task that returns the rows as text</returns>
+    private async Task<List<string>> StoredAsync(string directory)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Mode=ReadOnly;Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT r.id || '|' || r.kind || '|' || (SELECT count(*) FROM metrics AS m WHERE m.record_id = r.id) || '|' || (SELECT count(*) FROM log_lines AS l WHERE l.record_id = r.id) "
+                              + "FROM records AS r WHERE r.origin <> 'import' "
+                              + "UNION ALL SELECT 'rollups 5m|' || count(*) FROM metric_rollups_5m "
+                              + "UNION ALL SELECT 'rollups 1h|' || count(*) FROM metric_rollups_1h "
+                              + "UNION ALL SELECT 'holds|' || count(*) FROM retention_holds "
+                              + "UNION ALL SELECT 'gaps|' || count(*) FROM gaps";
+
+        await using var reader = await command.ExecuteReaderAsync(TestContext.CancellationToken);
+        var rows = new List<string>();
+
+        while (await reader.ReadAsync(TestContext.CancellationToken))
+        {
+            rows.Add(reader.GetString(0));
+        }
+
+        return rows;
     }
 
     #endregion // Methods
