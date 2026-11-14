@@ -24,13 +24,16 @@ manual `systemctl restart` moves only `active_enter_at`, and so does a plain sta
 
 ## Decision
 
-Option 3. The previous record is the unit's last `service_state` before the one judged, of any age, found by a seek on the kind index;
-the comparison is made on the parsed values. The rules and the marker's time are in [Time-series queries](../areas/time-series-query.md).
+Option 3. The previous record is the unit's last `service_state` before the one judged: inside the range from the same read, before it
+from one backward scan of at most 10,000 `service_state` records for all units together. A boot lies between when the two records'
+boot IDs differ or a boot record is stored between them; an enter time that is newly present counts as moved. The comparison is made
+on the parsed values. The rules and the marker's time are in [Time-series queries](../areas/time-series-query.md).
 
 ## Consequences
 
 - A restart while the agent was stopped is found at its first record after the start, when the boot check allows it.
 - A unit started from `inactive` by hand is a start, not a restart; #52 shows availability from the states themselves.
-- `restarts` is compared as a double: counts above 2^53 (only forged ones) compare approximately.
-- At most 256 units of a query are sought back; a unit beyond that (only possible with forged records, the agent tracks at most 64
-  configured entries) has no previous record and yields no restart from its first record in the range.
+- A unit whose previous record lies beyond the 10,000 records scanned back (a unit silent for weeks, or forged unit names) has none, so
+  its first record in the range is no restart; the scan stays bounded however many units appear.
+- The restart is timed at its new enter time only when that lies in the range and not after its record, so a forged enter time cannot
+  place a marker outside the range.

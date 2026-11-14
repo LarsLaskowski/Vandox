@@ -22,12 +22,13 @@ a year and stay bounded by its caps.
 2. **A new table of gap record spans, written by the write path and removed by retention** — exact and indexed, but adds work and a
    migration to the ingest write path and the retention removal (security areas 1 and 9) for a rare case.
 3. **Fixed windows by capture time** (chosen) — gap records captured from one hour before the range start to seven days after its
-   end, backup records from one day before to one day after; each kind read is one page of at most 10,000 records.
+   end, backup records from one day before to one day after; each kind read as projected rows in pages of at most 1,001, at most ten
+   pages.
 
 ## Decision
 
 Option 3. Seven days covers a span the agent records up to a week after it began (a disk fault that lasted days); one day covers a
-nightly backup. A full page bounds the list as complete only up to its last capture time less the window. The rules are in
+nightly backup. When the ten pages run out, the list is complete only up to the last capture time read less the window. The rules are in
 [Time-series queries](../areas/time-series-query.md).
 
 ## Consequences

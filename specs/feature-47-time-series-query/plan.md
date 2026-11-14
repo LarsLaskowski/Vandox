@@ -3,7 +3,7 @@
 Source: Issue #47 | [spec.md](spec.md)
 Tier: standard — new read behavior (a query service, new store reads, a chart state) that creates, changes or removes no security control.
 Security areas touched: 10 Parsing of external input (new store reads decode stored agent payloads with `json_extract` and the payload rules, forged values included); 12 Logging and display of external data (marker texts handed to the views; the chart data path in `wwwroot/js/charts.js`)
-Plan size: one feature with eleven criteria spanning seven store reads, the query engine with three marker kinds and two gap sources, the read gate and a chart contract change.
+Plan size: one feature with eleven criteria spanning ten store reads, the query engine with three marker kinds and two gap sources, the read gate and a chart contract change.
 
 ## Problem / root cause
 
@@ -18,7 +18,9 @@ See [spec.md](spec.md), *Problem*.
 | 3 | Gap rows: table `gaps` with `kind`, `cause`, `state` (`open`/`closed`/`final`), `from_at`, `to_at`, index `gaps_to_at(to_at)`; time-gap state is derived on read | `SchemaMigrator.cs` steps 12, 14; storage-reading.md *Agent timeline* | confirmed |
 | 4 | `IAgentTimelineReader.GapsAsync` pages one agent in ID order, no time range | `IAgentTimelineReader.cs`, `GapQuery.cs` | confirmed |
 | 5 | `records.data` is a TEXT column; payload members carry the wire names (`unit`, `active_state`, `active_enter_at`, `restarts`, `type`, `boot`); JSON1 is used already | `SchemaMigrator.cs:20-32`; `ServiceState.cs`, `KernelEvent.cs`; `LogFinderQueries.cs:46` | confirmed |
-| 5a | The stored document holds those members at its top level, so `json_extract(data, '$.unit')` reads them | to verify: the first `SqliteStoreTimeSeriesTests` case over a written batch, Tester, step 5 | unverified |
+| 5a | The stored document holds those members at its top level, so `json_extract(data, '$.unit')` reads them | `BatchWriter.cs:111`, `PayloadJson.cs:62` (Devil's Advocate) | confirmed |
+| 5b | `active_enter_at` is left out of the stored JSON when absent (`json_extract` gives NULL); `restarts` is a `uint`; payload times are checked only against the storable range | `ServiceState.cs:41-49,99`, `BackupRun.cs:151,165` | confirmed |
+| 5c | `records.boot_id` holds the boot ID of the envelope, so two `service_state` rows of different boots differ there | wire-format.md (envelope `boot_id`); `SchemaMigrator.cs:29` | confirmed |
 | 6 | Metric sources: collectors `system`, `filesystem`, `clock` write source `system`; `self` writes `agent`; `mariadb` writes `mariadb`; scheduler gap records carry source `agent` and `collector` = job name | `sysstats.go:19-25`, `selfstats.go:152`, `scheduler/runner.go:400`, wire-format-records.md *Metric names* | confirmed |
 | 7 | Gap records without numbers come from the scheduler, `kernel`, `systemd`, `logs` and the spool's refused-write episode; the spool's dropped and the sender's given-up gaps name numbers | `runner.go:400`, `kernevents/records.go:58`, `svcstats.go:340`, `logship/records.go:58`, `spool/put.go:345-357`, `sender.go:730` | confirmed |
 | 8 | uPlot 1.6.32 breaks a line only at `null` and draws through `undefined` | `uPlot.esm.js` `findGaps` (1958) and the linear builder (2235-2241) | confirmed |
@@ -32,20 +34,20 @@ Store reads: `SqliteStoreTimeSeriesTests`; engine: `TimeSeriesServiceTests` (rea
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `QueryAsyncShortRangeWithinTargetIsRaw`, `QueryAsyncRawOverTargetTimesChoosesFiveMinuteStep`, `QueryAsyncYearChoosesTwelveHourStepFromHourlyRollups`, `QueryAsyncStepChoiceKeepsOverlappingStepsWithinTarget` (table: 1 h/24 h/7 d/30 d/1 y/3 y at targets 1, 100, 1000, 2000), `QueryAsyncRangeBeforeRawPeriodIsNeverRaw`, `QueryAsyncRangeBeforeFiveMinutePeriodUsesHourSteps`, `QueryAsyncRangeBeforeHourlyPeriodFlagsEmptyLines`, `QueryAsyncLabelledSeriesHasOneLinePerLabelSet`, `QueryAsyncSeriesWithoutValuesHasNoLine` | `tests/Vandox.Storage.Tests/TimeSeriesServiceTests.cs` |
+| AC1 | `QueryAsyncShortRangeWithinTargetIsRaw`, `QueryAsyncRawOverTargetTimesChoosesFiveMinuteStep`, `QueryAsyncYearChoosesTwelveHourStepFromHourlyRollups`, `QueryAsyncStepChoiceKeepsOverlappingStepsWithinTarget` (table: 1 h/24 h/7 d/30 d/1 y/3 y at targets 1, 100, 1000, 2000), `QueryAsyncRangeBeforeRawPeriodIsNeverRaw`, `QueryAsyncRangeBeforeFiveMinutePeriodUsesHourSteps`, `QueryAsyncRangeBeforeHourlyPeriodFlagsEmptyLines`, `QueryAsyncLabelledSeriesHasOneLinePerLabelSet`, `QueryAsyncSeriesWithoutValuesHasNoLine`, `QueryAsyncSeriesOfOneCollectorSharingTimesStayRaw` (two series with identical times: union fits the target, the sum does not) | `tests/Vandox.Storage.Tests/TimeSeriesServiceTests.cs` |
 | AC1 | `RawValuesAsyncStopsAfterOneTimeOverMaxTimes`, `RawValuesAsyncQueryPlanStreamsByCaptureTime` | `tests/Vandox.Storage.Tests/SqliteStoreTimeSeriesTests.cs` |
 | AC2 | `QueryAsyncStepTimesAreEpochMultiplesFromStepHoldingFrom`, `QueryAsyncStepPointMergesBucketsCountWeighted`, `QueryAsyncStepPointCoversWholeStepBeyondRange`, `QueryAsyncRawAxisIsUnionOfLineTimes`, `QueryAsyncRawDuplicateTimeMergesIntoOnePoint` | `TimeSeriesServiceTests.cs` |
 | AC2 | `RollupStepsAsyncMergesMinMaxCountAndLatestLast`, `RollupStepsAsyncClampsSumToFiniteRange` | `SqliteStoreTimeSeriesTests.cs` |
-| AC3 | `QueryAsyncEmptyStepIsGap`, `QueryAsyncRawTimeOfOtherLineIsBetweenSamples`, `QueryAsyncRawConcerningGapBreaksLineAndAddsTime`, `QueryAsyncRawGapOfOtherCollectorDoesNotBreakLine`, `QueryAsyncRawEmptyAlignedFiveMinutesBreaksLine`, `QueryAsyncRawFourMinuteSpacingStaysConnected` | `TimeSeriesServiceTests.cs` |
+| AC3 | `QueryAsyncEmptyStepIsGap`, `QueryAsyncRawTimeOfOtherLineIsBetweenSamples`, `QueryAsyncRawConcerningGapBreaksLineAndAddsTime`, `QueryAsyncRawGapOfOtherCollectorDoesNotBreakLine`, `QueryAsyncRawEmptyAlignedFiveMinutesBreaksLine`, `QueryAsyncRawFourMinuteSpacingStaysConnected`, `QueryAsyncRawGapAcrossSixtyFourLinesAddsOneTime` (64 lines broken by one gap in one interval: one added time, axis at most 2 × target − 1) | `TimeSeriesServiceTests.cs` |
 | AC4 | `QueryAsyncListsOpenAndFinalGapsWithoutClosed`, `QueryAsyncAgentGapRecordIsFinal`, `QueryAsyncGapRecordInsideSequenceGapOfSameCauseListedOnce`, `QueryAsyncGapRecordFoundOnlyInsideCaptureWindow` | `TimeSeriesServiceTests.cs` |
 | AC4 | `ConcernsMapsCollectorToLines` (table: `self`→`agent` lines only; `filesystem`→`filesystem_*` not `mem_*`; `clock`; `system`→other `system` names; `mariadb`; `logs`/`kernel`→none; no collector and `future`→every line) | `tests/Vandox.Storage.Tests/SeriesGapTests.cs` |
-| AC4 | `GapsInRangeAsyncReturnsOverlappingOpenAndFinalOfAllAgents`, `GapsInRangeAsyncReportsDerivedTimeGapState` | `SqliteStoreTimeSeriesTests.cs` |
-| AC5 | `QueryAsyncOomKillsOncePerIdentity`, `QueryAsyncBootsOncePerBootId`, `QueryAsyncServiceRestartRules` (table: restarts rose; enter moved from `active` and from `failed`; from `inactive`; boot between; hourly re-record; restarts fell; previous record before `from`), `QueryAsyncRestartTimedAtNewActiveEnter`, `QueryAsyncBackupRunSpans` (table: ended in range; started a day before; still running; unknown end after a later boot; start written twice), `QueryAsyncMarkersInTimeOrder` | `TimeSeriesServiceTests.cs` |
-| AC5 | `ServiceChangesAsyncReturnsFirstPerUnitAndChangesWithPrevious`, `PreviousServiceStateAsyncFindsLastRecordOfUnitOfAnyAge`, `BootTimesAsyncReturnsOnlyBoots` | `SqliteStoreTimeSeriesTests.cs` |
+| AC4 | `GapsInRangeAsyncReturnsOverlappingOpenAndFinalOfAllAgents`, `GapsInRangeAsyncReportsDerivedTimeGapState`, `GapRecordsAsyncProjectsSpanCauseCollectorAndNumbers` | `SqliteStoreTimeSeriesTests.cs` |
+| AC5 | `QueryAsyncOomKillsOncePerIdentity`, `QueryAsyncBootsOncePerBootId`, `QueryAsyncServiceRestartRules` (table: restarts rose; enter moved from `active` and from `failed`; no enter time before, one now, from `failed`; from `inactive`; boot between by boot ID while the boot record is captured after the unit's first record; boot between by boot record; hourly re-record; restarts fell; previous record before `from`; previous record beyond the 10,000 rows examined), `QueryAsyncRestartTime` (table: new enter time in range; enter time after the query time and before `from` → capture time), `QueryAsyncBackupRunSpans` (table: ended in range; started a day before; still running; unknown end after a later boot; start written twice; `gone_by` and `last_seen_at` after the query time → clamped; `started_at` after the query time → dropped), `QueryAsyncMarkersInTimeOrder` | `TimeSeriesServiceTests.cs` |
+| AC5 | `ServiceChangesAsyncReturnsFirstPerUnitAndChangesWithPrevious` (a missing enter time against a present one is a change), `PreviousServiceStatesAsyncScansAtMostTenThousandRows` (300 new units over a long history: one call, cap respected, unfound units absent), `BootTimesAsyncReturnsOnlyBoots`, `KernelEventsAsyncProjectsFieldsWithoutMessage`, `BackupRunsAsyncProjectsFields`, `EventReadsRefuseLimitOverOneThousandOne` | `SqliteStoreTimeSeriesTests.cs` |
 | AC6 | `QueryAsyncReturnsNothingAfterQueryTime`, `QueryAsyncCompleteUntilIsEarliestUnfoldedCapture` (stalled fold: values stored, no fold step), `QueryAsyncCompleteUntilIsQueryTimeWhenAllFolded`, `QueryAsyncRawHasNoCompleteUntil` | `TimeSeriesServiceTests.cs` |
 | AC6 | `EarliestUnfoldedAsyncReadsAboveWatermark` | `SqliteStoreTimeSeriesTests.cs` |
-| AC7 | `QueryAsyncOverSixtyFourLinesCutsInSeriesThenByteOrder`, `QueryAsyncOverThousandMarkersKeepsEarliestWithCompleteUntil`, `QueryAsyncOverThousandGapsKeepsEarliestWithCompleteUntil`, `QueryAsyncFullRecordPageBoundsCompleteUntil` | `TimeSeriesServiceTests.cs` |
-| AC8 | `QueryAsyncInvalidQueryRefusedBeforeStoreRead` (table of the six exact texts, a `CountingTimeSeriesReader` and a counting record reader that must see zero calls) | `TimeSeriesServiceTests.cs` |
+| AC7 | `QueryAsyncOverSixtyFourLinesCutsInSeriesThenUtf8ByteOrder`, `QueryAsyncOverThousandMarkersKeepsEarliestWithCompleteUntil`, `QueryAsyncOverThousandGapsKeepsEarliestWithCompleteUntil`, `QueryAsyncFullRecordPageBoundsCompleteUntil`, `QueryAsyncEventReadsUseAtMostTenPagesOfOneThousandOne` (a `CountingTimeSeriesReader` records every limit and call) | `TimeSeriesServiceTests.cs` |
+| AC8 | `QueryAsyncInvalidQueryRefusedBeforeStoreRead` (table of the six exact texts, a `CountingTimeSeriesReader` that must see zero calls), `QueryAsyncStorableEdgesReadWithoutError` (from = `StorableTime.Min`, to and query time = `StorableTime.Max`: every derived bound clamped, no window error) | `TimeSeriesServiceTests.cs` |
 | AC9 | `QueryAsyncCancelledThrowsWithoutResult` | `TimeSeriesServiceTests.cs` |
 | AC9 | `EveryCallHoldsTheGateOnlyWhileItRuns`, `CancelledWaitForSlotThrowsAndHoldsNothing` | `tests/Vandox.Backend.Tests/GatedTimeSeriesReaderTests.cs` |
 | AC9 | `ServeRegistersTimeSeriesServiceOverTheGate` | `tests/Vandox.Backend.Tests/ServeTests.cs` |
@@ -57,8 +59,8 @@ Store reads: `SqliteStoreTimeSeriesTests`; engine: `TimeSeriesServiceTests` (rea
 ## Approach
 
 **Placement.** The engine `TimeSeriesService` lives in `Vandox.Storage` (flat namespace, like the other readers) and depends only on
-`ITimeSeriesReader`, `IRecordReader`, `RetentionPolicy` and `TimeProvider`, so the benchmark tool runs it without ASP.NET. `vandoxd`
-registers one singleton over `GatedTimeSeriesReader` and `GatedRecordReader` (both on the shared `WebReaderGate`), with
+`ITimeSeriesReader`, `RetentionPolicy` and `TimeProvider`, so the benchmark tool runs it without ASP.NET. `vandoxd`
+registers one singleton over `GatedTimeSeriesReader` (on the shared `WebReaderGate`), with
 `RetentionService.CreatePolicy(config)`; Blazor components inject it. No route, page or option.
 
 **Validation (AC8)**, before any read, `InvalidQueryException` with exactly: `store: invalid query: at least one series is required`,
@@ -67,9 +69,12 @@ registers one singleton over `GatedTimeSeriesReader` and `GatedRecordReader` (bo
 series listed twice is used once.
 
 **Range.** `now` from the clock; `end = min(to, now)`; `from >= now` gives an empty result. Nothing after `now` is returned (AC6).
+Every bound the engine derives (`from − 1 h`, `from − 1 d`, `end + 1 d`, `end + 7 d`, aligned step bounds) is clamped to
+[`StorableTime.Min`, `StorableTime.Max`], so no read refuses a window after validation.
 
-**Resolution (AC1).** Raw is tried when `policy.Raw` is null or `from >= now − Raw`: `RawValuesAsync` per series in order, with
-`MaxTimes` = target + 1 − (distinct times so far, at least 1); the first `TimesExceeded` abandons raw. Otherwise the ladder 5, 10, 15,
+**Resolution (AC1).** Raw is tried when `policy.Raw` is null or `from >= now − Raw`: `RawValuesAsync` per series in order, each with
+`MaxTimes` = target + 1; the engine builds the union of times and abandons raw once a series reports `TimesExceeded` or the union
+exceeds the target, so series of one collector that share their times count once. Otherwise the ladder 5, 10, 15,
 30 min (only while `from >= now − FiveMinuteRollups` or that period is null), 1, 2, 3, 6, 12 h, 1 d, then k days: the smallest step `s`
 with `floor((end − 1 tick)/s) − floor(from/s) + 1 <= target`, the k-day step computed directly. `StartsBeforeRollups` is set when the
 hourly period is not null and `from < now − HourlyRollups`. Steps under one hour read the 5-minute tier, the rest the hourly tier.
@@ -77,33 +82,45 @@ hourly period is not null and `from < now − HourlyRollups`. Steps under one ho
 **Step points (AC2).** `RollupStepsAsync` reads `[floor(from/s)·s, (floor((end−1)/s)+1)·s)`: the label sets of the series by a loose
 index scan over the primary key (`min(labels) > previous`), at most 1,024 sets examined, then one primary-key range seek per set,
 merging buckets per step in one pass: min, max, sum clamped to ±`double.MaxValue` as the fold does, count, last by (`last_at`,
-`last_record_id`). A set without a bucket is no line; lines stop at `MaxLines` + 1 (`LinesCut`). The axis is every step start of the
+`last_record_id`). A set without a bucket is no line; lines stop at `MaxLines` + 1 (`LinesCut`). Label sets are ordered by SQLite's
+BINARY collation (UTF-8 bytes) and never re-sorted in C#. The axis is every step start of the
 range; a line's missing step is `PointState.Gap`. Average = sum / count.
 
 **Raw points (AC2, AC3).** `RawValuesAsync` returns rows ordered by (`captured_at`, labels, record ID), labels normalized as the fold
 does (NULL and `{}` → `''`). Rows of one line at one time merge like buckets. Axis = union of times. Per line: own time → value;
 another line's time → `BetweenSamples`; then for each pair of consecutive own values `t1 < t2`, when a gap that `Concerns` the line
-overlaps `(t1, t2)` or a whole UTC 5-minute span lies inside `(t1, t2)`, every axis time in `(t1, t2)` becomes `Gap`, and if there is
-none, the time `max(t1 + 1 tick, start of that gap or span)` is added to the axis (the other lines get `BetweenSamples` or, inside a
+overlaps `(t1, t2)` or a whole UTC 5-minute span lies inside `(t1, t2)`, every axis time in `(t1, t2)` becomes `Gap`, and only if the
+current axis (with the times added so far) has none there, the time `max(t1 + 1 tick, start of that gap or span)` is added — at most
+one per interval between two neighbouring times of the original axis, so the axis holds at most 2 × target − 1 times (the other lines get `BetweenSamples` or, inside a
 gap of theirs, `Gap`). Axis times inside a concerning gap are `Gap` also before the first and after the last value.
 
 **Gaps (AC4).** Rows: `GapsInRangeAsync(From = from, To = end, Limit = 1,001)` — `to_at > from AND from_at < to AND` derived state not
-`closed`, all agents, ordered by `from_at, id`, through the derived-state SQL of `GapReadSql`. Records: `RecordsAsync(kind gap, [from −
-1 h, end + 7 d), limit 10,000)` (record 0216), span filtered to the range, reported `final`, skipped when it names numbers inside a
-returned sequence row of its agent and cause. Sorted by start, then rows before records, then ID; cut at 1,000. `GapsCompleteUntil`:
-the start of the 1,001st, a full row page's 1,001st start, a full record page's last capture − 7 days — the earliest; null when
+`closed`, all agents, ordered by `from_at, id`, through the derived-state SQL of `GapReadSql`. Records: `GapRecordsAsync([from − 1 h,
+end + 7 d))` (record 0216), a projection (agent ID, capture time, `from`, `to`, cause, collector, numbers; no other member), span
+filtered to the range and its end clipped to `now`, reported `final`, skipped when it names numbers inside a returned sequence row of
+its agent and cause; a span that does not parse is skipped. Sorted by start, then rows before records, then ID; cut at 1,000. `GapsCompleteUntil`:
+the start of the 1,001st, a full row page's 1,001st start, the last capture read − 7 days when the ten pages ran out — the earliest; null when
 complete. `SeriesGap.Concerns(source, name)`: the mapping of spec AC4 in one internal table.
 
-**Markers (AC5).** Kernel events: `RecordsAsync(kind kernel_event, [from, end), 10,000)`; `oom_kill` once per (boot ID, kernel time,
-PID) when all three exist, else per record; boot once per boot ID. Restarts: `ServiceChangesAsync([from, end), 10,001)` — SQL over
-`records_kind_time` with `json_extract` and `LAG … OVER (PARTITION BY unit ORDER BY captured_at, id)`, returning each unit's first row
-in range and every row whose `restarts` or `active_enter_at` text differs from its predecessor, with the predecessor; for first rows
-`PreviousServiceStateAsync(unit, from)` (a backward seek on the kind index, first 256 units by first appearance); boots between come
-from `BootTimesAsync([earliest predecessor, end), 10,000)`. The rule (record 0215) is applied on parsed values: `restarts` as double;
-`active_enter_at` parsed as an instant (unparseable: no enter move). Backups: `RecordsAsync(kind backup_run, [from − 1 d, end + 1 d),
-10,000)`, paired by (boot ID, `started_at`), duplicates dropped; a run is kept when `started_at < end` and (`gone_by > from` or no end);
-without an end, `BootTimesAsync((start, now], 1)` decides `Running` or `Unknown`. All markers sorted by `At` then kind then record
-ID, cut at 1,000; `MarkersCompleteUntil` as for gaps, with a full page's last capture (− 1 d for backups, the last row for restarts).
+**Event reads.** Gap records, kernel events and backup runs are read by projections (`json_extract` of the named members only, never
+the payload or `message`), in pages of at most 1,001 rows keyed on (capture time, ID) with `AfterId`, at most ten pages per kind and
+query; a limit over 1,001 is refused (`store: invalid query: limit must be 1 to 1001`). Only the fields below are kept.
+
+**Markers (AC5).** Kernel events: `KernelEventsAsync([from, end))` (type, boot ID, kernel time, PID, victim command); `oom_kill` once
+per (boot ID, kernel time, PID) when all three exist, else per record; boot once per boot ID. Restarts: `ServiceChangesAsync([from,
+end), 2,001)` — SQL over `records_kind_time` with `json_extract` and `LAG … OVER (PARTITION BY unit ORDER BY captured_at, id)`,
+returning each unit's first row in range and every row whose `restarts` differs or whose `active_enter_at` `IS NOT` its predecessor's
+(so absent against present is a change), with the predecessor and both rows' `records.boot_id`; for the first rows one
+`PreviousServiceStatesAsync(units, from)`: a single backward scan of at most 10,000 `service_state` rows on the kind index, filtered to
+the units (`json_each`), latest per unit; a unit not found has no previous record (no restart). The rule (record 0215) on parsed
+values: `restarts` as `long`; `active_enter_at` parsed as an instant (unparseable: no enter move; absent before and present now: moved);
+a boot lies between when the two rows' boot IDs differ or `BootTimesAsync([predecessor capture, row capture), 1)` finds one. The
+restart is timed at the new `active_enter_at` when it lies in `[from, end)` and not after its record's capture time, else at the
+capture time. Backups: `BackupRunsAsync([from − 1 d, end + 1 d))` (phase, boot ID, `started_at`, `last_seen_at`, `gone_by`, command),
+paired by (boot ID, `started_at`), duplicates dropped; a run with `started_at >= end` is dropped; it is kept when `gone_by > from` or it
+has no end; `EndsAt` and `LastSeenAt` are clamped to `now`; without an end, `BootTimesAsync((start, now], 1)` decides `Running` or
+`Unknown`. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
+2,001st row's capture).
 
 **Completeness (AC6).** At a step, `EarliestUnfoldedAsync`: `SELECT min(captured_at) FROM metrics WHERE record_id > watermark` (primary
 key range; empty or no watermark row → null); `CompleteUntil = min(now, that)` or `now`. Raw: null.
@@ -115,8 +132,9 @@ bridge points.` `ChartData.ToBridges()` gives per series the bridged indexes; `C
 `create`/`createStacked` and a second of `update`; `charts.js` sets those cells to `undefined` before handing columns to uPlot. Nulls
 stay gaps. Layout of the chart is unchanged.
 
-**Bounds (N2).** Lines ≤ 64, times ≤ target + inserted gap times, markers and gaps ≤ 1,000 each, record reads one page per kind; the
-caller's token interrupts every store call (`ReaderLease`).
+**Bounds (N2).** Lines ≤ 64; times ≤ 2 × target − 1; raw rows per series ≤ (target + 1) distinct times; markers and gaps ≤ 1,000
+kept; event reads ≤ ten pages of 1,001 projected rows per kind (each row at most about 2.5 KiB: a 1 KiB command and a unit of 256
+bytes); restart rows ≤ 2,001 plus one backward scan of ≤ 10,000 rows. The caller's token interrupts every store call (`ReaderLease`).
 
 ## Options considered
 
@@ -126,6 +144,8 @@ caller's token interrupts every store call (`ReaderLease`).
 - Completeness from a stored fold time — lost: needs a new write in the fold; the earliest unfolded capture is exact and read-only.
 - Restarts by decoding every `service_state` record in C# — lost: 87,600 decodes a year on the Celeron against N1; the SQL prefilter
   returns changes only, and C# decides on parsed values.
+- Event markers from decoded `StoredRecord`s through `IRecordReader` — lost: a page of 10,000 kernel events with 16 KiB messages
+  holds hundreds of MiB; projections keep only the marker fields.
 - *Between samples* as a sentinel number in the value columns — lost: any number can be a real value; a separate index list keeps
   `double?` columns unchanged.
 
@@ -133,7 +153,7 @@ caller's token interrupts every store call (`ReaderLease`).
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| Vandox.Storage | `ITimeSeriesReader`, `TimeRangeQuery`, `RawValueQuery`, `RollupStepQuery`, `LinePage`, `MetricLine`, `LinePoint`, `ServiceStateRow`, `BootTime` | new store read API |
+| Vandox.Storage | `ITimeSeriesReader`, `TimeRangeQuery`, `RawValueQuery`, `RollupStepQuery`, `LinePage`, `MetricLine`, `LinePoint`, `ServiceStateRow`, `BootTime`, `GapRecordRow`, `KernelEventRow`, `BackupRunRow` | new store read API |
 | Vandox.Storage | `TimeSeriesQueries` (internal SQL), `SqliteStore` | implements `ITimeSeriesReader` |
 | Vandox.Storage | `TimeSeriesService`, `TimeSeriesQuery`, `SeriesKey`, `TimeSeriesResult`, `TimeSeriesResolution`, `SeriesLine`, `SeriesPoint`, `PointState`, `SeriesGap`, `SeriesMarker`, `MarkerKind`, `BackupRunEnd` | new engine |
 | Vandox.Backend | `TimeSeries/GatedTimeSeriesReader.cs`, `Hosting/ServeCommand.cs` | gate, registration |
@@ -146,19 +166,22 @@ Properties have get and init accessors unless said otherwise; every class is pub
 
 Vandox.Storage, store reads:
 
-- `ITimeSeriesReader` (public interface) with `Task<LinePage> RawValuesAsync(RawValueQuery query, CancellationToken cancellationToken)`, `Task<LinePage> RollupStepsAsync(RollupStepQuery query, CancellationToken cancellationToken)`, `Task<IReadOnlyList<AgentGap>> GapsInRangeAsync(TimeRangeQuery query, CancellationToken cancellationToken)`, `Task<DateTimeOffset?> EarliestUnfoldedAsync(CancellationToken cancellationToken)`, `Task<IReadOnlyList<ServiceStateRow>> ServiceChangesAsync(TimeRangeQuery query, CancellationToken cancellationToken)`, `Task<ServiceStateRow?> PreviousServiceStateAsync(string unit, DateTimeOffset before, CancellationToken cancellationToken)`, `Task<IReadOnlyList<BootTime>> BootTimesAsync(TimeRangeQuery query, CancellationToken cancellationToken)`; `SqliteStore` implements all seven publicly.
-- `TimeRangeQuery`: `TimeRangeQuery.From`, `TimeRangeQuery.To` (DateTimeOffset), `TimeRangeQuery.Limit` (int).
+- `ITimeSeriesReader` (public interface) with `Task<LinePage> RawValuesAsync(RawValueQuery query, CancellationToken cancellationToken)`, `Task<LinePage> RollupStepsAsync(RollupStepQuery query, CancellationToken cancellationToken)`, `Task<IReadOnlyList<AgentGap>> GapsInRangeAsync(TimeRangeQuery query, CancellationToken cancellationToken)`, `Task<DateTimeOffset?> EarliestUnfoldedAsync(CancellationToken cancellationToken)`, `Task<IReadOnlyList<ServiceStateRow>> ServiceChangesAsync(TimeRangeQuery query, CancellationToken cancellationToken)`, `Task<IReadOnlyList<ServiceStateRow>> PreviousServiceStatesAsync(IReadOnlyList<string> units, DateTimeOffset before, CancellationToken cancellationToken)`, `Task<IReadOnlyList<BootTime>> BootTimesAsync(TimeRangeQuery query, CancellationToken cancellationToken)`, `Task<IReadOnlyList<GapRecordRow>> GapRecordsAsync(TimeRangeQuery query, CancellationToken cancellationToken)`, `Task<IReadOnlyList<KernelEventRow>> KernelEventsAsync(TimeRangeQuery query, CancellationToken cancellationToken)`, `Task<IReadOnlyList<BackupRunRow>> BackupRunsAsync(TimeRangeQuery query, CancellationToken cancellationToken)`; `SqliteStore` implements all ten publicly.
+- `TimeRangeQuery`: `TimeRangeQuery.From`, `TimeRangeQuery.To` (DateTimeOffset), `TimeRangeQuery.Limit` (int), `TimeRangeQuery.AfterId` (long; rows at the capture time `From` with an ID at most it are skipped).
 - `RawValueQuery`: `RawValueQuery.Source`, `RawValueQuery.Name` (string), `RawValueQuery.From`, `RawValueQuery.To` (DateTimeOffset), `RawValueQuery.MaxTimes`, `RawValueQuery.MaxLines` (int).
 - `RollupStepQuery`: `RollupStepQuery.Tier` (RollupTier), `RollupStepQuery.Source`, `RollupStepQuery.Name` (string), `RollupStepQuery.From`, `RollupStepQuery.To` (DateTimeOffset), `RollupStepQuery.Step` (TimeSpan), `RollupStepQuery.MaxLines` (int).
 - `LinePage`: `LinePage.Lines` (IReadOnlyList of MetricLine), `LinePage.LinesCut`, `LinePage.TimesExceeded` (bool).
 - `MetricLine`: `MetricLine.Labels` (string), `MetricLine.Points` (IReadOnlyList of LinePoint).
 - `LinePoint`: `LinePoint.At`, `LinePoint.LastAt` (DateTimeOffset), `LinePoint.Minimum`, `LinePoint.Average`, `LinePoint.Maximum`, `LinePoint.Last` (double), `LinePoint.Count` (long).
-- `ServiceStateRow`: `ServiceStateRow.Unit`, `ServiceStateRow.ActiveState` (string), `ServiceStateRow.ActiveEnterAt` (string, nullable), `ServiceStateRow.CapturedAt` (DateTimeOffset), `ServiceStateRow.Restarts` (double), `ServiceStateRow.Previous` (ServiceStateRow, nullable).
+- `ServiceStateRow`: `ServiceStateRow.Unit`, `ServiceStateRow.ActiveState` (string), `ServiceStateRow.ActiveEnterAt` (string, nullable), `ServiceStateRow.CapturedAt` (DateTimeOffset), `ServiceStateRow.Restarts` (long), `ServiceStateRow.BootId` (string, empty for none), `ServiceStateRow.Previous` (ServiceStateRow, nullable).
 - `BootTime`: `BootTime.CapturedAt` (DateTimeOffset), `BootTime.BootId` (string).
+- `GapRecordRow`: `GapRecordRow.Id` (long), `GapRecordRow.AgentId`, `GapRecordRow.Cause`, `GapRecordRow.Collector`, `GapRecordRow.SpanFrom`, `GapRecordRow.SpanTo` (string, as stored), `GapRecordRow.CapturedAt` (DateTimeOffset), `GapRecordRow.FirstSeq`, `GapRecordRow.LastSeq` (long, nullable).
+- `KernelEventRow`: `KernelEventRow.Id` (long), `KernelEventRow.CapturedAt` (DateTimeOffset), `KernelEventRow.Type`, `KernelEventRow.BootId`, `KernelEventRow.VictimCommand` (string), `KernelEventRow.KernelTimeNs`, `KernelEventRow.VictimPid` (long, nullable).
+- `BackupRunRow`: `BackupRunRow.Id` (long), `BackupRunRow.CapturedAt` (DateTimeOffset), `BackupRunRow.Phase`, `BackupRunRow.BootId`, `BackupRunRow.StartedAt`, `BackupRunRow.LastSeenAt`, `BackupRunRow.GoneBy`, `BackupRunRow.Command` (string, times as stored, empty when absent).
 
 Vandox.Storage, engine:
 
-- `TimeSeriesService`: `TimeSeriesService.MaxSeries` (16), `TimeSeriesService.MaxLines` (64), `TimeSeriesService.MaxTarget` (2000), `TimeSeriesService.MaxMarkers` (1000), `TimeSeriesService.MaxGaps` (1000), all public int constants; `public TimeSeriesService(ITimeSeriesReader reader, IRecordReader records, RetentionPolicy policy, TimeProvider clock)`; `public Task<TimeSeriesResult> QueryAsync(TimeSeriesQuery query, CancellationToken cancellationToken)`.
+- `TimeSeriesService`: `TimeSeriesService.MaxSeries` (16), `TimeSeriesService.MaxLines` (64), `TimeSeriesService.MaxTarget` (2000), `TimeSeriesService.MaxMarkers` (1000), `TimeSeriesService.MaxGaps` (1000), all public int constants; `public TimeSeriesService(ITimeSeriesReader reader, RetentionPolicy policy, TimeProvider clock)`; `public Task<TimeSeriesResult> QueryAsync(TimeSeriesQuery query, CancellationToken cancellationToken)`.
 - `SeriesKey`: `public SeriesKey(string source, string name)`; `SeriesKey.Source`, `SeriesKey.Name` (string, get only).
 - `TimeSeriesQuery`: `TimeSeriesQuery.Series` (IReadOnlyList of SeriesKey), `TimeSeriesQuery.From`, `TimeSeriesQuery.To` (DateTimeOffset), `TimeSeriesQuery.Target` (int).
 - `TimeSeriesResolution` (public enum) with `TimeSeriesResolution.Raw`, `TimeSeriesResolution.Step`.
@@ -173,7 +196,7 @@ Vandox.Storage, engine:
 
 Vandox.Backend:
 
-- `GatedTimeSeriesReader` (implements ITimeSeriesReader): `public GatedTimeSeriesReader(ITimeSeriesReader inner, WebReaderGate gate)`; the seven members, one gate slot per call.
+- `GatedTimeSeriesReader` (implements ITimeSeriesReader): `public GatedTimeSeriesReader(ITimeSeriesReader inner, WebReaderGate gate)`; the ten members, one gate slot per call.
 - `public ChartSeries(string label, IReadOnlyList<double?> values, IReadOnlyList<bool> bridged)` and `ChartSeries.Bridged` (IReadOnlyList of bool, get only); the two-argument constructor stays and gives an empty list.
 - `internal int[][] ToBridges()` on ChartData.
 
@@ -184,8 +207,8 @@ none whole; SqliteStore.cs gains a region, ServeCommand.cs two registrations.
 
 `tests/Vandox.Storage.Tests/TimeSeriesServiceTests.cs`, `tests/Vandox.Storage.Tests/SqliteStoreTimeSeriesTests.cs`,
 `tests/Vandox.Storage.Tests/SeriesGapTests.cs`, `tests/Vandox.Backend.Tests/GatedTimeSeriesReaderTests.cs`, and the existing
-`tests/Vandox.Backend.Tests/ChartDataTests.cs`, `ChartInteropTests.cs`, `ServeTests.cs`. New doubles: `CountingTimeSeriesReader` and a
-counting `IRecordReader` (Storage tests); samples in `TimeSeriesSamples.cs` (Storage tests).
+`tests/Vandox.Backend.Tests/ChartDataTests.cs`, `ChartInteropTests.cs`, `ServeTests.cs`. New double: `CountingTimeSeriesReader`, wrapping a
+real store and recording every call and limit (Storage tests); samples in `TimeSeriesSamples.cs` (Storage tests).
 
 Existing test code that calls a changed signature: `ChartInteropTests` and `RecordingJsRuntime` assertions on the `create`/`update`
 argument lists — adapted by the Tester. `ChartSeries`' two-argument constructor is unchanged.
@@ -205,15 +228,19 @@ Files no unit test can cover: `src/Vandox.Backend/wwwroot/js/charts.js` (browser
 All by the Dev, after the code is green:
 
 - `docs/areas/time-series-query.md` (new, from `_template.md`) and its index row in `docs/areas/README.md`: every rule of *Approach*
-  as behavior (texts of AC8, ladder, windows, caps), linking records 0214, 0215, 0216 and 0028.
+  as behavior (texts of AC8, ladder, windows, caps, clamping), linking records 0214, 0215, 0216 and 0028, with this paragraph verbatim:
+  "Marker texts (SeriesMarker.Text: victim command, unit, backup command), line labels (SeriesLine.Labels), boot IDs and gap
+  collectors are external text from the agent, returned as stored; a view shows them, and a chart label built from them, only as
+  [Web UI](web-ui.md) *External text* writes external text."
 - `docs/areas/storage-reading.md`: *Scope* names time-series reads; new section *Time-series reads* with the seven reads, limits and
-  orders (byte order of labels, 1,024 label sets examined, 256 units sought).
+  orders (UTF-8 byte order of labels, 1,024 label sets examined, pages of 1,001 projected rows, ten pages per kind, the
+  10,000-row backward scan for previous unit states).
 - `docs/areas/web-ui.md`: *Charts* — the *between samples* state and the three new error texts; *Store reads of the views* — the
   time-series service shares the gate; *Implementation* — `GatedTimeSeriesReader`.
 - `docs/areas/retention.md`, *Rollups*: the readers line adds the time-series query.
 - `docs/ARCHITECTURE.md`: backend component — the time-series service the views call in process; *Interfaces* list adds
   `ITimeSeriesReader`; records 0214–0216 linked.
-- `docs/BENCHMARKS.md`: section *Time-series query* — criterion (spec N1), workload, `--query` procedure, results table (the
+- `docs/BENCHMARKS.md`: section *Time-series query* — criterion (spec N1), workload (with the hourly `service_state` re-records), `--query` procedure, results table (the
   development-host row by the Dev, the DS918+ row from the Product Manager's run, written in by the Dev).
 - `CHANGELOG.md`: an `[Unreleased]` *Added* entry for the time-series query service.
 - `.squad/project.md` *Test doubles*: the Tester reports a row for `CountingTimeSeriesReader`; the orchestrator writes it in.
@@ -226,8 +253,9 @@ four readers keep two free: every new read takes the shared gate per call.
 
 ## Security considerations
 
-- [x] No limits on parsed input: the reads parse stored, validated payloads; `json_extract` on a member a forged record lacks gives
-  NULL (row skipped as no change); an unparseable `active_enter_at` counts as no move; caps bound every list.
+- [x] Limits apply to stored, already decoded values: projected rows never carry `message` or the payload; pages of 1,001 rows,
+  ten per kind; the backward unit scan examines 10,000 rows; added axis times one per interval. A member a forged record lacks reads as
+  NULL; an unparseable time is no enter move or a skipped gap; payload times outside `[from, now]` are clamped or replaced (Approach).
 - [x] Exceptions: `InvalidQueryException` (the AC8 texts) and `StoreException` from a failing read reach the calling view, which maps
   them to its own message (#48–#52); `OperationCanceledException` on cancellation. No raw text reaches a user here.
 
@@ -238,6 +266,41 @@ four readers keep two free: every new read takes the shared gate per call.
 - `docs/decisions/0216-time-series-context-is-read-in-fixed-windows-around-the-range.md` (Proposed)
 
 Their area link resolves once the Dev adds `docs/areas/time-series-query.md`; `decision-check.py` fails until then.
+
+## Challenge
+
+- M1 (raw check double-counts shared times). Accepted: every series is read with `MaxTimes` = target + 1 and the engine counts the
+  union, abandoning raw once it exceeds the target (*Resolution*); N2 states one time more than the target per series; test
+  `QueryAsyncSeriesOfOneCollectorSharingTimesStayRaw`.
+- m1 (absent `active_enter_at`). Accepted: the SQL compares with `IS NOT`, and absent before / present now is a moved enter time
+  (*Markers*, record 0215); a row of `QueryAsyncServiceRestartRules` and of `ServiceChangesAsyncReturnsFirstPerUnitAndChangesWithPrevious`.
+- m2 (boot captured after the unit's first post-boot record). Accepted: `ServiceStateRow.BootId` from `records.boot_id`; differing boot
+  IDs are a boot between, `BootTimesAsync` stays the second check; test row added.
+- m3 (derived bounds below the storable minimum). Accepted with S6: every derived bound is clamped; `QueryAsyncStorableEdgesReadWithoutError`.
+- m4 (benchmark without service re-records). Accepted: spec N1 and task 10 write the hourly re-records of 10 units (87,600 a year).
+- m5 (`restarts` is a uint). Accepted: `ServiceStateRow.Restarts` is a `long`, compared as an integer; record 0215 drops the 2^53
+  consequence.
+- m6 (one statement of the label order). Accepted: UTF-8 byte order (SQLite BINARY), never re-sorted in C#, in spec AC7 and E5, the
+  plan, the area document and the test name `QueryAsyncOverSixtyFourLinesCutsInSeriesThenUtf8ByteOrder`.
+- Note on fact 5a: confirmed and marked so.
+
+## Security review
+
+- S1 (decoded records of 10,000 per page). Accepted: gap records, kernel events and backup runs are read by projections without the
+  payload or `message`, in pages of at most 1,001 rows, at most ten per kind; a limit over 1,001 is refused; the engine no longer takes
+  an `IRecordReader`. N2 states the bound; `QueryAsyncEventReadsUseAtMostTenPagesOfOneThousandOne` and
+  `EventReadsRefuseLimitOverOneThousandOne` pin it.
+- S2 (unbounded backward seek). Accepted, first option: one backward scan for all first-row units together, at most 10,000
+  `service_state` rows; a unit not found has no previous record and gives no restart. Stated in spec E12 and N2, record 0215, the area
+  document and storage-reading; test `PreviousServiceStatesAsyncScansAtMostTenThousandRows` (300 new units).
+- S3 (unbounded added axis times). Accepted: a time is added only when the current axis has none in the interval, so at most one per
+  interval and at most 2 × target − 1 times; *Raw points*, N2, the area document; test `QueryAsyncRawGapAcrossSixtyFourLinesAddsOneTime`.
+- S4 (forged payload times). Accepted: a restart is timed at its new enter time only inside `[from, end)` and not after its capture,
+  else at the capture time; a backup with `started_at` at or after `end` is dropped, its `EndsAt` and `LastSeenAt` clamped to `now`; a
+  gap record's end is clipped to `now`. Test rows in `QueryAsyncRestartTime` and `QueryAsyncBackupRunSpans`.
+- S5 (external-text paragraph). Accepted verbatim in *Documentation updates* (task 11).
+- S6 (derived windows outside the storable range). Accepted: every derived bound is clamped; N2's second clause takes the suggested
+  wording; `QueryAsyncStorableEdgesReadWithoutError`.
 
 ## Out of scope / follow-ups
 

@@ -16,52 +16,46 @@ is .NET 11 (record 0197), not .NET 10.
 
 ## Scenarios
 
-- S1: Given the overview charts the last 24 hours at 1,000 points, when it queries available memory and swap, then each is one line
-  at a 5-minute step (a 30-second series has too many values for raw), plus the day's markers and gaps.
-- S2: Given the history view shows one year at 1,000 points with eight series, then every line has a 12-hour step from the hourly
-  rollups, with the year's markers and gaps, in under one second on the reference host.
-- S3: Given the history view overlays `mem_available_bytes` (collector `system`, 30 s) and `agent_rss_bytes` (collector `self`, 60 s)
-  over the last 30 minutes, then the result is raw on one axis, the union of both lines' times, and each line is drawn connected
-  through the times only the other was sampled at.
-- S4: Given `cpu_percent` is queried, then the result holds one line per `mode`, each with its labels.
-- S5: Given the agent was stopped for 20 minutes and the `filesystem` collector missed one sample, then every line breaks over the
-  stop, only the `filesystem_*` lines break over the missed sample, and the gap list holds both.
+- S1: Given the overview charts the last 24 hours at 1,000 points, then memory and swap are lines at a 5-minute step (30-second
+  series have too many values for raw), with the day's markers and gaps.
+- S2: Given one year at 1,000 points with eight series, then every line has a 12-hour step from the hourly rollups, with markers
+  and gaps, in under one second on the reference host.
+- S3: Given the history view overlays `mem_available_bytes` (`system`, 30 s) and `agent_rss_bytes` (`self`, 60 s) over 30 minutes,
+  then the result is raw on the union of both lines' times, each line drawn through the other's times.
+- S4: Given `cpu_percent`, then the result holds one line per `mode`.
+- S5: Given a 20-minute agent stop and one missed `filesystem` sample, then every line breaks over the stop, only `filesystem_*`
+  lines over the sample, and the gap list holds both.
 - S6: Given an OOM kill, a reboot, a crash and automatic restart of `mariadb.service` and a nightly backup, then the markers list each
   once in time order, the backup as a span; the units started by the reboot are no restarts.
 
 ## Errors and edge cases
 
-- E1: A series without values in the range has no line; no error.
-- E2: Nothing after the query time is returned.
-- E3: Rollups lag behind the stored values (record 0208), a stalled fold further: the result says up to when its rollup points are
-  complete; a missing value after that is pending, not lost.
-- E4: Raw is not chosen for a range that starts before `retention.raw`, nor a step under one hour before `retention.rollups_5m`, even
-  where imported values or the window of an OOM kill are still stored. Before `retention.rollups_1h` no bucket exists: the lines are
-  empty and the result says so.
-- E5: More than 64 lines (`meminfo_bytes` alone has one per `/proc/meminfo` field) are cut, and the result names the cut series.
-- E6: More than 1,000 markers or gaps are cut, and the result says up to when each list is complete.
-- E7: A backfill after a query may shrink or close an `open` sequence gap and change rollup points once folded; a repeated query shows
-  it. A `closed` gap is not returned.
-- E9: Cancellation or a passed deadline stops the query (AC9).
-- E10: A re-record with the same state (after an agent start, hourly), a start from stopped, a start by a boot, and a falling restart
-  counter are no restarts.
-- E11: A record stored twice (a kill from two journal files, a start written again after a lost check) gives one marker; a lost range
-  the agent reported and the sequence gap it made final are one gap.
-- E12: Facts before `from` count: an earlier-starting gap, a unit's previous record of any age, a backup that started before the
-  range. An agent gap record is found when captured from one hour before the range to seven days after it, a backup record from one
-  day before to one day after (record 0216). A start without a stored end is still running while no later boot is stored, else its
-  end is unknown.
+- E1: A series without values has no line.
+- E2: Nothing after the query time.
+- E3: Rollups lag (record 0208), a stalled fold more: the result says up to when its rollup points are complete.
+- E4: No raw before `retention.raw`, no step under an hour before `retention.rollups_5m`, even where raw values remain; before
+  `retention.rollups_1h` the lines are empty and the result says so.
+- E5: More than 64 lines (`meminfo_bytes` alone has one per field) are cut (AC7).
+- E6: More than 1,000 markers or gaps are cut (AC7).
+- E7: A later backfill may shrink or close an `open` gap and change folded points; a `closed` gap is not returned.
+- E9: Cancellation or a deadline stops the query.
+- E10: A re-record with the same state, a start from stopped, a start by a boot and a falling counter are no restarts.
+- E11: A record stored twice gives one marker; a lost range the agent reported and the sequence gap it made final are one gap.
+- E12: Facts before `from` count, within bounds: an earlier-starting gap, a unit's previous record among the 10,000 `service_state`
+  records before `from`, gap and backup records in the windows of record 0216. A backup start without an end is still running while
+  no later boot is stored, else its end is unknown.
 
 ## Non-functional requirements
 
 - N1: The reference workload runs in under one second, median of five runs, on the reference host of
   [`docs/BENCHMARKS.md`](../../docs/BENCHMARKS.md) (DS918+, SSD volume): a database with one year of the agent's data at default
   intervals (a year of rollups of the `system`, `filesystem`, `clock`, `mariadb` and `self` metrics, their raw values for the last 30
-  days), a backup run a day, 10 tracked units, 50 OOM kills, 1,000 recorded gaps; a one-year query of eight series, one of them
+  days), a backup run a day, 10 tracked units each recorded hourly (87,600 records), 50 OOM kills, 1,000 recorded gaps; a one-year query of eight series, one of them
   `cpu_percent` with its eight modes, at 1,000 points, with markers and gaps.
-- N2: The memory of a query is bounded by its caps (16 series, 64 lines, 2,000 times plus the gap times AC3 adds, 1,000 markers,
-  1,000 gaps); its store work by the rollup buckets of its lines in the range and one page per event kind, never by the raw values
-  in the range: the raw check reads at most one distinct time more than the target.
+- N2: The memory of a query is bounded by its caps (16 series, 64 lines, at most 2 × target − 1 times, 1,000 markers, 1,000 gaps)
+  and by event reads of projected rows in pages of at most 1,001; its store work by the rollup buckets of its lines in the range, the
+  `service_state` records in the range plus at most 10,000 before it, and at most ten pages per other event kind, never by the raw
+  values in the range: the raw check reads at most one distinct time more than the target per series.
 - N3: Every store read takes the views' shared read gate ([Web UI](../../docs/areas/web-ui.md), *Store reads of the views*) per call
   and honours the caller's token and deadline.
 - N4: Blazor components call the service in process; no HTTP route, page or listener is added.
@@ -91,13 +85,15 @@ is .NET 11 (record 0197), not .NET 10.
   collector not named here, concerns every line (S5, E7, E11, E12).
 - AC5: The markers in the range, in time order: each `oom_kill` with victim command and PID, once per boot ID, kernel time and PID;
   each boot, once per boot ID; each service restart with its unit — a `service_state` record whose `restarts` is above the unit's
-  previous record's, or whose `active_enter_at` is later while the previous record was `active`, `activating`, `reloading`,
-  `deactivating` or `failed` with no boot between, timed at the new `active_enter_at` when it moved, else at its capture time; each
+  previous record's, or whose `active_enter_at` is later (or newly present) while the previous record was `active`,
+  `activating`, `reloading`, `deactivating` or `failed` with no boot between (different boot IDs or a stored boot), timed at the new
+  `active_enter_at` when it lies in the range and not after its capture time, else at its capture time; each
   backup run overlapping the range, once per boot ID and start, as a span to `gone_by` (with `last_seen_at`), still running, or with
   an unknown end (S6, E10, E11, E12).
 - AC6: Nothing after the query time is returned; at a rollup step the result states up to when its points are complete: the earliest
   capture time among the stored values not yet folded, or the query time when every value is folded, never after it (E2, E3).
-- AC7: Over 64 lines, the first 64 in series order, then ordinal label text, with the cut series named; over 1,000 markers or gaps,
+- AC7: Over 64 lines, the first 64 in series order, then the UTF-8 byte order of the stored label text, with the cut
+  series named; over 1,000 markers or gaps,
   the earliest 1,000 with the time up to which the list is complete (E5, E6, N2).
 - AC8: Refused before any store read, with an error naming the rule: no series, more than 16, an empty source or name, a target
   outside 1 to 2,000, `from` not before `to`, a time outside the storable range.
@@ -165,3 +161,7 @@ is .NET 11 (record 0197), not .NET 10.
   though those collectors write no metric — such a collector now concerns no line, and only an unnamed collector every line. AC6
   took a fold time the store does not keep; the earliest unfolded capture time states the same completeness exactly from the
   watermark. E12 and N2 now name the read windows (record 0216) and that a step's work grows with the buckets in the range.
+- Lead, plan revision after the plan challenge and Security's review: E5 and AC7 state the label order as UTF-8 byte order (DA m6);
+  E12 and N2 bound the previous-record search to 10,000 `service_state` records (Security S2) and N2 states the real memory and work
+  bounds (S1, S3, S6, DA M1); N1's workload names the hourly re-records (DA m4); AC5 counts an enter time that newly appears, uses
+  boot IDs, and times a restart at its capture time when its enter time lies outside the range or after the capture (DA m1, m2, S4).
