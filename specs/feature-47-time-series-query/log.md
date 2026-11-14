@@ -35,3 +35,4 @@ are quoted in full.
 | 2026-11-14 18:03 | 6 Coverage skipped (G4) | Orchestrator | skipped — Coverage gate passes at 98.8% (run by the orchestrator), no uncovered new lines, benchmark files are excluded from coverage like the other scenarios, no deferred test |
 | 2026-11-14 18:03 | 6 Documentation | Orchestrator | written in 6 Implement (G4) |
 | 2026-11-14 18:11 | 7 Gate stamp | Orchestrator | FAIL on 0870c0f2c04bb0b8dafd64034ab63c1c5d99fac4 (tier standard): Format check pass; Analyzer gate pass; Test with coverage FAIL; Coverage gate not run (Test with coverage failed); decision-check.py pass; scope-check.py pass · figure-check.py 0 hit(s) |
+| 2026-11-14 18:19 | 7 Gate stamp | Orchestrator | FAIL on cf1c44b3ba744cc81a4597e8af2a20ad6c8592f7 (tier standard): Format check pass; Analyzer gate pass; Test with coverage FAIL; Coverage gate not run (Test with coverage failed); decision-check.py pass; scope-check.py pass · figure-check.py 0 hit(s) |
