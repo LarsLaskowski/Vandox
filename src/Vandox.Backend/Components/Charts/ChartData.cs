@@ -84,6 +84,18 @@ public sealed class ChartData
         return columns;
     }
 
+    // Skeleton: removed with the implementation
+#pragma warning disable S2325, RH2003
+    /// <summary>
+    /// Converts the data to the bridge columns the chart module expects: per series, the indexes of the bridged points.
+    /// </summary>
+    /// <returns>The indexes per series</returns>
+    internal int[][] ToBridges()
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore S2325, RH2003
+
     /// <summary>
     /// Checks that the data can be drawn.
     /// </summary>
