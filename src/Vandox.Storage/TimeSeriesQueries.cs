@@ -499,7 +499,7 @@ internal static class TimeSeriesQueries
     {
         var fiveMinutes = query.Tier == RollupTier.FiveMinutes;
         var stepNs = query.Step.Ticks * 100;
-        var from = FloorDiv(StorageTime.ToNanoseconds(query.From), stepNs) * stepNs;
+        var from = StepStart(FloorDiv(StorageTime.ToNanoseconds(query.From), stepNs), stepNs);
         var to = CeilingEnd(StorageTime.ToNanoseconds(query.To), stepNs);
         var lines = new List<MetricLine>();
         var cut = false;
@@ -557,6 +557,24 @@ internal static class TimeSeriesQueries
         RecordQueries.Require(string.IsNullOrEmpty(source) == false && string.IsNullOrEmpty(name) == false, "source and name are required");
         RecordQueries.Require(StorageTime.InStorableRange(from) && StorageTime.InStorableRange(to), "from and to must be within the storable range");
         RecordQueries.Require(from < to, "from must be before to");
+    }
+
+    /// <summary>
+    /// Returns the start of a step, clamped to the range of a nanosecond count.
+    /// </summary>
+    /// <param name="index">The index of the step since the epoch</param>
+    /// <param name="stepNs">The step in nanoseconds</param>
+    /// <returns>The start of the step</returns>
+    private static long StepStart(long index, long stepNs)
+    {
+        var start = (Int128)index * stepNs;
+
+        if (start < long.MinValue)
+        {
+            return long.MinValue;
+        }
+
+        return start > long.MaxValue ? long.MaxValue : (long)start;
     }
 
     /// <summary>
@@ -650,7 +668,7 @@ internal static class TimeSeriesQueries
             {
                 if (step != long.MinValue)
                 {
-                    points.Add(StepPoint(step * window.Step, merged));
+                    points.Add(StepPoint(StepStart(step, window.Step), merged));
                 }
 
                 step = index;
@@ -664,7 +682,7 @@ internal static class TimeSeriesQueries
 
         if (step != long.MinValue)
         {
-            points.Add(StepPoint(step * window.Step, merged));
+            points.Add(StepPoint(StepStart(step, window.Step), merged));
         }
 
         return points;

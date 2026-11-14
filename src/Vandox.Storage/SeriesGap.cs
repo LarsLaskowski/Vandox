@@ -5,6 +5,15 @@ namespace Vandox.Storage;
 /// </summary>
 public sealed class SeriesGap
 {
+    #region Constants
+
+    private const string AgentSource = "agent";
+    private const string SystemSource = "system";
+    private const string FilesystemPrefix = "filesystem_";
+    private const string ClockPrefix = "clock_";
+
+    #endregion // Constants
+
     #region Properties
 
     /// <summary>
@@ -46,8 +55,6 @@ public sealed class SeriesGap
 
     #region Methods
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S2325, RH2003
     /// <summary>
     /// Returns whether the gap concerns a series.
     /// </summary>
@@ -56,9 +63,17 @@ public sealed class SeriesGap
     /// <returns><see langword="true"/> when the gap concerns the series</returns>
     public bool Concerns(string source, string name)
     {
-        throw new NotImplementedException();
+        return Collector switch
+               {
+                   "self" => source == AgentSource,
+                   "mariadb" => source == "mariadb",
+                   "filesystem" => source == SystemSource && name.StartsWith(FilesystemPrefix, StringComparison.Ordinal),
+                   "clock" => source == SystemSource && name.StartsWith(ClockPrefix, StringComparison.Ordinal),
+                   "system" => source == SystemSource && name.StartsWith(FilesystemPrefix, StringComparison.Ordinal) == false && name.StartsWith(ClockPrefix, StringComparison.Ordinal) == false,
+                   "processes" or "connections" or "systemd" or "kernel" or "logs" or "backups" => false,
+                   _ => true
+               };
     }
-#pragma warning restore S2325, RH2003
 
     #endregion // Methods
 }

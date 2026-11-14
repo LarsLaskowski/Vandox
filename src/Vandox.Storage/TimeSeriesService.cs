@@ -1,34 +1,35 @@
 namespace Vandox.Storage;
 
 /// <summary>
-/// Answers time-series queries in process: lines on one axis, gaps and markers.
+/// Answers time-series queries in process: metric lines at one resolution on one time axis, with the gaps and markers of the range
+/// ([Time-series queries](../../docs/areas/time-series-query.md)).
 /// </summary>
 public sealed class TimeSeriesService
 {
     #region Constants
 
     /// <summary>
-    /// The maximum number of series of a query.
+    /// The most series of a query.
     /// </summary>
     public const int MaxSeries = 16;
 
     /// <summary>
-    /// The maximum number of lines of a result.
+    /// The most lines of a result.
     /// </summary>
     public const int MaxLines = 64;
 
     /// <summary>
-    /// The maximum target of axis times.
+    /// The largest target.
     /// </summary>
     public const int MaxTarget = 2000;
 
     /// <summary>
-    /// The maximum number of markers of a result.
+    /// The most markers of a result.
     /// </summary>
     public const int MaxMarkers = 1000;
 
     /// <summary>
-    /// The maximum number of gaps of a result.
+    /// The most gaps of a result.
     /// </summary>
     public const int MaxGaps = 1000;
 
@@ -36,23 +37,11 @@ public sealed class TimeSeriesService
 
     #region Fields
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
-    /// <summary>
-    /// The store reads.
-    /// </summary>
     private readonly ITimeSeriesReader _reader;
 
-    /// <summary>
-    /// The retention policy.
-    /// </summary>
     private readonly RetentionPolicy _policy;
 
-    /// <summary>
-    /// The clock.
-    /// </summary>
     private readonly TimeProvider _clock;
-#pragma warning restore S4487
 
     #endregion // Fields
 
@@ -62,8 +51,8 @@ public sealed class TimeSeriesService
     /// Initializes a new instance of the <see cref="TimeSeriesService"/> class.
     /// </summary>
     /// <param name="reader">The store reads</param>
-    /// <param name="policy">The retention policy</param>
-    /// <param name="clock">The clock</param>
+    /// <param name="policy">The retention periods that bound the resolutions</param>
+    /// <param name="clock">The clock of the query time</param>
     public TimeSeriesService(ITimeSeriesReader reader, RetentionPolicy policy, TimeProvider clock)
     {
         _reader = reader;
@@ -75,19 +64,92 @@ public sealed class TimeSeriesService
 
     #region Methods
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S2325, RH2003
     /// <summary>
-    /// Answers a time-series query.
+    /// Runs a query: the lines of its series at one resolution, and the gaps and markers of its range. Nothing after the query time is returned.
     /// </summary>
     /// <param name="query">The query</param>
-    /// <param name="cancellationToken">Cancels the call</param>
+    /// <param name="cancellationToken">Cancels the query; no partial result is returned</param>
     /// <returns>A task that returns the result</returns>
-    public Task<TimeSeriesResult> QueryAsync(TimeSeriesQuery query, CancellationToken cancellationToken)
+    /// <exception cref="InvalidQueryException">The query breaks a rule; nothing was read</exception>
+    /// <exception cref="StoreException">A store read fails</exception>
+    /// <exception cref="OperationCanceledException">The token was cancelled</exception>
+    public async Task<TimeSeriesResult> QueryAsync(TimeSeriesQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var series = Validate(query);
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var now = _clock.GetUtcNow();
+
+        if (query.From >= now)
+        {
+            return new TimeSeriesResult();
+        }
+
+        var range = new SeriesRange
+                    {
+                        From = query.From,
+                        End = query.To < now ? query.To : now,
+                        Now = now,
+                        Target = query.Target
+                    };
+        var data = await SeriesLineReader.ReadAsync(_reader, _policy, series, range, cancellationToken).ConfigureAwait(false);
+        var gaps = await SeriesGapReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+        var markers = await SeriesMarkerReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+        var startsBefore = _policy.HourlyRollups is not null && query.From < now - _policy.HourlyRollups.Value;
+
+        if (data.Raw)
+        {
+            var (times, lines) = SeriesAssembler.Raw(data.Lines, gaps.Gaps);
+
+            return new TimeSeriesResult
+                   {
+                       Resolution = TimeSeriesResolution.Raw,
+                       Times = times,
+                       Lines = lines,
+                       CutSeries = data.Cut,
+                       StartsBeforeRollups = startsBefore,
+                       GapsCompleteUntil = gaps.CompleteUntil,
+                       MarkersCompleteUntil = markers.CompleteUntil,
+                       Gaps = gaps.Gaps,
+                       Markers = markers.Markers
+                   };
+        }
+
+        return new TimeSeriesResult
+               {
+                   Resolution = TimeSeriesResolution.Step,
+                   Step = data.Step,
+                   Times = data.Axis.Select(time => new DateTimeOffset(time, TimeSpan.Zero)).ToList(),
+                   Lines = SeriesAssembler.Steps(data),
+                   CutSeries = data.Cut,
+                   StartsBeforeRollups = startsBefore,
+                   CompleteUntil = data.CompleteUntil,
+                   GapsCompleteUntil = gaps.CompleteUntil,
+                   MarkersCompleteUntil = markers.CompleteUntil,
+                   Gaps = gaps.Gaps,
+                   Markers = markers.Markers
+               };
     }
-#pragma warning restore S2325, RH2003
+
+    /// <summary>
+    /// Checks a query against the rules of the plan and returns its distinct series.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <returns>The series, each once, in query order</returns>
+    /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
+    private static List<SeriesKey> Validate(TimeSeriesQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        RecordQueries.Require(query.Series.Count > 0, "at least one series is required");
+        RecordQueries.Require(query.Series.Count <= MaxSeries, $"at most {MaxSeries} series");
+        RecordQueries.Require(query.Series.All(key => string.IsNullOrEmpty(key.Source) == false && string.IsNullOrEmpty(key.Name) == false), "source and name are required");
+        RecordQueries.Require(query.Target >= 1 && query.Target <= MaxTarget, $"target must be 1 to {MaxTarget}");
+        RecordQueries.Require(query.From < query.To, "from must be before to");
+        RecordQueries.Require(StorageTime.InStorableRange(query.From) && StorageTime.InStorableRange(query.To), "from and to must be within the storable range");
+
+        return query.Series.DistinctBy(key => (key.Source, key.Name)).ToList();
+    }
 
     #endregion // Methods
 }
