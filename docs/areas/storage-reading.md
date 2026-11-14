@@ -3,7 +3,7 @@
 ## Scope
 
 How stored data is read from the backend's database ([Storage](storage.md)): record series and kinds, incidents and their notes,
-template statistics, listener history, the agent timeline (live flag, gaps, clock), the literal-term log search, and the log exploration
+template statistics, rollups, listener history, the agent timeline (live flag, gaps, clock), the literal-term log search, and the log exploration
 that serves the logs view with bounded pages. `vandoxd incidents`, `vandoxd report` and the web UI's views rely on it. Every read runs on
 a reader connection and is interrupted by a cancelled token or a passed deadline ([Storage](storage.md), *Database file and connections*).
 
@@ -22,6 +22,14 @@ a reader connection and is interrupted by a cancelled token or a passed deadline
 - A stored payload is read from the column's UTF-8 bytes, not from a string, so the payload exists once as bytes and once as the parsed
   document. It is read with the payload rules of the wire decoder, so an unknown member is ignored; this includes the `Kind` member that
   rows written before #183 carry.
+
+### Rollups
+
+- The rollup buckets of one metric series (source and name; every label set of it) are read for one tier, 5 minutes or one hour, and a
+  time range of bucket starts (the start inclusive, the end exclusive), oldest first, at most 10,000 per query. The range and the limit
+  follow the rules of a record query; a missing source or name, or an unknown tier, is refused as an invalid query.
+- A bucket carries its minimum, average (the sum over the count), maximum, last value with its capture time and count, and its labels as
+  stored (empty for none). A bucket is current only up to the last fold step, at most 5 minutes behind ([Retention and rollups](retention.md)).
 
 ### Incidents
 

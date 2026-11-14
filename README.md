@@ -106,6 +106,13 @@ the file and of the secrets in [Configuration and secrets](docs/areas/configurat
 | `import.time_zone` | none | IANA time zone of the server the imported logs come from, such as `Europe/Berlin` (see *Import logs*). |
 | `incidents.window_before` | `1h` | How long before an OOM kill an incident starts, such as `30m`; also the lookback of the forensics report. |
 | `incidents.window_after` | `30m` | How long after an OOM kill an incident ends. |
+| `retention.raw` | `30d` | How long raw metric values are kept, `1d` to `9999d` or `unlimited`; the 5-minute and hourly rollups stay. |
+| `retention.rollups_5m` | `365d` | How long the 5-minute rollups are kept. |
+| `retention.rollups_1h` | `1095d` | How long the hourly rollups and the log template statistics are kept. |
+| `retention.logs` | `90d` | How long log lines are kept. |
+| `retention.snapshots` | `30d` | How long process, connection and MariaDB status snapshots are kept. |
+| `retention.events` | `1095d` | How long kernel events, service states, backup runs, gaps and listener findings are kept. |
+| `retention.incidents` | `unlimited` | How long incidents (without a note) are kept. |
 
 **Secrets**
 

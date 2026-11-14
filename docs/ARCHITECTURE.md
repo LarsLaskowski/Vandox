@@ -12,7 +12,7 @@ exist as the storage layer; the service reads it through the logs and incidents 
 web and ingest ports, accepts the agent's batches on its ingest endpoint (`POST /v1/batches`: the token bound to one configured agent ID, bounded body, batch and time, two slots through the commit, a free-space floor; `Vandox.Backend` `Ingest`), protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
 collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services, the state of the local MariaDB server, the kernel's OOM kills and the boots, the lines of the journal and of configured `syslog` and error log files, and the backup runs), keeps every record in its on-disk spool, keeps its small state file and notifies systemd, and its sender sends the spool to the ingest endpoint, current data first and the backlog throttled beside it, and the backend acknowledges each batch after its commit.
-Everything else described here — the agent's other collectors, the classification of live and backfilled data, retention, alerting, Telegram, the nightly
+Everything else described here — the agent's other collectors, the classification of live and backfilled data, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -117,7 +117,7 @@ way, and agents of the hosting provider are never disabled or changed
   rebuilds the log template statistics from the stored log lines
   ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)); `vandoxd report`
   writes the forensics report of the stored data as Markdown to standard output
-  ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md)). Two Kestrel listeners serve
+  ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md)). The running service also runs the retention job, a hosted service that folds metric values into 5-minute and hourly rollups and removes expired data in bounded steps ([Retention and rollups](areas/retention.md); no other command removes data). Two Kestrel listeners serve
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
   lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The ingest listener hands only
   `POST /v1/batches` to the ingest endpoint (`Vandox.Backend.Ingest`), which checks the bearer token before it reads the body and the
@@ -414,8 +414,8 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 
 ## Storage and retention
 
-`vandoxd` stores everything in SQLite with the FTS5 extension for log search, in WAL mode, with these
-retention tiers. The database is the file `vandox.db` in `storage.directory`, created with mode 0600, opened through
+`vandoxd` stores everything in SQLite with the FTS5 extension for log search, in WAL mode, and keeps it bounded with the
+retention periods below. The database is the file `vandox.db` in `storage.directory`, created with mode 0600, opened through
 `Microsoft.Data.Sqlite` with its bundled SQLite (FTS5 included, no system library needed): one writer connection
 with `BEGIN IMMEDIATE`, a pool of query-only readers, WAL and `synchronous=FULL`
 ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md), which carries the Go storage rules over). The storage directory is not created (a missing mount must not be hidden), and a
@@ -433,7 +433,7 @@ Implemented by `src/Vandox.Storage`:
   2^63 - 1.
 - **Migrations** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
-  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`, version 6 the head key and the continuation point of `import_files`, version 7 the line hashes (`import_line_hashes`) and the import attempts of `import_files`, version 8 the log template statistics, version 9 the table `incidents`, version 10 the table `incident_notes`.
+  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`, version 6 the head key and the continuation point of `import_files`, version 7 the line hashes (`import_line_hashes`) and the import attempts of `import_files`, version 8 the log template statistics, version 9 the table `incidents`, version 10 the table `incident_notes`, version 11 the listener marks and comparisons, version 12 the `live` column and the agent timeline tables (streams, clock samples, sample times, gaps), version 13 the changed-listener columns, version 14 the rollup tables, the retention holds and the indexes the removal uses (details in [Storage](areas/storage.md), *Migration steps*).
 - **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
   `import_files` holds one row per imported file content (SHA-256 of the decompressed content, size, the name
   and modification time the parser got, the source type, the number of records stored so far and whether the
@@ -472,23 +472,30 @@ Implemented by `src/Vandox.Storage`:
   rules in [Storage reading and log exploration](areas/storage-reading.md), *Log exploration*).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogExplorer` (the logs view), `ILogTemplateReader`,
-  `IImportTracker`, `IIncidentStore` and `IIncidentBrowser` (the incidents view: summaries, one incident, notes); a consumer that depends on the store's semantics is tested against the real store.
+  `IImportTracker`, `IIncidentStore` and `IIncidentBrowser` (the incidents view: summaries, one incident, notes), `IRetentionStore` (the retention job: fold, kill scan, removal, holds) and `IRollupReader` (the rollup buckets of a series); a consumer that depends on the store's semantics is tested against the real store.
 - **Write throughput** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
 
-| Data | Retention (planned, not implemented yet: v0.1.0 keeps everything) |
+Retention is the backend's own job ([Retention and rollups](areas/retention.md)); the periods are options (`retention.*`) with these defaults:
+
+| Data | Retention (default) |
 | ---- | --------- |
-| Raw data | 30 days |
+| Raw data (metric values) | 30 days |
 | 5-minute rollups | 1 year |
-| Hourly rollups | 3 years |
+| Hourly rollups (and the template statistics) | 3 years |
 | Incidents | unlimited |
 | Logs | 90 days |
-| Process and connection snapshots | 30 days |
+| Process, connection and MariaDB status snapshots | 30 days |
+| Events (OOM kills, boots, service states, backup runs, gaps, listener findings) | 3 years |
+| Imported data | kept |
+| Windows of agent `kernel_event` OOM kills | kept as long as their incident |
+
+Removal frees space inside `vandox.db`, not on the volume: the file does not shrink ([0212](decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md)).
 
 Log data is stored as it is, without pseudonymization: it is the operator's own server and the data stays in
 the home network.
 
-Records: [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
+Records: [0007](decisions/0007-sqlite-with-fts5-no-external-database.md), [0208](decisions/0208-metric-rollups-are-folded-from-new-rows-by-record-id-never-recomputed-from-raw.md), [0209](decisions/0209-retention-removes-by-capture-time-per-kind-imports-kept-events-kept-three-years.md), [0210](decisions/0210-data-in-the-windows-of-the-agents-kernel-oom-kills-is-kept-as-long-as-their-incident.md), [0211](decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md), [0212](decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md),
 [0021](decisions/0021-no-pseudonymization-of-log-data.md).
 
 ## Remote actions (later)

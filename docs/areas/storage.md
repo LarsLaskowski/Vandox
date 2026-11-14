@@ -3,7 +3,7 @@
 ## Scope
 
 The backend's database: the file and how it is opened, the connections and how a running statement is interrupted, the schema with
-its migrations, retention and the write-throughput criterion. A database file written by one version of the backend must stay readable
+its migrations, retention in outline and the write-throughput criterion. A database file written by one version of the backend must stay readable
 by the next, whichever language implements it, so the schema below is part of the contract. How batches are written is in
 [Storage writing](storage-writing.md), how stored data is read and searched in
 [Storage reading and log exploration](storage-reading.md); what a record means is in the [wire format](wire-format.md), how the log
@@ -42,12 +42,12 @@ import tracks files on top of this store in [Log import](log-import.md).
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is **13**. Times are Unix nanoseconds in `INTEGER` columns.
+The schema version is stored in `meta.schema_version`; the current version is **14**. Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
 | ----- | ------- |
-| `meta` | key and value; the schema version, and the run marker `template_rebuild` from the start of a template rebuild until one completes |
+| `meta` | key and value; the schema version, the run marker `template_rebuild` from the start of a template rebuild until one completes, and the retention state: `rollup_after_id` (the record ID up to which metric values are folded), `kill_scan_after_id` (the record ID up to which kernel events are scanned for OOM kills; both absent read as 0) and `sample_time_floor` (the capture time below which agent sample times were removed; absent for none) |
 | `records` | one row per record: `id`, `kind`, `origin` (`agent`, `backend` or `import`), `source`, `agent_id`, `seq`, `captured_at`, `received_at`, `boot_id`, `clock_offset_ns`, `data` (the record's payload as the `data` object of the wire format, without the kind, which is the `kind` column, for every kind except metrics and log lines; `NULL` there), `live` (`CHECK (live IN (0, 1))`: 1 when the record was classified as live data when it was stored, 0 for backfilled data and for every record of origin `import` or `backend`; set in the insert, never changed) |
 | `metrics` | typed rows for metric records: `record_id`, `source`, `name`, `captured_at`, `value`, `unit`, `labels` (JSON object or `NULL`) |
 | `log_lines` | typed rows for log lines: `record_id`, `log`, `program`, `pid`, `priority`, `message`, `truncated`, `host`, `event` |
@@ -63,7 +63,9 @@ All tables are `STRICT`.
 | `listener_comparisons` | derived rows, one per usable agent snapshot with `listener_check` `start`: `record_id` (the start's record, the primary key, a foreign key to `records(id)`), `agent_id`, `seq`, `captured_at`, `base_record_id`, `base_seq` and `base_captured_at` (the agent's previous mark by `seq`, `NULL` when there is none), `outcome` (text: `no_earlier`, `not_comparable`, `privileged_incomplete`, `all_ports` or `privileged_only`), `new_count` (the listeners found new, listed and omitted together), `new_listeners` (the first 64 as a JSON array, `NULL` when `new_count` is 0), `changed_count` and `changed_listeners` (the changed endpoints of the comparison, as in `connection_marks`; a start that is not compared has none) and `finding` (`CHECK (finding IN (0, 1))`: 1 when `new_count` or `changed_count` is above 0 or the outcome says the start was not compared) |
 | `agent_streams` | one row per agent: `agent_id` (primary key, without row ID), `floor_seq` (the lowest number the backend ever received from the agent; numbers below it are never missing), `max_seq` (the highest number stored), `max_captured_at` (its capture time), `fill_at` (the instant the last record arrived into an open sequence gap, a gap opened or the wait was restarted), `open_gaps` (the number of open sequence gaps, kept as a counter), `offset_ns` and `measured_at` (the measured clock offset and the receive time of the newest counted sample, `NULL` until measured), `clock_off` (1 while the offset exceeds 90 seconds), and `last_bound_ns`, `last_captured_at` and `last_received_at` (the previous counted reading: its bound, raw capture time and receive time, `NULL` until the agent has one and after the migration) |
 | `agent_clock_samples` | the clock bounds of an agent: `agent_id`, `sort` (`counted` or `run`), `bucket` (the receive time floored to 10 seconds) and `bound_ns` (the largest bound of the bucket); primary key `(agent_id, sort, bucket)`, without row ID; at most 64 rows per agent and sort, the oldest dropped |
-| `agent_sample_times` | one row per distinct capture time of an agent's stored `metric` records: `agent_id`, `captured_at`, `min_seq` and `max_seq` (the lowest and highest number of a metric at that time); primary key `(agent_id, captured_at)`, without row ID |
+| `agent_sample_times` | one row per distinct capture time of an agent's stored `metric` records: `agent_id`, `captured_at`, `min_seq` and `max_seq` (the lowest and highest number of a metric at that time); primary key `(agent_id, captured_at)`, without row ID; the rows below the raw horizon are removed by retention except each agent's newest ([Retention and rollups](retention.md)) |
+| `metric_rollups_5m` and `metric_rollups_1h` | the 5-minute and hourly buckets of a metric series: `source`, `name`, `labels` (the labels as stored, `''` for none), `bucket` (the start), `min_value`, `max_value`, `sum_value` (REAL), `count` (`CHECK (count >= 1)`), `last_value`, `last_at` and `last_record_id` (the latest value by capture time, ties by record ID); primary key `(source, name, labels, bucket)`, without row ID |
+| `retention_holds` | the windows retention keeps for the agent's OOM kills: `id`, `started_at` and `ended_at` (`CHECK (ended_at > started_at)`); stored holds never overlap |
 | `gaps` | the gaps of an agent: `id` (`AUTOINCREMENT`), `agent_id`, `kind` (`sequence` or `time`), `cause`, `state` (`open`, `closed` or `final`), `first_seq` and `last_seq` (a sequence gap's missing numbers, `CHECK (first_seq <= last_seq)`, `NULL` for a time gap), `from_seq` and `to_seq` (a time gap's bounding samples' highest and lowest metric numbers, `NULL` for a sequence gap), `from_at` and `to_at` (the span in the agent's raw capture times; for a sequence gap the capture time of the highest record before it and of the record after it), `detected_at` and `changed_at` |
 
 Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records(kind, source, captured_at)`;
@@ -76,7 +78,7 @@ agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, ag
 (`connection_marks_changes`, the findings with changes only); `listener_comparisons(captured_at DESC, agent_id, seq DESC)` where
 `finding = 1` (`listener_comparisons_findings`); `gaps(agent_id, first_seq)` where `kind = 'sequence'` and `state <> 'closed'`
 (`gaps_seq`) and, apart, where `state = 'open'` (`gaps_seq_open`); `gaps(agent_id, from_at)`, unique, where `kind = 'time'` and
-`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader).
+`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader); `metric_rollups_5m(bucket)` and `metric_rollups_1h(bucket)`; `retention_holds(started_at)`; `records(kind, captured_at)` where `origin <> 'import'` (`records_removable`, the walk of a removal step); `gaps(to_at)` (`gaps_to_at`).
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -107,6 +109,10 @@ What each step after the first adds, and how data stored before it reads:
   it read as no changes (0 and `NULL`), and a start compared before it keeps its stored outcome without changes until it is compared
   again; stored comparisons are not recomputed when the comparison rules change.
 
+- **14** adds `metric_rollups_5m`, `metric_rollups_1h` and `retention_holds` with their indexes and the indexes `records_removable` and
+  `gaps_to_at`, all empty. The metric values stored before it are folded into the rollups by the retention job before it removes
+  anything, because `rollup_after_id` is absent (0) ([Retention and rollups](retention.md)).
+
 ### Migrations
 
 - Migrations are an ordered list of steps. A step runs in its own write transaction that first re-reads the version, skips itself if
@@ -116,28 +122,11 @@ What each step after the first adds, and how data stored before it reads:
   refused before anything is written: an older build refuses a newer schema.
 - A released step is never edited: every schema change is a new step, tested by migrating from the previous version.
 
-## Retention (planned)
+## Retention
 
-Retention and rollups are the backend's own job and **are not implemented yet**. The planned periods: raw data 30 days, 5-minute rollups
-1 year, hourly rollups 3 years (the template statistics count as hourly rollups), logs 90 days, process and connection snapshots
-30 days, incidents without limit; an incident that no rebuilt one overlaps is kept as it is ([Incidents](incidents.md)). What retention
-must do (open limits for #46):
-
-- Deleting log lines must also remove their `log_fts` entries (the FTS5 `delete` command with the old message) in the same transaction.
-- Once lines are deleted, a re-run of `vandoxd incidents` would rebuild an incident whose window lines have partly expired from what is
-  left and replace the richer stored one (fewer kills, a shorter timeline): retention must prevent that (keep the data of incident
-  windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came
-  from, so retention must bound them, too.
-- An incident with notes cannot be deleted (the foreign key of `incident_notes` has no cascade): retention must move or keep the notes
-  before it deletes an incident.
-- The derived rows of `connection_marks` and `listener_comparisons` go with their records (their `record_id` is a foreign key without a
-  cascade, so retention deletes them first). The comparison of a start whose predecessor was deleted would read `no_earlier` if it were
-  recomputed, so retention must not recompute it.
-- Retention must delete the `gaps`, `agent_sample_times`, `agent_clock_samples` and `agent_streams` rows of the data it removes, and a
-  stream row only with the agent's last record: a stream row that outlives its records keeps numbers from being reported missing; one
-  that is deleted first reports the next batch's numbers as a new start.
-- A template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines: retention must
-  make the rebuild refuse or keep that history.
+The backend removes expired data and keeps rollups of the raw metric values in a background job. The periods, what outlives them, the
+steps and the log lines are in [Retention and rollups](retention.md). In the file: retention deletes rows in bounded steps and never
+vacuums, so the file does not shrink and freed pages are reused; the stream rows of agents and the clock samples are never removed.
 
 ## Write throughput
 
@@ -169,6 +158,9 @@ stored once") is tested against the real store; fakes for other consumers only r
   stream rows exist.
 - [0181](../decisions/0181-the-agents-clock-offset-is-measured-from-caught-up-self-samples.md) — why the stream row and the clock samples
   hold the measured clock offset.
+- [0208](../decisions/0208-metric-rollups-are-folded-from-new-rows-by-record-id-never-recomputed-from-raw.md) to
+  [0213](../decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md) — why the rollup tables, the
+  removal by period, the holds, the resend rule, the unshrunk file and the sample-time floor exist.
 - [0204](../decisions/0204-sql-command-text-meets-ca2100-through-justified-suppressions-at-the-command-helpers.md) — why a helper that takes
   the statement text suppresses CA2100 with a reason instead of the callers assigning it.
 
@@ -184,5 +176,5 @@ stored once") is tested against the real store; fakes for other consumers only r
 ## Implementation
 
 `Vandox.Storage`: `SqliteStore` (opening, connections), `DatabaseFile` (file creation and the refusal of links), `SchemaMigrator`
-(steps), `ReaderQuery` (the progress handler on reader connections), `StorageLimits`; the connections set Microsoft.Data.Sqlite's
+(steps), `RollupFolder` (the fold step), `RetentionRemover` (the removal step), `ReaderQuery` (the progress handler on reader connections), `StorageLimits`; the connections set Microsoft.Data.Sqlite's
 `DefaultTimeout` next to the busy timeout. The throughput benchmark is `tools/Vandox.StorageBenchmark`.

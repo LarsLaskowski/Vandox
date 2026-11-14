@@ -63,8 +63,10 @@ told from a placeholder; a template is a grouping key, not a reversible form of 
   first or last seen time.
 - Per source and hour the number of stored lines is kept as well; an hour in which a source has at least one line is **covered** for
   that source.
-- The statistics are history: they are not changed when log lines are deleted (retention, when it exists, keeps them as hourly
-  rollups). Lines stored before the statistics existed (a database of schema version 7) are not counted until `vandoxd templates`
+- The statistics are history: they are not changed when log lines are deleted. Retention keeps them as hourly rollups: the hours of a
+  source and its templates are removed only past `retention.rollups_1h` (1,095 days by default) and only where no stored log line of
+  that source lies in the hour (an imported line, or a line of a kept window, keeps its hour), and a template with no hour left is
+  removed ([Retention and rollups](retention.md)). Lines stored before the statistics existed (a database of schema version 7) are not counted until `vandoxd templates`
   rebuilds the statistics.
 
 ## Queries
@@ -120,9 +122,12 @@ covered hours than the minimum no usual level is known and nothing is reported.
 - Templates are **external text**: the normalizer removes control characters of category Cc, but keeps format characters (Cf, such as
   U+202E, which reverses the display direction, and U+200B), `<`, `&` and any other markup; whoever shows a template, or the template of
   a spike, escapes it like any log line and handles format characters (security area 12 of `.squad/project.md`).
-- With the planned retention ([Storage](storage.md), *Retention (planned)*), the template statistics are kept as hourly rollups (3 years) and
-  outlive the log lines (90 days): after the lines have expired, a template's text is the only trace of them. Until retention exists
-  nothing expires.
+- With retention ([Retention and rollups](retention.md)), the template statistics are kept as hourly rollups (1,095 days by default) and
+  outlive the log lines (90 days by default): after the lines have expired, a template's text is the only trace of them.
+- `vandoxd templates` recounts only the hours that begin at or after the start of the log period (`now − retention.logs`, rounded up to
+  a full hour) and keeps the statistics of every earlier hour, so a rebuild after a change of the rules leaves the old templates in
+  expired hours; with `retention.logs` `unlimited` it recounts every stored line ([Storage writing](storage-writing.md), *Template
+  rebuild*).
 - A change of these rules changes only the templates of lines stored afterwards until the statistics are rebuilt: after a rule change
   `vandoxd templates` recounts every stored line under the current rules, then `vandoxd incidents` is run again.
 - While a rebuild runs and after an interrupted one (the `template_rebuild` row in `meta`, [Storage writing](storage-writing.md),

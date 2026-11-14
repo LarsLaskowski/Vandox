@@ -228,6 +228,13 @@ section, keeps the defaults, which ship the journal at `info` and more severe an
 | `import.time_zone` | none (optional) | a time zone ID of the IANA time zone database, compared ordinally (`UTC`, `Etc/UTC`, `Europe/Berlin`; not `europe/berlin`, an offset or a Windows name) |
 | `incidents.window_before` | `1h` | a duration of 1 minute to 24 hours |
 | `incidents.window_after` | `30m` | a duration of 1 minute to 24 hours |
+| `retention.raw` | `30d` | a period (below) |
+| `retention.rollups_5m` | `365d` | a period |
+| `retention.rollups_1h` | `1095d` | a period |
+| `retention.logs` | `90d` | a period |
+| `retention.snapshots` | `30d` | a period |
+| `retention.events` | `1095d` | a period |
+| `retention.incidents` | `unlimited` | a period |
 
 - `web.trusted_proxies` lists the reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` the web listener trusts ([Web
   login](web-login.md), *Reverse proxy trust*). Entries are separated by `,` and trimmed of spaces (U+0020 only); each is `address` or
@@ -252,6 +259,13 @@ section, keeps the defaults, which ship the journal at `info` and more severe an
   a fraction, another digit script, a second unit (`1h30m`), a missing unit (`60`) and any other unit (`1d`, `1s`) are rejected. The
   error reads `incidents.window_before: must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h` (and the same
   with `incidents.window_after`).
+- A retention period (the seven `retention.*` keys; [Retention and rollups](retention.md)) is one to four ASCII digits without a leading
+  zero followed by `d` (days), from `1d` to `9999d`, or exactly `unlimited`, which keeps that data forever. A sign, a space, a fraction,
+  another digit script, an upper-case `D` or `Unlimited`, a missing unit (`30`) and any other unit (`1y`, `12h`) are rejected. The
+  error reads `retention.<key>: must be a whole number of days from 1d to 9999d, such as 30d, or unlimited`, with the key's own name
+  (for example `retention.logs`). `retention.raw` covers metric values, `retention.snapshots` process, connection and MariaDB status
+  snapshots, `retention.events` kernel events, service states, backup runs, gap records and rows and listener findings, and the rollup
+  keys the 5-minute and hourly buckets (the hourly period also the template statistics).
 - `import.time_zone` has no default: the value is `null` when the key is absent, also with an `import:` section that is null or only
   holds comments. A value that is no zone ID, and an empty value, is refused with the reason `must be a time zone of the IANA time
   zone database, such as UTC or Europe/Berlin`. While it is unset, `vandoxd import` fails a syslog file at its first line without a

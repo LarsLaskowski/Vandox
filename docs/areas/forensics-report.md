@@ -19,11 +19,15 @@ Operators read it to reconstruct outages; the web UI's report page shows it.
 
 ## What it reads
 
-- **Every stored log line**, in capture order in pages of 1,000 (by capture time, then record ID, as [Incidents](incidents.md),
+- **Every stored log line** that the retention periods still count, in capture order in pages of 1,000 (by capture time, then record ID, as [Incidents](incidents.md),
   *Re-running*): the first and last capture time of all lines, the observed hours (below), and the **boots**: the events of the signature
   `boot` (copies merged as in [Log signatures](log-signatures.md), *Events and merging*).
-- **Every stored process snapshot**, one at a time in capture order: the series for the activities and the memory consumers. Its
+- **Every stored process snapshot** that they still count, one at a time in capture order: the series for the activities and the memory consumers. Its
   programs are the *programs of a snapshot* of [Incidents](incidents.md), *Content* (names that start with `/` reduced to their last part).
+- **Retention.** A line or snapshot of origin `agent` or `backend` captured before the current time minus `retention.logs` (lines) or
+  `retention.snapshots` (snapshots) is skipped, also where a kept window of an OOM kill ([Retention and rollups](retention.md)) still
+  holds it: it counts in no total, first or last time, observed hour, boot or snapshot series. Imported lines and snapshots count
+  however old they are. With `unlimited` nothing is skipped.
 - **Every stored incident**, one at a time in the order of its window, **twice**: the first pass feeds the rules, the second lists
   each outage. Stored incidents never overlap, so each page starts at the end of the previous incident's window; a page that does not
   lead past it is an error (`store: reading incidents: page did not advance`). When the second pass lists a different number of
@@ -36,7 +40,9 @@ Operators read it to reconstruct outages; the web UI's report page shows it.
 An **observed hour** is a UTC hour (it starts at a full hour of Unix time, also before 1970) in which at least one log line of the
 source `journal` or `syslog` is stored: the system log, which holds the kernel's kill and boot lines. An hour without such a line is
 **unknown**: it takes no part in any base rate, and an outage cannot be judged on it. Hours in which only other sources (web server,
-mail, MariaDB's own error log) logged are not observed.
+mail, MariaDB's own error log) logged are not observed. A line that retention removed, or that the report skips for being past
+`retention.logs`, makes no hour observed, so an agent hour older than the log period is unknown even where a kept window still holds
+lines; imported hours count as before.
 
 ## Activities before a moment
 
@@ -64,6 +70,9 @@ Each rule compares the **share of outages** that have a property with the **base
 
 - **Time of day**, for each of the 24 hours of the day (UTC): the outages whose first kill lies in that hour of the day, of all
   outages, against the observed hours that are that hour of the day, of all observed hours. Every outage counts as known.
+- **An outage in an unobserved hour before the log period.** An outage whose first kill lies before the start of the log period (now
+  minus `retention.logs`) in an hour that is not observed is counted and listed, in the totals of the head, but takes part in no rule: it
+  counts in no hour of the day and in no activity rule. Outages after that start, and outages in observed hours, are judged as before.
 - **Backup running**, **Boot**, **Panel memory high**: the outages whose activity is yes, of those where it is known, against the
   observed hours whose **end** (the moment the next hour starts) has the activity yes, of those where it is known. With the default
   lookback of one hour, an hour's activity is the activity within that hour.
@@ -220,6 +229,7 @@ U+202E (`\u202e`).
 - [0101](../decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md) — why the report's rules compare
   outages with observed system-log hours, judge activities over the lookback, decide by a binomial tail, and how panel use and
   permanent and transient consumers are defined.
+- [0210](../decisions/0210-data-in-the-windows-of-the-agents-kernel-oom-kills-is-kept-as-long-as-their-incident.md) — why kept windows do not weigh the base rates.
 - [0102](../decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md) — why the report's language is a
   flag with English as default and its texts are tables in code.
 

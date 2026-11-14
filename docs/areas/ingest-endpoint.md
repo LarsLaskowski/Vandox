@@ -146,7 +146,7 @@ at most the busy timeout of 5 seconds ([Storage](storage.md)).
 
 While less than `ingest.min_free` (default 1 GiB) is free on the file system of `storage.directory`, no batch is written and the agent
 keeps its records. The free space is read before every write. The overshoot below the floor is at most what the two slots write at
-once. The web UI and the import do not check the floor; the database still grows up to it, and retention (#46) is to bound it by age.
+once. The web UI and the import do not check the floor; the database still grows up to it. Retention bounds the database by age ([Retention and rollups](retention.md)) but frees no space on the volume: it deletes rows inside `vandox.db`, which does not shrink (record 0212), so ingest stopped at the floor resumes only when space on the volume is freed (shrinking the file is #55).
 
 ## Stop
 
