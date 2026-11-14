@@ -46,9 +46,9 @@ protected, where, and the area documents that state its rules.
    [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
    [agent-sending](../docs/areas/agent-sending.md), [agent-installation](../docs/areas/agent-installation.md).
 9. **File writes and paths derived from external input** — writes stay in the configured directories, follow no link,
-   use restrictive modes; the spool is bounded. `vandox.db` (`src/Vandox.Storage/`), `src/Vandox.Import/`,
+   use restrictive modes; the spool is bounded. Retention deletes in `vandox.db` only through the bounded steps of `RetentionRemover`. `vandox.db` (`src/Vandox.Storage/`), `src/Vandox.Import/`,
    `src/Vandox.Core/IO/`, `spool.directory` (`internal/spool`, `internal/agentstate`), `deploy/agent/install.sh` and
-   `uninstall.sh` — [storage](../docs/areas/storage.md), [log-import](../docs/areas/log-import.md),
+   `uninstall.sh` — [storage](../docs/areas/storage.md), [retention](../docs/areas/retention.md), [log-import](../docs/areas/log-import.md),
    [agent-spool](../docs/areas/agent-spool.md), [agent](../docs/areas/agent.md) (*Agent state*),
    [agent-installation](../docs/areas/agent-installation.md).
 10. **Parsing of external input** — hostile input yields an error or a skipped record, never a crash, unbounded

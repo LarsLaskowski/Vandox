@@ -35,7 +35,8 @@ boots](../areas/agent-kernel-events.md)).
 Before removing data, the job reads the `kernel_event` records received since its last scan and stores a hold for the window of each
 OOM kill, widened by 5 minutes on each side and merged with the holds it overlaps; no record captured inside a hold is removed while the hold's window end is within
 `retention.incidents` (or a stored incident with a note overlaps it). A stored incident's window keeps nothing by itself, and a re-run
-of `vandoxd incidents` changes no incident whose window starts before the log period unless one hold contains its window. The rules are in [Retention and
+of `vandoxd incidents` changes no incident whose window starts before the log period unless one hold contains its window or all its
+kills come from imported lines (imported data is kept). The rules are in [Retention and
 rollups](../areas/retention.md).
 
 ## Consequences
