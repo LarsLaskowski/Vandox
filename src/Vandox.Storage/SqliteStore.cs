@@ -1215,70 +1215,90 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
     #region ITimeSeriesReader
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-
     /// <inheritdoc/>
     public Task<LinePage> RawValuesAsync(RawValueQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateRaw(query);
+
+        return ReadAsync(connection => TimeSeriesQueries.ReadRawAsync(connection, query, cancellationToken), TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<LinePage> RollupStepsAsync(RollupStepQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateSteps(query);
+
+        return ReadAsync(connection => TimeSeriesQueries.ReadStepsAsync(connection, query, cancellationToken), TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<AgentGap>> GapsInRangeAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+
+        return QueryAsync(TimeSeriesQueries.GapsInRange, TimeSeriesQueries.WindowParameters(query), TimeSeriesQueries.ReadGap, TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
-    public Task<DateTimeOffset?> EarliestUnfoldedAsync(CancellationToken cancellationToken)
+    public async Task<DateTimeOffset?> EarliestUnfoldedAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var rows = await QueryAsync(TimeSeriesQueries.EarliestUnfolded, [], TimeSeriesQueries.ReadEarliest, TimeSeriesQueries.Context, cancellationToken).ConfigureAwait(false);
+
+        return rows.Count > 0 ? rows[0] : null;
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<ServiceStateRow>> ServiceChangesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxServiceLimit);
+
+        return QueryAsync(TimeSeriesQueries.ServiceChanges, TimeSeriesQueries.WindowParameters(query), TimeSeriesQueries.ReadServiceChange, TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<ServiceStateRow>> PreviousServiceStatesAsync(IReadOnlyList<string> units, DateTimeOffset before, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateUnits(units, before);
+
+        if (units.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<ServiceStateRow>>([]);
+        }
+
+        return QueryAsync(TimeSeriesQueries.PreviousServiceStates, TimeSeriesQueries.UnitParameters(units, before), reader => TimeSeriesQueries.ReadServiceState(reader, null), TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<BootTime>> BootTimesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+
+        return QueryAsync(TimeSeriesQueries.BootTimes, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadBoot, TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<GapRecordRow>> GapRecordsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+
+        return QueryAsync(TimeSeriesQueries.GapRecords, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadGapRecord, TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<KernelEventRow>> KernelEventsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+
+        return QueryAsync(TimeSeriesQueries.KernelEvents, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadKernelEvent, TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<BackupRunRow>> BackupRunsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
-    }
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
 
-#pragma warning restore RH2003
+        return QueryAsync(TimeSeriesQueries.BackupRuns, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadBackupRun, TimeSeriesQueries.Context, cancellationToken);
+    }
 
     #endregion // ITimeSeriesReader
 
