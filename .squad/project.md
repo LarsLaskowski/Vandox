@@ -186,6 +186,7 @@ marked planned.
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `CountingClock` (Storage tests) | the clock |
 | database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `ListLogger` (Backend tests) | store, readers |
 | retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
+| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests): wraps the real `SqliteStore` as `ITimeSeriesReader`, records every call by name with its limit (range reads: `Limit`; raw reads: `MaxTimes`; step reads: `MaxLines`; previous-state reads: the number of units) and runs an optional `AfterCall` action after each call returns; used for counts and limits of reads, and to cancel between reads | `ITimeSeriesReader` of the engine |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
 | Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |

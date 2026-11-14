@@ -1,3 +1,5 @@
+using Vandox.Core.Model;
+
 namespace Vandox.Storage.Tests;
 
 /// <summary>
@@ -16,6 +18,11 @@ internal sealed class SampleGap
     /// Gets the kind, <c>sequence</c> or <c>time</c>.
     /// </summary>
     internal string Kind { get; init; } = GapKind.Sequence;
+
+    /// <summary>
+    /// Gets the cause.
+    /// </summary>
+    internal string Cause { get; init; } = GapCause.NoData;
 
     /// <summary>
     /// Gets the stored state.

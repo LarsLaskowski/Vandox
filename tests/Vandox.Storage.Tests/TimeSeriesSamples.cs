@@ -275,7 +275,25 @@ internal static class TimeSeriesSamples
     /// <param name="value">The minimum, maximum and last value of the bucket</param>
     /// <param name="cancellationToken">Cancels the statement</param>
     /// <returns>A task that completes when the bucket is stored</returns>
-    internal static async Task InsertBucketAsync(string directory, string labels, DateTimeOffset bucket, double sum, long count, double value, CancellationToken cancellationToken)
+    internal static Task InsertBucketAsync(string directory, string labels, DateTimeOffset bucket, double sum, long count, double value, CancellationToken cancellationToken)
+    {
+        return InsertBucketAsync(directory, MetricSource, "load", labels, bucket, sum, count, value, cancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts one 5-minute bucket of a series directly.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="source">The source of the series</param>
+    /// <param name="name">The name of the series</param>
+    /// <param name="labels">The label text, empty for none</param>
+    /// <param name="bucket">The start of the bucket</param>
+    /// <param name="sum">The sum of the values</param>
+    /// <param name="count">The number of values</param>
+    /// <param name="value">The minimum, maximum and last value of the bucket</param>
+    /// <param name="cancellationToken">Cancels the statement</param>
+    /// <returns>A task that completes when the bucket is stored</returns>
+    internal static async Task InsertBucketAsync(string directory, string source, string name, string labels, DateTimeOffset bucket, double sum, long count, double value, CancellationToken cancellationToken)
     {
         await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
 
@@ -285,9 +303,10 @@ internal static class TimeSeriesSamples
 
 #pragma warning disable CA2100 // the statement is a test-owned literal
         command.CommandText = "INSERT INTO metric_rollups_5m(source, name, labels, bucket, min_value, max_value, sum_value, count, last_value, last_at, last_record_id) "
-                              + "VALUES ($source, 'load', $labels, $bucket, $value, $value, $sum, $count, $value, $bucket, 1)";
+                              + "VALUES ($source, $name, $labels, $bucket, $value, $value, $sum, $count, $value, $bucket, 1)";
 #pragma warning restore CA2100
-        command.Parameters.AddWithValue("$source", MetricSource);
+        command.Parameters.AddWithValue("$source", source);
+        command.Parameters.AddWithValue("$name", name);
         command.Parameters.AddWithValue("$labels", labels);
         command.Parameters.AddWithValue("$bucket", StorageTime.ToNanoseconds(bucket));
         command.Parameters.AddWithValue("$value", value);
@@ -420,10 +439,11 @@ internal static class TimeSeriesSamples
 
 #pragma warning disable CA2100 // the statement is a test-owned literal
         command.CommandText = "INSERT INTO gaps(agent_id, kind, cause, state, first_seq, last_seq, from_seq, to_seq, from_at, to_at, detected_at, changed_at) "
-                              + "VALUES ($agent, $kind, 'no_data', $state, $first, $last, $fromSeq, $toSeq, $from, $to, $from, $to)";
+                              + "VALUES ($agent, $kind, $cause, $state, $first, $last, $fromSeq, $toSeq, $from, $to, $from, $to)";
 #pragma warning restore CA2100
         command.Parameters.AddWithValue("$agent", row.AgentId);
         command.Parameters.AddWithValue("$kind", row.Kind);
+        command.Parameters.AddWithValue("$cause", row.Cause);
         command.Parameters.AddWithValue("$state", row.State);
         command.Parameters.AddWithValue("$first", row.FirstSeq is null ? DBNull.Value : row.FirstSeq);
         command.Parameters.AddWithValue("$last", row.LastSeq is null ? DBNull.Value : row.LastSeq);
@@ -433,6 +453,101 @@ internal static class TimeSeriesSamples
         command.Parameters.AddWithValue("$to", StorageTime.ToNanoseconds(row.To));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts many final sequence gap rows directly, one per spacing.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="count">The number of rows</param>
+    /// <param name="first">The start of the first span</param>
+    /// <param name="spacing">The distance of the starts</param>
+    /// <param name="length">The length of each span</param>
+    /// <param name="cancellationToken">Cancels the statement</param>
+    /// <returns>A task that completes when the rows are stored</returns>
+    internal static async Task InsertGapRowsAsync(string directory, int count, DateTimeOffset first, TimeSpan spacing, TimeSpan length, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statement is a test-owned literal
+        command.CommandText = "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < $count) "
+                              + "INSERT INTO gaps(agent_id, kind, cause, state, first_seq, last_seq, from_at, to_at, detected_at, changed_at) "
+                              + "SELECT 'agent-1', 'sequence', 'no_data', 'final', i * 2 + 1, i * 2 + 2, $first + i * $spacing, $first + i * $spacing + $length, $first, $first FROM n";
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("$count", count);
+        command.Parameters.AddWithValue("$first", StorageTime.ToNanoseconds(first));
+        command.Parameters.AddWithValue("$spacing", spacing.Ticks * 100);
+        command.Parameters.AddWithValue("$length", length.Ticks * 100);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts many <c>gap</c> records directly, one per second, each with a span of the second before its capture time.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="count">The number of records</param>
+    /// <param name="first">The capture time of the first record</param>
+    /// <param name="cancellationToken">Cancels the statement</param>
+    /// <returns>A task that completes when the records are stored</returns>
+    internal static async Task InsertGapRecordsAsync(string directory, int count, DateTimeOffset first, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statement is a test-owned literal
+        command.CommandText = "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < $count) "
+                              + "INSERT INTO records(kind, origin, source, agent_id, captured_at, received_at, data) "
+                              + "SELECT 'gap', 'backend', 'agent', 'agent-1', $first + i * 1000000000, $first + i * 1000000000, "
+                              + "json_object('from', strftime('%Y-%m-%dT%H:%M:%SZ', $first / 1000000000 + i - 1, 'unixepoch'), 'to', strftime('%Y-%m-%dT%H:%M:%SZ', $first / 1000000000 + i, 'unixepoch'), 'cause', 'no_data', 'collector', '') FROM n";
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("$count", count);
+        command.Parameters.AddWithValue("$first", StorageTime.ToNanoseconds(first));
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Creates the policy of the default periods with a raw period.
+    /// </summary>
+    /// <param name="raw">The raw period, or <c>null</c> for unlimited</param>
+    /// <returns>The policy</returns>
+    internal static RetentionPolicy Policy(TimeSpan? raw)
+    {
+        var defaults = RetentionSamples.Defaults();
+
+        return new RetentionPolicy
+               {
+                   Raw = raw,
+                   FiveMinuteRollups = defaults.FiveMinuteRollups,
+                   HourlyRollups = defaults.HourlyRollups,
+                   Logs = defaults.Logs,
+                   Snapshots = defaults.Snapshots,
+                   Events = defaults.Events,
+                   Incidents = null,
+                   KillWindowBefore = defaults.KillWindowBefore,
+                   KillWindowAfter = defaults.KillWindowAfter
+               };
+    }
+
+    /// <summary>
+    /// Creates a policy that keeps everything.
+    /// </summary>
+    /// <returns>The policy</returns>
+    internal static RetentionPolicy Unlimited()
+    {
+        return new RetentionPolicy
+               {
+                   KillWindowBefore = TimeSpan.FromHours(1),
+                   KillWindowAfter = TimeSpan.FromMinutes(30)
+               };
     }
 
     /// <summary>

@@ -21,5 +21,5 @@ Orchestrator, from the text its member reports), in the last group. Tasks of the
 | 9 | G3 | Gate, `ServeCommand` registration, chart validation and interop, `charts.js`; *Image build check* | `src/Vandox.Backend/TimeSeries/GatedTimeSeriesReader.cs`, `Hosting/ServeCommand.cs`, `Components/Charts/*.cs`, `wwwroot/js/charts.js` | AC9, AC11 | 8 | Dev | [ ] |
 | 10 | G4 | `--query` scenario (no new API): workload of spec N1 including the hourly `service_state` re-records of 10 units, five runs, median; development-host run | `tools/Vandox.StorageBenchmark/QueryBenchmark.cs`, `Program.cs` | AC10 | 6 | Dev | [ ] |
 | 11 | G4 | Documentation updates of the plan (area document and index, storage-reading, web-ui, retention, ARCHITECTURE, BENCHMARKS, CHANGELOG) | `docs/`, `CHANGELOG.md` | AC1–AC11 | 9, 10 | Dev | [ ] |
-| 12 | G4 | *Test doubles* row for `CountingTimeSeriesReader`: text reported by the Tester | `.squad/project.md` | AC8 | 5 | Orchestrator | [ ] |
+| 12 | G4 | *Test doubles* row for `CountingTimeSeriesReader`: text reported by the Tester | `.squad/project.md` | AC8 | 5 | Orchestrator | [x] |
 | 13 | PM | Run `--query` on the DS918+ SSD volume (fallback build: orchestrator, early draft PR) and report the five times | — | AC10 | 10 | Product Manager | [ ] |
