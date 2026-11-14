@@ -1,6 +1,6 @@
 # 0209: Retention removes by capture time per record kind; imported data is kept, events are kept three years
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-13
 - **Area:** Storage
 - **Source:** Issue #46

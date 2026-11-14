@@ -1,6 +1,6 @@
 # 0211: A resent agent record whose stored copy was removed is not stored again
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-13
 - **Area:** Storage writing
 - **Source:** Issue #46

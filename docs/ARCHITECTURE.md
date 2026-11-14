@@ -495,7 +495,7 @@ Removal frees space inside `vandox.db`, not on the volume: the file does not shr
 Log data is stored as it is, without pseudonymization: it is the operator's own server and the data stays in
 the home network.
 
-Records: [0007](decisions/0007-sqlite-with-fts5-no-external-database.md), [0208](decisions/0208-metric-rollups-are-folded-from-new-rows-by-record-id-never-recomputed-from-raw.md), [0209](decisions/0209-retention-removes-by-capture-time-per-kind-imports-kept-events-kept-three-years.md), [0210](decisions/0210-data-in-the-windows-of-the-agents-kernel-oom-kills-is-kept-as-long-as-their-incident.md), [0211](decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md), [0212](decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md),
+Records: [0007](decisions/0007-sqlite-with-fts5-no-external-database.md), [0208](decisions/0208-metric-rollups-are-folded-from-new-rows-by-record-id-never-recomputed-from-raw.md), [0209](decisions/0209-retention-removes-by-capture-time-per-kind-imports-kept-events-kept-three-years.md), [0210](decisions/0210-data-in-the-windows-of-the-agents-kernel-oom-kills-is-kept-as-long-as-their-incident.md), [0211](decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md), [0212](decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md), [0213](decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md),
 [0021](decisions/0021-no-pseudonymization-of-log-data.md).
 
 ## Remote actions (later)

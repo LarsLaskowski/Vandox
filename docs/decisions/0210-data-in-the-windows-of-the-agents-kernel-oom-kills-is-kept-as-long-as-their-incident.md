@@ -1,6 +1,6 @@
 # 0210: Data in the windows of the agent's kernel OOM kills is kept as long as their incident
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-13
 - **Area:** Storage
 - **Source:** Issue #46

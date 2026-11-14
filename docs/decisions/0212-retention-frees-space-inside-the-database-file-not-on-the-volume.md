@@ -1,6 +1,6 @@
 # 0212: Retention frees space inside the database file, not on the volume
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-13
 - **Area:** Storage
 - **Source:** Issue #46

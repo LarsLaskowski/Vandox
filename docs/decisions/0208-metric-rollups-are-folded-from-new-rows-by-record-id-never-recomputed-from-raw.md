@@ -1,6 +1,6 @@
 # 0208: Metric rollups are folded from new rows by record ID, never recomputed from raw values
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-13
 - **Area:** Storage
 - **Source:** Issue #46

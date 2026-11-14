@@ -1,6 +1,6 @@
 # 0213: Agent sample times follow the raw period, below a floor that opens no time gap
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-13
 - **Area:** Storage
 - **Source:** Issue #46
