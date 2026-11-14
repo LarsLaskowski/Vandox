@@ -12,6 +12,8 @@ public class ChartDataTests
 
     private static readonly DateTimeOffset _start = new(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);
 
+    private static readonly int[] _bridgedIndexes = [1, 3];
+
     #endregion // Fields
 
     #region Methods
@@ -101,6 +103,93 @@ public class ChartDataTests
         Assert.IsTrue(stacked.Stacked, "a complete stacked chart is accepted");
         Assert.IsFalse(lines.Stacked, "a line chart with a gap is accepted");
         Assert.IsFalse(plain.Stacked, "a chart made without the flag is not stacked");
+    }
+
+    /// <summary>
+    /// A series with a bridged point that has a value is refused, and the message names the series and the point; a bridged point without a value is accepted.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public void ChartDataConstructorRefusesBridgedPointWithValue()
+    {
+        // Arrange
+        var times = new[] { _start, _start.AddSeconds(1), _start.AddSeconds(2) };
+        var withValue = new ChartSeries("load", [1.0, 2.0, null], [false, true, false]);
+        var withoutValue = new ChartSeries("load", [1.0, null, 3.0], [false, true, false]);
+
+        // Act
+        var exception = Assert.ThrowsExactly<ArgumentException>(() => new ChartData(times, [withValue]), "a bridged point with a value");
+        var accepted = new ChartData(times, [withoutValue]);
+
+        // Assert
+        Assert.StartsWith("The series 'load' has a value at bridged point 1.", exception.Message, "the message names the series and the point");
+        Assert.HasCount(1, accepted.Series, "a bridged point without a value is accepted");
+    }
+
+    /// <summary>
+    /// A bridge list whose length is neither zero nor the number of points is refused with the count of flags and points in the message.
+    /// </summary>
+    /// <param name="flags">The number of bridge flags</param>
+    [TestMethod]
+    [TestCategory("AC11")]
+    [DataRow(1)]
+    [DataRow(2)]
+    [DataRow(4)]
+    public void ChartDataConstructorRefusesBridgeCountMismatch(int flags)
+    {
+        // Arrange
+        var times = new[] { _start, _start.AddSeconds(1), _start.AddSeconds(2) };
+        var series = new ChartSeries("load", [1.0, null, 3.0], [.. new bool[flags]]);
+
+        // Act
+        var exception = Assert.ThrowsExactly<ArgumentException>(() => new ChartData(times, [series]), "a wrong count of bridge flags");
+        var none = new ChartData(times, [new ChartSeries("load", [1.0, null, 3.0], [])]);
+
+        // Assert
+        Assert.StartsWith($"The series 'load' has {flags} bridge flags for 3 points in time.", exception.Message, "the message names the series and both counts");
+        Assert.HasCount(1, none.Series, "no bridge flags at all is accepted");
+    }
+
+    /// <summary>
+    /// A stacked series that bridges a point is refused, and the message names the series.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public void ChartDataConstructorRefusesBridgedStackedSeries()
+    {
+        // Arrange
+        var times = new[] { _start, _start.AddSeconds(1), _start.AddSeconds(2) };
+        var series = new ChartSeries("memory", [1.0, 2.0, 3.0], [false, true, false]);
+
+        // Act
+        var exception = Assert.ThrowsExactly<ArgumentException>(() => new ChartData(times, [series], true), "a bridged stacked series");
+
+        // Assert
+        Assert.StartsWith("The stacked series 'memory' cannot bridge points.", exception.Message, "the message names the series");
+    }
+
+    /// <summary>
+    /// The bridges hold per series the indexes of the bridged points, in ascending order, and an empty list for a series without any.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public void ChartDataToBridgesListsBridgedIndexesPerSeries()
+    {
+        // Arrange
+        var times = new[] { _start, _start.AddSeconds(1), _start.AddSeconds(2), _start.AddSeconds(3) };
+        var bridged = new ChartSeries("a", [1.0, null, 3.0, null], [false, true, false, true]);
+        var plain = new ChartSeries("b", [1.0, 2.0, null, 4.0]);
+        var unbridged = new ChartSeries("c", [1.0, 2.0, 3.0, 4.0], [false, false, false, false]);
+        var data = new ChartData(times, [bridged, plain, unbridged]);
+
+        // Act
+        var bridges = data.ToBridges();
+
+        // Assert
+        Assert.HasCount(3, bridges, "one list per series");
+        Assert.AreSequenceEqual(_bridgedIndexes, bridges[0], "the bridged indexes of the first series");
+        Assert.IsEmpty(bridges[1], "a series without flags has no bridged index");
+        Assert.IsEmpty(bridges[2], "a series with only false flags has no bridged index");
     }
 
     /// <summary>

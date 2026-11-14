@@ -14,6 +14,7 @@ using Vandox.Backend.Ingest;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Retention;
 using Vandox.Backend.Security;
+using Vandox.Backend.TimeSeries;
 using Vandox.Storage;
 
 namespace Vandox.Backend.Tests;
@@ -1056,6 +1057,46 @@ public class ServeTests
         Assert.AreSame<object>(store, FieldValues(explorer).OfType<ILogExplorer>().Single(), "the explorer wraps the store");
         Assert.AreSame<object>(store, FieldValues(browser).OfType<IIncidentBrowser>().Single(), "the browser wraps the store");
         Assert.AreSame<object>(store, FieldValues(records[0]).OfType<IRecordReader>().Single(), "the record reader wraps the store");
+    }
+
+    /// <summary>
+    /// The time-series service is registered once for every scope, reads through a gated reader that wraps the store, and the gate is the one shared with the logs and incidents.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task ServeRegistersTimeSeriesServiceOverTheGate()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        IServiceProvider? services = null;
+
+        var run = await StartAsync(fixture, stop.Token, built: provider => services = provider);
+
+        Assert.IsNotNull(services, "the Built hook ran before the service started");
+
+        // Act
+        var service = services.GetService<TimeSeriesService>();
+        var gate = services.GetRequiredService<WebReaderGate>();
+        var store = services.GetRequiredService<ILogSearcher>();
+
+        using var scope = services.CreateScope();
+
+        var serviceInScope = scope.ServiceProvider.GetService<TimeSeriesService>();
+        var readers = service is null ? [] : FieldValues(service).OfType<ITimeSeriesReader>().ToArray();
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(service, "the time-series service is registered");
+        Assert.AreSame(service, serviceInScope, "the service is the same for every scope");
+        Assert.HasCount(1, readers, "the service holds one reader");
+        Assert.IsInstanceOfType<GatedTimeSeriesReader>(readers[0], "the reader of the service is gated");
+        Assert.AreSame(gate, FieldValues(readers[0]).OfType<WebReaderGate>().Single(), "the reader uses the shared gate");
+        Assert.AreSame<object>(store, FieldValues(readers[0]).OfType<ITimeSeriesReader>().Single(), "the reader wraps the store");
     }
 
     /// <summary>
