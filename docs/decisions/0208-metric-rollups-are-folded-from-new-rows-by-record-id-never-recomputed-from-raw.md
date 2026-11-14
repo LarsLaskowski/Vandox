@@ -35,6 +35,9 @@ in [Retention and rollups](../areas/retention.md).
 
 - A value is folded exactly once: a resend after its stored copy was removed must not be stored again (record 0211).
 - The average is a floating-point sum in arrival order, so it equals a recomputation within rounding, not bit for bit.
+- A sum is clamped to the largest finite double at every addition, in a step and in the stored bucket, so values that are each
+  finite but overflow together (only forged ones reach that size) give a capped average instead of a NaN that would fail every
+  later step and stop all removal of raw values.
 - A step is bounded by rows and by the bytes of the labels it reads (a label set can reach about 200 KB), so a forged batch of
   large labels cannot make one step hold more than a few MiB.
 - Buckets are current only up to the last step (at most 5 minutes behind); a reader of #47 sees the newest bucket grow.

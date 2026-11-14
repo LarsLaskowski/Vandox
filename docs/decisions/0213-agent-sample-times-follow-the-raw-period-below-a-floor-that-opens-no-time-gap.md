@@ -28,8 +28,8 @@ so its outage would open no time gap.
 
 ## Decision
 
-Removal deletes an agent's sample times below the raw horizon except its newest and raises the stored sample-time floor in the same
-transaction; a sample time below the floor narrows, splits or closes the time gap that contains it but adds no row and opens no time
+Removal deletes an agent's sample times below the raw horizon except its newest and raises the stored sample-time floor before its
+first delete, so a pass split into several steps never leaves deleted times above the floor; a sample time below the floor narrows, splits or closes the time gap that contains it but adds no row and opens no time
 gap. The rules are in [Retention and rollups](../areas/retention.md) and [Storage writing](../areas/storage-writing.md).
 
 ## Consequences

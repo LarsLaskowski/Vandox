@@ -33,7 +33,7 @@ boots](../areas/agent-kernel-events.md)).
 ## Decision
 
 Before removing data, the job reads the `kernel_event` records received since its last scan and stores a hold for the window of each
-OOM kill, merged with the holds it overlaps; no record captured inside a hold is removed while the hold's window end is within
+OOM kill, widened by 5 minutes on each side and merged with the holds it overlaps; no record captured inside a hold is removed while the hold's window end is within
 `retention.incidents` (or a stored incident with a note overlaps it). A stored incident's window keeps nothing by itself, and a re-run
 of `vandoxd incidents` changes no incident whose window starts before the log period unless one hold contains its window. The rules are in [Retention and
 rollups](../areas/retention.md).
@@ -45,6 +45,9 @@ rollups](../areas/retention.md).
   once its window data passes the periods.
 - Residual of holds: only a holder of the agent token can forge a `kernel_event`; the free-space floor `ingest.min_free` bounds the
   growth (record 0177).
+- The kill's log line carries the capture time of the report's first line, up to 60 seconds before the kill line, and the
+  `kernel_event` its receipt minus the delay; the 5-minute margin covers that offset. A kill whose kernel event is delayed further
+  leaves its incident unchanged on a re-run and may lose the edge of its window.
 - A kill without a `kernel_event` (an agent that did not run its kernel collector) gets no hold; its window follows the periods.
 - The forensics report counts no agent hour past `retention.logs` as observed, even inside a kept window, so kept windows do not
   weigh the base rates (spec S10).
