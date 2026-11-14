@@ -121,7 +121,8 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    conversion in its `else` branch or a `return`. A G115 exclusion needs a Lead decision record.
 3. `analyzer-check-dotnet.py`: a Release build of `Vandox.slnx` (`--no-restore --no-incremental`) with a SARIF log
    per project. Reihitsu and SonarAnalyzer run inside the build with every rule, info level included, and every
-   diagnostic of any severity in a changed C# file fails the gate (diagnostics in unchanged files are listed, not gating).
+   diagnostic of any severity in a changed C# file fails the gate, and so does every diagnostic without a location
+   (MSTEST0001) of a project with such a changed file (diagnostics in unchanged files are listed, not gating).
    Fixable style findings are the Code Officer's; findings that need a code change go to the Dev or Tester.
    The gate also runs `dotnet_config.py`, which checks the build structure (*Toolchain*) and the rule blocks.
 
@@ -134,9 +135,11 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    `squad_settings.py` with the issue that brings the code up to it: it is written as `suggestion`, which the gate
    still reports in a changed file, and the entry goes once the issue is done; that holds for a rule the baseline does
    not set too (one on only through `AnalysisLevel`, CA1848). The blocks do not reach the code the Razor compiler
-   generates from a `.razor` file's markup; the rules the baseline switches off (S1125) are off there too through the
-   template-managed global analyzer config `.squad/dotnet-rules.globalconfig`, which `Directory.Build.props` names in
-   `GlobalAnalyzerConfigFiles`. A diagnostic SonarQube Cloud lists but the build reports only at info level is raised
+   generates from a `.razor` file's markup, nor a diagnostic without a location (MSTEST0001): the template-managed
+   global analyzer config `.squad/dotnet-rules.globalconfig` switches the baseline's off rules (S1125) off there too and
+   sets the severity of the rules reported without a location. A pending entry for one of those is written by
+   `dotnet-rules.py` into `.squad/dotnet-rules-pending.globalconfig`, whose higher `global_level` wins over the managed
+   file; `Directory.Build.props` names both in `GlobalAnalyzerConfigFiles`. A diagnostic SonarQube Cloud lists but the build reports only at info level is raised
    in the template's baseline, not here.
 
    SonarQube Cloud analyses this project with the built-in C# profile *Sonar way comprehensive*, while the
@@ -258,15 +261,14 @@ can contain files the image never gets (Vandox#24: `_framework/blazor.web.js` wa
 missing from the image, because no `.razor` file existed at restore time). Where Docker runs, build the image.
 Where it does not (the cloud sessions), reproduce the Dockerfile's order in a scratch directory; every change
 to a `.csproj`, `Directory.*.props`, `Vandox.slnx`, `global.json`, a `.razor` or other content item, a static
-web asset under `wwwroot/` or the Dockerfile runs it before the review. The image build needs
-`.squad/dotnet-rules.globalconfig`, which `Directory.Build.props` names: a Dockerfile that copies files by name
-copies it into the build stage, and a `.dockerignore` that leaves out `.squad/` lets it in (`dotnet_config.py`
-checks both):
+web asset under `wwwroot/` or the Dockerfile runs it before the review. The image build needs both global configs
+of `.squad/` that `Directory.Build.props` names: a Dockerfile that copies files by name copies them into the build
+stage, and a `.dockerignore` that leaves out `.squad/` lets them in (`dotnet_config.py` checks both):
 
 ```bash
 scratch="$(mktemp -d)"
 git ls-files -z -- .editorconfig global.json Directory.Build.props Directory.Packages.props Vandox.slnx \
-  .squad/dotnet-rules.globalconfig 'src/*.csproj' \
+  .squad/dotnet-rules.globalconfig .squad/dotnet-rules-pending.globalconfig 'src/*.csproj' \
   | xargs -0 -I{} cp --parents {} "$scratch"
 (cd "$scratch" && dotnet restore src/Vandox.Backend/Vandox.Backend.csproj)
 git ls-files -z -- src/ | xargs -0 -I{} cp --parents {} "$scratch"
