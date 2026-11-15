@@ -3,6 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
 
+using Microsoft.Data.Sqlite;
+
 using Vandox.Core.Model;
 using Vandox.Storage;
 
@@ -31,6 +33,8 @@ internal static class QueryBenchmark
     private const int OomKills = 50;
     private const int Gaps = 1000;
     private const int MaxSteps = 100000;
+    private const int LeaseRuns = 20;
+    private const string CpuName = "cpu_percent";
 
     #endregion // Constants
 
@@ -99,7 +103,7 @@ internal static class QueryBenchmark
                 var service = new TimeSeriesService(store, _policy, new FixedClock(now));
                 var query = new TimeSeriesQuery
                             {
-                                Series = [.. _singleSeries.Select(item => new SeriesKey(item.Source, item.Name)), new SeriesKey(SystemSource, "cpu_percent")],
+                                Series = [.. _singleSeries.Select(item => new SeriesKey(item.Source, item.Name)), new SeriesKey(SystemSource, CpuName)],
                                 From = now.AddDays(-Days),
                                 To = now,
                                 Target = Target
@@ -124,6 +128,8 @@ internal static class QueryBenchmark
                 Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"result: {result.Resolution} step {result.Step}, {result.Times.Count} times, {result.Lines.Count} lines, {result.Markers.Count} markers, {result.Gaps.Count} gaps"));
                 Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"median query: {median:F0} ms ({times.Count} runs)"));
                 Console.WriteLine(median < 1000 ? "AC10 (median query under one second): met" : "AC10 (median query under one second): NOT met");
+
+                await MeasureBreakdownAsync(store, query, now, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -131,6 +137,154 @@ internal static class QueryBenchmark
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(work, true);
         }
+    }
+
+    /// <summary>
+    /// Runs the query five more times through a wrapper that times every store read, and prints the median time and the calls of each part, then the time of the
+    /// statements of the three largest reads alone and of one reader lease.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="query">The query</param>
+    /// <param name="now">The fixed clock</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that completes when the breakdown is printed</returns>
+    private static async Task MeasureBreakdownAsync(SqliteStore store, TimeSeriesQuery query, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var timing = new TimingTimeSeriesReader(store);
+        var service = new TimeSeriesService(timing, _policy, new FixedClock(now));
+        var totals = new List<double>();
+        var reads = TimingTimeSeriesReader.Parts.ToDictionary(part => part, _ => new List<double>());
+        var calls = new Dictionary<string, int>();
+
+        await service.QueryAsync(query, cancellationToken).ConfigureAwait(false);
+
+        for (var run = 1; run <= Runs; run++)
+        {
+            timing.Reset();
+
+            var watch = Stopwatch.StartNew();
+
+            await service.QueryAsync(query, cancellationToken).ConfigureAwait(false);
+            watch.Stop();
+            totals.Add(watch.Elapsed.TotalMilliseconds);
+
+            foreach (var part in TimingTimeSeriesReader.Parts)
+            {
+                var (count, milliseconds) = timing.Get(part);
+
+                reads[part].Add(milliseconds);
+                calls[part] = count;
+            }
+        }
+
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"breakdown ({Runs} runs through the timing reader), median query: {Median(totals):F0} ms"));
+
+        var readsTotal = 0.0;
+
+        foreach (var part in TimingTimeSeriesReader.Parts)
+        {
+            var partMs = Median(reads[part]);
+
+            readsTotal += partMs;
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{part}: {partMs:F1} ms, {calls[part]} calls"));
+        }
+
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"engine (total less the reads): {Median(totals) - readsTotal:F1} ms"));
+
+        var from = StorageTime.ToNanoseconds(query.From);
+        var to = StorageTime.ToNanoseconds(query.To);
+        var range = new Dictionary<string, object>
+                    {
+                        ["$from"] = from,
+                        ["$to"] = to,
+                        ["$after"] = 0L,
+                        ["$limit"] = (long)TimeSeriesQueries.MaxServiceLimit
+                    };
+        var gapRecords = new Dictionary<string, object>(range)
+                         {
+                             ["$from"] = StorageTime.ToNanoseconds(query.From.AddHours(-1)),
+                             ["$to"] = StorageTime.ToNanoseconds(query.To.AddDays(7)),
+                             ["$limit"] = (long)EventPages.PageSize
+                         };
+
+        await using (var lease = await store.LeaseReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var labels = (await ReaderQuery.ReadAsync(lease.Connection,
+                                                      TimeSeriesQueries.FirstLabelsHourly,
+                                                      new Dictionary<string, object>
+                                                      {
+                                                          ["$source"] = SystemSource,
+                                                          ["$name"] = CpuName
+                                                      },
+                                                      reader => reader.GetString(0),
+                                                      TimeSeriesQueries.Context,
+                                                      cancellationToken).ConfigureAwait(false))[0];
+            var buckets = new Dictionary<string, object>
+                          {
+                              ["$source"] = SystemSource,
+                              ["$name"] = CpuName,
+                              ["$labels"] = labels,
+                              ["$from"] = from,
+                              ["$to"] = to
+                          };
+
+            await CountAsync(lease.Connection, "cpu_percent buckets (one label set, hourly)", TimeSeriesQueries.BucketsHourly, buckets, cancellationToken).ConfigureAwait(false);
+            await CountAsync(lease.Connection, "service changes", TimeSeriesQueries.ServiceChanges, range, cancellationToken).ConfigureAwait(false);
+            await CountAsync(lease.Connection, "gap records", TimeSeriesQueries.GapRecords, gapRecords, cancellationToken).ConfigureAwait(false);
+        }
+
+        var leases = new List<double>();
+
+        for (var run = 0; run < LeaseRuns; run++)
+        {
+            var watch = Stopwatch.StartNew();
+
+            await using (await store.LeaseReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                watch.Stop();
+            }
+
+            leases.Add(watch.Elapsed.TotalMilliseconds);
+        }
+
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"one lease: {Median(leases):F2} ms (median of {LeaseRuns})"));
+    }
+
+    /// <summary>
+    /// Times the statement alone as <c>SELECT count(*) FROM (statement)</c> five times and prints the median.
+    /// </summary>
+    /// <param name="connection">The reader connection</param>
+    /// <param name="name">The name printed</param>
+    /// <param name="statement">The statement</param>
+    /// <param name="parameters">The statement parameters</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that completes when the line is printed</returns>
+    private static async Task CountAsync(SqliteConnection connection, string name, string statement, IReadOnlyDictionary<string, object> parameters, CancellationToken cancellationToken)
+    {
+        var times = new List<double>();
+        long rows = 0;
+
+        for (var run = 0; run < Runs; run++)
+        {
+            var watch = Stopwatch.StartNew();
+            var counted = await ReaderQuery.ReadAsync(connection, $"SELECT count(*) FROM ({statement})", parameters, reader => reader.GetInt64(0), TimeSeriesQueries.Context, cancellationToken).ConfigureAwait(false);
+
+            watch.Stop();
+            rows = counted[0];
+            times.Add(watch.Elapsed.TotalMilliseconds);
+        }
+
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"statement alone, {name}: {Median(times):F1} ms, {rows} rows"));
+    }
+
+    /// <summary>
+    /// Gets the median of the times.
+    /// </summary>
+    /// <param name="times">The times</param>
+    /// <returns>The middle time</returns>
+    private static double Median(List<double> times)
+    {
+        return times.Order().ElementAt(times.Count / 2);
     }
 
     /// <summary>
@@ -155,7 +309,7 @@ internal static class QueryBenchmark
 
             foreach (var mode in _cpuModes)
             {
-                await writer.AddAsync(SystemSource, at, Metric("cpu_percent", at, mode), cancellationToken).ConfigureAwait(false);
+                await writer.AddAsync(SystemSource, at, Metric(CpuName, at, mode), cancellationToken).ConfigureAwait(false);
             }
         }
 
