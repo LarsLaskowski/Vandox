@@ -1650,12 +1650,6 @@ public class SqliteStoreTimeSeriesTests
     }
 
     /// <summary>
-    /// Reads the query plan of one of the service statements.
-    /// </summary>
-    /// <param name="directory">The store directory</param>
-    /// <param name="statement">The name of the statement</param>
-    /// <returns>The detail lines of the plan, one per line</returns>
-    /// <summary>
     /// Runs the statement that reads service records by ID over the IDs of 300 records and returns the capture times it reads.
     /// </summary>
     /// <param name="directory">The store directory</param>
@@ -1689,6 +1683,12 @@ public class SqliteStoreTimeSeriesTests
         return captured;
     }
 
+    /// <summary>
+    /// Reads the query plan of one of the service statements.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="statement">The name of the statement</param>
+    /// <returns>The detail lines of the plan, one per line</returns>
     private async Task<string> ExplainAsync(string directory, string statement)
     {
         await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
