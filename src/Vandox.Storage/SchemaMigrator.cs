@@ -10,6 +10,24 @@ namespace Vandox.Storage;
 /// </summary>
 internal static class SchemaMigrator
 {
+    #region Constants
+
+    /// <summary>
+    /// The statement of schema step 15 (record 0217): the covering partial index over the members of <c>service_state</c>
+    /// records that tell a restart. The service reads of the time-series query use exactly these expressions.
+    /// </summary>
+    internal const string ServiceStateIndexStatement = """
+                                                       CREATE INDEX records_service_state ON records(
+                                                         captured_at,
+                                                         json_extract(data, '$.unit'),
+                                                         json_extract(data, '$.restarts'),
+                                                         json_extract(data, '$.active_enter_at'),
+                                                         json_extract(data, '$.active_state'),
+                                                         boot_id) WHERE kind = 'service_state'
+                                                       """;
+
+    #endregion // Constants
+
     #region Fields
 
     private static readonly SchemaStep[] _steps = [
