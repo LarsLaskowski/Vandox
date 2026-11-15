@@ -992,7 +992,7 @@ public class SqliteStoreTimeSeriesTests
     }
 
     /// <summary>
-    /// The boot read returns only the boot events of the range, with their boot ID, in order of capture time.
+    /// The boot read returns only the boot events of the range, with their boot ID, newest first.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -1019,9 +1019,105 @@ public class SqliteStoreTimeSeriesTests
         var first = await store.BootTimesAsync(TimeSeriesSamples.Range(Samples.Base, Samples.Base.AddHours(4), 1), TestContext.CancellationToken);
 
         // Assert
-        Assert.AreSequenceEqual(["22222222-2222-2222-2222-222222222222@0", $"{FirstBoot}@1"], boots.Select(boot => $"{boot.BootId}@{(boot.CapturedAt - Samples.Base).TotalHours:0}").ToList(), "boots in the range by capture time: the start is in, the end is out, a kill and a service record are no boot");
+        Assert.AreSequenceEqual([$"{FirstBoot}@1", "22222222-2222-2222-2222-222222222222@0"], boots.Select(boot => $"{boot.BootId}@{(boot.CapturedAt - Samples.Base).TotalHours:0}").ToList(), "boots in the range newest first: the start is in, the end is out, a kill and a service record are no boot");
         Assert.HasCount(1, first, "the limit applies");
-        Assert.AreEqual(Samples.Base, first[0].CapturedAt, "the earliest boot");
+        Assert.AreEqual(Samples.Base.AddHours(1), first[0].CapturedAt, "the newest boot");
+    }
+
+    /// <summary>
+    /// The boot read pages newest first by capture time and ID: 1,002 boots at one capture time and one earlier boot come in two pages through <c>BeforeId</c>, each boot once, and the IDs are those of the boot events.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task BootTimesAsyncPagesNewestFirstByBeforeId()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var from = Samples.Base;
+        var at = Samples.Base.AddHours(2);
+        var end = Samples.Base.AddHours(3);
+
+        await TimeSeriesSamples.InsertBootsAsync(directory.Path, Samples.Base.AddHours(1), 1, TimeSpan.Zero, TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertBootsAsync(directory.Path, at, 1002, TimeSpan.Zero, TestContext.CancellationToken);
+
+        var stored = await store.KernelEventsAsync(TimeSeriesSamples.Range(from, end), TestContext.CancellationToken);
+
+        // Act
+        var first = await store.BootTimesAsync(TimeSeriesSamples.Range(from, end), TestContext.CancellationToken);
+        var second = await store.BootTimesAsync(TimeSeriesSamples.Range(from, first[^1].CapturedAt, TimeSeriesSamples.EventLimit, 0, first[^1].Id), TestContext.CancellationToken);
+        var all = first.Concat(second).ToList();
+
+        // Assert
+        Assert.HasCount(1001, first, "the first page is full");
+        Assert.HasCount(2, second, "the second page holds the rest: the last boot of the capture time and the earlier boot");
+        Assert.AreEqual(at, first[0].CapturedAt, "the first page starts with the newest capture time");
+        Assert.AreEqual(Samples.Base.AddHours(1), second[^1].CapturedAt, "the earlier boot comes last");
+        Assert.HasCount(1003, all.Select(boot => boot.Id).Distinct().ToList(), "every boot is read once");
+        Assert.AreSequenceEqual(all.OrderByDescending(boot => boot.CapturedAt).ThenByDescending(boot => boot.Id).Select(boot => boot.Id).ToList(), all.Select(boot => boot.Id).ToList(), "newest first by capture time and ID");
+        Assert.AreSequenceEqual(stored.Select(row => row.Id).Order().ToList(), all.Select(boot => boot.Id).Order().ToList(), "the IDs are those of the boot events");
+    }
+
+    /// <summary>
+    /// The paging IDs belong to their reads: the boot read refuses an ID after which to continue and a negative ID before which to continue, every other range read refuses an ID before which to continue.
+    /// </summary>
+    /// <param name="read">The read</param>
+    /// <param name="afterId">The ID after which to continue</param>
+    /// <param name="beforeId">The ID before which to continue</param>
+    /// <param name="message">The text of the refusal</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [DataRow("BootTimes", 5L, 0L, "store: invalid query: after id is not used by boot times")]
+    [DataRow("BootTimes", 0L, -1L, "store: invalid query: before id must not be negative")]
+    [DataRow("GapsInRange", 0L, 5L, "store: invalid query: before id is only for boot times")]
+    [DataRow("ServiceChanges", 0L, 5L, "store: invalid query: before id is only for boot times")]
+    [DataRow("GapRecords", 0L, 5L, "store: invalid query: before id is only for boot times")]
+    [DataRow("KernelEvents", 0L, 5L, "store: invalid query: before id is only for boot times")]
+    [DataRow("BackupRuns", 0L, 5L, "store: invalid query: before id is only for boot times")]
+    public async Task TimeRangeReadsRefuseForeignPagingId(string read, long afterId, long beforeId, string message)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = TimeSeriesSamples.Range(Samples.Base, Samples.Base.AddHours(1), 10, afterId, beforeId);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => CountAsync(store, read, query), "a paging ID the read does not use");
+
+        // Assert
+        Assert.AreEqual(message, exception.Message, "the text names the rule");
+    }
+
+    /// <summary>
+    /// The step read aligns its steps by the floor of the step index, also before the epoch, and reads up to the storable maximum: a bucket before the epoch lies in the step before it, not in the first step after it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public async Task RollupStepsAsyncAlignsFromBeforeEpochToStorableMaximum()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var epoch = new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var late = StorableTime.Max.AddDays(-3).Date;
+        var late0 = new DateTimeOffset(late, TimeSpan.Zero);
+        var end = new DateTimeOffset(StorableTime.Max.AddDays(-2).Date, TimeSpan.Zero);
+
+        await TimeSeriesSamples.InsertBucketAsync(directory.Path, string.Empty, epoch.AddDays(-2).AddHours(20), 1, 1, 1, TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertBucketAsync(directory.Path, string.Empty, epoch.AddMinutes(-5), 2, 1, 2, TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertBucketAsync(directory.Path, string.Empty, epoch.AddMinutes(5), 3, 1, 3, TestContext.CancellationToken);
+        await TimeSeriesSamples.InsertBucketAsync(directory.Path, string.Empty, late0.AddMinutes(5), 4, 1, 4, TestContext.CancellationToken);
+
+        // Act
+        var page = await store.RollupStepsAsync(StepQuery(RollupTier.FiveMinutes, "load", epoch.AddDays(-2).AddHours(18), end, TimeSpan.FromDays(1)), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, page.Lines, "one line");
+        Assert.AreSequenceEqual([epoch.AddDays(-2), epoch.AddDays(-1), epoch, late0], page.Lines[0].Points.Select(point => point.At).ToList(), "the steps start at multiples of a day, the bucket before the epoch lies in the step before it");
+        Assert.AreSequenceEqual([1.0, 2.0, 3.0, 4.0], page.Lines[0].Points.Select(point => point.Average).ToList(), "each step holds its own bucket");
     }
 
     /// <summary>
@@ -1406,6 +1502,7 @@ public class SqliteStoreTimeSeriesTests
                {
                    "GapsInRange" => (await store.GapsInRangeAsync(query, TestContext.CancellationToken)).Count,
                    "BootTimes" => (await store.BootTimesAsync(query, TestContext.CancellationToken)).Count,
+                   "ServiceChanges" => (await store.ServiceChangesAsync(query, TestContext.CancellationToken)).Count,
                    "GapRecords" => (await store.GapRecordsAsync(query, TestContext.CancellationToken)).Count,
                    "KernelEvents" => (await store.KernelEventsAsync(query, TestContext.CancellationToken)).Count,
                    _ => (await store.BackupRunsAsync(query, TestContext.CancellationToken)).Count

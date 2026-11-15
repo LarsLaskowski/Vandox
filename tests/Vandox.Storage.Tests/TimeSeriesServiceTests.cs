@@ -2312,44 +2312,54 @@ public class TimeSeriesServiceTests
         switch (scenario)
         {
             case "EnterMoves":
-                await ArrangeEnterMovesAsync(directory, store, [At(-1)]);
+                {
+                    await ArrangeEnterMovesAsync(directory, store, [At(-1)]);
 
-                return (RestartsWithoutBoot([At(-1)]), default, 0, false, null);
+                    return (RestartsWithoutBoot([At(-1)]), default, 0, false, null);
+                }
 
             case "BackupRuns":
-                await TimeSeriesSamples.InsertBackupStartsAsync(directory, At(1), 1001, TestContext.CancellationToken);
-                await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, TimeSeriesSamples.Boot(lateBoot, SecondBoot));
+                {
+                    await TimeSeriesSamples.InsertBackupStartsAsync(directory, At(1), 1001, TestContext.CancellationToken);
+                    await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, TimeSeriesSamples.Boot(lateBoot, SecondBoot));
 
-                return ([], lateBoot, 990, false, null);
+                    return ([], lateBoot, 990, false, null);
+                }
 
             case "Both":
-                await ArrangeEnterMovesAsync(directory, store, [At(-1), lateBoot]);
-                await TimeSeriesSamples.InsertBackupStartsAsync(directory, At(1), 1001, TestContext.CancellationToken);
+                {
+                    await ArrangeEnterMovesAsync(directory, store, [At(-1), lateBoot]);
+                    await TimeSeriesSamples.InsertBackupStartsAsync(directory, At(1), 1001, TestContext.CancellationToken);
 
-                return (RestartsWithoutBoot([At(-1), lateBoot]), lateBoot, 700, false, null);
+                    return (RestartsWithoutBoot([At(-1), lateBoot]), lateBoot, 700, false, null);
+                }
 
             case "BootsBeforeFrom":
-                await TimeSeriesSamples.WriteAsync(store,
-                                                   string.Empty,
-                                                   FirstBoot,
-                                                   TestContext.CancellationToken,
-                                                   TimeSeriesSamples.Service(Unit, "active", At(-26281), 0, At(-26280)),
-                                                   TimeSeriesSamples.Service(Unit, "active", At(0.5), 0, At(1)),
-                                                   TimeSeriesSamples.BackupStart(At(1), FirstBoot, StorableTime.Min, "pzstd"));
-                await TimeSeriesSamples.InsertBootsAsync(directory, At(-200), 10010, TimeSpan.FromSeconds(1), TestContext.CancellationToken);
+                {
+                    await TimeSeriesSamples.WriteAsync(store,
+                                                       string.Empty,
+                                                       FirstBoot,
+                                                       TestContext.CancellationToken,
+                                                       TimeSeriesSamples.Service(Unit, "active", At(-26281), 0, At(-26280)),
+                                                       TimeSeriesSamples.Service(Unit, "active", At(0.5), 0, At(1)),
+                                                       TimeSeriesSamples.BackupStart(At(1), FirstBoot, StorableTime.Min, "pzstd"));
+                    await TimeSeriesSamples.InsertBootsAsync(directory, At(-200), 10010, TimeSpan.FromSeconds(1), TestContext.CancellationToken);
 
-                return ([], At(-200).AddSeconds(10009), 1, true, null);
+                    return ([], At(-200).AddSeconds(10009), 1, true, null);
+                }
 
             default:
-                await TimeSeriesSamples.WriteAsync(store,
-                                                   string.Empty,
-                                                   FirstBoot,
-                                                   TestContext.CancellationToken,
-                                                   TimeSeriesSamples.Service(Unit, "active", At(-2), 0, At(-1)),
-                                                   TimeSeriesSamples.Service(Unit, "active", At(0.5), 0, At(1)));
-                await TimeSeriesSamples.InsertBootsAsync(directory, At(2), 10011, TimeSpan.FromSeconds(1), TestContext.CancellationToken);
+                {
+                    await TimeSeriesSamples.WriteAsync(store,
+                                                       string.Empty,
+                                                       FirstBoot,
+                                                       TestContext.CancellationToken,
+                                                       TimeSeriesSamples.Service(Unit, "active", At(-2), 0, At(-1)),
+                                                       TimeSeriesSamples.Service(Unit, "active", At(0.5), 0, At(1)));
+                    await TimeSeriesSamples.InsertBootsAsync(directory, At(2), 10011, TimeSpan.FromSeconds(1), TestContext.CancellationToken);
 
-                return ([], default, 0, true, At(0.5));
+                    return ([], default, 0, true, At(0.5));
+                }
         }
     }
 
