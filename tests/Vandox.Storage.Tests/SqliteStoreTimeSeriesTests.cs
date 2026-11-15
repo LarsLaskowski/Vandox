@@ -1074,6 +1074,8 @@ public class SqliteStoreTimeSeriesTests
     [TestCategory("AC5")]
     [DataRow("BootTimes", 5L, 0L, "store: invalid query: after id is not used by boot times")]
     [DataRow("BootTimes", 0L, -1L, "store: invalid query: before id must not be negative")]
+    [DataRow("GapsInRange", 5L, 0L, "store: invalid query: after id is not used by gap rows")]
+    [DataRow("ServiceChanges", 5L, 0L, "store: invalid query: after id is not used by service changes")]
     [DataRow("GapsInRange", 0L, 5L, "store: invalid query: before id is only for boot times")]
     [DataRow("ServiceChanges", 0L, 5L, "store: invalid query: before id is only for boot times")]
     [DataRow("GapRecords", 0L, 5L, "store: invalid query: before id is only for boot times")]
@@ -1150,14 +1152,15 @@ public class SqliteStoreTimeSeriesTests
     /// The three service statements of the restart markers are answered from the covering index <c>records_service_state</c> alone: SQLite reports it for each of them.
     /// </summary>
     /// <param name="statement">The statement</param>
+    /// <param name="searched">The part of the plan that names the searched range, empty when the statement names none</param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
     [TestCategory("AC5")]
     [TestCategory("AC10")]
-    [DataRow("ServiceStream")]
-    [DataRow("ServiceRows")]
-    [DataRow("PreviousServiceStates")]
-    public async Task ServiceReadsQueryPlanUseCoveringServiceStateIndex(string statement)
+    [DataRow("ServiceStream", "")]
+    [DataRow("ServiceRows", "SEARCH records USING COVERING INDEX records_service_state (captured_at>? AND captured_at<?)")]
+    [DataRow("PreviousServiceStates", "")]
+    public async Task ServiceReadsQueryPlanUseCoveringServiceStateIndex(string statement, string searched)
     {
         // Arrange
         using var directory = new TempDirectory();
@@ -1171,7 +1174,7 @@ public class SqliteStoreTimeSeriesTests
         // Assert
         Assert.Contains("COVERING INDEX records_service_state", plan, $"the plan of {statement} reads the covering index: {plan}");
         Assert.DoesNotContain("SCAN records", plan, $"the plan of {statement} does not scan the table: {plan}");
-        Assert.AreEqual(statement == "ServiceRows", plan.Contains("SEARCH records", StringComparison.Ordinal) && plan.Contains("captured_at>? AND captured_at<?", StringComparison.Ordinal) || statement != "ServiceRows", $"the plan of ServiceRows searches the capture time range: {plan}");
+        Assert.Contains(searched, plan, $"the plan of {statement} searches the range it names: {plan}");
     }
 
     /// <summary>
@@ -1652,6 +1655,40 @@ public class SqliteStoreTimeSeriesTests
     /// <param name="directory">The store directory</param>
     /// <param name="statement">The name of the statement</param>
     /// <returns>The detail lines of the plan, one per line</returns>
+    /// <summary>
+    /// Runs the statement that reads service records by ID over the IDs of 300 records and returns the capture times it reads.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="from">The start of the range</param>
+    /// <param name="to">The end of the range</param>
+    /// <returns>The capture times in nanoseconds</returns>
+    private async Task<List<long>> ServiceRowCapturesAsync(string directory, DateTimeOffset from, DateTimeOffset to)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statement is a constant of the store
+        command.CommandText = TimeSeriesQueries.ServiceRows;
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("$from", StorageTime.ToNanoseconds(from));
+        command.Parameters.AddWithValue("$to", StorageTime.ToNanoseconds(to));
+        command.Parameters.AddWithValue("$ids", "[" + string.Join(",", Enumerable.Range(1, 300)) + "]");
+
+        var captured = new List<long>();
+
+        await using var reader = await command.ExecuteReaderAsync(TestContext.CancellationToken);
+
+        while (await reader.ReadAsync(TestContext.CancellationToken))
+        {
+            captured.Add(reader.GetInt64(3));
+        }
+
+        return captured;
+    }
+
     private async Task<string> ExplainAsync(string directory, string statement)
     {
         await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
