@@ -1147,6 +1147,78 @@ public class SqliteStoreTimeSeriesTests
     }
 
     /// <summary>
+    /// The three service statements of the restart markers are answered from the covering index <c>records_service_state</c> alone: SQLite reports it for each of them.
+    /// </summary>
+    /// <param name="statement">The statement</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [TestCategory("AC10")]
+    [DataRow("ServiceStream")]
+    [DataRow("ServiceRows")]
+    [DataRow("PreviousServiceStates")]
+    public async Task ServiceReadsQueryPlanUseCoveringServiceStateIndex(string statement)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.InsertServiceStatesAsync(directory.Path, "unit-%03d.service", Samples.Base, 300, TestContext.CancellationToken);
+
+        // Act
+        var plan = await ExplainAsync(directory.Path, statement);
+
+        // Assert
+        Assert.Contains("COVERING INDEX records_service_state", plan, $"the plan of {statement} reads the covering index: {plan}");
+    }
+
+    /// <summary>
+    /// A database at version 14 with stored service records, one of them without a unit, gets the index of step 15 when it is opened, and the service reads return the same rows as before.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [TestCategory("AC10")]
+    public async Task MigrationFromVersion14IndexesStoredServiceStates()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+
+        string before;
+
+        await using (var first = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken))
+        {
+            await TimeSeriesSamples.WriteAsync(first,
+                                               string.Empty,
+                                               FirstBoot,
+                                               TestContext.CancellationToken,
+                                               TimeSeriesSamples.Service("a.service", "active", Samples.Base.AddHours(-2), 0, Samples.Base.AddHours(-1)),
+                                               TimeSeriesSamples.Service("a.service", "active", Samples.Base.AddMinutes(30), 1, Samples.Base.AddHours(1)),
+                                               TimeSeriesSamples.Service("b.service", "failed", null, 0, Samples.Base.AddHours(2)));
+            await TimeSeriesSamples.InsertRecordAsync(directory.Path, "service_state", Samples.Base.AddHours(3), "{\"active_state\":\"active\",\"restarts\":4}", TestContext.CancellationToken);
+
+            before = await DescribeServiceReadsAsync(first);
+        }
+
+        await RetentionSamples.ExecuteAsync(directory.Path, $"{RetentionSamples.UndoStepFifteen}; UPDATE meta SET value = '14' WHERE key = 'schema_version'", TestContext.CancellationToken);
+
+        var indexAtVersion14 = await TimeSeriesSamples.TextAsync(directory.Path, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'records_service_state'", TestContext.CancellationToken);
+
+        // Act
+        await using var reopened = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        var after = await DescribeServiceReadsAsync(reopened);
+
+        // Assert
+        Assert.AreEqual("0", indexAtVersion14, "the arranged database has no index, as at version 14");
+        Assert.AreEqual("15", await TimeSeriesSamples.TextAsync(directory.Path, "SELECT value FROM meta WHERE key = 'schema_version'", TestContext.CancellationToken), "the database is migrated to version 15");
+        Assert.AreEqual("1", await TimeSeriesSamples.TextAsync(directory.Path, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'records_service_state'", TestContext.CancellationToken), "step 15 created the index");
+        Assert.AreEqual("4", await TimeSeriesSamples.TextAsync(directory.Path, "SELECT count(*) FROM records WHERE kind = 'service_state'", TestContext.CancellationToken), "the stored records are kept, also the one without a unit");
+        Assert.AreEqual(before, after, "the service reads return the same rows after the migration");
+        Assert.DoesNotContain("|||", after, "the record without a unit is not read as a unit");
+    }
+
+    /// <summary>
     /// A gap record read projects its span, cause, collector, numbers and agent in order of capture time and returns no other record.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -1533,6 +1605,60 @@ public class SqliteStoreTimeSeriesTests
                    "KernelEvents" => (await store.KernelEventsAsync(query, TestContext.CancellationToken)).Count,
                    _ => (await store.BackupRunsAsync(query, TestContext.CancellationToken)).Count
                };
+    }
+
+    /// <summary>
+    /// Describes the rows of the service change read and of the previous state read as one text.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <returns>The text</returns>
+    private async Task<string> DescribeServiceReadsAsync(SqliteStore store)
+    {
+        var changes = await store.ServiceChangesAsync(TimeSeriesSamples.Range(Samples.Base.AddHours(-3), Samples.Base.AddHours(10), 100), TestContext.CancellationToken);
+        var previous = await store.PreviousServiceStatesAsync(["a.service", "b.service"], Samples.Base, TestContext.CancellationToken);
+
+        return string.Join("|", changes.Concat(previous).Select(row => $"{row.Unit}/{row.ActiveState}/{row.ActiveEnterAt}/{row.CapturedAt:o}/{row.Restarts}/{row.BootId}/{row.Previous?.Restarts}"));
+    }
+
+    /// <summary>
+    /// Reads the query plan of one of the service statements.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="statement">The name of the statement</param>
+    /// <returns>The detail lines of the plan, one per line</returns>
+    private async Task<string> ExplainAsync(string directory, string statement)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statements are constants of the store
+        command.CommandText = "EXPLAIN QUERY PLAN " + statement switch
+                                                      {
+                                                          "ServiceStream" => TimeSeriesQueries.ServiceStream,
+                                                          "ServiceRows" => TimeSeriesQueries.ServiceRows,
+                                                          _ => TimeSeriesQueries.PreviousServiceStates
+                                                      };
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("$from", StorageTime.ToNanoseconds(Samples.Base));
+        command.Parameters.AddWithValue("$to", StorageTime.ToNanoseconds(Samples.Base.AddHours(1)));
+        command.Parameters.AddWithValue("$ids", "[1,2,3]");
+        command.Parameters.AddWithValue("$before", StorageTime.ToNanoseconds(Samples.Base.AddHours(1)));
+        command.Parameters.AddWithValue("$scan", 10000);
+        command.Parameters.AddWithValue("$units", "[\"unit-001.service\"]");
+
+        var lines = new List<string>();
+
+        await using var reader = await command.ExecuteReaderAsync(TestContext.CancellationToken);
+
+        while (await reader.ReadAsync(TestContext.CancellationToken))
+        {
+            lines.Add(reader.GetString(3));
+        }
+
+        return string.Join("\n", lines);
     }
 
     /// <summary>
