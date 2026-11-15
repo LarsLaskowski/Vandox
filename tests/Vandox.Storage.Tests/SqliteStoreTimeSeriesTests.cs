@@ -1101,7 +1101,7 @@ public class SqliteStoreTimeSeriesTests
         // Arrange
         using var directory = new TempDirectory();
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
-        var epoch = new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var epoch = DateTimeOffset.UnixEpoch;
         var late = StorableTime.Max.AddDays(-3).Date;
         var late0 = new DateTimeOffset(late, TimeSpan.Zero);
         var end = new DateTimeOffset(StorableTime.Max.AddDays(-2).Date, TimeSpan.Zero);
