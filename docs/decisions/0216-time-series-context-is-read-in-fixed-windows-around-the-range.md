@@ -1,6 +1,6 @@
 # 0216: The time-series query reads gap records and backup runs in fixed windows around the range
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-14
 - **Area:** Time-series queries
 - **Source:** Issue #47

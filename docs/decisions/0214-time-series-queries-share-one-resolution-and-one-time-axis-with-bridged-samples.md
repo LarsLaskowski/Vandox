@@ -1,6 +1,6 @@
 # 0214: Time-series queries share one resolution and one time axis, raw samples bridged between other lines' times
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-14
 - **Area:** Time-series queries
 - **Source:** Issue #47

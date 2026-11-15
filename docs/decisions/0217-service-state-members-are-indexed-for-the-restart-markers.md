@@ -1,6 +1,6 @@
 # 0217: The members of service records that tell a restart are kept in a covering partial index
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-15
 - **Area:** Time-series queries
 - **Source:** Issue #47

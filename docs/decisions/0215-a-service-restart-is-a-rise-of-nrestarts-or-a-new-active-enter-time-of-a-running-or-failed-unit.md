@@ -1,6 +1,6 @@
 # 0215: A service restart is a rise of NRestarts, or a new active-enter time of a running or failed unit with no boot between
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-14
 - **Area:** Time-series queries
 - **Source:** Issue #47
