@@ -277,7 +277,9 @@ git ls-files -z -- src/ | xargs -0 -I{} cp --parents {} "$scratch"
 ls "$scratch"/publish/wwwroot/_framework "$scratch"/publish/wwwroot/js
 ```
 
-Keep the first copy equal to the `COPY` lines before `RUN dotnet restore` in the Dockerfile and the second to
+In a repository checked out with CRLF line endings, a copy of the block taken from this file runs only with the
+carriage returns removed (`sed 's/\r$//'`); without them bash reports `$'\r': command not found`. Keep the first copy
+equal to the `COPY` lines before `RUN dotnet restore` in the Dockerfile and the second to
 `COPY src/ src/` (`.dockerignore` lets nothing else into the build context). A `--no-restore` publish that
 fails, or an output that is missing, is the defect the CI job *Release build check* would report after the PR
 is open.
@@ -361,9 +363,12 @@ C# (backend): follow the surrounding code and the analyzers; in particular
   (the `ChartInterop` gate, record 0205);
 - the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
   `-p:VandoxCommit` and `-p:VandoxDate`;
-- names the analyzers refuse, checked by the Lead before a name goes into the plan's *Signatures*: an enum
-  whose name ends in `Flags` or `Enum` (S2344), and a nested type of any
-  visibility (RH2101 class, RH2104 struct, RH2105 interface, RH2106 record, RH2107 enum, RH2108 delegate).
+- names and signatures the analyzers refuse, checked by the Lead before they go into the plan's *Signatures*: an
+  enum whose name ends in `Flags` or `Enum` (S2344), a nested type of any
+  visibility (RH2101 class, RH2104 struct, RH2105 interface, RH2106 record, RH2107 enum, RH2108 delegate), more than
+  seven parameters on a method or constructor outside the tests, a `[LoggerMessage]` method included (S107), and a parameter or
+  member named after a keyword of another .NET language on a public or interface member (`from`, `to`, `step`:
+  CA1716).
 
 ## Writing tests
 
