@@ -581,11 +581,24 @@ internal static class TimeSeriesQueries
         var examined = 0;
         var after = await NextLabelsAsync(connection, query, fiveMinutes ? FirstLabelsFiveMinutes : FirstLabelsHourly, null, cancellationToken).ConfigureAwait(false);
 
+        using var buckets = connection.CreateCommand();
+
+#pragma warning disable CA2100 // constant statements, values bound as parameters
+        buckets.CommandText = fiveMinutes ? BucketsFiveMinutes : BucketsHourly;
+#pragma warning restore CA2100
+        buckets.Parameters.AddWithValue("$source", query.Source);
+        buckets.Parameters.AddWithValue("$name", query.Name);
+        buckets.Parameters.AddWithValue(FromParameter, from);
+        buckets.Parameters.AddWithValue(ToParameter, to);
+
+        var labelsParameter = buckets.Parameters.Add("$labels", SqliteType.Text);
+
         while (after is not null && examined < MaxLabelSets && cut == false)
         {
             examined++;
+            labelsParameter.Value = after;
 
-            var points = await ReadLabelSetAsync(connection, query, after, (from, to, stepNs), cancellationToken).ConfigureAwait(false);
+            var points = await ReadLabelSetAsync(buckets, stepNs, cancellationToken).ConfigureAwait(false);
 
             if (points.Count > 0)
             {
@@ -727,57 +740,45 @@ internal static class TimeSeriesQueries
     }
 
     /// <summary>
-    /// Reads the buckets of one label set and merges them into steps.
+    /// Reads the buckets of one label set and merges them into steps while reading.
     /// </summary>
-    /// <param name="connection">The reader connection</param>
-    /// <param name="query">The query</param>
-    /// <param name="labels">The label set</param>
-    /// <param name="window">The aligned start and end of the range and the step, all in nanoseconds</param>
+    /// <param name="command">The bucket statement with every parameter set but the label set</param>
+    /// <param name="step">The step in nanoseconds</param>
     /// <param name="cancellationToken">Cancels the read</param>
     /// <returns>A task that returns the points, one per step with a bucket</returns>
-    private static async Task<List<LinePoint>> ReadLabelSetAsync(SqliteConnection connection, RollupStepQuery query, string labels, (long From, long To, long Step) window, CancellationToken cancellationToken)
+    private static async Task<List<LinePoint>> ReadLabelSetAsync(SqliteCommand command, long step, CancellationToken cancellationToken)
     {
-        var parameters = new Dictionary<string, object>
-                         {
-                             ["$source"] = query.Source,
-                             ["$name"] = query.Name,
-                             ["$labels"] = labels,
-                             [FromParameter] = window.From,
-                             [ToParameter] = window.To
-                         };
-        var buckets = await ReaderQuery.ReadAsync(connection,
-                                                  query.Tier == RollupTier.FiveMinutes ? BucketsFiveMinutes : BucketsHourly,
-                                                  parameters,
-                                                  reader => (Bucket: reader.GetInt64(0), Min: reader.GetDouble(1), Max: reader.GetDouble(2), Sum: reader.GetDouble(3), Count: reader.GetInt64(4), Last: reader.GetDouble(5), LastAt: reader.GetInt64(6), LastId: reader.GetInt64(7)),
-                                                  Context,
-                                                  cancellationToken).ConfigureAwait(false);
         var points = new List<LinePoint>();
-        var step = long.MinValue;
-        var merged = buckets.Count > 0 ? buckets[0] : default;
+        var index = long.MinValue;
+        var merged = default((long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId));
+        var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        foreach (var bucket in buckets)
+        await using var readerDisposal = reader.ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            var index = FloorDiv(bucket.Bucket, window.Step);
+            var bucket = (Bucket: reader.GetInt64(0), Min: reader.GetDouble(1), Max: reader.GetDouble(2), Sum: reader.GetDouble(3), Count: reader.GetInt64(4), Last: reader.GetDouble(5), LastAt: reader.GetInt64(6), LastId: reader.GetInt64(7));
+            var bucketIndex = FloorDiv(bucket.Bucket, step);
 
-            if (index != step)
+            if (bucketIndex == index)
             {
-                if (step != long.MinValue)
-                {
-                    points.Add(StepPoint(StepStart(step, window.Step), merged));
-                }
-
-                step = index;
-                merged = bucket;
+                merged = MergeBuckets(merged, bucket);
 
                 continue;
             }
 
-            merged = MergeBuckets(merged, bucket);
+            if (index != long.MinValue)
+            {
+                points.Add(StepPoint(StepStart(index, step), merged));
+            }
+
+            index = bucketIndex;
+            merged = bucket;
         }
 
-        if (step != long.MinValue)
+        if (index != long.MinValue)
         {
-            points.Add(StepPoint(StepStart(step, window.Step), merged));
+            points.Add(StepPoint(StepStart(index, step), merged));
         }
 
         return points;
