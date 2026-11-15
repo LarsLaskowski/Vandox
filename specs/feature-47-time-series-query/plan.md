@@ -27,7 +27,7 @@ See [spec.md](spec.md), *Problem*.
 | 12 | Each of a query's about 20 store reads opens a new connection (`Pooling = false`) with the reader pragmas | `SqliteStore.cs:266-284,346-355` | confirmed |
 | 13 | The restart check calls `BootTimesAsync` once per row whose enter time moved under a running predecessor (up to 2,000 calls), the backup check once per run without end (up to 1,001): beyond N2's ten pages per kind — a related defect | `SeriesMarkerReader.cs:186-193,225-246,350-358` | confirmed |
 | 14 | The benchmark's restart counter rises with every enter move, so fact 13's calls hardly occur there | `QueryBenchmark.cs:168-179`, `SeriesMarkerReader.cs:188` | confirmed |
-| 15 | The rollup reads (15 × 8,760 buckets, listed per label set) and the service-change window (87,600 records, six `json_extract` each, two sorts) dominate | to verify: breakdown of task 14, Dev | unverified |
+| 15 | The rollup reads (15 × 8,760 buckets, listed per label set) and the service-change window (87,600 records, six `json_extract` each, two sorts) dominate | to verify: breakdown, task 14, Dev | unverified |
 
 ## Tests per criterion
 
@@ -120,10 +120,11 @@ restart is timed at the new `active_enter_at` when it lies in `[from, end)` and 
 capture time. Backups: `BackupRunsAsync([from − 1 d, end + 1 d))` (phase, boot ID, `started_at`, `last_seen_at`, `gone_by`, command),
 paired by (boot ID, `started_at`), duplicates dropped; a run with `started_at >= end` is dropped; it is kept when `gone_by > from` or it
 has no end; `EndsAt` and `LastSeenAt` are clamped to `now`; without an end, a boot of the boot read in `(start, now]` makes it `Unknown`,
-none `Running`. The boot read (G5, fact 13) is one `BootTimesAsync` read through `EventPages` (pages of 1,001, at most ten), made only
-when a check with a non-empty interval needs it, over `[earliest interval start, now + 1 tick)` of the checks; a check it cannot decide (no boot found in its
-interval, which reaches past the last boot read when the pages ran out) gives no marker and bounds `MarkersCompleteUntil` at that
-boot's capture. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
+none `Running`. The boot read (G5, fact 13; Security S1) is made only when a check with a non-empty interval needs it: pages of 1,001
+newest first from `now + 1 tick` down, keyed on (capture time, ID), stopping after ten pages or once a page reaches below the earliest
+interval start. A check is undecided only when no boot read lies in its interval and the interval reaches below the oldest boot read;
+it gives no marker and bounds `MarkersCompleteUntil` at `max(from, its row's capture or run's start)`. Old boots cannot crowd out the
+checks of recent records. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
 2,001st row's capture).
 
 **Completeness (AC6).** At a step, `EarliestUnfoldedAsync`: `SELECT min(captured_at) FROM metrics WHERE record_id > watermark` (primary
@@ -151,8 +152,10 @@ expectation (but the one *Test files* names) and record; the five timed runs tha
    changes and the gap records, and one lease (median of 20).
 2. Reductions open to the Dev, kept only where they gain: the one boot read (required, fact 13); bucket merge while reading, one
    prepared command reused across a series' label sets; a merge per step in SQL only if every existing test passes unchanged (sum,
-   clamp, last-value tie-break); a service-change statement with the same rows and less work (one `json_extract` per member and row,
-   one sort fewer, no temp-file spill).
+   clamp, last-value tie-break), the step index in SQL only as `(bucket - $from) / $step` over rows with `bucket >= $from`, both bound,
+   with a Tester case from before the epoch to near the storable maximum — else no SQL merge; a service-change statement with the same
+   rows and less work (one `json_extract` per member and row, one sort fewer, no temp-file spill by fewer or narrower sorted rows;
+   reader pragmas unchanged, held back below).
 3. Goal: development-host median ≤ 250 ms (about 825 ms on the DS918+ at factor 3.2–3.3). Not reached: the Dev stops and reports both
    breakdowns, and the Lead decides (mode `decide`) on the held-back options below.
 
@@ -183,7 +186,7 @@ expectation (but the one *Test files* names) and record; the five timed runs tha
 | Vandox.Backend | `TimeSeries/GatedTimeSeriesReader.cs`, `Hosting/ServeCommand.cs` | gate, registration |
 | Vandox.Backend | `Components/Charts/ChartSeries.cs`, `ChartData.cs`, `ChartInterop.cs`, `wwwroot/js/charts.js` | bridged points |
 | tools | `Vandox.StorageBenchmark/QueryBenchmark.cs`, `Program.cs`, `TimingTimeSeriesReader.cs` (G5) | `--query` scenario, breakdown |
-| Vandox.Storage | `SeriesMarkerReader.cs`; by the breakdown `TimeSeriesQueries.cs`, `SeriesLineReader.cs` (G5) | one boot read; faster reads, no API change |
+| Vandox.Storage | `TimeRangeQuery`, `BootTime`, `SqliteStore.BootTimesAsync`, `SeriesMarkerReader.cs`; by the breakdown `TimeSeriesQueries.cs`, `SeriesLineReader.cs` (G5) | boot read newest first with `BeforeId` and `Id`; faster reads |
 
 ## Signatures (for the Dev's skeleton)
 
@@ -199,7 +202,11 @@ Vandox.Storage, store reads:
 - `MetricLine`: `MetricLine.Labels` (string), `MetricLine.Points` (IReadOnlyList of LinePoint).
 - `LinePoint`: `LinePoint.At`, `LinePoint.LastAt` (DateTimeOffset), `LinePoint.Minimum`, `LinePoint.Average`, `LinePoint.Maximum`, `LinePoint.Last` (double), `LinePoint.Count` (long).
 - `ServiceStateRow`: `ServiceStateRow.Unit`, `ServiceStateRow.ActiveState` (string), `ServiceStateRow.ActiveEnterAt` (string, nullable), `ServiceStateRow.CapturedAt` (DateTimeOffset), `ServiceStateRow.Restarts` (long), `ServiceStateRow.BootId` (string, empty for none), `ServiceStateRow.Previous` (ServiceStateRow, nullable).
-- `BootTime`: `BootTime.CapturedAt` (DateTimeOffset), `BootTime.BootId` (string).
+- `BootTime`: `BootTime.CapturedAt` (DateTimeOffset), `BootTime.BootId` (string), `BootTime.Id` (long, G5, selected first).
+- G5: `TimeRangeQuery.BeforeId` (long, default 0; rows read are those with (capture time, ID) below (`To`, `BeforeId`), so 0 keeps `To`
+  exclusive). `BootTimesAsync` keeps its signature and returns boots newest first from `[From, To)` paged by `BeforeId`, `From` not after
+  `To`; it refuses a non-zero `AfterId` (`store: invalid query: after id is not used by boot times`), every other read a non-zero
+  `BeforeId` (`store: invalid query: before id is only for boot times`).
 - `GapRecordRow`: `GapRecordRow.Id` (long), `GapRecordRow.AgentId`, `GapRecordRow.Cause`, `GapRecordRow.Collector`, `GapRecordRow.SpanFrom`, `GapRecordRow.SpanTo` (string, as stored), `GapRecordRow.CapturedAt` (DateTimeOffset), `GapRecordRow.FirstSeq`, `GapRecordRow.LastSeq` (long, nullable).
 - `KernelEventRow`: `KernelEventRow.Id` (long), `KernelEventRow.CapturedAt` (DateTimeOffset), `KernelEventRow.Type`, `KernelEventRow.BootId`, `KernelEventRow.VictimCommand` (string), `KernelEventRow.KernelTimeNs`, `KernelEventRow.VictimPid` (long, nullable).
 - `BackupRunRow`: `BackupRunRow.Id` (long), `BackupRunRow.CapturedAt` (DateTimeOffset), `BackupRunRow.Phase`, `BackupRunRow.BootId`, `BackupRunRow.StartedAt`, `BackupRunRow.LastSeenAt`, `BackupRunRow.GoneBy`, `BackupRunRow.Command` (string, times as stored, empty when absent).
@@ -235,8 +242,9 @@ none whole; SqliteStore.cs gains a region, ServeCommand.cs two registrations.
 `tests/Vandox.Backend.Tests/ChartDataTests.cs`, `ChartInteropTests.cs`, `ServeTests.cs`. New double: `CountingTimeSeriesReader`, wrapping a
 real store and recording every call and limit (Storage tests); samples in `TimeSeriesSamples.cs` (Storage tests).
 
-G5: `QueryAsyncBackupRunsProcessAtMostThousandAndOne` asserts 1,001 boot look-ups; the Tester adapts it in task 15 to the one boot
-read (at most ten pages), its other assertions unchanged.
+G5: `QueryAsyncBackupRunsProcessAtMostThousandAndOne` asserts 1,001 boot look-ups, `BootTimesAsyncReturnsOnlyBoots` the old order; the
+Tester adapts both in task 16 (one boot read of at most ten pages; newest first), other assertions unchanged. The new `BootTime.Id` and
+`BeforeId` need no change at other call sites (signatures kept).
 
 Existing test code that calls a changed signature: `ChartInteropTests` and `RecordingJsRuntime` assertions on the `create`/`update`
 argument lists — adapted by the Tester. `ChartSeries`' two-argument constructor is unchanged.
@@ -274,7 +282,7 @@ All by the Dev, after the code is green:
 - `CHANGELOG.md`: an `[Unreleased]` *Added* entry for the time-series query service.
 - G5: `docs/BENCHMARKS.md`, *Time-series query* — the breakdown in *Procedure*; rows for the DS918+ run of 2026-11-15 (be419c6,
   2,386 ms, not met) and the new development-host run with its breakdown; `docs/areas/time-series-query.md` — the one boot read, its
-  bound and the undecided checks.
+  bound and the undecided checks; `docs/areas/storage-reading.md` — boot times newest first, `BeforeId`, the two error texts.
 - `.squad/project.md` *Test doubles*: the Tester reports a row for `CountingTimeSeriesReader`; the orchestrator writes it in.
 
 ## Architecture check

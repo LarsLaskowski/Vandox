@@ -207,7 +207,9 @@ internal static class QueryBenchmark
                              ["$limit"] = (long)EventPages.PageSize
                          };
 
-        await using (var lease = await store.LeaseReaderAsync(cancellationToken).ConfigureAwait(false))
+        var lease = await store.LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        await using (lease.ConfigureAwait(false))
         {
             var labels = (await ReaderQuery.ReadAsync(lease.Connection,
                                                       TimeSeriesQueries.FirstLabelsHourly,
@@ -239,7 +241,9 @@ internal static class QueryBenchmark
         {
             var watch = Stopwatch.StartNew();
 
-            await using (await store.LeaseReaderAsync(cancellationToken).ConfigureAwait(false))
+            var single = await store.LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            await using (single.ConfigureAwait(false))
             {
                 watch.Stop();
             }
