@@ -59,7 +59,9 @@ The reads of the time-series query ([Time-series queries](time-series-query.md))
   projections of the named members of the rows (never the payload or a message), ordered by capture time and ID, paged with an *after ID*.
 - **Limits.** Each read refuses a limit above its own maximum with `store: invalid query: limit must be 1 to <maximum>`: 1,001 for gap
   rows and the event projections (boots, gap records, kernel events, backup runs), 2,001 for service changes; the previous-state read
-  refuses more than 2,001 units. A range follows the rules of a record query. A caller reads at most ten pages of 1,001 rows per kind.
+  refuses more than 2,001 units. The gap rows and the service changes have no paging ID and refuse a non-zero *after ID* with
+  `store: invalid query: after id is not used by gap rows` and `store: invalid query: after id is not used by service changes`. A
+  range follows the rules of a record query. A caller reads at most ten pages of 1,001 rows per kind.
 
 ### Incidents
 

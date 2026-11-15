@@ -100,7 +100,7 @@ internal static class TimeSeriesQueries
     /// Reads the service records of a list of record IDs.
     /// </summary>
     internal const string ServiceRows = "SELECT CAST(json_extract(data, '$.unit') AS TEXT), COALESCE(CAST(json_extract(data, '$.active_state') AS TEXT), ''), CAST(json_extract(data, '$.active_enter_at') AS TEXT), "
-                                        + "captured_at, COALESCE(json_extract(data, '$.restarts'), 0), COALESCE(boot_id, ''), id FROM records INDEXED BY records_service_state WHERE kind = 'service_state' AND id IN (SELECT value FROM json_each($ids))";
+                                        + "captured_at, COALESCE(json_extract(data, '$.restarts'), 0), COALESCE(boot_id, ''), id FROM records INDEXED BY records_service_state WHERE kind = 'service_state' AND captured_at >= $from AND captured_at < $to AND id IN (SELECT value FROM json_each($ids))";
 
     /// <summary>
     /// Reads the latest service record before a time of each of the units among the most recent service records.
@@ -167,6 +167,19 @@ internal static class TimeSeriesQueries
         RecordQueries.Require(query.Limit >= 1 && query.Limit <= maxLimit, $"limit must be 1 to {maxLimit}");
         RecordQueries.Require(query.AfterId >= 0, "after id must not be negative");
         RecordQueries.Require(query.BeforeId == 0, "before id is only for boot times");
+    }
+
+    /// <summary>
+    /// Checks a range read that has no paging ID: the gap rows and the service changes.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <param name="maxLimit">The largest limit of the read</param>
+    /// <param name="read">The name of the read in the error of an after ID</param>
+    /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
+    internal static void ValidateWindow(TimeRangeQuery query, int maxLimit, string read)
+    {
+        ValidateRange(query, maxLimit);
+        RecordQueries.Require(query.AfterId == 0, $"after id is not used by {read}");
     }
 
     /// <summary>
@@ -373,6 +386,8 @@ internal static class TimeSeriesQueries
                                                ServiceRows,
                                                new Dictionary<string, object>
                                                {
+                                                   [FromParameter] = StorageTime.ToNanoseconds(query.From),
+                                                   [ToParameter] = StorageTime.ToNanoseconds(query.To),
                                                    ["$ids"] = JsonSerializer.Serialize(ids)
                                                },
                                                reader => (Id: reader.GetInt64(6), Row: ReadServiceState(reader, null)),

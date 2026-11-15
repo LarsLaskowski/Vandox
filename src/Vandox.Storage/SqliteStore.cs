@@ -1234,7 +1234,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <inheritdoc/>
     public Task<IReadOnlyList<AgentGap>> GapsInRangeAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+        TimeSeriesQueries.ValidateWindow(query, TimeSeriesQueries.MaxEventLimit, "gap rows");
 
         return QueryAsync(TimeSeriesQueries.GapsInRange, TimeSeriesQueries.WindowParameters(query), TimeSeriesQueries.ReadGap, TimeSeriesQueries.Context, cancellationToken);
     }
@@ -1250,7 +1250,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <inheritdoc/>
     public Task<IReadOnlyList<ServiceStateRow>> ServiceChangesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxServiceLimit);
+        TimeSeriesQueries.ValidateWindow(query, TimeSeriesQueries.MaxServiceLimit, "service changes");
 
         return ReadAsync(connection => TimeSeriesQueries.ReadServiceChangesAsync(connection, query, cancellationToken), TimeSeriesQueries.Context, cancellationToken);
     }
