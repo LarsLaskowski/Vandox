@@ -26,7 +26,7 @@ See [spec.md](spec.md), *Problem*.
 | 11 | SQLite streams `ORDER BY captured_at, labels` over `metrics_source_name_time` with a temp B-tree only for the right part | `RawValuesAsyncQueryPlanStreamsByCaptureTime` (Tester, step 5) | confirmed |
 | 13 | Before G5, boots were looked up per check (≤ 3,001), beyond N2 | `SeriesMarkerReader.cs` at be419c6 | confirmed |
 | 15 | Rollup reads and service changes dominate | G5 breakdown (`docs/BENCHMARKS.md`) | confirmed |
-| 16 | SQLite 3.53 answers the service reads from `records_service_state` alone only with `kind` as an index column and `INDEXED BY` | `ServiceReadsQueryPlanUseCoveringServiceStateIndex`; Dev, G6, reproduced on 3.53.1 | confirmed |
+| 16 | SQLite 3.53 answers the service reads from `records_service_state` alone only with `kind` as an index column and `INDEXED BY` | `ServiceReadsQueryPlanUseCoveringServiceStateIndex`; Dev, G6 | confirmed |
 
 ## Tests per criterion
 
@@ -146,8 +146,7 @@ expectation (but those *Test files* names); the five timed AC10 runs stay as the
    development host 306–468 ms, service changes 137–168 ms of it (`docs/BENCHMARKS.md`); goal missed.
 2. G6 (Lead decision 2026-11-15, record 0217): schema step 15 adds the covering partial index `records_service_state` (record 0217
    names its columns, `kind` last); `ServiceStream`, `ServiceRows` and `PreviousServiceStates` read it `INDEXED BY`, only `id` and the
-   indexed expressions, so SQLite needs no payload (fact 16). Result: 218 ms (289, 216, 218), goal met. The benchmark prints the time to rebuild that index on its database
-   (drop and create, after the fold). Then the DS918+ re-run (task 24).
+   indexed expressions, so SQLite needs no payload (fact 16). Result: 218 ms (289, 216, 218), goal met. The benchmark prints the index build time. Then the DS918+ re-run (task 24).
 3. Held back: parallel reads (next if the DS918+ fails again), pooling, reader caches.
 
 ## Options considered
