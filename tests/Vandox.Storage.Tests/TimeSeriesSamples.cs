@@ -597,8 +597,8 @@ internal static class TimeSeriesSamples
         command.CommandText = "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < $count) "
                               + "INSERT INTO records(kind, origin, source, captured_at, received_at, data) "
                               + "SELECT 'service_state', 'backend', 'services', at, at, json_object('unit', printf('unit-%04d.service', i), 'load_state', 'loaded', 'active_state', 'active', 'sub_state', 'running', 'restarts', 0, 'active_enter_at', enter) "
-                              + "FROM (SELECT i, CASE WHEN i % 2 = 0 THEN $even ELSE $odd END AS at, strftime('%Y-%m-%dT%H:%M:%SZ', (CASE WHEN i % 2 = 0 THEN $even ELSE $odd END) / 1000000000 - 3600) AS enter FROM n "
-                              + "UNION ALL SELECT i, $row + i * 1000000000, strftime('%Y-%m-%dT%H:%M:%SZ', $enter / 1000000000 + i) FROM n)";
+                              + "FROM (SELECT i, CASE WHEN i % 2 = 0 THEN $even ELSE $odd END AS at, strftime('%Y-%m-%dT%H:%M:%SZ', (CASE WHEN i % 2 = 0 THEN $even ELSE $odd END) / 1000000000 - 3600, 'unixepoch') AS enter FROM n "
+                              + "UNION ALL SELECT i, $row + i * 1000000000, strftime('%Y-%m-%dT%H:%M:%SZ', $enter / 1000000000 + i, 'unixepoch') FROM n)";
 #pragma warning restore CA2100
         command.Parameters.AddWithValue("$count", count);
         command.Parameters.AddWithValue("$even", StorageTime.ToNanoseconds(evenPredecessor));
