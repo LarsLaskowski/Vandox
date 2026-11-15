@@ -227,10 +227,11 @@ internal static class QueryBenchmark
                               ["$name"] = CpuName,
                               ["$labels"] = labels,
                               ["$from"] = from,
-                              ["$to"] = to
+                              ["$to"] = to,
+                              ["$step"] = TimeSpan.FromHours(12).Ticks * 100
                           };
 
-            await CountAsync(lease.Connection, "cpu_percent buckets (one label set, hourly)", TimeSeriesQueries.BucketsHourly, buckets, cancellationToken).ConfigureAwait(false);
+            await CountAsync(lease.Connection, "cpu_percent steps (one label set, hourly buckets)", TimeSeriesQueries.BucketsHourly, buckets, cancellationToken).ConfigureAwait(false);
             await ChangesAsync(lease.Connection, query, cancellationToken).ConfigureAwait(false);
             await CountAsync(lease.Connection, "gap records", TimeSeriesQueries.GapRecords, gapRecords, cancellationToken).ConfigureAwait(false);
         }

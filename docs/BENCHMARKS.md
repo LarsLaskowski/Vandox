@@ -198,6 +198,14 @@ a day (a start and an end record), 50 OOM kills and 1,000 gap records. It folds 
 for the year at 1,000 points through `TimeSeriesService` over the store: one query that is not counted, then five that are timed. It prints the
 times, the shape of the result and the median, and whether it is under one second.
 
+After the median line the program prints a **breakdown**: five more runs of the same query through a wrapper that times every store read
+(the reader lease included) and counts its calls. It prints, per part, the median time and the calls: the rollup steps of `cpu_percent`
+(one call, eight label sets), of the other seven series (seven calls), the earliest unfolded time, the gap rows, the gap records, the
+kernel events, the service changes, the previous service states, the boot reads and the backup runs, then the engine as the rest of the
+query. It then times the read of the service changes and of the gap records alone and the steps of one `cpu_percent` label set, five times
+each, and one reader lease (median of 20). The total of the breakdown runs differs from the median line by the run-to-run spread of the
+host, which on the development host is up to a factor of two between two runs; the parts are what to compare.
+
 The values older than 30 days are written every 15 minutes, not at the agent's default intervals (30 and 60 seconds): a query reads
 rollup buckets, and the hourly buckets that a one-year query reads are the same in number, so the older density only makes the fold of the
 setup shorter; the raw values of the last 30 days are written every minute. The database holds about 1.2 million records.
@@ -207,11 +215,44 @@ setup shorter; the raw values of the last 30 days are written every minute. The 
 | Host | Date | Volume | Median query | Times | Verdict |
 | ---- | ---- | ------ | -----------: | ----- | ------- |
 | development host (4 logical CPUs, Ubuntu 24.04, .NET 11.0.0), not the reference host | 2026-11-14 | local disk | 791 ms | 791, 957, 762, 858, 731 ms | order of magnitude only |
-| DS918+ (reference host) | not run yet | SSD volume | | | open (task 13, Product Manager) |
+| DS918+ (reference host), published from `be419c6` | 2026-11-15 | SSD volume `/volume2` | **2,386 ms** | 2,394, 2,449, 2,342, 2,386, 2,331 ms | **not met** (limit 1,000 ms) |
+| development host, before the changes of group G5 | 2026-11-15 | local disk | 717 ms, 624 ms | 608, 618, 778, 782, 717 ms; 866, 905, 624, 522, 518 ms | order of magnitude only |
+| development host, after the changes of group G5 (three runs) | 2026-11-15 | local disk | 468 ms, 306 ms, 382 ms | 472, 404, 425, 468, 513 ms; 297, 306, 291, 316, 346 ms; 355, 266, 399, 384, 382 ms | goal of 250 ms not reached; order of magnitude only |
+| DS918+ (reference host), re-run from the stamped head after group G5 | not run yet | SSD volume | | | open (task 19, Product Manager) |
 
-The development-host run wrote 1,219,780 records in 27 s, folded 1,130,400 values in 8 s, and answered with a 12-hour step, 730 times, 15 lines,
-1,000 markers (cut) and 1,000 gaps (cut). The DS918+ is slower than the development host; the row of the reference host is written in
-from the Product Manager's run.
+The DS918+ run of 2026-11-15 wrote 1,219,780 records in 123 s and folded the values in 27 s, and the same database answered the query in 2,386
+ms: 3.2 times the development host of that day (735 ms), so the reference host does not meet the criterion with the first implementation.
+The development-host runs wrote the same records in 25 to 27 s, folded the values in 7 to 8 s, and answered with a 12-hour step, 730 times,
+15 lines, 1,000 markers (cut) and 1,000 gaps (cut). A run on the development host is a measure of the code, not of the criterion; the
+spread between two runs of the same code is large (the first run after the change of group G5 took 468 ms, the second 306 ms).
+
+**Breakdown on the development host** (median of five runs through the timing reader, in ms; the DS918+ is about three times slower):
+
+| Part | Calls | Before G5 (two runs) | After G5 (three runs) |
+| ---- | ----: | -------------------: | --------------------: |
+| rollup steps, `cpu_percent` (8 label sets) | 1 | 97, 85 | 37, 46, 45 |
+| rollup steps, the other seven series | 7 | 101, 79 | 36, 49, 47 |
+| service changes (87,600 records of the year) | 1 | 505, 448 | 137, 167, 168 |
+| gap rows, gap records, kernel events, backup runs, earliest unfolded, previous states | 6 | 19, 17 | 14, 17, 15 |
+| boot reads | 0 | 0, 0 | 0, 0, 0 |
+| engine (the query less the reads) | | 12, not measurable | 3, 16, 6 |
+| median of the breakdown runs | | 734, 618 | 226, 295, 281 |
+
+Before group G5 the service changes took two thirds of the query (the statement alone 443 ms for 1,738 rows over the 87,600 `service_state`
+records: it extracted four members of each record and ran six window functions over a sort by unit) and the rollup steps
+a quarter (one read per label set that built a list of up to 8,760 buckets and merged them in the program). What group G5 changed
+([Time-series queries](areas/time-series-query.md), *Limits and errors*): the service changes are streamed once in capture order with three
+members per record, the last record of each unit is kept in memory, and only the changed records and their predecessors are read in full;
+the rollup steps are merged in SQL per step, with one prepared statement for all label sets of a series; and the restart and backup checks
+read the boots once instead of once per check (this benchmark makes no boot read: 0 calls).
+
+The goal of group G5 was a development-host median of at most 250 ms (about 825 ms on the DS918+ at the factor of 3.2). The three runs
+reached 468, 306 and 382 ms, the breakdowns 226 to 295 ms, so the goal is **not reached** and the DS918+ is estimated at about 1.2 s
+(not measured). The remainder is the service changes (about 140 to 170 ms: SQLite fetches and parses 87,600 payloads, about 90 ms in a separate measurement, and
+87,600 rows cross into the program), the rollup steps (about 70 to 95 ms: 15 label sets, each a statement of 4 to 6 ms inside its connection,
+plus the label-set reads and a new reader connection for each call) and the engine. The further options (parallel reads, reader caches or
+pooling, a covering index on `service_state`) are not taken here; they need a decision of their own. The row of the re-run on the DS918+ from
+the stamped head stays open for the Product Manager.
 
 ## Log templates
 

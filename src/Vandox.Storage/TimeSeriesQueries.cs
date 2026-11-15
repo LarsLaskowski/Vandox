@@ -70,16 +70,19 @@ internal static class TimeSeriesQueries
     internal const string NextLabelsHourly = "SELECT labels FROM metric_rollups_1h WHERE source = $source AND name = $name AND labels > $after ORDER BY labels LIMIT 1";
 
     /// <summary>
-    /// Reads the 5-minute buckets of one label set in a range.
+    /// Reads the 5-minute buckets of one label set in a range merged into steps: the floor of the step index, the extremes, the sum and the count of its buckets, and the last value of its latest bucket
+    /// (the fold writes a bucket's last time inside the bucket, so the latest bucket holds the latest last value).
     /// </summary>
-    internal const string BucketsFiveMinutes = "SELECT bucket, min_value, max_value, sum_value, count, last_value, last_at, last_record_id FROM metric_rollups_5m "
-                                               + "WHERE source = $source AND name = $name AND labels = $labels AND bucket >= $from AND bucket < $to ORDER BY bucket";
+    internal const string BucketsFiveMinutes = "SELECT g.step_index, g.min_value, g.max_value, g.sum_value, g.count, r.last_value, r.last_at, r.last_record_id FROM (SELECT (bucket - ((bucket % $step) + $step) % $step) / $step AS step_index, min(min_value) AS min_value, max(max_value) AS max_value, "
+                                               + "sum(sum_value) AS sum_value, sum(count) AS count, max(bucket) AS last_bucket FROM metric_rollups_5m WHERE source = $source AND name = $name AND labels = $labels AND bucket >= $from AND bucket < $to GROUP BY step_index) AS g "
+                                               + "JOIN metric_rollups_5m AS r ON r.source = $source AND r.name = $name AND r.labels = $labels AND r.bucket = g.last_bucket ORDER BY g.step_index";
 
     /// <summary>
-    /// Reads the hourly buckets of one label set in a range.
+    /// Reads the hourly buckets of one label set in a range merged into steps, as <see cref="BucketsFiveMinutes"/> does.
     /// </summary>
-    internal const string BucketsHourly = "SELECT bucket, min_value, max_value, sum_value, count, last_value, last_at, last_record_id FROM metric_rollups_1h "
-                                          + "WHERE source = $source AND name = $name AND labels = $labels AND bucket >= $from AND bucket < $to ORDER BY bucket";
+    internal const string BucketsHourly = "SELECT g.step_index, g.min_value, g.max_value, g.sum_value, g.count, r.last_value, r.last_at, r.last_record_id FROM (SELECT (bucket - ((bucket % $step) + $step) % $step) / $step AS step_index, min(min_value) AS min_value, max(max_value) AS max_value, "
+                                          + "sum(sum_value) AS sum_value, sum(count) AS count, max(bucket) AS last_bucket FROM metric_rollups_1h WHERE source = $source AND name = $name AND labels = $labels AND bucket >= $from AND bucket < $to GROUP BY step_index) AS g "
+                                          + "JOIN metric_rollups_1h AS r ON r.source = $source AND r.name = $name AND r.labels = $labels AND r.bucket = g.last_bucket ORDER BY g.step_index";
 
     /// <summary>
     /// Reads the open and final gaps of every agent that overlap a range, by their start.
@@ -590,6 +593,7 @@ internal static class TimeSeriesQueries
         buckets.Parameters.AddWithValue("$name", query.Name);
         buckets.Parameters.AddWithValue(FromParameter, from);
         buckets.Parameters.AddWithValue(ToParameter, to);
+        buckets.Parameters.AddWithValue("$step", stepNs);
 
         var labelsParameter = buckets.Parameters.Add("$labels", SqliteType.Text);
 
@@ -740,7 +744,7 @@ internal static class TimeSeriesQueries
     }
 
     /// <summary>
-    /// Reads the buckets of one label set and merges them into steps while reading.
+    /// Reads the steps of one label set.
     /// </summary>
     /// <param name="command">The bucket statement with every parameter set but the label set</param>
     /// <param name="step">The step in nanoseconds</param>
@@ -749,80 +753,27 @@ internal static class TimeSeriesQueries
     private static async Task<List<LinePoint>> ReadLabelSetAsync(SqliteCommand command, long step, CancellationToken cancellationToken)
     {
         var points = new List<LinePoint>();
-        var index = long.MinValue;
-        var merged = default((long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId));
         var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         await using var readerDisposal = reader.ConfigureAwait(false);
 
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            var bucket = (Bucket: reader.GetInt64(0), Min: reader.GetDouble(1), Max: reader.GetDouble(2), Sum: reader.GetDouble(3), Count: reader.GetInt64(4), Last: reader.GetDouble(5), LastAt: reader.GetInt64(6), LastId: reader.GetInt64(7));
-            var bucketIndex = FloorDiv(bucket.Bucket, step);
+            var count = reader.GetInt64(4);
 
-            if (bucketIndex == index)
-            {
-                merged = MergeBuckets(merged, bucket);
-
-                continue;
-            }
-
-            if (index != long.MinValue)
-            {
-                points.Add(StepPoint(StepStart(index, step), merged));
-            }
-
-            index = bucketIndex;
-            merged = bucket;
-        }
-
-        if (index != long.MinValue)
-        {
-            points.Add(StepPoint(StepStart(index, step), merged));
+            points.Add(new LinePoint
+                       {
+                           At = StorageTime.FromNanoseconds(StepStart(reader.GetInt64(0), step)),
+                           LastAt = StorageTime.FromNanoseconds(reader.GetInt64(6)),
+                           Minimum = reader.GetDouble(1),
+                           Average = ClampSum(reader.GetDouble(3)) / count,
+                           Maximum = reader.GetDouble(2),
+                           Last = reader.GetDouble(5),
+                           Count = count
+                       });
         }
 
         return points;
-    }
-
-    /// <summary>
-    /// Merges a bucket into the merged buckets of its step.
-    /// </summary>
-    /// <param name="merged">The merged buckets</param>
-    /// <param name="bucket">The bucket</param>
-    /// <returns>The merged buckets including the bucket</returns>
-    private static (long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId) MergeBuckets((long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId) merged,
-                                                                                                                                     (long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId) bucket)
-    {
-        var newer = bucket.LastAt > merged.LastAt || (bucket.LastAt == merged.LastAt && bucket.LastId > merged.LastId);
-
-        return (merged.Bucket,
-                Math.Min(merged.Min, bucket.Min),
-                Math.Max(merged.Max, bucket.Max),
-                ClampSum(merged.Sum + bucket.Sum),
-                merged.Count + bucket.Count,
-                newer ? bucket.Last : merged.Last,
-                newer ? bucket.LastAt : merged.LastAt,
-                newer ? bucket.LastId : merged.LastId);
-    }
-
-    /// <summary>
-    /// Builds the point of a step from its merged buckets.
-    /// </summary>
-    /// <param name="start">The start of the step in nanoseconds</param>
-    /// <param name="merged">The merged buckets</param>
-    /// <returns>The point</returns>
-    private static LinePoint StepPoint(long start, (long Bucket, double Min, double Max, double Sum, long Count, double Last, long LastAt, long LastId) merged)
-    {
-        return new LinePoint
-               {
-                   At = StorageTime.FromNanoseconds(start),
-                   LastAt = StorageTime.FromNanoseconds(merged.LastAt),
-                   Minimum = merged.Min,
-                   Average = ClampSum(merged.Sum) / merged.Count,
-                   Maximum = merged.Max,
-                   Last = merged.Last,
-                   Count = merged.Count
-               };
     }
 
     /// <summary>

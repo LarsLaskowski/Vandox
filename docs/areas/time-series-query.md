@@ -61,13 +61,24 @@ no HTTP route, page, option or listener belongs to it.
 - **Service restarts** ([0215](../decisions/0215-a-service-restart-is-a-rise-of-nrestarts-or-a-new-active-enter-time-of-a-running-or-failed-unit.md)):
   a `service_state` record whose `restarts` is above the unit's previous record's, or whose `active_enter_at` is later (or newly present)
   while the previous record was `active`, `activating`, `reloading`, `deactivating` or `failed`, and no boot lies between the two (the
-  records have different boot IDs, or a boot is stored between their capture times). A re-record with the same state, a start from
+  records have different boot IDs, or a boot is stored in `[previous capture time, capture time)`). A re-record with the same state, a start from
   `inactive`, a start by a boot and a falling counter are no restarts. A restart is timed at the new `active_enter_at` when it lies in the
   range and not after the record's capture time, else at the capture time. The previous record of a unit is searched among the 10,000
   most recent `service_state` records before `from`; a unit not found there has no previous record and no restart.
 - **Backup runs** that overlap the range, once per boot ID and start, as a span to `gone_by` with `last_seen_at` as the last sighting. A
-  run without an end is *running* while no later boot is stored, else its end is *unknown*; an end and a last sighting are clamped to
+  run without an end is *running* while no boot is stored in `(start, now]`, else its end is *unknown*; an end and a last sighting are clamped to
   now. Starts are read from 1 day before `from` to 1 day after the end.
+- **The boot read.** The two checks above that ask whether a boot lies in an interval (a restart by a moved enter time, a backup run
+  without an end) are answered from one read of the boots per query, not one read per check. The read starts when the first check with a
+  non-empty interval needs it: boots newest first from the query time, in pages of 1,001 keyed on capture time and ID, at most ten pages,
+  and it stops below the earliest start of the intervals asked about. A check is *undecided* only when no boot read lies in its interval
+  and the interval reaches below the oldest boot read, which happens when ten full pages did not reach the start of the interval. An
+  undecided check gives no marker (neither a restart nor a backup run without an end) and bounds the time up to which the list of markers
+  is complete at the time its marker would have had: the restart time of the record, the start of the run, never before `from`. The
+  boots are read from the query time, not from the end of the range, so that boots stored after an interval count against the ten
+  pages; a host that stores more than 10,010 boot records after the start of an interval leaves those checks undecided, and the list says
+  so by its completeness time (residual risk: boot records come from the agent, so a flood of them can hide restarts and backup runs
+  that lie before them, never invent a marker).
 - Markers are sorted by time, kind and record ID; a record stored twice gives one marker.
 
 ### Completeness
@@ -89,9 +100,10 @@ collectors are external text from the agent, returned as stored; a view shows th
   named. At most 1,000 markers and 1,000 gaps, the earliest ones, with the time up to which the list is complete. At most `2 x target - 1`
   times.
 - **Bounds of the work.** The memory of a query is bounded by these caps; its store work by the rollup buckets of its lines in the
-  range, never by the raw values in it. Event reads (gap records, kernel events, backup runs) project the named members of their rows,
+  range and the `service_state` records of the range (each read once, the service rows streamed in capture order and only the last record of
+  each unit and the changes kept), never by the raw values in it. Event reads (gap records, kernel events, backup runs) project the named members of their rows,
   never the payload or the message, in pages of at most 1,001 rows, at most ten pages per kind and query; service rows are read at most
-  2,001 plus one backward scan of at most 10,000 rows.
+  2,001 plus one backward scan of at most 10,000 rows; the boot checks of a query read at most ten pages of 1,001 boots.
 - **Errors.** A query is refused before any store read with an invalid-query error whose text names the rule:
   - `store: invalid query: at least one series is required`
   - `store: invalid query: at most 16 series`
@@ -103,8 +115,11 @@ collectors are external text from the agent, returned as stored; a view shows th
   partial result and no gate slot held. Each store read takes one slot of the views' shared read gate for that call only
   ([Web UI](web-ui.md), *Store reads of the views*).
 - **Performance.** The reference workload (a year of rollups of eight series, one of them `cpu_percent` with eight modes, at 1,000
-  points, with markers and gaps, over the database described in [Benchmarks](../BENCHMARKS.md), *Time-series query*) runs in under one
-  second, median of five runs, on the reference host.
+  points, with markers and gaps, over the database described in [Benchmarks](../BENCHMARKS.md), *Time-series query*) must run in under one
+  second, median of five runs, on the reference host. The first run on the reference host (2026-11-15) took 2,386 ms and did not meet it;
+  the service changes read in one pass and the rollup steps merged in SQL cut the development-host median from about 700 ms to about 380 ms,
+  a goal of 250 ms there was not reached, and the criterion is open until the run on the reference host after that change (Benchmarks has the
+  numbers and the breakdown).
 
 ## Related decisions
 

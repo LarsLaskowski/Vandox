@@ -56,9 +56,9 @@ public interface ITimeSeriesReader
     Task<IReadOnlyList<ServiceStateRow>> PreviousServiceStatesAsync(IReadOnlyList<string> units, DateTimeOffset before, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Reads the boots recorded in a range.
+    /// Reads the boots recorded in a range, newest first by capture time and ID; the next page starts below the last boot read (<c>To</c> is its capture time, <c>BeforeId</c> its ID).
     /// </summary>
-    /// <param name="query">The range and limit</param>
+    /// <param name="query">The range and limit; <c>AfterId</c> must be 0</param>
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the boots</returns>
     Task<IReadOnlyList<BootTime>> BootTimesAsync(TimeRangeQuery query, CancellationToken cancellationToken);

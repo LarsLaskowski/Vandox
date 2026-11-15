@@ -38,18 +38,25 @@ The reads of the time-series query ([Time-series queries](time-series-query.md))
 - **Raw values** of one series (source and name) in a range: rows ordered by capture time, labels and record ID, labels normalized as the
   fold does (none and `{}` as empty), at most 10,000 distinct times and 1,024 lines per read; the read reports whether the times
   exceeded its limit and whether lines were cut. **Rollup steps** of one series, one tier and a step: the buckets of the range merged
-  per step (minimum, maximum, sum clamped to a double, count, last by capture time and record ID), one line per label set, at most 1,024
+  per step in SQL (minimum, maximum, sum clamped to a double, count, the last value of the step's latest bucket, whose last time the fold
+  writes inside the bucket; the step index is the floor of the bucket start over the step), one line per label set, at most 1,024
   lines. The label sets are found by a loose scan of the primary key, at most 1,024 sets examined, and are ordered by the UTF-8 byte
   order of the label text, never re-sorted in the caller.
 - **Gaps in a range**: the rows of the agent timeline whose span overlaps the range and whose derived state is not `closed`, of all
   agents, ordered by start and ID.
 - **Earliest unfolded**: the earliest capture time of the metric values above the fold watermark, none when every value is folded.
 - **Service changes** in a range: for each unit its first row in the range and every row whose `restarts` differs from, or whose
-  `active_enter_at` is not the same as, its predecessor's, with the predecessor's values and both rows' boot IDs. **Previous service
-  states** of a list of units before a time: the latest row of each unit among the 10,000 most recent `service_state` records before the
-  time; the units are one bound JSON parameter and filtered after the 10,000 rows are limited.
-- **Boot times**, **gap records**, **kernel events** and **backup runs** in a range: projections of the named members of the rows
-  (never the payload or a message), ordered by capture time and ID, paged with an *after ID*.
+  `active_enter_at` is not the same as, its predecessor's, with the predecessor's values and both rows' boot IDs, in order of capture
+  time and ID, at most the limit. The records of the range are streamed once in capture order with three members each (unit, `restarts`,
+  `active_enter_at`), the last record of each unit is kept, and only the rows found and their predecessors are read in full; the read
+  stops at the limit. **Previous service states** of a list of units before a time: the latest row of each unit among the 10,000 most
+  recent `service_state` records before the time; the units are one bound JSON parameter and filtered after the 10,000 rows are limited.
+- **Boot times** in a range: the boot events **newest first** by capture time and ID, each with its record ID, paged with a *before ID*:
+  the next page reads the range from `From` to the capture time of the last boot read with its ID as `BeforeId` (`BeforeId` 0 keeps `To`
+  exclusive), and a range may end where it starts. The read refuses an *after ID* with `store: invalid query: after id is not used by boot
+  times` and a negative *before ID* with `store: invalid query: before id must not be negative`; every other range read refuses a *before
+  ID* with `store: invalid query: before id is only for boot times`. **Gap records**, **kernel events** and **backup runs** in a range:
+  projections of the named members of the rows (never the payload or a message), ordered by capture time and ID, paged with an *after ID*.
 - **Limits.** Each read refuses a limit above its own maximum with `store: invalid query: limit must be 1 to <maximum>`: 1,001 for gap
   rows and the event projections (boots, gap records, kernel events, backup runs), 2,001 for service changes; the previous-state read
   refuses more than 2,001 units. A range follows the rules of a record query. A caller reads at most ten pages of 1,001 rows per kind.
