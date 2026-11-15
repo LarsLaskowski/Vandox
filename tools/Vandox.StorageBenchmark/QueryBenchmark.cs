@@ -296,7 +296,14 @@ internal static class QueryBenchmark
         for (var run = 0; run < Runs; run++)
         {
             var watch = Stopwatch.StartNew();
-            var read = await TimeSeriesQueries.ReadServiceChangesAsync(connection, new TimeRangeQuery { From = query.From, To = query.To, Limit = TimeSeriesQueries.MaxServiceLimit }, cancellationToken).ConfigureAwait(false);
+            var read = await TimeSeriesQueries.ReadServiceChangesAsync(connection,
+                                                                       new TimeRangeQuery
+                                                                       {
+                                                                           From = query.From,
+                                                                           To = query.To,
+                                                                           Limit = TimeSeriesQueries.MaxServiceLimit
+                                                                       },
+                                                                       cancellationToken).ConfigureAwait(false);
 
             watch.Stop();
             rows = read.Count;
