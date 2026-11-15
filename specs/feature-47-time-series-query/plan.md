@@ -24,9 +24,9 @@ See [spec.md](spec.md), *Problem*.
 | 9 | `wwwroot/js/**` is excluded from coverage (record 0098) | `.squad/stack.md` | confirmed |
 | 10 | The reference workload answers in under one second on the DS918+ | Product Manager, 2026-11-15, be419c6: median 2,386 ms; development host 735 ms (factor 3.2) | refuted |
 | 11 | SQLite streams `ORDER BY captured_at, labels` over `metrics_source_name_time` with a temp B-tree only for the right part | `RawValuesAsyncQueryPlanStreamsByCaptureTime` (Tester, step 5) | confirmed |
-| 12 | Each of a query's ~20 reads opens a new connection (`Pooling = false`) | `SqliteStore.cs:266-284,346-355` | confirmed |
-| 13 | Boots are looked up once per enter-moved row (≤ 2,000) and per endless backup run (≤ 1,001), beyond N2 — a related defect | `SeriesMarkerReader.cs:186-193,225-246,350-358` | confirmed |
-| 14 | Fact 13's calls hardly occur in the benchmark (its counter rises first) | `QueryBenchmark.cs:168-179` | confirmed |
+| 12 | Each of ~20 reads opens a new connection (`Pooling = false`) | `SqliteStore.cs:266-284,346-355` | confirmed |
+| 13 | Boots are looked up per enter-moved row (≤ 2,000) and endless backup run (≤ 1,001), beyond N2: a related defect | `SeriesMarkerReader.cs:186-193,225-246,350-358` | confirmed |
+| 14 | Fact 13's calls hardly occur in the benchmark | `QueryBenchmark.cs:168-179` | confirmed |
 | 15 | Rollup reads (131,400 buckets) and the service-change window (87,600 records) dominate | to verify: breakdown, task 14, Dev | unverified |
 
 ## Tests per criterion
@@ -44,7 +44,7 @@ Store reads: `SqliteStoreTimeSeriesTests`; engine: `TimeSeriesServiceTests` (rea
 | AC4 | `ConcernsMapsCollectorToLines` (table: `self`→`agent` lines only; `filesystem`→`filesystem_*` not `mem_*`; `clock`; `system`→other `system` names; `mariadb`; `logs`/`kernel`→none; no collector and `future`→every line) | `tests/Vandox.Storage.Tests/SeriesGapTests.cs` |
 | AC4 | `GapsInRangeAsyncReturnsOverlappingOpenAndFinalOfAllAgents`, `GapsInRangeAsyncReportsDerivedTimeGapState`, `GapRecordsAsyncProjectsSpanCauseCollectorAndNumbers` | `SqliteStoreTimeSeriesTests.cs` |
 | AC5 | `QueryAsyncOomKillsOncePerIdentity`, `QueryAsyncBootsOncePerBootId`, `QueryAsyncServiceRestartRules` (table: restarts rose; enter moved from `active` and from `failed`; no enter time before, one now, from `failed`; from `inactive`; boot between by boot ID while the boot record is captured after the unit's first record; boot between by boot record; hourly re-record; restarts fell; previous record before `from`; previous record beyond the 10,000 rows examined), `QueryAsyncBootChecksReadAtMostTenBootPages` (G5, a `CountingTimeSeriesReader`; table: 2,000 enter moves under running predecessors with no counter rise; 1,001 backup runs without end; both in one query; 10,010 boots before `from` with an endless run started at `StorableTime.Min` and a predecessor years back → every check decided; 10,011 boots after a row's capture → that restart undecided, no marker, `MarkersCompleteUntil` at its restart time; results equal to the per-row check's), `QueryAsyncRestartTime` (table: new enter time in range; enter time after the query time and before `from` → capture time), `QueryAsyncBackupRunSpans` (table: ended in range; started a day before; still running; unknown end after a later boot; start written twice; `gone_by` and `last_seen_at` after the query time → clamped; `started_at` after the query time → dropped), `QueryAsyncMarkersInTimeOrder` | `TimeSeriesServiceTests.cs` |
-| AC5 | `ServiceChangesAsyncReturnsFirstPerUnitAndChangesWithPrevious` (a missing enter time against a present one is a change), `PreviousServiceStatesAsyncScansAtMostTenThousandRows` (300 new units over a long history: one call, cap respected, unfound units absent), `BootTimesAsyncReturnsOnlyBoots`, `BootTimesAsyncPagesNewestFirstByBeforeId` (G5; 1,002 boots at one capture time page on), `TimeRangeReadsRefuseForeignPagingId` (G5, the three texts), `KernelEventsAsyncProjectsFieldsWithoutMessage`, `BackupRunsAsyncProjectsFields`, `EventReadsRefuseLimitOverOneThousandOne` | `SqliteStoreTimeSeriesTests.cs` |
+| AC5 | `ServiceChangesAsyncReturnsFirstPerUnitAndChangesWithPrevious` (a missing enter time against a present one is a change), `PreviousServiceStatesAsyncScansAtMostTenThousandRows` (300 new units over a long history: one call, cap respected, unfound units absent), `BootTimesAsyncReturnsOnlyBoots`, `BootTimesAsyncPagesNewestFirstByBeforeId` (G5; 1,002 boots at one capture time), `TimeRangeReadsRefuseForeignPagingId` (G5, the three texts), `KernelEventsAsyncProjectsFieldsWithoutMessage`, `BackupRunsAsyncProjectsFields`, `EventReadsRefuseLimitOverOneThousandOne` | `SqliteStoreTimeSeriesTests.cs` |
 | AC6 | `QueryAsyncReturnsNothingAfterQueryTime`, `QueryAsyncCompleteUntilIsEarliestUnfoldedCapture` (stalled fold: values stored, no fold step), `QueryAsyncCompleteUntilIsQueryTimeWhenAllFolded`, `QueryAsyncRawHasNoCompleteUntil` | `TimeSeriesServiceTests.cs` |
 | AC6 | `EarliestUnfoldedAsyncReadsAboveWatermark` | `SqliteStoreTimeSeriesTests.cs` |
 | AC7 | `QueryAsyncOverSixtyFourLinesCutsInSeriesThenUtf8ByteOrder`, `QueryAsyncOverThousandMarkersKeepsEarliestWithCompleteUntil`, `QueryAsyncOverThousandGapsKeepsEarliestWithCompleteUntil`, `QueryAsyncFullRecordPageBoundsCompleteUntil`, `QueryAsyncEventReadsUseAtMostTenPagesOfOneThousandOne` (a `CountingTimeSeriesReader` records every limit and call) | `TimeSeriesServiceTests.cs` |
@@ -122,7 +122,7 @@ paired by (boot ID, `started_at`), duplicates dropped; a run with `started_at >=
 has no end; `EndsAt` and `LastSeenAt` are clamped to `now`; without an end, a boot of the boot read in `(start, now]` makes it `Unknown`,
 none `Running`. The boot read (G5, fact 13, Security S1), only when a check with a non-empty interval needs it: pages of 1,001 newest first
 from `now + 1 tick`, keyed on (capture time, ID), at most ten, stopping below the earliest interval start. A check is undecided only when no boot read lies in its interval and the interval reaches below the oldest boot read;
-it gives no marker and bounds `MarkersCompleteUntil` at the time its marker would have (*restart time* above, never before `from`). Errors: `store: invalid query: after id is not used by boot times`, `store: invalid query: before id is only for boot times`. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
+it gives no marker and bounds `MarkersCompleteUntil` at the time its marker would have (*restart time* above, never before `from`). Errors: `store: invalid query: after id is not used by boot times`, `… before id is only for boot times`, `… before id must not be negative`. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
 2,001st row's capture).
 
 **Completeness (AC6).** At a step, `EarliestUnfoldedAsync`: `SELECT min(captured_at) FROM metrics WHERE record_id > watermark` (primary
@@ -150,7 +150,7 @@ expectation (but those *Test files* names); the five timed AC10 runs stay as the
    prepared command reused across a series' label sets; a merge per step in SQL only if every existing test passes unchanged (sum,
    clamp, last-value tie-break), the step index in SQL only as `(bucket - $from) / $step` over rows with `bucket >= $from`, both bound,
    with a Tester case from before the epoch to near the storable maximum — else no SQL merge; a service-change statement with the same
-   rows and less work (one `json_extract` per member and row, one sort fewer, no temp-file spill by fewer or narrower sorted rows;
+   rows and less work (one `json_extract` per member and row, fewer sorts, no temp-file spill by fewer or narrower sorted rows;
    reader pragmas unchanged, held back below).
 3. Goal: development-host median ≤ 250 ms (≈ 825 ms on the DS918+). Not reached: the Dev stops and reports both
    breakdowns; the Lead decides (mode `decide`) on the held-back options.
@@ -167,8 +167,8 @@ expectation (but those *Test files* names); the five timed AC10 runs stay as the
   holds hundreds of MiB; projections keep only the marker fields.
 - *Between samples* as a sentinel number in the value columns — lost: any number can be a real value; a separate index list keeps
   `double?` columns unchanged.
-- G5, held back for a Lead decision (*Performance* 3): parallel reads (the benchmark lacks the gate), pooling or reader caches
-  (store-wide), a covering `service_state` index (ingest migration, new record, Security delta). Relaxing AC10: Product Manager.
+- G5, held back for a Lead decision (*Performance* 3): parallel reads (no gate in the benchmark), pooling or reader caches,
+  a covering `service_state` index (ingest migration, record, Security delta). Relaxing AC10: Product Manager.
 
 ## Affected projects and types
 
@@ -198,8 +198,8 @@ Vandox.Storage, store reads:
 - `ServiceStateRow`: `ServiceStateRow.Unit`, `ServiceStateRow.ActiveState` (string), `ServiceStateRow.ActiveEnterAt` (string, nullable), `ServiceStateRow.CapturedAt` (DateTimeOffset), `ServiceStateRow.Restarts` (long), `ServiceStateRow.BootId` (string, empty for none), `ServiceStateRow.Previous` (ServiceStateRow, nullable).
 - `BootTime`: `BootTime.CapturedAt` (DateTimeOffset), `BootTime.BootId` (string), `BootTime.Id` (long, G5, selected first).
 - G5: `TimeRangeQuery.BeforeId` (long, default 0; rows read are those with (capture time, ID) below (`To`, `BeforeId`), so 0 keeps `To`
-  exclusive); a negative `BeforeId` is refused (`store: invalid query: before id must not be negative`). `BootTimesAsync` keeps its signature and returns boots newest first from `[From, To)` paged by `BeforeId`, `From` not after
-  `To`; it refuses a non-zero `AfterId`, every other read a non-zero `BeforeId` (*Markers*).
+  exclusive); a negative one is refused. `BootTimesAsync` keeps its signature, returns boots newest first from `[From, To)` paged by `BeforeId`,
+  `From` not after `To`; it refuses a non-zero `AfterId`, every other read a non-zero `BeforeId` (errors: *Markers*).
 - `GapRecordRow`: `GapRecordRow.Id` (long), `GapRecordRow.AgentId`, `GapRecordRow.Cause`, `GapRecordRow.Collector`, `GapRecordRow.SpanFrom`, `GapRecordRow.SpanTo` (string, as stored), `GapRecordRow.CapturedAt` (DateTimeOffset), `GapRecordRow.FirstSeq`, `GapRecordRow.LastSeq` (long, nullable).
 - `KernelEventRow`: `KernelEventRow.Id` (long), `KernelEventRow.CapturedAt` (DateTimeOffset), `KernelEventRow.Type`, `KernelEventRow.BootId`, `KernelEventRow.VictimCommand` (string), `KernelEventRow.KernelTimeNs`, `KernelEventRow.VictimPid` (long, nullable).
 - `BackupRunRow`: `BackupRunRow.Id` (long), `BackupRunRow.CapturedAt` (DateTimeOffset), `BackupRunRow.Phase`, `BackupRunRow.BootId`, `BackupRunRow.StartedAt`, `BackupRunRow.LastSeenAt`, `BackupRunRow.GoneBy`, `BackupRunRow.Command` (string, times as stored, empty when absent).
