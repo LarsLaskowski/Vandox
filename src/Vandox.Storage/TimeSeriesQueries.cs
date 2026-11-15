@@ -88,16 +88,16 @@ internal static class TimeSeriesQueries
                                         + "WHERE gaps.to_at > $from AND gaps.from_at < $to AND gaps.state <> 'closed' ORDER BY gaps.from_at, gaps.id LIMIT $limit";
 
     /// <summary>
-    /// Reads the first service record of every unit in a range and every record whose restart counter or active enter time differs from its predecessor's.
+    /// Streams the service records of a range in order of capture time with the three members that tell a change: unit, restart counter and active enter time.
     /// </summary>
-    internal const string ServiceChanges = "WITH s AS (SELECT id, captured_at, COALESCE(boot_id, '') AS boot, CAST(json_extract(data, '$.unit') AS TEXT) AS unit, "
-                                           + "COALESCE(CAST(json_extract(data, '$.active_state') AS TEXT), '') AS state, CAST(json_extract(data, '$.active_enter_at') AS TEXT) AS enter, "
-                                           + "COALESCE(json_extract(data, '$.restarts'), 0) AS restarts FROM records "
-                                           + "WHERE kind = 'service_state' AND captured_at >= $from AND captured_at < $to AND json_extract(data, '$.unit') IS NOT NULL), "
-                                           + "l AS (SELECT id, captured_at, unit, state, enter, restarts, boot, ROW_NUMBER() OVER w AS rn, LAG(state) OVER w AS p_state, LAG(enter) OVER w AS p_enter, "
-                                           + "LAG(captured_at) OVER w AS p_at, LAG(restarts) OVER w AS p_restarts, LAG(boot) OVER w AS p_boot FROM s WINDOW w AS (PARTITION BY unit ORDER BY captured_at, id)) "
-                                           + "SELECT unit, state, enter, captured_at, restarts, boot, rn, p_state, p_enter, p_at, p_restarts, p_boot FROM l "
-                                           + "WHERE rn = 1 OR restarts <> p_restarts OR enter IS NOT p_enter ORDER BY captured_at, id LIMIT $limit";
+    internal const string ServiceStream = "SELECT id, CAST(json_extract(data, '$.unit') AS TEXT), COALESCE(json_extract(data, '$.restarts'), 0), CAST(json_extract(data, '$.active_enter_at') AS TEXT) FROM records "
+                                          + "WHERE kind = 'service_state' AND captured_at >= $from AND captured_at < $to ORDER BY captured_at, id";
+
+    /// <summary>
+    /// Reads the service records of a list of record IDs.
+    /// </summary>
+    internal const string ServiceRows = "SELECT CAST(json_extract(data, '$.unit') AS TEXT), COALESCE(CAST(json_extract(data, '$.active_state') AS TEXT), ''), CAST(json_extract(data, '$.active_enter_at') AS TEXT), "
+                                        + "captured_at, COALESCE(json_extract(data, '$.restarts'), 0), COALESCE(boot_id, ''), id FROM records WHERE kind = 'service_state' AND id IN (SELECT value FROM json_each($ids))";
 
     /// <summary>
     /// Reads the latest service record before a time of each of the units among the most recent service records.
@@ -313,29 +313,71 @@ internal static class TimeSeriesQueries
     }
 
     /// <summary>
-    /// Maps the current row of <see cref="ServiceChanges"/>, with its predecessor unless it is the first row of its unit.
+    /// Reads the first service record of every unit in a range and every record whose restart counter or active enter time differs from its predecessor's, in order of capture time.
+    /// The records are streamed in order of capture time once, the last one of each unit is kept, and only the rows found are read in full, with their predecessors.
     /// </summary>
-    /// <param name="reader">The reader</param>
-    /// <returns>The row</returns>
-    internal static ServiceStateRow ReadServiceChange(SqliteDataReader reader)
+    /// <param name="connection">The leased reader connection</param>
+    /// <param name="query">The validated query</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the rows, at most the limit</returns>
+    internal static async Task<IReadOnlyList<ServiceStateRow>> ReadServiceChangesAsync(SqliteConnection connection, TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        var unit = reader.GetString(0);
-        ServiceStateRow? previous = null;
+        var found = new List<(long Id, long PreviousId)>();
+        var last = new Dictionary<string, (long Id, long Restarts, string? Enter)>(StringComparer.Ordinal);
 
-        if (reader.GetInt64(6) != 1)
+        using (var command = connection.CreateCommand())
         {
-            previous = new ServiceStateRow
-                       {
-                           Unit = unit,
-                           ActiveState = reader.GetString(7),
-                           ActiveEnterAt = reader.IsDBNull(8) ? null : reader.GetString(8),
-                           CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(9)),
-                           Restarts = reader.GetInt64(10),
-                           BootId = reader.GetString(11)
-                       };
+            command.CommandText = ServiceStream;
+            command.Parameters.AddWithValue(FromParameter, StorageTime.ToNanoseconds(query.From));
+            command.Parameters.AddWithValue(ToParameter, StorageTime.ToNanoseconds(query.To));
+
+            var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            await using var readerDisposal = reader.ConfigureAwait(false);
+
+            while (found.Count < query.Limit && await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (reader.IsDBNull(1))
+                {
+                    continue;
+                }
+
+                var unit = reader.GetString(1);
+                var id = reader.GetInt64(0);
+                var restarts = reader.GetInt64(2);
+                var enter = reader.IsDBNull(3) ? null : reader.GetString(3);
+
+                if (last.TryGetValue(unit, out var before) == false)
+                {
+                    found.Add((id, 0));
+                }
+                else if (before.Restarts != restarts || string.Equals(before.Enter, enter, StringComparison.Ordinal) == false)
+                {
+                    found.Add((id, before.Id));
+                }
+
+                last[unit] = (id, restarts, enter);
+            }
         }
 
-        return ReadServiceState(reader, previous);
+        if (found.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = found.Select(item => item.Id).Concat(found.Where(item => item.PreviousId != 0).Select(item => item.PreviousId)).Distinct().ToList();
+        var rows = await ReaderQuery.ReadAsync(connection,
+                                               ServiceRows,
+                                               new Dictionary<string, object>
+                                               {
+                                                   ["$ids"] = JsonSerializer.Serialize(ids)
+                                               },
+                                               reader => (Id: reader.GetInt64(6), Row: ReadServiceState(reader, null)),
+                                               Context,
+                                               cancellationToken).ConfigureAwait(false);
+        var byId = rows.ToDictionary(item => item.Id, item => item.Row);
+
+        return found.Where(item => byId.ContainsKey(item.Id)).Select(item => WithPrevious(byId[item.Id], item.PreviousId != 0 ? byId.GetValueOrDefault(item.PreviousId) : null)).ToList();
     }
 
     /// <summary>
@@ -590,6 +632,26 @@ internal static class TimeSeriesQueries
         RecordQueries.Require(string.IsNullOrEmpty(source) == false && string.IsNullOrEmpty(name) == false, "source and name are required");
         RecordQueries.Require(StorageTime.InStorableRange(from) && StorageTime.InStorableRange(to), "from and to must be within the storable range");
         RecordQueries.Require(from < to, "from must be before to");
+    }
+
+    /// <summary>
+    /// Returns a service row with its predecessor.
+    /// </summary>
+    /// <param name="row">The row</param>
+    /// <param name="previous">The predecessor, or <c>null</c></param>
+    /// <returns>A copy of the row that holds the predecessor</returns>
+    private static ServiceStateRow WithPrevious(ServiceStateRow row, ServiceStateRow? previous)
+    {
+        return new ServiceStateRow
+               {
+                   Unit = row.Unit,
+                   ActiveState = row.ActiveState,
+                   ActiveEnterAt = row.ActiveEnterAt,
+                   CapturedAt = row.CapturedAt,
+                   Restarts = row.Restarts,
+                   BootId = row.BootId,
+                   Previous = previous
+               };
     }
 
     /// <summary>

@@ -1252,7 +1252,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxServiceLimit);
 
-        return QueryAsync(TimeSeriesQueries.ServiceChanges, TimeSeriesQueries.WindowParameters(query), TimeSeriesQueries.ReadServiceChange, TimeSeriesQueries.Context, cancellationToken);
+        return ReadAsync(connection => TimeSeriesQueries.ReadServiceChangesAsync(connection, query, cancellationToken), TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>

@@ -29,8 +29,8 @@ internal static class SeriesMarkerReader
         var restarts = await ReadRestartsAsync(reader, range, items, cancellationToken).ConfigureAwait(false);
         var backups = await ReadBackupsAsync(reader, range, items, cancellationToken).ConfigureAwait(false);
         var intervals = restarts.Checks.Select(check => (check.Before.CapturedAt, check.Row.CapturedAt))
-                                .Concat(backups.Checks.Select(check => (SeriesTime.Add(check.Start, TimeSpan.FromTicks(1)), SeriesTime.Add(range.Now, TimeSpan.FromTicks(1)))))
-                                .ToList();
+                                       .Concat(backups.Checks.Select(check => (SeriesTime.Add(check.Start, TimeSpan.FromTicks(1)), SeriesTime.Add(range.Now, TimeSpan.FromTicks(1)))))
+                                       .ToList();
         var boots = await SeriesBootIndex.ReadAsync(reader, intervals, cancellationToken).ConfigureAwait(false);
 
         bound = SeriesTime.Earlier(bound, restarts.Bound);
