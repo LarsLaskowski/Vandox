@@ -1934,8 +1934,50 @@ public class TimeSeriesServiceTests
         // Assert
         Assert.HasCount(TimeSeriesService.MaxMarkers, result.Markers, "the markers are cut at the cap");
         Assert.AreEqual(At(1).AddSeconds(999), result.Markers[^1].At, "the earliest runs are kept");
-        Assert.AreEqual(1001, reader.CountOf(nameof(ITimeSeriesReader.BootTimesAsync)), "one boot look-up for each of the 1,001 runs processed");
+        Assert.IsGreaterThan(0, reader.CountOf(nameof(ITimeSeriesReader.BootTimesAsync)), "the runs without an end need the boot read");
+        Assert.IsLessThanOrEqualTo(10, reader.CountOf(nameof(ITimeSeriesReader.BootTimesAsync)), "one boot read of at most ten pages for the 1,001 runs processed, not one look-up for each");
         Assert.AreEqual(At(1).AddSeconds(10009).AddDays(-1), result.MarkersCompleteUntil, "ten pages of 1,001 records were read, less the one-day window");
+    }
+
+    /// <summary>
+    /// The restart and backup checks read the boots once in at most ten pages of 1,001 newest first, not once per row: 2,000 enter moves, 1,001 backup runs without an end, both together,
+    /// and 10,010 boots before the range decide every check, while 10,011 boots after a restart leave that restart undecided without a marker and bound the list at its time.
+    /// </summary>
+    /// <param name="scenario">The scenario</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [TestCategory("AC7")]
+    [DataRow("EnterMoves")]
+    [DataRow("BackupRuns")]
+    [DataRow("Both")]
+    [DataRow("BootsBeforeFrom")]
+    [DataRow("BootsAfterRow")]
+    public async Task QueryAsyncBootChecksReadAtMostTenBootPages(string scenario)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var reader = new CountingTimeSeriesReader(store);
+
+        await WriteSamplesAsync(store, _mem, At(0), TimeSpan.FromSeconds(30), 1);
+
+        var expected = await ArrangeBootChecksAsync(directory.Path, store, scenario);
+
+        // Act
+        var result = await RunAsync(reader, At(12), At(0), scenario == "BootsAfterRow" ? At(1.5) : At(10), 1000, null, _mem);
+
+        // Assert
+        var bootReads = reader.CountOf(nameof(ITimeSeriesReader.BootTimesAsync));
+        var runs = result.Markers.Where(marker => marker.Kind == MarkerKind.BackupRun).ToList();
+
+        Assert.IsGreaterThan(0, bootReads, "the checks need the boot read");
+        Assert.IsLessThanOrEqualTo(10, bootReads, "at most ten boot pages are read for all checks of the query");
+        Assert.IsTrue(reader.LimitsOf(nameof(ITimeSeriesReader.BootTimesAsync)).All(limit => limit == 1001), "every boot page asks for 1,001 boots");
+        Assert.AreSequenceEqual(expected.Restarts, result.Markers.Where(marker => marker.Kind == MarkerKind.ServiceRestart).Select(marker => marker.Text).ToList(), "the restarts are those without a boot between the two records, as the per-row check finds them");
+        Assert.IsGreaterThanOrEqualTo(expected.MinimumRuns, runs.Count, "the backup runs are kept");
+        Assert.AreEqual(0, runs.Count(marker => marker.End != (marker.At < expected.LastBoot ? BackupRunEnd.Unknown : BackupRunEnd.Running)), "a run without an end is unknown when a boot follows its start, else running");
+        Assert.IsTrue(expected.CheckComplete == false || result.MarkersCompleteUntil == expected.CompleteUntil, $"the list is complete up to {expected.CompleteUntil}, found {result.MarkersCompleteUntil}");
     }
 
     /// <summary>
@@ -1959,6 +2001,29 @@ public class TimeSeriesServiceTests
         Assert.HasCount(TimeSeriesService.MaxLines, result.Lines, "the lines are cut at the cap");
         Assert.AreEqual("{\"set\":\"0063\"}", result.Lines[^1].Labels, "the first 64 label sets in byte order are kept");
         Assert.AreSequenceEqual(["load"], result.CutSeries.Select(key => key.Name).ToList(), "the series that lost lines");
+    }
+
+    /// <summary>
+    /// Names the units of the 2,000 enter moves of <c>ArrangeEnterMovesAsync</c> that were restarted: those with no boot between their two records, up to the cap of the marker list.
+    /// </summary>
+    /// <param name="boots">The capture times of the boots</param>
+    /// <returns>The unit names in order of their enter time</returns>
+    private static List<string> RestartsWithoutBoot(DateTimeOffset[] boots)
+    {
+        var restarts = new List<string>();
+
+        for (var index = 0; index < 2000; index++)
+        {
+            var predecessor = index % 2 == 0 ? At(-3) : At(-0.5);
+            var row = At(1).AddSeconds(index);
+
+            if (boots.Any(boot => boot >= predecessor && boot < row) == false)
+            {
+                restarts.Add($"unit-{index:0000}.service");
+            }
+        }
+
+        return restarts.Take(TimeSeriesService.MaxMarkers).ToList();
     }
 
     /// <summary>
@@ -2231,6 +2296,74 @@ public class TimeSeriesServiceTests
                                       Target = target
                                   },
                                   TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Writes the records of a boot check scenario and tells what the query must find.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="store">The store</param>
+    /// <param name="scenario">The scenario</param>
+    /// <returns>The restarts in order, the time of the last boot, the fewest backup markers, whether the list must be complete up to a time, and that time</returns>
+    private async Task<(IReadOnlyList<string> Restarts, DateTimeOffset LastBoot, int MinimumRuns, bool CheckComplete, DateTimeOffset? CompleteUntil)> ArrangeBootChecksAsync(string directory, SqliteStore store, string scenario)
+    {
+        var lateBoot = At(1).AddMilliseconds(500500);
+
+        switch (scenario)
+        {
+            case "EnterMoves":
+                await ArrangeEnterMovesAsync(directory, store, [At(-1)]);
+
+                return (RestartsWithoutBoot([At(-1)]), default, 0, false, null);
+
+            case "BackupRuns":
+                await TimeSeriesSamples.InsertBackupStartsAsync(directory, At(1), 1001, TestContext.CancellationToken);
+                await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, TimeSeriesSamples.Boot(lateBoot, SecondBoot));
+
+                return ([], lateBoot, 990, false, null);
+
+            case "Both":
+                await ArrangeEnterMovesAsync(directory, store, [At(-1), lateBoot]);
+                await TimeSeriesSamples.InsertBackupStartsAsync(directory, At(1), 1001, TestContext.CancellationToken);
+
+                return (RestartsWithoutBoot([At(-1), lateBoot]), lateBoot, 700, false, null);
+
+            case "BootsBeforeFrom":
+                await TimeSeriesSamples.WriteAsync(store,
+                                                   string.Empty,
+                                                   FirstBoot,
+                                                   TestContext.CancellationToken,
+                                                   TimeSeriesSamples.Service(Unit, "active", At(-26281), 0, At(-26280)),
+                                                   TimeSeriesSamples.Service(Unit, "active", At(0.5), 0, At(1)),
+                                                   TimeSeriesSamples.BackupStart(At(1), FirstBoot, StorableTime.Min, "pzstd"));
+                await TimeSeriesSamples.InsertBootsAsync(directory, At(-200), 10010, TimeSpan.FromSeconds(1), TestContext.CancellationToken);
+
+                return ([], At(-200).AddSeconds(10009), 1, true, null);
+
+            default:
+                await TimeSeriesSamples.WriteAsync(store,
+                                                   string.Empty,
+                                                   FirstBoot,
+                                                   TestContext.CancellationToken,
+                                                   TimeSeriesSamples.Service(Unit, "active", At(-2), 0, At(-1)),
+                                                   TimeSeriesSamples.Service(Unit, "active", At(0.5), 0, At(1)));
+                await TimeSeriesSamples.InsertBootsAsync(directory, At(2), 10011, TimeSpan.FromSeconds(1), TestContext.CancellationToken);
+
+                return ([], default, 0, true, At(0.5));
+        }
+    }
+
+    /// <summary>
+    /// Writes 2,000 units whose enter time moved: the even ones after a predecessor three hours before the range, the odd ones after one at half an hour before it, and the given boots.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="store">The store</param>
+    /// <param name="boots">The capture times of the boots</param>
+    /// <returns>A task that completes when the records are stored</returns>
+    private async Task ArrangeEnterMovesAsync(string directory, SqliteStore store, DateTimeOffset[] boots)
+    {
+        await TimeSeriesSamples.InsertServiceMovesAsync(directory, 2000, At(-3), At(-0.5), At(1), At(0.5), TestContext.CancellationToken);
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, [.. boots.Select(boot => TimeSeriesSamples.Boot(boot, SecondBoot))]);
     }
 
     /// <summary>

@@ -229,15 +229,17 @@ internal static class TimeSeriesSamples
     /// <param name="to">The end of the range</param>
     /// <param name="limit">The limit</param>
     /// <param name="afterId">The ID after which rows at the start time are returned</param>
+    /// <param name="beforeId">The ID before which rows at the end time are returned, for the boot read</param>
     /// <returns>The query</returns>
-    internal static TimeRangeQuery Range(DateTimeOffset from, DateTimeOffset to, int limit = EventLimit, long afterId = 0)
+    internal static TimeRangeQuery Range(DateTimeOffset from, DateTimeOffset to, int limit = EventLimit, long afterId = 0, long beforeId = 0)
     {
         return new TimeRangeQuery
                {
                    From = from,
                    To = to,
                    Limit = limit,
-                   AfterId = afterId
+                   AfterId = afterId,
+                   BeforeId = beforeId
                };
     }
 
@@ -538,6 +540,71 @@ internal static class TimeSeriesSamples
 #pragma warning restore CA2100
         command.Parameters.AddWithValue("$count", count);
         command.Parameters.AddWithValue("$first", StorageTime.ToNanoseconds(first));
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts boot events directly, one per spacing from the first one, with the boot IDs <c>00000000-0000-0000-0000-000000000000</c> upward in the first group.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="first">The capture time of the first boot</param>
+    /// <param name="count">The number of boots</param>
+    /// <param name="spacing">The distance of two boots, zero for one capture time</param>
+    /// <param name="cancellationToken">Cancels the statement</param>
+    /// <returns>A task that completes when the records are stored</returns>
+    internal static async Task InsertBootsAsync(string directory, DateTimeOffset first, int count, TimeSpan spacing, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statement is a test-owned literal
+        command.CommandText = "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < $count) "
+                              + "INSERT INTO records(kind, origin, source, captured_at, received_at, data) "
+                              + "SELECT 'kernel_event', 'backend', 'kernel', $first + i * $spacing, $first + i * $spacing, "
+                              + "json_object('type', 'boot', 'boot', json_object('boot_id', printf('%08x-0000-0000-0000-000000000000', i))) FROM n";
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("$count", count);
+        command.Parameters.AddWithValue("$first", StorageTime.ToNanoseconds(first));
+        command.Parameters.AddWithValue("$spacing", spacing.Ticks * 100);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts pairs of service records directly: per unit one earlier record and one later record whose enter time moved, with the restart counter unchanged and no boot ID.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="count">The number of units, named <c>unit-0000.service</c> upward</param>
+    /// <param name="evenPredecessor">The capture time of the earlier record of the even units</param>
+    /// <param name="oddPredecessor">The capture time of the earlier record of the odd units</param>
+    /// <param name="firstRow">The capture time of the later record of the first unit, a second more for each next one</param>
+    /// <param name="firstEnter">The new enter time of the first unit, a second more for each next one</param>
+    /// <param name="cancellationToken">Cancels the statement</param>
+    /// <returns>A task that completes when the records are stored</returns>
+    internal static async Task InsertServiceMovesAsync(string directory, int count, DateTimeOffset evenPredecessor, DateTimeOffset oddPredecessor, DateTimeOffset firstRow, DateTimeOffset firstEnter, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection($"Data Source={RetentionSamples.DatabasePath(directory)};Pooling=False");
+
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // the statement is a test-owned literal
+        command.CommandText = "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < $count) "
+                              + "INSERT INTO records(kind, origin, source, captured_at, received_at, data) "
+                              + "SELECT 'service_state', 'backend', 'services', at, at, json_object('unit', printf('unit-%04d.service', i), 'load_state', 'loaded', 'active_state', 'active', 'sub_state', 'running', 'restarts', 0, 'active_enter_at', enter) "
+                              + "FROM (SELECT i, CASE WHEN i % 2 = 0 THEN $even ELSE $odd END AS at, strftime('%Y-%m-%dT%H:%M:%SZ', (CASE WHEN i % 2 = 0 THEN $even ELSE $odd END) / 1000000000 - 3600) AS enter FROM n "
+                              + "UNION ALL SELECT i, $row + i * 1000000000, strftime('%Y-%m-%dT%H:%M:%SZ', $enter / 1000000000 + i) FROM n)";
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("$count", count);
+        command.Parameters.AddWithValue("$even", StorageTime.ToNanoseconds(evenPredecessor));
+        command.Parameters.AddWithValue("$odd", StorageTime.ToNanoseconds(oddPredecessor));
+        command.Parameters.AddWithValue("$row", StorageTime.ToNanoseconds(firstRow));
+        command.Parameters.AddWithValue("$enter", StorageTime.ToNanoseconds(firstEnter));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
