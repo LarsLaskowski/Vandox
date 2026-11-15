@@ -122,8 +122,7 @@ paired by (boot ID, `started_at`), duplicates dropped; a run with `started_at >=
 has no end; `EndsAt` and `LastSeenAt` are clamped to `now`; without an end, a boot of the boot read in `(start, now]` makes it `Unknown`,
 none `Running`. The boot read (G5, fact 13, Security S1), only when a check with a non-empty interval needs it: pages of 1,001 newest first
 from `now + 1 tick`, keyed on (capture time, ID), at most ten, stopping below the earliest interval start. A check is undecided only when no boot read lies in its interval and the interval reaches below the oldest boot read;
-it gives no marker and bounds `MarkersCompleteUntil` at `max(from, its row's capture or run's start)`. Old boots cannot crowd out recent checks.
-Errors: `store: invalid query: after id is not used by boot times`, `store: invalid query: before id is only for boot times`. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
+it gives no marker and bounds `MarkersCompleteUntil` at `max(from, its row's capture or run's start)`. Errors: `store: invalid query: after id is not used by boot times`, `store: invalid query: before id is only for boot times`. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
 2,001st row's capture).
 
 **Completeness (AC6).** At a step, `EarliestUnfoldedAsync`: `SELECT min(captured_at) FROM metrics WHERE record_id > watermark` (primary
@@ -200,7 +199,7 @@ Vandox.Storage, store reads:
 - `BootTime`: `BootTime.CapturedAt` (DateTimeOffset), `BootTime.BootId` (string), `BootTime.Id` (long, G5, selected first).
 - G5: `TimeRangeQuery.BeforeId` (long, default 0; rows read are those with (capture time, ID) below (`To`, `BeforeId`), so 0 keeps `To`
   exclusive). `BootTimesAsync` keeps its signature and returns boots newest first from `[From, To)` paged by `BeforeId`, `From` not after
-  `To`; it refuses a non-zero `AfterId`, every other read a non-zero `BeforeId` (texts: *Markers*).
+  `To`; it refuses a non-zero `AfterId`, every other read a non-zero `BeforeId` (*Markers*).
 - `GapRecordRow`: `GapRecordRow.Id` (long), `GapRecordRow.AgentId`, `GapRecordRow.Cause`, `GapRecordRow.Collector`, `GapRecordRow.SpanFrom`, `GapRecordRow.SpanTo` (string, as stored), `GapRecordRow.CapturedAt` (DateTimeOffset), `GapRecordRow.FirstSeq`, `GapRecordRow.LastSeq` (long, nullable).
 - `KernelEventRow`: `KernelEventRow.Id` (long), `KernelEventRow.CapturedAt` (DateTimeOffset), `KernelEventRow.Type`, `KernelEventRow.BootId`, `KernelEventRow.VictimCommand` (string), `KernelEventRow.KernelTimeNs`, `KernelEventRow.VictimPid` (long, nullable).
 - `BackupRunRow`: `BackupRunRow.Id` (long), `BackupRunRow.CapturedAt` (DateTimeOffset), `BackupRunRow.Phase`, `BackupRunRow.BootId`, `BackupRunRow.StartedAt`, `BackupRunRow.LastSeenAt`, `BackupRunRow.GoneBy`, `BackupRunRow.Command` (string, times as stored, empty when absent).
