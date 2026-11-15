@@ -35,10 +35,10 @@ The schema and the step are in [Storage](../areas/storage.md).
 
 ## Consequences
 
-- Each stored `service_state` record costs one index entry (about 100 bytes) and one parse at write time; other records cost only the
+- Each stored `service_state` record costs one index entry (about 100 bytes, at most about the size of its payload) and one parse at write time; other records cost only the
   check of `kind`.
 - The upgrade to step 15 scans the `records` table once to build the index; the writer is busy for that time, and agents keep their
   records in the spool. The build time on the benchmark database is in `BENCHMARKS.md`.
-- A payload that is not valid JSON would make its insert fail; payloads are only written by the backend's serializer.
+- A `service_state` payload that is not valid JSON would make its insert fail, and the upgrade to step 15 (`store: migration 15: malformed JSON`, the step rolled back, version 14 kept); payloads are only written by the backend's serializer (`BatchWriter` through `PayloadJson`), so neither occurs.
 - The restart rule (record 0215) is unchanged; if it ever reads another member, the index gains it in a new step, or the read loses
   its speed.
