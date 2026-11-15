@@ -1271,9 +1271,9 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <inheritdoc/>
     public Task<IReadOnlyList<BootTime>> BootTimesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+        TimeSeriesQueries.ValidateBoots(query);
 
-        return QueryAsync(TimeSeriesQueries.BootTimes, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadBoot, TimeSeriesQueries.Context, cancellationToken);
+        return QueryAsync(TimeSeriesQueries.BootTimes, TimeSeriesQueries.BootParameters(query), TimeSeriesQueries.ReadBoot, TimeSeriesQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>

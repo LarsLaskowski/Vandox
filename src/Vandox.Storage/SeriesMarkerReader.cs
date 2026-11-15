@@ -26,9 +26,17 @@ internal static class SeriesMarkerReader
     {
         var items = new List<(SeriesMarker Marker, long Id)>();
         var bound = await AddKernelAsync(reader, range, items, cancellationToken).ConfigureAwait(false);
+        var restarts = await ReadRestartsAsync(reader, range, items, cancellationToken).ConfigureAwait(false);
+        var backups = await ReadBackupsAsync(reader, range, items, cancellationToken).ConfigureAwait(false);
+        var intervals = restarts.Checks.Select(check => (check.Before.CapturedAt, check.Row.CapturedAt))
+                                .Concat(backups.Checks.Select(check => (SeriesTime.Add(check.Start, TimeSpan.FromTicks(1)), SeriesTime.Add(range.Now, TimeSpan.FromTicks(1)))))
+                                .ToList();
+        var boots = await SeriesBootIndex.ReadAsync(reader, intervals, cancellationToken).ConfigureAwait(false);
 
-        bound = SeriesTime.Earlier(bound, await AddRestartsAsync(reader, range, items, cancellationToken).ConfigureAwait(false));
-        bound = SeriesTime.Earlier(bound, await AddBackupsAsync(reader, range, items, cancellationToken).ConfigureAwait(false));
+        bound = SeriesTime.Earlier(bound, restarts.Bound);
+        bound = SeriesTime.Earlier(bound, backups.Bound);
+        bound = SeriesTime.Earlier(bound, DecideRestarts(restarts.Checks, boots, range, items));
+        bound = SeriesTime.Earlier(bound, DecideBackups(backups.Checks, boots, range, items));
 
         var sorted = items.OrderBy(item => item.Marker.At).ThenBy(item => item.Marker.Kind).ThenBy(item => item.Id).Select(item => item.Marker).ToList();
 
@@ -118,14 +126,14 @@ internal static class SeriesMarkerReader
     }
 
     /// <summary>
-    /// Adds the service restarts of the range.
+    /// Adds the service restarts that need no boot read and lists the checks that do.
     /// </summary>
     /// <param name="reader">The store reads</param>
     /// <param name="range">The range</param>
     /// <param name="items">The markers; the new ones are added</param>
     /// <param name="cancellationToken">Cancels the reads</param>
-    /// <returns>A task that returns the time up to which the restarts are complete, or <c>null</c></returns>
-    private static async Task<DateTimeOffset?> AddRestartsAsync(ITimeSeriesReader reader, SeriesRange range, List<(SeriesMarker Marker, long Id)> items, CancellationToken cancellationToken)
+    /// <returns>A task that returns the time up to which the restarts are complete, or <c>null</c>, and the records whose restart depends on the boots</returns>
+    private static async Task<(DateTimeOffset? Bound, List<(ServiceStateRow Row, ServiceStateRow Before)> Checks)> ReadRestartsAsync(ITimeSeriesReader reader, SeriesRange range, List<(SeriesMarker Marker, long Id)> items, CancellationToken cancellationToken)
     {
         var read = await reader.ServiceChangesAsync(new TimeRangeQuery
                                                     {
@@ -137,6 +145,7 @@ internal static class SeriesMarkerReader
         var full = read.Count >= TimeSeriesQueries.MaxServiceLimit;
         var rows = read.Take(TimeSeriesQueries.MaxServiceLimit - 1).ToList();
         DateTimeOffset? bound = full ? read[TimeSeriesQueries.MaxServiceLimit - 1].CapturedAt : null;
+        var checks = new List<(ServiceStateRow Row, ServiceStateRow Before)>();
 
         var previous = await PreviousAsync(reader, rows, range.From, cancellationToken).ConfigureAwait(false);
 
@@ -144,7 +153,52 @@ internal static class SeriesMarkerReader
         {
             var before = row.Previous ?? previous.GetValueOrDefault(row.Unit);
 
-            if (before is not null && await IsRestartAsync(reader, row, before, cancellationToken).ConfigureAwait(false))
+            if (before is null)
+            {
+                continue;
+            }
+
+            if (row.Restarts > before.Restarts)
+            {
+                items.Add((RestartMarker(row, before, range), 0));
+            }
+            else if (EnterMoved(row, before) is not null && _runningStates.Contains(before.ActiveState) && BootIdsAgree(row, before))
+            {
+                if (row.CapturedAt <= before.CapturedAt)
+                {
+                    items.Add((RestartMarker(row, before, range), 0));
+                }
+                else
+                {
+                    checks.Add((row, before));
+                }
+            }
+        }
+
+        return (bound, checks);
+    }
+
+    /// <summary>
+    /// Adds the restarts whose boot check the boot read decides.
+    /// </summary>
+    /// <param name="checks">The records whose restart depends on the boots</param>
+    /// <param name="boots">The boots read</param>
+    /// <param name="range">The range</param>
+    /// <param name="items">The markers; the new ones are added</param>
+    /// <returns>The time its markers would have of the earliest undecided check, never before the range, or <c>null</c> when every check is decided</returns>
+    private static DateTimeOffset? DecideRestarts(List<(ServiceStateRow Row, ServiceStateRow Before)> checks, SeriesBootIndex boots, SeriesRange range, List<(SeriesMarker Marker, long Id)> items)
+    {
+        DateTimeOffset? bound = null;
+
+        foreach (var (row, before) in checks)
+        {
+            var between = boots.Contains(before.CapturedAt, row.CapturedAt);
+
+            if (between is null)
+            {
+                bound = SeriesTime.Earlier(bound, RestartMarker(row, before, range).At);
+            }
+            else if (between == false)
             {
                 items.Add((RestartMarker(row, before, range), 0));
             }
@@ -176,24 +230,6 @@ internal static class SeriesMarkerReader
     }
 
     /// <summary>
-    /// Tells whether a service record is a restart: its counter rose, or its enter time moved while the unit ran or had failed and no boot lies between.
-    /// </summary>
-    /// <param name="reader">The store reads</param>
-    /// <param name="row">The record</param>
-    /// <param name="before">The unit's previous record</param>
-    /// <param name="cancellationToken">Cancels the read</param>
-    /// <returns>A task that returns <c>true</c> for a restart</returns>
-    private static async Task<bool> IsRestartAsync(ITimeSeriesReader reader, ServiceStateRow row, ServiceStateRow before, CancellationToken cancellationToken)
-    {
-        if (row.Restarts > before.Restarts)
-        {
-            return true;
-        }
-
-        return EnterMoved(row, before) is not null && _runningStates.Contains(before.ActiveState) && await NoBootBetweenAsync(reader, row, before, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// Returns the new enter time of a record when it is later than, or newly present against, its predecessor's.
     /// </summary>
     /// <param name="row">The record</param>
@@ -215,34 +251,14 @@ internal static class SeriesMarkerReader
     }
 
     /// <summary>
-    /// Tells whether no boot lies between two service records: their boot IDs agree and no boot record is stored between them.
+    /// Tells whether the boot IDs of two service records leave room for a restart: they agree or one is missing.
     /// </summary>
-    /// <param name="reader">The store reads</param>
     /// <param name="row">The record</param>
     /// <param name="before">The predecessor</param>
-    /// <param name="cancellationToken">Cancels the read</param>
-    /// <returns>A task that returns <c>true</c> when no boot lies between</returns>
-    private static async Task<bool> NoBootBetweenAsync(ITimeSeriesReader reader, ServiceStateRow row, ServiceStateRow before, CancellationToken cancellationToken)
+    /// <returns><c>false</c> when the records carry different boot IDs, which is a boot between them</returns>
+    private static bool BootIdsAgree(ServiceStateRow row, ServiceStateRow before)
     {
-        if (row.BootId.Length > 0 && before.BootId.Length > 0 && row.BootId != before.BootId)
-        {
-            return false;
-        }
-
-        if (row.CapturedAt <= before.CapturedAt)
-        {
-            return true;
-        }
-
-        var boots = await reader.BootTimesAsync(new TimeRangeQuery
-                                                {
-                                                    From = before.CapturedAt,
-                                                    To = row.CapturedAt,
-                                                    Limit = 1
-                                                },
-                                                cancellationToken).ConfigureAwait(false);
-
-        return boots.Count == 0;
+        return row.BootId.Length == 0 || before.BootId.Length == 0 || row.BootId == before.BootId;
     }
 
     /// <summary>
@@ -272,14 +288,14 @@ internal static class SeriesMarkerReader
     }
 
     /// <summary>
-    /// Adds the backup runs that overlap the range.
+    /// Adds the backup runs that overlap the range and have an end, and lists the runs without one.
     /// </summary>
     /// <param name="reader">The store reads</param>
     /// <param name="range">The range</param>
     /// <param name="items">The markers; the new ones are added</param>
     /// <param name="cancellationToken">Cancels the reads</param>
-    /// <returns>A task that returns the time up to which the backup runs are complete, or <c>null</c></returns>
-    private static async Task<DateTimeOffset?> AddBackupsAsync(ITimeSeriesReader reader, SeriesRange range, List<(SeriesMarker Marker, long Id)> items, CancellationToken cancellationToken)
+    /// <returns>A task that returns the time up to which the backup runs are complete, or <c>null</c>, and the runs whose state depends on the boots</returns>
+    private static async Task<(DateTimeOffset? Bound, List<(List<BackupRunRow> Records, DateTimeOffset Start)> Checks)> ReadBackupsAsync(ITimeSeriesReader reader, SeriesRange range, List<(SeriesMarker Marker, long Id)> items, CancellationToken cancellationToken)
     {
         var read = await EventPages.ReadAsync(query => reader.BackupRunsAsync(query, cancellationToken),
                                               SeriesTime.Add(range.From, TimeSpan.FromDays(-1)),
@@ -293,18 +309,61 @@ internal static class SeriesMarkerReader
                             .OrderBy(group => ParsedStart(group[0]))
                             .Take(TimeSeriesService.MaxMarkers + 1)
                             .ToList();
+        var checks = new List<(List<BackupRunRow> Records, DateTimeOffset Start)>();
 
         foreach (var run in runs)
         {
-            var marker = await BackupMarkerAsync(reader, range, run, cancellationToken).ConfigureAwait(false);
+            var start = ParsedStart(run[0]);
+
+            if (start >= range.End)
+            {
+                continue;
+            }
+
+            var marker = BackupMarker(range, run, start);
 
             if (marker is not null)
             {
                 items.Add((marker, run[0].Id));
             }
+            else if (run.Any(row => row.Phase == BackupRun.PhaseEnd && ParsedGone(row) is not null) == false)
+            {
+                checks.Add((run, start));
+            }
         }
 
-        return read.RanOutAt is null ? null : SeriesTime.Add(read.RanOutAt.Value, TimeSpan.FromDays(-1));
+        return (read.RanOutAt is null ? null : SeriesTime.Add(read.RanOutAt.Value, TimeSpan.FromDays(-1)), checks);
+    }
+
+    /// <summary>
+    /// Adds the backup runs without an end whose state the boot read decides: unknown when a boot follows the start, else running.
+    /// </summary>
+    /// <param name="checks">The runs without an end</param>
+    /// <param name="boots">The boots read</param>
+    /// <param name="range">The range</param>
+    /// <param name="items">The markers; the new ones are added</param>
+    /// <returns>The time of the earliest undecided run, never before the range, or <c>null</c> when every run is decided</returns>
+    private static DateTimeOffset? DecideBackups(List<(List<BackupRunRow> Records, DateTimeOffset Start)> checks, SeriesBootIndex boots, SeriesRange range, List<(SeriesMarker Marker, long Id)> items)
+    {
+        DateTimeOffset? bound = null;
+
+        foreach (var (records, start) in checks)
+        {
+            var followed = boots.Contains(SeriesTime.Add(start, TimeSpan.FromTicks(1)), SeriesTime.Add(range.Now, TimeSpan.FromTicks(1)));
+
+            if (followed is null)
+            {
+                bound = SeriesTime.Earlier(bound, Later(start, range.From));
+
+                continue;
+            }
+
+            var command = records.Select(row => row.Command).FirstOrDefault(text => text.Length > 0) ?? string.Empty;
+
+            items.Add((Backup(records[0], start, command, null, null, followed == true ? BackupRunEnd.Unknown : BackupRunEnd.Running), records[0].Id));
+        }
+
+        return bound;
     }
 
     /// <summary>
@@ -328,38 +387,22 @@ internal static class SeriesMarkerReader
     }
 
     /// <summary>
-    /// Builds the marker of one backup run from its records, or <c>null</c> when it started at or after the range's end or ended before its start.
+    /// Builds the marker of one backup run that has an end from its records, or <c>null</c> when it has none or ended before the range.
     /// </summary>
-    /// <param name="reader">The store reads</param>
     /// <param name="range">The range</param>
     /// <param name="records">The records of the run: its start records and its end record</param>
-    /// <param name="cancellationToken">Cancels the read</param>
-    /// <returns>A task that returns the marker, or <c>null</c></returns>
-    private static async Task<SeriesMarker?> BackupMarkerAsync(ITimeSeriesReader reader, SeriesRange range, List<BackupRunRow> records, CancellationToken cancellationToken)
+    /// <param name="start">The start of the run</param>
+    /// <returns>The marker, or <c>null</c></returns>
+    private static SeriesMarker? BackupMarker(SeriesRange range, List<BackupRunRow> records, DateTimeOffset start)
     {
-        var start = ParsedStart(records[0]);
+        var end = records.FirstOrDefault(row => row.Phase == BackupRun.PhaseEnd && ParsedGone(row) is not null);
 
-        if (start >= range.End)
+        if (end is null)
         {
             return null;
         }
 
         var command = records.Select(row => row.Command).FirstOrDefault(text => text.Length > 0) ?? string.Empty;
-        var end = records.FirstOrDefault(row => row.Phase == BackupRun.PhaseEnd && ParsedGone(row) is not null);
-
-        if (end is null)
-        {
-            var boots = await reader.BootTimesAsync(new TimeRangeQuery
-                                                    {
-                                                        From = SeriesTime.Add(start, TimeSpan.FromTicks(1)),
-                                                        To = SeriesTime.Add(range.Now, TimeSpan.FromTicks(1)),
-                                                        Limit = 1
-                                                    },
-                                                    cancellationToken).ConfigureAwait(false);
-
-            return Backup(records[0], start, command, null, null, boots.Count == 0 ? BackupRunEnd.Running : BackupRunEnd.Unknown);
-        }
-
         var endsAt = Later(start, Earlier(ParsedGone(end) ?? start, range.Now));
 
         if (endsAt <= range.From)

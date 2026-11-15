@@ -111,10 +111,10 @@ internal static class TimeSeriesQueries
                                                   + "SELECT unit, state, enter, captured_at, restarts, boot FROM u WHERE rn = 1";
 
     /// <summary>
-    /// Reads the boot events in a range.
+    /// Reads the boot events of a range newest first, below a capture time and ID.
     /// </summary>
-    internal const string BootTimes = "SELECT captured_at, COALESCE(CAST(json_extract(data, '$.boot.boot_id') AS TEXT), '') FROM records "
-                                      + "WHERE kind = 'kernel_event' AND json_extract(data, '$.type') = 'boot' AND (captured_at, id) > ($from, $after) AND captured_at < $to ORDER BY captured_at, id LIMIT $limit";
+    internal const string BootTimes = "SELECT id, captured_at, COALESCE(CAST(json_extract(data, '$.boot.boot_id') AS TEXT), '') FROM records "
+                                      + "WHERE kind = 'kernel_event' AND json_extract(data, '$.type') = 'boot' AND captured_at >= $from AND (captured_at, id) < ($to, $before) ORDER BY captured_at DESC, id DESC LIMIT $limit";
 
     /// <summary>
     /// Reads the projected members of the gap records in a range.
@@ -163,6 +163,22 @@ internal static class TimeSeriesQueries
         RecordQueries.Require(query.From < query.To, "from must be before to");
         RecordQueries.Require(query.Limit >= 1 && query.Limit <= maxLimit, $"limit must be 1 to {maxLimit}");
         RecordQueries.Require(query.AfterId >= 0, "after id must not be negative");
+        RecordQueries.Require(query.BeforeId == 0, "before id is only for boot times");
+    }
+
+    /// <summary>
+    /// Checks a boot read, which pages newest first: its range may end where it starts, once a page ended at the start.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
+    internal static void ValidateBoots(TimeRangeQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        RecordQueries.Require(StorageTime.InStorableRange(query.From) && StorageTime.InStorableRange(query.To), "from and to must be within the storable range");
+        RecordQueries.Require(query.From <= query.To, "from must not be after to");
+        RecordQueries.Require(query.Limit >= 1 && query.Limit <= MaxEventLimit, $"limit must be 1 to {MaxEventLimit}");
+        RecordQueries.Require(query.AfterId == 0, "after id is not used by boot times");
+        RecordQueries.Require(query.BeforeId >= 0, "before id must not be negative");
     }
 
     /// <summary>
@@ -222,6 +238,22 @@ internal static class TimeSeriesQueries
                    [FromParameter] = StorageTime.ToNanoseconds(query.From),
                    [ToParameter] = StorageTime.ToNanoseconds(query.To),
                    ["$after"] = query.AfterId,
+                   ["$limit"] = (long)query.Limit
+               };
+    }
+
+    /// <summary>
+    /// Builds the parameters of a boot read.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <returns>The parameters</returns>
+    internal static Dictionary<string, object> BootParameters(TimeRangeQuery query)
+    {
+        return new Dictionary<string, object>
+               {
+                   [FromParameter] = StorageTime.ToNanoseconds(query.From),
+                   [ToParameter] = StorageTime.ToNanoseconds(query.To),
+                   ["$before"] = query.BeforeId,
                    ["$limit"] = (long)query.Limit
                };
     }
@@ -335,8 +367,9 @@ internal static class TimeSeriesQueries
     {
         return new BootTime
                {
-                   CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(0)),
-                   BootId = reader.GetString(1)
+                   Id = reader.GetInt64(0),
+                   CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(1)),
+                   BootId = reader.GetString(2)
                };
     }
 
