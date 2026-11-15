@@ -118,7 +118,7 @@ What each step after the first adds, and how data stored before it reads:
   the index lacks). The time-series reads of service records name the same expressions, so they are answered from the index without a
   payload ([Time-series queries](time-series-query.md)); a record's entry is computed when it is stored, and the write of a record of
   another kind only checks its `kind`. The step reads every `service_state` record once while the writer is busy (agents keep their records in the spool): 87,600
-  records among 1.2 million took 243 to 282 ms on the development host (`docs/BENCHMARKS.md`, *Time-series query*). A `service_state`
+  records among 1.2 million took 243 to 282 ms on the development host and 899 ms on the DS918+ (`docs/BENCHMARKS.md`, *Time-series query*). A `service_state`
   payload that is not valid JSON would fail the step (`store: migration 15: …`, rolled back, version 14 kept) and its insert;
   the backend only stores payloads it serialized itself.
 

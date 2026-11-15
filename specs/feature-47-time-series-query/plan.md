@@ -22,7 +22,7 @@ See [spec.md](spec.md), *Problem*.
 | 7 | Only the spool's dropped and the sender's given-up gap records name numbers | `spool/put.go:345-357`, `sender.go:730` | confirmed |
 | 8 | uPlot 1.6.32 breaks only at `null`, draws through `undefined` | `uPlot.esm.js` 1958, 2235-2241 | confirmed |
 | 9 | `wwwroot/js/**` is excluded from coverage (record 0098) | `.squad/stack.md` | confirmed |
-| 10 | The reference workload answers in under one second on the DS918+ | Product Manager, 2026-11-15, be419c6: median 2,386 ms; development host 735 ms (factor 3.2) | refuted |
+| 10 | The reference workload answers in under one second on the DS918+ | Product Manager, 2026-11-15: 1f0b60b (after G6) median 795 ms (812, 784, 795, 864, 779); earlier be419c6 2,386 ms, refuted then | confirmed |
 | 11 | SQLite streams `ORDER BY captured_at, labels` over `metrics_source_name_time` with a temp B-tree only for the right part | `RawValuesAsyncQueryPlanStreamsByCaptureTime` (Tester, step 5) | confirmed |
 | 13 | Before G5, boots were looked up per check (≤ 3,001), beyond N2 | `SeriesMarkerReader.cs` at be419c6 | confirmed |
 | 15 | Rollup reads and service changes dominate | G5 breakdown (`docs/BENCHMARKS.md`) | confirmed |
@@ -51,7 +51,7 @@ Store reads: `SqliteStoreTimeSeriesTests`; engine: `TimeSeriesServiceTests` (rea
 | AC9 | `QueryAsyncCancelledThrowsWithoutResult` | `TimeSeriesServiceTests.cs` |
 | AC9 | `EveryCallHoldsTheGateOnlyWhileItRuns`, `CancelledWaitForSlotThrowsAndHoldsNothing` | `tests/Vandox.Backend.Tests/GatedTimeSeriesReaderTests.cs` |
 | AC9 | `ServeSharesOneReaderGateBetweenLogsAndIncidents` | `tests/Vandox.Backend.Tests/ServeTests.cs` |
-| AC10 | manual: Product Manager, DS918+ SSD volume, `--query` published from the stamped head per `docs/BENCHMARKS.md` (fallback: the orchestrator publishes it to the draft PR); development host: Dev. Failed on be419c6 (fact 10); re-run after G6 (task 24) | — |
+| AC10 | manual: Product Manager, DS918+ SSD volume, `--query` published from the stamped head per `docs/BENCHMARKS.md` (fallback: the orchestrator publishes it to the draft PR); development host: Dev. Failed on be419c6 (2,386 ms); passed on 1f0b60b, 795 ms (fact 10, task 24) | — |
 | AC11 | `ConstructorRefusesBridgedPointWithValue`, `ConstructorRefusesBridgeCountMismatch`, `ConstructorRefusesBridgedStackedSeries` | `tests/Vandox.Backend.Tests/ChartDataTests.cs` |
 | AC11 | `RenderAsyncPassesBridgedIndexesOnCreateAndUpdate` | `tests/Vandox.Backend.Tests/ChartInteropTests.cs` |
 | AC11 | manual: Reviewer, step 8, reads `charts.js` (bridged indexes set to `undefined`, nothing else); CI: *Image build check* (Dev, step 6) for the changed static asset | — |

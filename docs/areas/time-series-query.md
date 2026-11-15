@@ -120,8 +120,9 @@ collectors are external text from the agent, returned as stored; a view shows th
   second, median of five runs, on the reference host. The first run on the reference host (2026-11-15) took 2,386 ms and did not meet it;
   the service changes read in one pass and the rollup steps merged in SQL cut the development-host median from about 700 ms to about 380 ms,
   and the covering index `records_service_state` ([Storage](storage.md), *Migration steps*), from which the three reads of service
-  records are answered without a payload, to about 220 ms against the goal of 250 ms there; the criterion stays open until the run on
-  the reference host after that change (Benchmarks has the numbers and the breakdown).
+  records are answered without a payload, to about 220 ms against the goal of 250 ms there. The re-run on the reference host
+  (2026-11-15, stamped head `1f0b60b`) took a median of 795 ms and **met** the criterion with a margin of about 20 percent; the service
+  changes remain the largest part (Benchmarks has the numbers and the breakdown).
 
 ## Related decisions
 
