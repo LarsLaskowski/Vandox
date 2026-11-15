@@ -2,8 +2,8 @@
 
 Source: Issue #47 | [spec.md](spec.md)
 Tier: standard — new read behavior (a query service, new store reads, a chart state) that creates, changes or removes no security control.
-Security areas touched: 10 Parsing of external input (new store reads decode stored agent payloads with `json_extract` and the payload rules, forged values included); 12 Logging and display of external data (marker texts handed to the views; the chart data path in `wwwroot/js/charts.js`)
-Plan size: one feature with eleven criteria spanning ten store reads, the query engine with three marker kinds and two gap sources, the read gate and a chart contract change, plus G5.
+Security areas touched: 1 Ingest (G6: the index of record 0217 adds a parse and an entry per stored `service_state` record, a one-time build at upgrade); 10 Parsing of external input (new store reads decode stored agent payloads with `json_extract` and the payload rules, forged values included); 12 Logging and display of external data (marker texts handed to the views; the chart data path in `wwwroot/js/charts.js`)
+Plan size: one feature with eleven criteria spanning ten store reads, the query engine with three marker kinds and two gap sources, the read gate and a chart contract change, plus G5 and G6.
 
 ## Problem / root cause
 
@@ -24,10 +24,9 @@ See [spec.md](spec.md), *Problem*.
 | 9 | `wwwroot/js/**` is excluded from coverage (record 0098) | `.squad/stack.md` | confirmed |
 | 10 | The reference workload answers in under one second on the DS918+ | Product Manager, 2026-11-15, be419c6: median 2,386 ms; development host 735 ms (factor 3.2) | refuted |
 | 11 | SQLite streams `ORDER BY captured_at, labels` over `metrics_source_name_time` with a temp B-tree only for the right part | `RawValuesAsyncQueryPlanStreamsByCaptureTime` (Tester, step 5) | confirmed |
-| 12 | Each of ~20 reads opens a new connection (`Pooling = false`) | `SqliteStore.cs:266-284,346-355` | confirmed |
-| 13 | Boots are looked up per enter-moved row (≤ 2,000) and endless backup run (≤ 1,001), beyond N2: a related defect | `SeriesMarkerReader.cs:186-193,225-246,350-358` | confirmed |
-| 14 | Fact 13's calls are rare in the benchmark | `QueryBenchmark.cs:168-179` | confirmed |
-| 15 | Rollup reads (131,400 buckets) and service changes (87,600 records) dominate | to verify: breakdown, task 14, Dev | unverified |
+| 13 | Before G5, boots were looked up per check (≤ 3,001), beyond N2 | `SeriesMarkerReader.cs` at be419c6 | confirmed |
+| 15 | Rollup reads and service changes dominate | G5 breakdown (`docs/BENCHMARKS.md`) | confirmed |
+| 16 | SQLite 3.53 answers the service reads from `records_service_state` alone (covering, expressions matched) | to verify: `ServiceReadsQueryPlanUseCoveringServiceStateIndex`, Tester, task 21 | unverified |
 
 ## Tests per criterion
 
@@ -44,7 +43,7 @@ Store reads: `SqliteStoreTimeSeriesTests`; engine: `TimeSeriesServiceTests` (rea
 | AC4 | `ConcernsMapsCollectorToLines` (table: `self`→`agent` lines only; `filesystem`→`filesystem_*` not `mem_*`; `clock`; `system`→other `system` names; `mariadb`; `logs`/`kernel`→none; no collector and `future`→every line) | `tests/Vandox.Storage.Tests/SeriesGapTests.cs` |
 | AC4 | `GapsInRangeAsyncReturnsOverlappingOpenAndFinalOfAllAgents`, `GapsInRangeAsyncReportsDerivedTimeGapState`, `GapRecordsAsyncProjectsSpanCauseCollectorAndNumbers` | `SqliteStoreTimeSeriesTests.cs` |
 | AC5 | `QueryAsyncOomKillsOncePerIdentity`, `QueryAsyncBootsOncePerBootId`, `QueryAsyncServiceRestartRules` (table: restarts rose; enter moved from `active` and from `failed`; no enter time before, one now, from `failed`; from `inactive`; boot between by boot ID while the boot record is captured after the unit's first record; boot between by boot record; hourly re-record; restarts fell; previous record before `from`; previous record beyond the 10,000 rows examined), `QueryAsyncBootChecksReadAtMostTenBootPages` (G5, a `CountingTimeSeriesReader`; table: 2,000 enter moves under running predecessors with no counter rise; 1,001 backup runs without end; both in one query; 10,010 boots before `from` with an endless run started at `StorableTime.Min` and a predecessor years back → every check decided; 10,011 boots after a row's capture → that restart undecided, no marker, `MarkersCompleteUntil` at its restart time; results equal to the per-row check's), `QueryAsyncRestartTime` (table: new enter time in range; enter time after the query time and before `from` → capture time), `QueryAsyncBackupRunSpans` (table: ended in range; started a day before; still running; unknown end after a later boot; start written twice; `gone_by` and `last_seen_at` after the query time → clamped; `started_at` after the query time → dropped), `QueryAsyncMarkersInTimeOrder` | `TimeSeriesServiceTests.cs` |
-| AC5 | `ServiceChangesAsyncReturnsFirstPerUnitAndChangesWithPrevious` (a missing enter time against a present one is a change), `PreviousServiceStatesAsyncScansAtMostTenThousandRows` (300 new units over a long history: one call, cap respected, unfound units absent), `BootTimesAsyncReturnsOnlyBoots`, `BootTimesAsyncPagesNewestFirstByBeforeId` (G5; 1,002 boots at one capture time), `TimeRangeReadsRefuseForeignPagingId` (G5, the three texts), `KernelEventsAsyncProjectsFieldsWithoutMessage`, `BackupRunsAsyncProjectsFields`, `EventReadsRefuseLimitOverOneThousandOne` | `SqliteStoreTimeSeriesTests.cs` |
+| AC5 | G6: `ServiceReadsQueryPlanUseCoveringServiceStateIndex` (fact 16; the three statements), `MigrationFromVersion14IndexesStoredServiceStates` (version-14 records, one without `unit`, read alike after step 15), `ServiceChangesAsyncReturnsFirstPerUnitAndChangesWithPrevious` (a missing enter time against a present one is a change), `PreviousServiceStatesAsyncScansAtMostTenThousandRows` (300 new units over a long history: one call, cap respected, unfound units absent), `BootTimesAsyncReturnsOnlyBoots`, `BootTimesAsyncPagesNewestFirstByBeforeId` (G5; 1,002 boots at one capture time), `TimeRangeReadsRefuseForeignPagingId` (G5, the three texts), `KernelEventsAsyncProjectsFieldsWithoutMessage`, `BackupRunsAsyncProjectsFields`, `EventReadsRefuseLimitOverOneThousandOne` | `SqliteStoreTimeSeriesTests.cs` |
 | AC6 | `QueryAsyncReturnsNothingAfterQueryTime`, `QueryAsyncCompleteUntilIsEarliestUnfoldedCapture` (stalled fold: values stored, no fold step), `QueryAsyncCompleteUntilIsQueryTimeWhenAllFolded`, `QueryAsyncRawHasNoCompleteUntil` | `TimeSeriesServiceTests.cs` |
 | AC6 | `EarliestUnfoldedAsyncReadsAboveWatermark` | `SqliteStoreTimeSeriesTests.cs` |
 | AC7 | `QueryAsyncOverSixtyFourLinesCutsInSeriesThenUtf8ByteOrder`, `QueryAsyncOverThousandMarkersKeepsEarliestWithCompleteUntil`, `QueryAsyncOverThousandGapsKeepsEarliestWithCompleteUntil`, `QueryAsyncFullRecordPageBoundsCompleteUntil`, `QueryAsyncEventReadsUseAtMostTenPagesOfOneThousandOne` (a `CountingTimeSeriesReader` records every limit and call) | `TimeSeriesServiceTests.cs` |
@@ -52,7 +51,7 @@ Store reads: `SqliteStoreTimeSeriesTests`; engine: `TimeSeriesServiceTests` (rea
 | AC9 | `QueryAsyncCancelledThrowsWithoutResult` | `TimeSeriesServiceTests.cs` |
 | AC9 | `EveryCallHoldsTheGateOnlyWhileItRuns`, `CancelledWaitForSlotThrowsAndHoldsNothing` | `tests/Vandox.Backend.Tests/GatedTimeSeriesReaderTests.cs` |
 | AC9 | `ServeSharesOneReaderGateBetweenLogsAndIncidents` | `tests/Vandox.Backend.Tests/ServeTests.cs` |
-| AC10 | manual: Product Manager, DS918+ SSD volume, `--query` published from the stamped head per `docs/BENCHMARKS.md` (fallback: the orchestrator publishes it to the draft PR); development host: Dev. Failed on be419c6 (fact 10); re-run after G5 (task 19) | — |
+| AC10 | manual: Product Manager, DS918+ SSD volume, `--query` published from the stamped head per `docs/BENCHMARKS.md` (fallback: the orchestrator publishes it to the draft PR); development host: Dev. Failed on be419c6 (fact 10); re-run after G6 (task 24) | — |
 | AC11 | `ConstructorRefusesBridgedPointWithValue`, `ConstructorRefusesBridgeCountMismatch`, `ConstructorRefusesBridgedStackedSeries` | `tests/Vandox.Backend.Tests/ChartDataTests.cs` |
 | AC11 | `RenderAsyncPassesBridgedIndexesOnCreateAndUpdate` | `tests/Vandox.Backend.Tests/ChartInteropTests.cs` |
 | AC11 | manual: Reviewer, step 8, reads `charts.js` (bridged indexes set to `undefined`, nothing else); CI: *Image build check* (Dev, step 6) for the changed static asset | — |
@@ -143,17 +142,13 @@ interrupts every store call (`ReaderLease`).
 **Performance (AC10, G5).** Measure first, then reduce, keeping every criterion, record and test
 expectation (but those *Test files* names); the five timed AC10 runs stay as they are.
 
-1. Breakdown (task 14, tool only): `TimingTimeSeriesReader` times each read member (lease included) over five extra runs, printed
-   per part with calls after the median line, the engine as the rest; plus the statement alone (`SELECT count(*) FROM (…)`) of the
-   `cpu_percent` buckets, the service changes and the gap records, and one lease (median of 20).
-2. Reductions open to the Dev, kept only where they gain: the one boot read (required, fact 13); bucket merge while reading, one
-   prepared command reused across a series' label sets; a merge per step in SQL only if every existing test passes unchanged (sum,
-   clamp, last-value tie-break), the step index in SQL only as `(bucket - $from) / $step` over rows with `bucket >= $from`, both bound,
-   with a Tester case from before the epoch to near the storable maximum — else no SQL merge; a service-change statement with the same
-   rows and less work (one `json_extract` per member and row, fewer sorts, no temp-file spill by fewer or narrower sorted rows;
-   reader pragmas unchanged, held back below).
-3. Goal: development-host median ≤ 250 ms (≈ 825 ms on the DS918+). Else the Dev stops, reports both
-   breakdowns; the Lead decides (mode `decide`) on the held-back options.
+1. Done in G5 (tasks 14–18): breakdown in the benchmark, one newest-first boot read, step merge in SQL, streamed service changes;
+   development host 306–468 ms, service changes 137–168 ms of it (`docs/BENCHMARKS.md`); goal missed.
+2. G6 (Lead decision 2026-11-15, record 0217): schema step 15 adds the covering partial index `records_service_state` (record 0217
+   names its columns); `ServiceStream`, `ServiceRows` and `PreviousServiceStates` read only `id` and the indexed expressions, written
+   exactly as in the index, so SQLite needs no payload (fact 16). The benchmark prints the time to rebuild that index on its database
+   (drop and create, after the fold). Goal unchanged: ≤ 250 ms on the development host, then the DS918+ re-run (task 24).
+3. Held back: parallel reads (next if the DS918+ fails again), pooling, reader caches.
 
 ## Options considered
 
@@ -167,8 +162,8 @@ expectation (but those *Test files* names); the five timed AC10 runs stay as the
   holds hundreds of MiB; projections keep only the marker fields.
 - *Between samples* as a sentinel number in the value columns — lost: any number can be a real value; a separate index list keeps
   `double?` columns unchanged.
-- G5, held back for a Lead decision (*Performance* 3): parallel reads (no gate in the benchmark), pooling or reader caches,
-  a covering `service_state` index (ingest migration, record, Security delta). Relaxing AC10: Product Manager.
+- G5/G6 (record 0217): parsing fewer members, a text search for the unit, a service-change table, pooling, reader caches, parallel
+  reads — lost or held back there; the covering index won. Relaxing AC10: Product Manager.
 
 ## Affected projects and types
 
@@ -236,7 +231,8 @@ none whole; SqliteStore.cs gains a region, ServeCommand.cs two registrations.
 real store and recording every call and limit (Storage tests); samples in `TimeSeriesSamples.cs` (Storage tests).
 
 G5: the Tester adapts `QueryAsyncBackupRunsProcessAtMostThousandAndOne` (1,001 look-ups) and `BootTimesAsyncReturnsOnlyBoots` (order) in
-task 16, nothing else; signatures are kept, so no other call site changes.
+task 16, nothing else; signatures are kept, so no other call site changes. G6: the schema-version assertions of `SqliteStoreOpenTests` (14 → 15, the
+refusal text) are adapted by the Tester in task 21; no API changes.
 
 Existing test code that calls a changed signature: `ChartInteropTests` and `RecordingJsRuntime` assertions on the `create`/`update`
 argument lists — adapted by the Tester. `ChartSeries`' two-argument constructor is unchanged.
@@ -272,13 +268,14 @@ All by the Dev, after the code is green:
 - `CHANGELOG.md`: an `[Unreleased]` *Added* entry for the time-series query service.
 - G5: `docs/BENCHMARKS.md`, *Time-series query* — the breakdown in *Procedure*; rows for the DS918+ run of 2026-11-15 (be419c6,
   2,386 ms, not met) and the new development-host run with its breakdown; `docs/areas/time-series-query.md` — the one boot read, its
-  bound and the undecided checks; `docs/areas/storage-reading.md` — boot times newest first, `BeforeId`, the two errors.
+  bound and the undecided checks; `docs/areas/storage-reading.md` — boot times newest first, `BeforeId`, the two errors. G6: `docs/areas/storage.md` —
+  version 15, step 15 and the index; `docs/BENCHMARKS.md` — the index build time and the new rows.
 - `.squad/project.md` *Test doubles*: the Tester reports a row for `CountingTimeSeriesReader`; the orchestrator writes it in.
 
 ## Architecture check
 
 Record 0028 holds: a span without data is `Gap`, never bridged; *between samples* exists only where another line has a sample and the
-line itself has no recorded gap or empty 5-minute span there. Live-only alerting, the agent and ingest are untouched. The store's
+line itself has no recorded gap or empty 5-minute span there. Live-only alerting and the agent are untouched; ingest gains one index (record 0217). The store's
 four readers keep two free: every new read takes the shared gate per call.
 
 ## Security considerations
@@ -294,6 +291,7 @@ four readers keep two free: every new read takes the shared gate per call.
 - `docs/decisions/0214-time-series-queries-share-one-resolution-and-one-time-axis-with-bridged-samples.md` (Proposed)
 - `docs/decisions/0215-a-service-restart-is-a-rise-of-nrestarts-or-a-new-active-enter-time-of-a-running-or-failed-unit.md` (Proposed)
 - `docs/decisions/0216-time-series-context-is-read-in-fixed-windows-around-the-range.md` (Proposed)
+- `docs/decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md` (Proposed, G6)
 
 Their area link resolves once the Dev adds `docs/areas/time-series-query.md`; `decision-check.py` fails until then.
 

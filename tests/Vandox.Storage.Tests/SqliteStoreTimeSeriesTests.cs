@@ -1042,7 +1042,9 @@ public class SqliteStoreTimeSeriesTests
         await TimeSeriesSamples.InsertBootsAsync(directory.Path, Samples.Base.AddHours(1), 1, TimeSpan.Zero, TestContext.CancellationToken);
         await TimeSeriesSamples.InsertBootsAsync(directory.Path, at, 1002, TimeSpan.Zero, TestContext.CancellationToken);
 
-        var stored = await store.KernelEventsAsync(TimeSeriesSamples.Range(from, end), TestContext.CancellationToken);
+        var storedFirst = await store.KernelEventsAsync(TimeSeriesSamples.Range(from, end), TestContext.CancellationToken);
+        var storedRest = await store.KernelEventsAsync(TimeSeriesSamples.Range(storedFirst[^1].CapturedAt, end, TimeSeriesSamples.EventLimit, storedFirst[^1].Id), TestContext.CancellationToken);
+        var stored = storedFirst.Concat(storedRest).ToList();
 
         // Act
         var first = await store.BootTimesAsync(TimeSeriesSamples.Range(from, end), TestContext.CancellationToken);
@@ -1056,6 +1058,7 @@ public class SqliteStoreTimeSeriesTests
         Assert.AreEqual(Samples.Base.AddHours(1), second[^1].CapturedAt, "the earlier boot comes last");
         Assert.HasCount(1003, all.Select(boot => boot.Id).Distinct().ToList(), "every boot is read once");
         Assert.AreSequenceEqual(all.OrderByDescending(boot => boot.CapturedAt).ThenByDescending(boot => boot.Id).Select(boot => boot.Id).ToList(), all.Select(boot => boot.Id).ToList(), "newest first by capture time and ID");
+        Assert.HasCount(1003, stored, "the boot events are read in two pages");
         Assert.AreSequenceEqual(stored.Select(row => row.Id).Order().ToList(), all.Select(boot => boot.Id).Order().ToList(), "the IDs are those of the boot events");
     }
 
@@ -1118,6 +1121,29 @@ public class SqliteStoreTimeSeriesTests
         Assert.HasCount(1, page.Lines, "one line");
         Assert.AreSequenceEqual([epoch.AddDays(-2), epoch.AddDays(-1), epoch, late0], page.Lines[0].Points.Select(point => point.At).ToList(), "the steps start at multiples of a day, the bucket before the epoch lies in the step before it");
         Assert.AreSequenceEqual([1.0, 2.0, 3.0, 4.0], page.Lines[0].Points.Select(point => point.Average).ToList(), "each step holds its own bucket");
+    }
+
+    /// <summary>
+    /// A service record without a unit is skipped by the service change read, while the records of named units are read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task ServiceChangesAsyncSkipsRecordWithoutUnit()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "service_state", Samples.Base.AddMinutes(1), "{\"active_state\":\"active\",\"restarts\":0}", TestContext.CancellationToken);
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, FirstBoot, TestContext.CancellationToken, TimeSeriesSamples.Service("a.service", "active", null, 0, Samples.Base.AddMinutes(2)));
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "service_state", Samples.Base.AddMinutes(3), "{\"active_state\":\"failed\",\"restarts\":4}", TestContext.CancellationToken);
+
+        // Act
+        var rows = await store.ServiceChangesAsync(TimeSeriesSamples.Range(Samples.Base, Samples.Base.AddHours(1), 10), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["a.service"], rows.Select(row => row.Unit).ToList(), "only the record of a named unit is read");
     }
 
     /// <summary>

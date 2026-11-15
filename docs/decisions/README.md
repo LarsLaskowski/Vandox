@@ -253,4 +253,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0214 | Time-series queries share one resolution and one time axis, raw samples bridged between other lines' times | Proposed | 2026-11-14 |
 | 0215 | A service restart is a rise of NRestarts, or a new active-enter time of a running or failed unit with no boot between | Proposed | 2026-11-14 |
 | 0216 | The time-series query reads gap records and backup runs in fixed windows around the range | Proposed | 2026-11-14 |
+| 0217 | The members of service records that tell a restart are kept in a covering partial index | Proposed | 2026-11-15 |
 <!-- project:end index -->
