@@ -12,6 +12,11 @@ internal static class RetentionSamples
     #region Constants
 
     /// <summary>
+    /// Undoes schema step 15: the covering index of the service state members.
+    /// </summary>
+    internal const string UndoStepFifteen = "DROP INDEX IF EXISTS records_service_state";
+
+    /// <summary>
     /// Undoes schema step 14: the rollup and hold tables, the two indexes and the two meta keys of the retention job.
     /// </summary>
     internal const string UndoStepFourteen = "DROP INDEX records_removable; DROP INDEX gaps_to_at; DROP TABLE metric_rollups_5m; DROP TABLE metric_rollups_1h; DROP TABLE retention_holds; DELETE FROM meta WHERE key IN ('rollup_after_id', 'kill_scan_after_id')";

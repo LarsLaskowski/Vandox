@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IAsyncDisposable
 {
     #region Constants
 
@@ -1212,6 +1212,95 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IRollupReader
+
+    #region ITimeSeriesReader
+
+    /// <inheritdoc/>
+    public Task<LinePage> RawValuesAsync(RawValueQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateRaw(query);
+
+        return ReadAsync(connection => TimeSeriesQueries.ReadRawAsync(connection, query, cancellationToken), TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<LinePage> RollupStepsAsync(RollupStepQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateSteps(query);
+
+        return ReadAsync(connection => TimeSeriesQueries.ReadStepsAsync(connection, query, cancellationToken), TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<AgentGap>> GapsInRangeAsync(TimeRangeQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateWindow(query, TimeSeriesQueries.MaxEventLimit, "gap rows");
+
+        return QueryAsync(TimeSeriesQueries.GapsInRange, TimeSeriesQueries.WindowParameters(query), TimeSeriesQueries.ReadGap, TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public async Task<DateTimeOffset?> EarliestUnfoldedAsync(CancellationToken cancellationToken)
+    {
+        var rows = await QueryAsync(TimeSeriesQueries.EarliestUnfolded, [], TimeSeriesQueries.ReadEarliest, TimeSeriesQueries.Context, cancellationToken).ConfigureAwait(false);
+
+        return rows.Count > 0 ? rows[0] : null;
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<ServiceStateRow>> ServiceChangesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateWindow(query, TimeSeriesQueries.MaxServiceLimit, "service changes");
+
+        return ReadAsync(connection => TimeSeriesQueries.ReadServiceChangesAsync(connection, query, cancellationToken), TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<ServiceStateRow>> PreviousServiceStatesAsync(IReadOnlyList<string> units, DateTimeOffset before, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateUnits(units, before);
+
+        if (units.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<ServiceStateRow>>([]);
+        }
+
+        return QueryAsync(TimeSeriesQueries.PreviousServiceStates, TimeSeriesQueries.UnitParameters(units, before), reader => TimeSeriesQueries.ReadServiceState(reader, null), TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<BootTime>> BootTimesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateBoots(query);
+
+        return QueryAsync(TimeSeriesQueries.BootTimes, TimeSeriesQueries.BootParameters(query), TimeSeriesQueries.ReadBoot, TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<GapRecordRow>> GapRecordsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+
+        return QueryAsync(TimeSeriesQueries.GapRecords, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadGapRecord, TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<KernelEventRow>> KernelEventsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+
+        return QueryAsync(TimeSeriesQueries.KernelEvents, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadKernelEvent, TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<BackupRunRow>> BackupRunsAsync(TimeRangeQuery query, CancellationToken cancellationToken)
+    {
+        TimeSeriesQueries.ValidateRange(query, TimeSeriesQueries.MaxEventLimit);
+
+        return QueryAsync(TimeSeriesQueries.BackupRuns, TimeSeriesQueries.RangeParameters(query), TimeSeriesQueries.ReadBackupRun, TimeSeriesQueries.Context, cancellationToken);
+    }
+
+    #endregion // ITimeSeriesReader
 
     #region IAsyncDisposable
 

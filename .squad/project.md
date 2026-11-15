@@ -186,6 +186,7 @@ marked planned.
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `CountingClock` (Storage tests) | the clock |
 | database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `ListLogger` (Backend tests) | store, readers |
 | retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
+| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests): counts calls of the real store; `ProbeTimeSeriesReader` (Backend tests): held calls | `ITimeSeriesReader` |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
 | Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |

@@ -42,7 +42,7 @@ import tracks files on top of this store in [Log import](log-import.md).
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is **14**. Times are Unix nanoseconds in `INTEGER` columns.
+The schema version is stored in `meta.schema_version`; the current version is **15**. Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
@@ -78,7 +78,7 @@ agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, ag
 (`connection_marks_changes`, the findings with changes only); `listener_comparisons(captured_at DESC, agent_id, seq DESC)` where
 `finding = 1` (`listener_comparisons_findings`); `gaps(agent_id, first_seq)` where `kind = 'sequence'` and `state <> 'closed'`
 (`gaps_seq`) and, apart, where `state = 'open'` (`gaps_seq_open`); `gaps(agent_id, from_at)`, unique, where `kind = 'time'` and
-`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader); `metric_rollups_5m(bucket)` and `metric_rollups_1h(bucket)`; `retention_holds(started_at)`; `records(kind, captured_at)` where `origin <> 'import'` (`records_removable`, the walk of a removal step); `gaps(to_at)` (`gaps_to_at`).
+`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader); `metric_rollups_5m(bucket)` and `metric_rollups_1h(bucket)`; `retention_holds(started_at)`; `records(kind, captured_at)` where `origin <> 'import'` (`records_removable`, the walk of a removal step); `gaps(to_at)` (`gaps_to_at`); the covering partial index `records_service_state` on `records(captured_at, json_extract(data, '$.unit'), json_extract(data, '$.restarts'), json_extract(data, '$.active_enter_at'), json_extract(data, '$.active_state'), boot_id, kind)` where `kind = 'service_state'`.
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -112,6 +112,15 @@ What each step after the first adds, and how data stored before it reads:
 - **14** adds `metric_rollups_5m`, `metric_rollups_1h` and `retention_holds` with their indexes and the indexes `records_removable` and
   `gaps_to_at`, all empty. The metric values stored before it are folded into the rollups by the retention job before it removes
   anything, because `rollup_after_id` is absent (0) ([Retention and rollups](retention.md)).
+- **15** adds the index `records_service_state` (record [0217](../decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md)):
+  one entry per stored `service_state` record with the capture time, the unit, restart counter, active enter time and active state read from the payload, the boot ID and the
+  kind (the kind is in the index because SQLite does not use an index over expressions as covering when its partial condition reads a column
+  the index lacks). The time-series reads of service records name the same expressions, so they are answered from the index without a
+  payload ([Time-series queries](time-series-query.md)); a record's entry is computed when it is stored, and the write of a record of
+  another kind only checks its `kind`. The step reads every `service_state` record once while the writer is busy (agents keep their records in the spool): 87,600
+  records among 1.2 million took 243 to 282 ms on the development host and 899 ms on the DS918+ (`docs/BENCHMARKS.md`, *Time-series query*). A `service_state`
+  payload that is not valid JSON would fail the step (`store: migration 15: …`, rolled back, version 14 kept) and its insert;
+  the backend only stores payloads it serialized itself.
 
 ### Migrations
 

@@ -175,6 +175,114 @@ The run on the DS918+ SSD volume is recorded above (Product Manager, database be
 (median 246 ms; steps 1 and 2 remove 0 values while they walk past the imported and the held values, steps 3 to 5 remove 5,000 each). The fold step (88 ms) and
 the removal step (246 ms) are at or below the median batch (1246 ms), so AC6 is met.
 
+## Time-series query
+
+Criterion (issue #47, AC10): **the reference workload runs in under one second, median of five runs, on the reference host** (the SSD
+volume). It is the one-year query of [Time-series queries](areas/time-series-query.md): the service reads the rollups of eight series, one of
+them `cpu_percent` with its eight modes (15 lines), at a target of 1,000 points, with the markers and gaps of the year. Only a run on the
+reference host counts against the criterion.
+
+### Procedure
+
+Publish the tool and run it on the reference host as for the retention steps (self-contained on the DS918+):
+
+```bash
+dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --query
+```
+
+`--query` takes no other option. In a fresh database under a fixed clock (2026-12-01 12:00 UTC) the program writes, through the store's batch
+write, 15 metric lines (`system`: `cpu_percent` with the labels `mode` of eight modes, `mem_available_bytes`, `swap_used_bytes`, `load1`,
+`load5`, `load15`, `filesystem_used_percent`; `self`: `agent_rss_bytes`), one value per line a minute for the last 30 days and one every 15
+minutes before, back to a year before the clock; the hourly `service_state` re-records of 10 units over the year (87,600 records), a backup run
+a day (a start and an end record), 50 OOM kills and 1,000 gap records. It folds every value into the rollups and then queries the 8 series
+for the year at 1,000 points through `TimeSeriesService` over the store: one query that is not counted, then five that are timed. It prints the
+times, the shape of the result and the median, and whether it is under one second.
+
+After the fold the program drops the index `records_service_state` of schema step 15 and creates it again from the stored `service_state` records, and prints the
+time of the creation: that is what the upgrade of a version 14 database costs once ([Storage](areas/storage.md), *Migration steps*). The
+index is in place for the timed query runs.
+
+After the median line the program prints a **breakdown**: five more runs of the same query through a wrapper that times every store read
+(the reader lease included) and counts its calls. It prints, per part, the median time and the calls: the rollup steps of `cpu_percent`
+(one call, eight label sets), of the other seven series (seven calls), the earliest unfolded time, the gap rows, the gap records, the
+kernel events, the service changes, the previous service states, the boot reads and the backup runs, then the engine as the rest of the
+query. It then times the read of the service changes and of the gap records alone and the steps of one `cpu_percent` label set, five times
+each, and one reader lease (median of 20). The total of the breakdown runs differs from the median line by the run-to-run spread of the
+host, which on the development host is up to a factor of two between two runs; the parts are what to compare.
+
+The values older than 30 days are written every 15 minutes, not at the agent's default intervals (30 and 60 seconds): a query reads
+rollup buckets, and the hourly buckets that a one-year query reads are the same in number, so the older density only makes the fold of the
+setup shorter; the raw values of the last 30 days are written every minute. The database holds about 1.2 million records.
+
+### Results
+
+| Host | Date | Volume | Median query | Times | Verdict |
+| ---- | ---- | ------ | -----------: | ----- | ------- |
+| development host (4 logical CPUs, Ubuntu 24.04, .NET 11.0.0), not the reference host | 2026-11-14 | local disk | 791 ms | 791, 957, 762, 858, 731 ms | order of magnitude only |
+| DS918+ (reference host), published from the first implementation | 2026-11-15 | SSD volume `/volume2` | **2,386 ms** | 2,394, 2,449, 2,342, 2,386, 2,331 ms | **not met** (limit 1,000 ms) |
+| development host, first implementation | 2026-11-15 | local disk | 717 ms, 624 ms | 608, 618, 778, 782, 717 ms; 866, 905, 624, 522, 518 ms | order of magnitude only |
+| development host, after the first reductions (three runs) | 2026-11-15 | local disk | 468 ms, 306 ms, 382 ms | 472, 404, 425, 468, 513 ms; 297, 306, 291, 316, 346 ms; 355, 266, 399, 384, 382 ms | goal of 250 ms not reached; order of magnitude only |
+| development host, with the covering index (three runs) | 2026-11-15 | local disk | 289 ms, 216 ms, 218 ms | 259, 229, 304, 289, 318 ms; 218, 189, 204, 216, 233 ms; 210, 179, 218, 415, 321 ms | goal of 250 ms reached (median of the three medians 218 ms); order of magnitude only |
+| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained), re-run with the covering index | 2026-11-15 | SSD volume `/volume2` | **795 ms** | 812, 784, 795, 864, 779 ms | **met** (limit 1,000 ms) |
+
+The first DS918+ run of 2026-11-15 (first implementation) wrote 1,219,780 records in 123 s and folded the values in 27 s, and the same database answered the query in 2,386
+ms: 3.2 times the development host of that day (735 ms), so the reference host does not meet the criterion with the first implementation.
+The development-host runs wrote the same records in 25 to 27 s, folded the values in 7 to 8 s, and answered with a 12-hour step, 730 times,
+15 lines, 1,000 markers (cut) and 1,000 gaps (cut). A run on the development host is a measure of the code, not of the criterion; the
+spread between two runs of the same code is large (the first run after the first reductions took 468 ms, the second 306 ms).
+
+**Breakdown** (median of five runs through the timing reader, in ms; the DS918+ column is the run of 2026-11-15 with the covering index):
+
+| Part | Calls | First implementation (two runs) | After the first reductions (three runs) | With the covering index (three runs) | DS918+ with the covering index |
+| ---- | ----: | -------------------: | --------------------: | --------------------: | --------------: |
+| rollup steps, `cpu_percent` (8 label sets) | 1 | 97, 85 | 37, 46, 45 | 44, 44, 45 | 161.2 |
+| rollup steps, the other seven series | 7 | 101, 79 | 36, 49, 47 | 43, 44, 41 | 152.1 |
+| service changes (87,600 records of the year) | 1 | 505, 448 | 137, 167, 168 | 108, 107, 104 | 396.5 |
+| gap rows, gap records, kernel events, backup runs, earliest unfolded, previous states | 6 | 19, 17 | 14, 17, 15 | 15, 16, 15 | 60.3 (gap rows 28.0, gap records 14.1, backup runs 10.9, kernel events 2.9, previous states 2.5, earliest unfolded 1.9) |
+| boot reads | 0 | 0, 0 | 0, 0, 0 | 0, 0, 0 | 0.0 |
+| engine (the query less the reads) | | 12, not measurable | 3, 16, 6 | 3, 3, 21 | 37.3 |
+| median of the breakdown runs | | 734, 618 | 226, 295, 281 | 213, 213, 225 | 807 |
+
+In the first implementation the service changes took two thirds of the query (the statement alone 443 ms for 1,738 rows over the 87,600 `service_state`
+records: it extracted four members of each record and ran six window functions over a sort by unit) and the rollup steps
+a quarter (one read per label set that built a list of up to 8,760 buckets and merged them in the program). What the first reductions changed
+([Time-series queries](areas/time-series-query.md), *Limits and errors*): the service changes are streamed once in capture order with three
+members per record, the last record of each unit is kept in memory, and only the changed records and their predecessors are read in full;
+the rollup steps are merged in SQL per step, with one prepared statement for all label sets of a series; and the restart and backup checks
+read the boots once instead of once per check (this benchmark makes no boot read: 0 calls).
+
+The goal of the first reductions was a development-host median of at most 250 ms (about 825 ms on the DS918+ at the factor of 3.2). The three runs
+reached 468, 306 and 382 ms, the breakdowns 226 to 295 ms, so the goal is **not reached** and the DS918+ is estimated at about 1.2 s
+(not measured). The remainder is the service changes (about 140 to 170 ms: SQLite fetches and parses 87,600 payloads, about 90 ms in a separate measurement, and
+87,600 rows cross into the program), the rollup steps (about 70 to 95 ms: 15 label sets, each a statement of 4 to 6 ms inside its connection,
+plus the label-set reads and a new reader connection for each call) and the engine. The further options (parallel reads, reader caches or
+pooling, a covering index on `service_state`) were not taken in the first reductions.
+
+**The covering index** ([0217](decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md)): schema step 15 adds
+`records_service_state`, and the three service reads (the stream, the rows of the changes and the previous states) read only the indexed
+expressions, so SQLite answers them from the index without fetching or parsing a payload (`EXPLAIN QUERY PLAN` shows `COVERING INDEX
+records_service_state` for each, pinned by a test). The service changes fell from 137 to 168 ms to 104 to 108 ms; the three runs reached
+289, 216 and 218 ms (the first run of a series after the database is written is the slowest), the goal of at most 250 ms is reached on the
+development host with a median of 218 ms of the three medians (the DS918+ was estimated at about 0.7 s at the factor of 3.2 and measured 795 ms,
+see below). The
+remainder of the service changes is the 87,600 index rows crossing into the program. **Building the index** on this database (87,600 `service_state` records among 1.2 million) took 257, 243 and 282 ms; this is the cost of
+the upgrade of a database at version 14, during which the writer is busy ([Storage](areas/storage.md), *Migration steps*); at the factor
+of 3.2 about 0.8 to 0.9 s on the DS918+ (estimated; measured below at 899 ms).
+
+**Re-run on the DS918+ with the covering index** (Product Manager, 2026-11-15, self-contained build of the merged implementation, folder
+`/volume2/DockerData/Vandox-Tests/` on the SSD volume, Linux 4.4.302+, .NET 11.0.0, 4 logical CPUs). The tool wrote 1,219,780 records in 129 s
+and folded 1,130,400 values in 28 s; the service state index was rebuilt over the 87,600 service records in **899 ms** (the cost of the
+upgrade of a version 14 database on the reference host). The five query times were 812, 784, 795, 864 and 779 ms, median **795 ms**: the
+criterion (under 1,000 ms) is **met**, with a margin of about 20 percent. The earlier row (2,386 ms, not met) stays as the
+record of the first implementation; the run is 3.0 times faster, and 3.6 times the development-host median of 218 ms (the factor of 3.2
+used for the estimate was too low).
+
+The breakdown of the DS918+ (median of five runs, 807 ms in total, in the table above) shows the service changes as the largest part, 396.5
+ms or about half of the query (the read alone took 380.3 ms for 1,738 rows), then the
+rollup steps with 313.3 ms (`cpu_percent` 161.2 ms in one call, the other seven series 152.1 ms in seven calls), the six smaller reads with 60.3 ms and the
+engine with 37.3 ms; no boot read is made (0 calls). The statement alone for the steps of one `cpu_percent` label set took 16.8 ms (730
+rows), and one reader lease 1.13 ms. The remaining parallel reads, reader caches or pooling were not needed.
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):

@@ -15,6 +15,10 @@ public class ChartInteropTests
 
     private static readonly DateTimeOffset _start = new(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);
 
+    private static readonly int[] _createdBridges = [1];
+
+    private static readonly int[] _updatedBridges = [0, 1];
+
     private static readonly string[] _labels = ["load", "memory"];
 
     private static readonly string[] _stackedSequence = ["import", "createStacked", "update", "import", "create"];
@@ -60,17 +64,19 @@ public class ChartInteropTests
         Assert.AreEqual("module", runtime.Calls[1].Target, "create goes to the module");
         Assert.AreEqual("create", runtime.Calls[1].Identifier, "create identifier");
         Assert.AreEqual(source.Token, runtime.Calls[1].CancellationToken, "create token");
-        Assert.HasCount(4, runtime.Calls[1].Arguments, "create arguments");
+        Assert.HasCount(5, runtime.Calls[1].Arguments, "create arguments");
         Assert.AreEqual(host, runtime.Calls[1].Arguments[0], "host element");
         Assert.AreEqual("Load", runtime.Calls[1].Arguments[1], "title");
         Assert.IsInstanceOfType<string[]>(runtime.Calls[1].Arguments[2], "labels are an array of strings");
         Assert.AreSequenceEqual(_labels, (string[])runtime.Calls[1].Arguments[2]!, "labels");
         Assert.IsInstanceOfType<double?[][]>(runtime.Calls[1].Arguments[3], "columns are arrays of nullable numbers");
         AssertColumns(data.ToColumns(), (double?[][])runtime.Calls[1].Arguments[3]!);
+        Assert.IsInstanceOfType<int[][]>(runtime.Calls[1].Arguments[4], "bridges are arrays of indexes");
+        Assert.HasCount(2, (int[][])runtime.Calls[1].Arguments[4]!, "one bridge list per series");
     }
 
     /// <summary>
-    /// A stacked chart is created with the module function createStacked and the same four arguments, a later render updates it, and a line chart is still created with create.
+    /// A stacked chart is created with the module function createStacked and the same five arguments, a later render updates it, and a line chart is still created with create.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -94,11 +100,12 @@ public class ChartInteropTests
         // Assert
         Assert.AreSequenceEqual(_stackedSequence, runtime.Calls.Select(call => call.Identifier).ToArray(), "a stacked chart is created with createStacked and updated, a line chart with create");
         Assert.AreEqual("module", runtime.Calls[1].Target, "createStacked goes to the module");
-        Assert.HasCount(4, runtime.Calls[1].Arguments, "the same four arguments as create");
+        Assert.HasCount(5, runtime.Calls[1].Arguments, "the same five arguments as create");
         Assert.AreEqual(host, runtime.Calls[1].Arguments[0], "host element");
         Assert.AreEqual("Memory per program", runtime.Calls[1].Arguments[1], "title");
         Assert.AreSequenceEqual(_labels, (string[])runtime.Calls[1].Arguments[2]!, "labels");
         AssertColumns(stacked.ToColumns(), (double?[][])runtime.Calls[1].Arguments[3]!);
+        Assert.IsInstanceOfType<int[][]>(runtime.Calls[1].Arguments[4], "createStacked gets the bridges as well");
         Assert.AreEqual("chart", runtime.Calls[2].Target, "the update goes to the stacked chart object");
     }
 
@@ -128,9 +135,43 @@ public class ChartInteropTests
         Assert.AreSequenceEqual(_createSequence, runtime.Calls.Select(call => call.Identifier).ToArray(), "calls in order");
         Assert.AreEqual("chart", runtime.Calls[2].Target, "update goes to the chart object");
         Assert.AreEqual(secondSource.Token, runtime.Calls[2].CancellationToken, "update token");
-        Assert.HasCount(1, runtime.Calls[2].Arguments, "update arguments");
+        Assert.HasCount(2, runtime.Calls[2].Arguments, "update arguments");
         Assert.IsInstanceOfType<double?[][]>(runtime.Calls[2].Arguments[0], "columns are arrays of nullable numbers");
         AssertColumns(second.ToColumns(), (double?[][])runtime.Calls[2].Arguments[0]!);
+        Assert.IsInstanceOfType<int[][]>(runtime.Calls[2].Arguments[1], "bridges are arrays of indexes");
+    }
+
+    /// <summary>
+    /// The bridged indexes of every series go to <c>create</c> as the fifth argument and to <c>update</c> as the second one.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public async Task ChartInteropRenderAsyncPassesBridgedIndexesOnCreateAndUpdate()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var host = new ElementReference("host-1");
+        var times = new[] { _start, _start.AddSeconds(60), _start.AddSeconds(120) };
+        var first = new ChartData(times, [new ChartSeries("load", [1.0, null, 3.0], [false, true, false]), new ChartSeries("memory", [1.0, 2.0, 3.0])]);
+        var second = new ChartData(times, [new ChartSeries("load", [null, null, 3.0], [true, true, false]), new ChartSeries("memory", [1.0, 2.0, 3.0])]);
+
+        await using var interop = new ChartInterop(runtime);
+
+        // Act
+        await interop.RenderAsync(host, "Load", first, CancellationToken.None);
+        await interop.RenderAsync(host, "Load", second, CancellationToken.None);
+
+        // Assert
+        var created = (int[][])runtime.Calls[1].Arguments[4]!;
+        var updated = (int[][])runtime.Calls[2].Arguments[1]!;
+
+        Assert.HasCount(2, created, "create: one list per series");
+        Assert.AreSequenceEqual(_createdBridges, created[0], "create: the bridged index of the first series");
+        Assert.IsEmpty(created[1], "create: the second series has none");
+        Assert.HasCount(2, updated, "update: one list per series");
+        Assert.AreSequenceEqual(_updatedBridges, updated[0], "update: the bridged indexes of the first series");
+        Assert.IsEmpty(updated[1], "update: the second series has none");
     }
 
     /// <summary>

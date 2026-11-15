@@ -119,13 +119,38 @@ function buildStackedOptions(title, labels, width, colors, raw) {
     return options;
 }
 
-function createChart(element, title, labels, columns, stacked) {
+// The columns with the bridged cells set to undefined: uPlot breaks a line only at null, so an undefined cell is
+// skipped and the line is drawn across it. bridges holds per series the indexes of its bridged points.
+function bridge(columns, bridges) {
+    if (!bridges || bridges.length === 0) {
+        return columns;
+    }
+
+    return columns.map(function (column, index) {
+        const skipped = index === 0 ? undefined : bridges[index - 1];
+
+        if (!skipped || skipped.length === 0) {
+            return column;
+        }
+
+        const copy = column.slice();
+
+        skipped.forEach(function (point) {
+            copy[point] = undefined;
+        });
+
+        return copy;
+    });
+}
+
+function createChart(element, title, labels, columns, stacked, bridges) {
     const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
     let data = columns;
+    let skipped = bridges;
     let plot = null;
 
     function plotted() {
-        return stacked ? stack(data).data : data;
+        return stacked ? stack(data).data : bridge(data, skipped);
     }
 
     function build() {
@@ -162,8 +187,9 @@ function createChart(element, title, labels, columns, stacked) {
     colorScheme.addEventListener("change", build);
 
     return {
-        update: function (newColumns) {
+        update: function (newColumns, newBridges) {
             data = newColumns;
+            skipped = newBridges;
             plot.setData(plotted());
         },
         destroy: function () {
@@ -179,11 +205,11 @@ function createChart(element, title, labels, columns, stacked) {
     };
 }
 
-export function create(element, title, labels, columns) {
-    return createChart(element, title, labels, columns, false);
+export function create(element, title, labels, columns, bridges) {
+    return createChart(element, title, labels, columns, false, bridges);
 }
 
 // Stacked areas: every series is drawn on top of the ones before it, and the legend shows the value of each series itself.
-export function createStacked(element, title, labels, columns) {
-    return createChart(element, title, labels, columns, true);
+export function createStacked(element, title, labels, columns, bridges) {
+    return createChart(element, title, labels, columns, true, bridges);
 }

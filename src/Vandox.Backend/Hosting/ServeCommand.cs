@@ -16,6 +16,7 @@ using Vandox.Backend.Logs;
 using Vandox.Backend.Reports;
 using Vandox.Backend.Retention;
 using Vandox.Backend.Security;
+using Vandox.Backend.TimeSeries;
 using Vandox.Core.Configuration;
 using Vandox.Core.Signatures;
 using Vandox.Storage;
@@ -248,6 +249,7 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IIncidentBrowser>(provider => new GatedIncidentBrowser(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton(provider => new IncidentWindowReader(new GatedRecordReader(store, provider.GetRequiredService<WebReaderGate>())));
         builder.Services.AddSingleton(hooks.Clock ?? TimeProvider.System);
+        builder.Services.AddSingleton(provider => new TimeSeriesService(new GatedTimeSeriesReader(store, provider.GetRequiredService<WebReaderGate>()), RetentionService.CreatePolicy(config), provider.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton(provider => CreateReportService(store, config, provider.GetRequiredService<WebReaderGate>(), provider.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.AddSingleton(provider => CreateIngestEndpoint(store, config, hooks, loggerFactory, provider));

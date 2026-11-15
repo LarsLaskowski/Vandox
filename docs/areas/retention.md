@@ -78,7 +78,7 @@ needs in [Storage writing](storage-writing.md).
   late value is later. A bucket past its tier's period is not created.
 - A raw value is never removed before it is folded: removal skips every metric above the watermark. A database of an earlier version
   folds all its stored values first, in steps, and removes after.
-- Readers take buckets of one series in a range, oldest first, with `IRollupReader` ([Storage reading and log exploration](storage-reading.md)).
+- Readers take buckets of one series in a range, oldest first, with `IRollupReader` ([Storage reading and log exploration](storage-reading.md)); the time-series query ([Time-series queries](time-series-query.md)) reads steps of them and the earliest value not yet folded.
 
 ## The job
 

@@ -85,6 +85,15 @@ public sealed class ChartData
     }
 
     /// <summary>
+    /// Converts the data to the bridge columns the chart module expects: per series, the indexes of the bridged points.
+    /// </summary>
+    /// <returns>The indexes per series</returns>
+    internal int[][] ToBridges()
+    {
+        return [.. _series.Select(item => item.Bridged.Select((flag, index) => flag ? index : -1).Where(index => index >= 0).ToArray())];
+    }
+
+    /// <summary>
     /// Checks that the data can be drawn.
     /// </summary>
     /// <param name="times">The points in time</param>
@@ -120,7 +129,50 @@ public sealed class ChartData
 
             if (stacked)
             {
+                RequireNoBridges(item);
                 RequireValues(item);
+            }
+
+            RequireBridgesWithoutValues(item, times.Length);
+        }
+    }
+
+    /// <summary>
+    /// Checks that a stacked series bridges no point.
+    /// </summary>
+    /// <param name="item">The series</param>
+    /// <exception cref="ArgumentException">The series bridges a point</exception>
+    private static void RequireNoBridges(ChartSeries item)
+    {
+        if (item.Bridged.Any(flag => flag))
+        {
+            throw new ArgumentException($"The stacked series '{item.Label}' cannot bridge points.", nameof(item));
+        }
+    }
+
+    /// <summary>
+    /// Checks that the bridge flags of a series fit the points and that no bridged point has a value.
+    /// </summary>
+    /// <param name="item">The series</param>
+    /// <param name="points">The number of points in time</param>
+    /// <exception cref="ArgumentException">The flags do not fit the points, or a bridged point has a value</exception>
+    private static void RequireBridgesWithoutValues(ChartSeries item, int points)
+    {
+        if (item.Bridged.Count == 0)
+        {
+            return;
+        }
+
+        if (item.Bridged.Count != points)
+        {
+            throw new ArgumentException($"The series '{item.Label}' has {item.Bridged.Count} bridge flags for {points} points in time.", nameof(item));
+        }
+
+        for (var index = 0; index < points; index++)
+        {
+            if (item.Bridged[index] && item.Values[index] is not null)
+            {
+                throw new ArgumentException($"The series '{item.Label}' has a value at bridged point {index}.", nameof(item));
             }
         }
     }

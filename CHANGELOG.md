@@ -4,6 +4,16 @@ All notable changes to Vandox are listed here, newest release first. Versions fo
 release is a GitHub release with a `vX.Y.Z` tag on `main` ([CONTRIBUTING.md](docs/CONTRIBUTING.md#versioning-and-releases)). The GitHub release of each
 tag lists the merged pull requests in detail.
 
+## [Unreleased]
+
+### Added
+
+- **Time-series query service** in the backend (issue #47): for a range, up to 16 series and a target number of points it picks the
+  resolution (raw values or a rollup step from 5 minutes to whole days), puts all lines on one time axis, marks spans without data as
+  gaps and points between another line's samples as *between samples*, and returns the gaps of the range, the markers (OOM kills, boots,
+  service restarts, backup runs) and up to when the rollup points are complete. The charts draw a line through a bridged point and
+  break it at a gap. Views call it in process; there is no HTTP route and no option. The storage benchmark gains `--query`.
+
 ## [0.2.0] - 2026-11-13
 
 The live release: the agent `vandox-agent` collects on the monitored Plesk server and sends to the backend over Tailscale, so

@@ -487,7 +487,7 @@ public partial class SqliteStoreRetentionTests
             await WriteMarkerAsync(store, now);
         }
 
-        await RetentionSamples.ExecuteAsync(directory.Path, $"{RetentionSamples.UndoStepFourteen}; UPDATE meta SET value = '13' WHERE key = 'schema_version'", TestContext.CancellationToken);
+        await RetentionSamples.ExecuteAsync(directory.Path, $"{RetentionSamples.UndoStepFifteen}; {RetentionSamples.UndoStepFourteen}; UPDATE meta SET value = '13' WHERE key = 'schema_version'", TestContext.CancellationToken);
 
         // Act
         await using var reopened = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
@@ -507,7 +507,7 @@ public partial class SqliteStoreRetentionTests
         var folded = await CountAsync(directory, "SELECT sum(count) FROM metric_rollups_5m WHERE name = 'cpu'");
 
         // Assert
-        Assert.AreSequenceEqual(["14"], version, "schema version after the migration");
+        Assert.AreSequenceEqual(["15"], version, "schema version after the migration");
         Assert.AreEqual(3L, tables, "the rollup and hold tables exist");
         Assert.AreEqual(2L, indexes, "the removal and gap indexes exist");
         Assert.AreEqual(5L, beforeFold, "no value is removed before the fold read it");
