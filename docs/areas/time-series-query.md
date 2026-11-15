@@ -117,12 +117,9 @@ collectors are external text from the agent, returned as stored; a view shows th
   ([Web UI](web-ui.md), *Store reads of the views*).
 - **Performance.** The reference workload (a year of rollups of eight series, one of them `cpu_percent` with eight modes, at 1,000
   points, with markers and gaps, over the database described in [Benchmarks](../BENCHMARKS.md), *Time-series query*) must run in under one
-  second, median of five runs, on the reference host. The first run on the reference host (2026-11-15) took 2,386 ms and did not meet it;
-  the service changes read in one pass and the rollup steps merged in SQL cut the development-host median from about 700 ms to about 380 ms,
-  and the covering index `records_service_state` ([Storage](storage.md), *Migration steps*), from which the three reads of service
-  records are answered without a payload, to about 220 ms against the goal of 250 ms there. The re-run on the reference host
-  (2026-11-15, stamped head `1f0b60b`) took a median of 795 ms and **met** the criterion with a margin of about 20 percent; the service
-  changes remain the largest part (Benchmarks has the numbers and the breakdown).
+  second, median of five runs, on the reference host. It took a median of 795 ms there (2026-11-15) and meets the criterion; the three
+  reads of service records are answered from the covering index `records_service_state` ([Storage](storage.md), *Migration steps*) without
+  a payload, and the service changes remain the largest part (Benchmarks has the numbers and the breakdown).
 
 ## Related decisions
 

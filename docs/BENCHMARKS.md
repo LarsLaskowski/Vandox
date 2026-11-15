@@ -219,21 +219,21 @@ setup shorter; the raw values of the last 30 days are written every minute. The 
 | Host | Date | Volume | Median query | Times | Verdict |
 | ---- | ---- | ------ | -----------: | ----- | ------- |
 | development host (4 logical CPUs, Ubuntu 24.04, .NET 11.0.0), not the reference host | 2026-11-14 | local disk | 791 ms | 791, 957, 762, 858, 731 ms | order of magnitude only |
-| DS918+ (reference host), published from `be419c6` | 2026-11-15 | SSD volume `/volume2` | **2,386 ms** | 2,394, 2,449, 2,342, 2,386, 2,331 ms | **not met** (limit 1,000 ms) |
-| development host, before the changes of group G5 | 2026-11-15 | local disk | 717 ms, 624 ms | 608, 618, 778, 782, 717 ms; 866, 905, 624, 522, 518 ms | order of magnitude only |
-| development host, after the changes of group G5 (three runs) | 2026-11-15 | local disk | 468 ms, 306 ms, 382 ms | 472, 404, 425, 468, 513 ms; 297, 306, 291, 316, 346 ms; 355, 266, 399, 384, 382 ms | goal of 250 ms not reached; order of magnitude only |
-| development host, after the covering index of group G6 (three runs) | 2026-11-15 | local disk | 289 ms, 216 ms, 218 ms | 259, 229, 304, 289, 318 ms; 218, 189, 204, 216, 233 ms; 210, 179, 218, 415, 321 ms | goal of 250 ms reached (median of the three medians 218 ms); order of magnitude only |
-| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained), re-run from the stamped head `1f0b60b` after group G6 | 2026-11-15 | SSD volume `/volume2` | **795 ms** | 812, 784, 795, 864, 779 ms | **met** (limit 1,000 ms) |
+| DS918+ (reference host), published from the first implementation | 2026-11-15 | SSD volume `/volume2` | **2,386 ms** | 2,394, 2,449, 2,342, 2,386, 2,331 ms | **not met** (limit 1,000 ms) |
+| development host, first implementation | 2026-11-15 | local disk | 717 ms, 624 ms | 608, 618, 778, 782, 717 ms; 866, 905, 624, 522, 518 ms | order of magnitude only |
+| development host, after the first reductions (three runs) | 2026-11-15 | local disk | 468 ms, 306 ms, 382 ms | 472, 404, 425, 468, 513 ms; 297, 306, 291, 316, 346 ms; 355, 266, 399, 384, 382 ms | goal of 250 ms not reached; order of magnitude only |
+| development host, with the covering index (three runs) | 2026-11-15 | local disk | 289 ms, 216 ms, 218 ms | 259, 229, 304, 289, 318 ms; 218, 189, 204, 216, 233 ms; 210, 179, 218, 415, 321 ms | goal of 250 ms reached (median of the three medians 218 ms); order of magnitude only |
+| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained), re-run with the covering index | 2026-11-15 | SSD volume `/volume2` | **795 ms** | 812, 784, 795, 864, 779 ms | **met** (limit 1,000 ms) |
 
-The first DS918+ run of 2026-11-15 (`be419c6`) wrote 1,219,780 records in 123 s and folded the values in 27 s, and the same database answered the query in 2,386
+The first DS918+ run of 2026-11-15 (first implementation) wrote 1,219,780 records in 123 s and folded the values in 27 s, and the same database answered the query in 2,386
 ms: 3.2 times the development host of that day (735 ms), so the reference host does not meet the criterion with the first implementation.
 The development-host runs wrote the same records in 25 to 27 s, folded the values in 7 to 8 s, and answered with a 12-hour step, 730 times,
 15 lines, 1,000 markers (cut) and 1,000 gaps (cut). A run on the development host is a measure of the code, not of the criterion; the
-spread between two runs of the same code is large (the first run after the change of group G5 took 468 ms, the second 306 ms).
+spread between two runs of the same code is large (the first run after the first reductions took 468 ms, the second 306 ms).
 
-**Breakdown** (median of five runs through the timing reader, in ms; the DS918+ column is the run of 2026-11-15 from `1f0b60b`, after G6):
+**Breakdown** (median of five runs through the timing reader, in ms; the DS918+ column is the run of 2026-11-15 with the covering index):
 
-| Part | Calls | Before G5 (two runs) | After G5 (three runs) | After G6 (three runs) | DS918+ after G6 |
+| Part | Calls | First implementation (two runs) | After the first reductions (three runs) | With the covering index (three runs) | DS918+ with the covering index |
 | ---- | ----: | -------------------: | --------------------: | --------------------: | --------------: |
 | rollup steps, `cpu_percent` (8 label sets) | 1 | 97, 85 | 37, 46, 45 | 44, 44, 45 | 161.2 |
 | rollup steps, the other seven series | 7 | 101, 79 | 36, 49, 47 | 43, 44, 41 | 152.1 |
@@ -243,22 +243,22 @@ spread between two runs of the same code is large (the first run after the chang
 | engine (the query less the reads) | | 12, not measurable | 3, 16, 6 | 3, 3, 21 | 37.3 |
 | median of the breakdown runs | | 734, 618 | 226, 295, 281 | 213, 213, 225 | 807 |
 
-Before group G5 the service changes took two thirds of the query (the statement alone 443 ms for 1,738 rows over the 87,600 `service_state`
+In the first implementation the service changes took two thirds of the query (the statement alone 443 ms for 1,738 rows over the 87,600 `service_state`
 records: it extracted four members of each record and ran six window functions over a sort by unit) and the rollup steps
-a quarter (one read per label set that built a list of up to 8,760 buckets and merged them in the program). What group G5 changed
+a quarter (one read per label set that built a list of up to 8,760 buckets and merged them in the program). What the first reductions changed
 ([Time-series queries](areas/time-series-query.md), *Limits and errors*): the service changes are streamed once in capture order with three
 members per record, the last record of each unit is kept in memory, and only the changed records and their predecessors are read in full;
 the rollup steps are merged in SQL per step, with one prepared statement for all label sets of a series; and the restart and backup checks
 read the boots once instead of once per check (this benchmark makes no boot read: 0 calls).
 
-The goal of group G5 was a development-host median of at most 250 ms (about 825 ms on the DS918+ at the factor of 3.2). The three runs
+The goal of the first reductions was a development-host median of at most 250 ms (about 825 ms on the DS918+ at the factor of 3.2). The three runs
 reached 468, 306 and 382 ms, the breakdowns 226 to 295 ms, so the goal is **not reached** and the DS918+ is estimated at about 1.2 s
 (not measured). The remainder is the service changes (about 140 to 170 ms: SQLite fetches and parses 87,600 payloads, about 90 ms in a separate measurement, and
 87,600 rows cross into the program), the rollup steps (about 70 to 95 ms: 15 label sets, each a statement of 4 to 6 ms inside its connection,
 plus the label-set reads and a new reader connection for each call) and the engine. The further options (parallel reads, reader caches or
-pooling, a covering index on `service_state`) were not taken in group G5.
+pooling, a covering index on `service_state`) were not taken in the first reductions.
 
-**Group G6** ([0217](decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md)) took the covering index: schema step 15 adds
+**The covering index** ([0217](decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md)) took the covering index: schema step 15 adds
 `records_service_state`, and the three service reads (the stream, the rows of the changes and the previous states) read only the indexed
 expressions, so SQLite answers them from the index without fetching or parsing a payload (`EXPLAIN QUERY PLAN` shows `COVERING INDEX
 records_service_state` for each, pinned by a test). The service changes fell from 137 to 168 ms to 104 to 108 ms; the three runs reached
@@ -269,11 +269,11 @@ remainder of the service changes is the 87,600 index rows crossing into the prog
 the upgrade of a database at version 14, during which the writer is busy ([Storage](areas/storage.md), *Migration steps*); at the factor
 of 3.2 about 0.8 to 0.9 s on the DS918+ (estimated; measured below at 899 ms).
 
-**Re-run on the DS918+ after group G6** (Product Manager, 2026-11-15, self-contained build of the stamped head `1f0b60b`, folder
+**Re-run on the DS918+ with the covering index** (Product Manager, 2026-11-15, self-contained build of the merged implementation, folder
 `/volume2/DockerData/Vandox-Tests/` on the SSD volume, Linux 4.4.302+, .NET 11.0.0, 4 logical CPUs). The tool wrote 1,219,780 records in 129 s
 and folded 1,130,400 values in 28 s; the service state index was rebuilt over the 87,600 service records in **899 ms** (the cost of the
 upgrade of a version 14 database on the reference host). The five query times were 812, 784, 795, 864 and 779 ms, median **795 ms**: the
-criterion (under 1,000 ms) is **met**, with a margin of about 20 percent. The earlier row of `be419c6` (2,386 ms, not met) stays as the
+criterion (under 1,000 ms) is **met**, with a margin of about 20 percent. The earlier row (2,386 ms, not met) stays as the
 record of the first implementation; the run is 3.0 times faster, and 3.6 times the development-host median of 218 ms (the factor of 3.2
 used for the estimate was too low).
 
