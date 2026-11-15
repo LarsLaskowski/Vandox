@@ -26,7 +26,7 @@ See [spec.md](spec.md), *Problem*.
 | 11 | SQLite streams `ORDER BY captured_at, labels` over `metrics_source_name_time` with a temp B-tree only for the right part | `RawValuesAsyncQueryPlanStreamsByCaptureTime` (Tester, step 5) | confirmed |
 | 13 | Before G5, boots were looked up per check (≤ 3,001), beyond N2 | `SeriesMarkerReader.cs` at be419c6 | confirmed |
 | 15 | Rollup reads and service changes dominate | G5 breakdown (`docs/BENCHMARKS.md`) | confirmed |
-| 16 | SQLite 3.53 answers the service reads from `records_service_state` alone (covering, expressions matched) | to verify: `ServiceReadsQueryPlanUseCoveringServiceStateIndex`, Tester, task 21 | unverified |
+| 16 | SQLite 3.53 answers the service reads from `records_service_state` alone only with `kind` as an index column and `INDEXED BY` | `ServiceReadsQueryPlanUseCoveringServiceStateIndex`; Dev, G6, reproduced on 3.53.1 | confirmed |
 
 ## Tests per criterion
 
@@ -120,8 +120,8 @@ capture time. Backups: `BackupRunsAsync([from − 1 d, end + 1 d))` (phase, boot
 paired by (boot ID, `started_at`), duplicates dropped; a run with `started_at >= end` is dropped; it is kept when `gone_by > from` or it
 has no end; `EndsAt` and `LastSeenAt` are clamped to `now`; without an end, a boot of the boot read in `(start, now]` makes it `Unknown`,
 none `Running`. The boot read (G5, fact 13, Security S1), only when a check with a non-empty interval needs it: pages of 1,001 newest first
-from `now + 1 tick`, keyed on (capture time, ID), at most ten, stopping below the earliest interval start. A check is undecided only when no boot read lies in its interval and the interval reaches below the oldest boot read;
-it gives no marker and bounds `MarkersCompleteUntil` at the time its marker would have (*restart time* above, never before `from`). Errors: `store: invalid query: after id is not used by boot times`, `… before id is only for boot times`, `… before id must not be negative`. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
+from `now + 1 tick`, keyed on (capture time, ID), at most ten, stopping below the earliest interval start. Only a restart check can be undecided (a backup's interval `(start, now]` holds every boot read): when no boot read lies in its
+interval and the interval reaches below the oldest boot read; it gives no marker and bounds `MarkersCompleteUntil` at the time its marker would have (*restart time* above, never before `from`). Errors: `store: invalid query: after id is not used by boot times`, `… before id is only for boot times`, `… before id must not be negative`. All markers sorted by `At`, kind, record ID, cut at 1,000; `MarkersCompleteUntil` as for gaps (backups − 1 d, restarts the
 2,001st row's capture).
 
 **Completeness (AC6).** At a step, `EarliestUnfoldedAsync`: `SELECT min(captured_at) FROM metrics WHERE record_id > watermark` (primary
@@ -145,9 +145,9 @@ expectation (but those *Test files* names); the five timed AC10 runs stay as the
 1. Done in G5 (tasks 14–18): breakdown in the benchmark, one newest-first boot read, step merge in SQL, streamed service changes;
    development host 306–468 ms, service changes 137–168 ms of it (`docs/BENCHMARKS.md`); goal missed.
 2. G6 (Lead decision 2026-11-15, record 0217): schema step 15 adds the covering partial index `records_service_state` (record 0217
-   names its columns); `ServiceStream`, `ServiceRows` and `PreviousServiceStates` read only `id` and the indexed expressions, written
-   exactly as in the index, so SQLite needs no payload (fact 16). The benchmark prints the time to rebuild that index on its database
-   (drop and create, after the fold). Goal unchanged: ≤ 250 ms on the development host, then the DS918+ re-run (task 24).
+   names its columns, `kind` last); `ServiceStream`, `ServiceRows` and `PreviousServiceStates` read it `INDEXED BY`, only `id` and the
+   indexed expressions, so SQLite needs no payload (fact 16). Result: 218 ms (289, 216, 218), goal met. The benchmark prints the time to rebuild that index on its database
+   (drop and create, after the fold). Then the DS918+ re-run (task 24).
 3. Held back: parallel reads (next if the DS918+ fails again), pooling, reader caches.
 
 ## Options considered
@@ -268,7 +268,7 @@ All by the Dev, after the code is green:
 - `CHANGELOG.md`: an `[Unreleased]` *Added* entry for the time-series query service.
 - G5: `docs/BENCHMARKS.md`, *Time-series query* — the breakdown in *Procedure*; rows for the DS918+ run of 2026-11-15 (be419c6,
   2,386 ms, not met) and the new development-host run with its breakdown; `docs/areas/time-series-query.md` — the one boot read, its
-  bound and the undecided checks; `docs/areas/storage-reading.md` — boot times newest first, `BeforeId`, the two errors. G6: `docs/areas/storage.md` —
+  bound and the undecided restart checks; `docs/areas/storage-reading.md` — boot times newest first, `BeforeId`, the two errors. G6: `docs/areas/storage.md` —
   version 15, step 15 and the index; `docs/BENCHMARKS.md` — the index build time and the new rows.
 - `.squad/project.md` *Test doubles*: the Tester reports a row for `CountingTimeSeriesReader`; the orchestrator writes it in.
 

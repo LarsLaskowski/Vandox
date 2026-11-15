@@ -29,8 +29,11 @@ is about 3.2 times slower. The payload is the backend's own serialization of the
 ## Decision
 
 Option 5: schema step 15 adds `records_service_state` on `records(captured_at, json_extract(data, '$.unit'),
-json_extract(data, '$.restarts'), json_extract(data, '$.active_enter_at'), json_extract(data, '$.active_state'), boot_id) WHERE kind =
-'service_state'`, and the service reads of the time-series query use exactly these expressions so SQLite answers them from the index.
+json_extract(data, '$.restarts'), json_extract(data, '$.active_enter_at'), json_extract(data, '$.active_state'), boot_id, kind) WHERE
+kind = 'service_state'`, and the three service reads of the time-series query name it with `INDEXED BY records_service_state` and use
+exactly these expressions, so SQLite answers them from the index. `kind` is a column of the index because SQLite 3.53 counts a column
+of the partial index's `WHERE` as read from the table, so without it the index is never covering; without `INDEXED BY` the planner
+takes `records_kind_time`.
 The schema and the step are in [Storage](../areas/storage.md).
 
 ## Consequences
@@ -38,7 +41,12 @@ The schema and the step are in [Storage](../areas/storage.md).
 - Each stored `service_state` record costs one index entry (about 100 bytes, at most about the size of its payload) and one parse at write time; other records cost only the
   check of `kind`.
 - The upgrade to step 15 scans the `records` table once to build the index; the writer is busy for that time, and agents keep their
-  records in the spool. The build time on the benchmark database is in `BENCHMARKS.md`.
+  records in the spool. On the benchmark database (1.2 million records) the build took 243 to 282 ms on the
+  development host (`BENCHMARKS.md`).
 - A `service_state` payload that is not valid JSON would make its insert fail, and the upgrade to step 15 (`store: migration 15: malformed JSON`, the step rolled back, version 14 kept); payloads are only written by the backend's serializer (`BatchWriter` through `PayloadJson`), so neither occurs.
+- The one-year query fell from 306 to 468 ms to about 218 ms on the development host (median of
+  three runs: 289, 216, 218 ms); the DS918+ figure is the Product Manager's run.
+- `INDEXED BY` makes a service read fail with an error, not run slowly, if the index is missing; step 15 always creates it before a
+  read runs.
 - The restart rule (record 0215) is unchanged; if it ever reads another member, the index gains it in a new step, or the read loses
   its speed.
