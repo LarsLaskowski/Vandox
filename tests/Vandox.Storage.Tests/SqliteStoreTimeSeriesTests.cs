@@ -1170,6 +1170,32 @@ public class SqliteStoreTimeSeriesTests
 
         // Assert
         Assert.Contains("COVERING INDEX records_service_state", plan, $"the plan of {statement} reads the covering index: {plan}");
+        Assert.DoesNotContain("SCAN records", plan, $"the plan of {statement} does not scan the table: {plan}");
+        Assert.AreEqual(statement == "ServiceRows", plan.Contains("SEARCH records", StringComparison.Ordinal) && plan.Contains("captured_at>? AND captured_at<?", StringComparison.Ordinal) || statement != "ServiceRows", $"the plan of ServiceRows searches the capture time range: {plan}");
+    }
+
+    /// <summary>
+    /// The statement that reads the service records of a list of IDs stays within the range: the records of IDs outside it are not read, so the work of a service change read is bounded by its range.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task ServiceRowsStatementReadsOnlyRecordsWithinRange()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var from = Samples.Base.AddSeconds(100);
+        var to = Samples.Base.AddSeconds(110);
+
+        await TimeSeriesSamples.InsertServiceStatesAsync(directory.Path, "unit-%03d.service", Samples.Base, 300, TestContext.CancellationToken);
+
+        // Act
+        var captured = await ServiceRowCapturesAsync(directory.Path, from, to);
+
+        // Assert
+        Assert.HasCount(10, captured, "only the records of the range are read, though the IDs name all 300 records");
+        Assert.IsTrue(captured.All(at => at >= StorageTime.ToNanoseconds(from) && at < StorageTime.ToNanoseconds(to)), "every record read lies in [from, to)");
     }
 
     /// <summary>
