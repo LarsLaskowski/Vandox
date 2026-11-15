@@ -26,8 +26,8 @@ See [spec.md](spec.md), *Problem*.
 | 11 | SQLite streams `ORDER BY captured_at, labels` over `metrics_source_name_time` with a temp B-tree only for the right part | `RawValuesAsyncQueryPlanStreamsByCaptureTime` (Tester, step 5) | confirmed |
 | 12 | Each of ~20 reads opens a new connection (`Pooling = false`) | `SqliteStore.cs:266-284,346-355` | confirmed |
 | 13 | Boots are looked up per enter-moved row (≤ 2,000) and endless backup run (≤ 1,001), beyond N2: a related defect | `SeriesMarkerReader.cs:186-193,225-246,350-358` | confirmed |
-| 14 | Fact 13's calls hardly occur in the benchmark | `QueryBenchmark.cs:168-179` | confirmed |
-| 15 | Rollup reads (131,400 buckets) and the service-change window (87,600 records) dominate | to verify: breakdown, task 14, Dev | unverified |
+| 14 | Fact 13's calls are rare in the benchmark | `QueryBenchmark.cs:168-179` | confirmed |
+| 15 | Rollup reads (131,400 buckets) and service changes (87,600 records) dominate | to verify: breakdown, task 14, Dev | unverified |
 
 ## Tests per criterion
 
@@ -152,7 +152,7 @@ expectation (but those *Test files* names); the five timed AC10 runs stay as the
    with a Tester case from before the epoch to near the storable maximum — else no SQL merge; a service-change statement with the same
    rows and less work (one `json_extract` per member and row, fewer sorts, no temp-file spill by fewer or narrower sorted rows;
    reader pragmas unchanged, held back below).
-3. Goal: development-host median ≤ 250 ms (≈ 825 ms on the DS918+). Not reached: the Dev stops and reports both
+3. Goal: development-host median ≤ 250 ms (≈ 825 ms on the DS918+). Else the Dev stops, reports both
    breakdowns; the Lead decides (mode `decide`) on the held-back options.
 
 ## Options considered
