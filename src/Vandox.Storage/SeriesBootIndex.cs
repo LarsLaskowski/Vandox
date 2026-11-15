@@ -30,21 +30,22 @@ internal sealed class SeriesBootIndex
     #region Methods
 
     /// <summary>
-    /// Reads the boots of the intervals the checks ask about: newest first from the latest interval end, at most ten pages of 1,001, down to the earliest interval start.
+    /// Reads the boots of the intervals the checks ask about: newest first from the query time, at most ten pages of 1,001, down to the earliest interval start.
     /// </summary>
     /// <param name="reader">The store reads</param>
-    /// <param name="intervals">The intervals, each from its first to below its last capture time and not empty</param>
+    /// <param name="starts">The first capture times of the intervals the checks ask about</param>
+    /// <param name="end">The time below which the read starts: the query time and one tick</param>
     /// <param name="cancellationToken">Cancels the reads</param>
     /// <returns>A task that returns the index; it holds no boot and decides every check when there is no interval</returns>
-    internal static async Task<SeriesBootIndex> ReadAsync(ITimeSeriesReader reader, IReadOnlyList<(DateTimeOffset From, DateTimeOffset To)> intervals, CancellationToken cancellationToken)
+    internal static async Task<SeriesBootIndex> ReadAsync(ITimeSeriesReader reader, IReadOnlyList<DateTimeOffset> starts, DateTimeOffset end, CancellationToken cancellationToken)
     {
-        if (intervals.Count == 0)
+        if (starts.Count == 0)
         {
             return new SeriesBootIndex([], null);
         }
 
-        var from = intervals.Min(interval => interval.From);
-        var cursor = intervals.Max(interval => interval.To);
+        var from = starts.Min();
+        var cursor = end;
         var before = 0L;
         var times = new List<long>();
 
