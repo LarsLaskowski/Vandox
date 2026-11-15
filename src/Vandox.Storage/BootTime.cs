@@ -8,6 +8,11 @@ public sealed class BootTime
     #region Properties
 
     /// <summary>
+    /// Gets the ID of the record.
+    /// </summary>
+    public long Id { get; init; }
+
+    /// <summary>
     /// Gets the capture time.
     /// </summary>
     public DateTimeOffset CapturedAt { get; init; }

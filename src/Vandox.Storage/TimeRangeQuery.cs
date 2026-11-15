@@ -27,5 +27,10 @@ public sealed class TimeRangeQuery
     /// </summary>
     public long AfterId { get; init; }
 
+    /// <summary>
+    /// Gets the ID before which rows at the capture time <see cref="To"/> are returned by a newest-first read; 0 keeps <see cref="To"/> exclusive.
+    /// </summary>
+    public long BeforeId { get; init; }
+
     #endregion // Properties
 }
