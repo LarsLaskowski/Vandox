@@ -37,3 +37,5 @@ on the parsed values. The rules and the marker's time are in [Time-series querie
   its first record in the range is no restart; the scan stays bounded however many units appear.
 - The restart is timed at its new enter time only when that lies in the range and not after its record, so a forged enter time cannot
   place a marker outside the range.
+- The stored boots are read once per query in bounded pages, not once per record judged; a record the pages cannot decide gives no
+  restart, and the marker list says up to when it is complete.

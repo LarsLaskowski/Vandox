@@ -40,3 +40,4 @@ are quoted in full.
 | 2026-11-14 20:00 | 7 Fix | squad-tester | LogTextTests heap measurements stabilised (median of 5); gate tests folded; 8 coverage runs green (sonnet/medium · 132,798 tokens · 20 tool uses · 297 s · 36 in · 20,034 out · 1,896,088 cache read · 76,933 cache write · 385,981 weighted) |
 | 2026-11-14 20:00 | 7 Early draft PR | Orchestrator | https://github.com/LarsLaskowski/Vandox/pull/468 |
 | 2026-11-15 09:16 | 7 Manual test | Product Manager | AC10 NOT met on the DS918+ (/volume2, self-contained published from be419c6): median query 2386 ms (2394, 2449, 2342, 2386, 2331); write 123 s, fold 27 s; development host 735 ms (3.2x) |
+| 2026-11-15 09:24 | 7 Fix | squad-lead | AC10 failed: G5 optimisation group planned (tasks 14-18), Security plan delta due (opus/medium · 183,906 tokens · 53 tool uses · 494 s · 76 in · 45,575 out · 5,152,892 cache read · 173,912 cache write · 1,405,971 weighted) |
