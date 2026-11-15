@@ -258,7 +258,7 @@ reached 468, 306 and 382 ms, the breakdowns 226 to 295 ms, so the goal is **not 
 plus the label-set reads and a new reader connection for each call) and the engine. The further options (parallel reads, reader caches or
 pooling, a covering index on `service_state`) were not taken in the first reductions.
 
-**The covering index** ([0217](decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md)) took the covering index: schema step 15 adds
+**The covering index** ([0217](decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md)): schema step 15 adds
 `records_service_state`, and the three service reads (the stream, the rows of the changes and the previous states) read only the indexed
 expressions, so SQLite answers them from the index without fetching or parsing a payload (`EXPLAIN QUERY PLAN` shows `COVERING INDEX
 records_service_state` for each, pinned by a test). The service changes fell from 137 to 168 ms to 104 to 108 ms; the three runs reached
