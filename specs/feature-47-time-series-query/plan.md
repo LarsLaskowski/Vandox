@@ -332,6 +332,16 @@ Their area link resolves once the Dev adds `docs/areas/time-series-query.md`; `d
 - S6 (derived windows outside the storable range). Accepted: every derived bound is clamped; N2's second clause takes the suggested
   wording; `QueryAsyncStorableEdgesReadWithoutError`.
 
+- G5 S1 (old boots crowd out the ascending boot read). Accepted, option (a): boots are read newest first from `now + 1 tick`, at most
+  ten pages, stopping below the earliest interval start; a check is undecided only when its interval reaches below the oldest boot
+  read and holds none, and bounds `MarkersCompleteUntil` at no earlier than `from`. `BootTimesAsync` keeps its signature and turns
+  newest first with `TimeRangeQuery.BeforeId` (skeleton task 15); test rows in `QueryAsyncBootChecksReadAtMostTenBootPages`.
+  Residual: more than 10,010 boots stored after an interval's start leave that check undecided, which the list states.
+- G5 N1 (paging without an ID). Accepted: `BootTime.Id`, selected first; paging on (capture time, ID); test
+  `BootTimesAsyncPagesNewestFirstByBeforeId` with 1,002 boots at one capture time.
+- G5 N2 (temp-file spill). Accepted verbatim in *Performance* 2.
+- G5 N3 (SQL step index). Accepted in *Performance* 2; test `RollupStepsAsyncAlignsFromBeforeEpochToStorableMaximum`.
+
 ## Out of scope / follow-ups
 
 See spec *Out of scope*. A view needing log-shipping gaps reported more than seven days late revisits record 0216.
