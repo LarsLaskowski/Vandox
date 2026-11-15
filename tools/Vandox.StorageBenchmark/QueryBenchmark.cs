@@ -231,7 +231,7 @@ internal static class QueryBenchmark
                           };
 
             await CountAsync(lease.Connection, "cpu_percent buckets (one label set, hourly)", TimeSeriesQueries.BucketsHourly, buckets, cancellationToken).ConfigureAwait(false);
-            await CountAsync(lease.Connection, "service changes", TimeSeriesQueries.ServiceChanges, range, cancellationToken).ConfigureAwait(false);
+            await ChangesAsync(lease.Connection, query, cancellationToken).ConfigureAwait(false);
             await CountAsync(lease.Connection, "gap records", TimeSeriesQueries.GapRecords, gapRecords, cancellationToken).ConfigureAwait(false);
         }
 
@@ -279,6 +279,31 @@ internal static class QueryBenchmark
         }
 
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"statement alone, {name}: {Median(times):F1} ms, {rows} rows"));
+    }
+
+    /// <summary>
+    /// Times the read of the service changes alone, with the rows built, five times and prints the median.
+    /// </summary>
+    /// <param name="connection">The reader connection</param>
+    /// <param name="query">The query whose range is read</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that completes when the line is printed</returns>
+    private static async Task ChangesAsync(SqliteConnection connection, TimeSeriesQuery query, CancellationToken cancellationToken)
+    {
+        var times = new List<double>();
+        var rows = 0;
+
+        for (var run = 0; run < Runs; run++)
+        {
+            var watch = Stopwatch.StartNew();
+            var read = await TimeSeriesQueries.ReadServiceChangesAsync(connection, new TimeRangeQuery { From = query.From, To = query.To, Limit = TimeSeriesQueries.MaxServiceLimit }, cancellationToken).ConfigureAwait(false);
+
+            watch.Stop();
+            rows = read.Count;
+            times.Add(watch.Elapsed.TotalMilliseconds);
+        }
+
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"read alone, service changes: {Median(times):F1} ms, {rows} rows"));
     }
 
     /// <summary>
