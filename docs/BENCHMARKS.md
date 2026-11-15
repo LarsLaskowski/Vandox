@@ -198,6 +198,10 @@ a day (a start and an end record), 50 OOM kills and 1,000 gap records. It folds 
 for the year at 1,000 points through `TimeSeriesService` over the store: one query that is not counted, then five that are timed. It prints the
 times, the shape of the result and the median, and whether it is under one second.
 
+After the fold the program drops the index `records_service_state` of schema step 15 and creates it again from the stored `service_state` records, and prints the
+time of the creation: that is what the upgrade of a version 14 database costs once ([Storage](areas/storage.md), *Migration steps*). The
+index is in place for the timed query runs.
+
 After the median line the program prints a **breakdown**: five more runs of the same query through a wrapper that times every store read
 (the reader lease included) and counts its calls. It prints, per part, the median time and the calls: the rollup steps of `cpu_percent`
 (one call, eight label sets), of the other seven series (seven calls), the earliest unfolded time, the gap rows, the gap records, the
@@ -218,7 +222,8 @@ setup shorter; the raw values of the last 30 days are written every minute. The 
 | DS918+ (reference host), published from `be419c6` | 2026-11-15 | SSD volume `/volume2` | **2,386 ms** | 2,394, 2,449, 2,342, 2,386, 2,331 ms | **not met** (limit 1,000 ms) |
 | development host, before the changes of group G5 | 2026-11-15 | local disk | 717 ms, 624 ms | 608, 618, 778, 782, 717 ms; 866, 905, 624, 522, 518 ms | order of magnitude only |
 | development host, after the changes of group G5 (three runs) | 2026-11-15 | local disk | 468 ms, 306 ms, 382 ms | 472, 404, 425, 468, 513 ms; 297, 306, 291, 316, 346 ms; 355, 266, 399, 384, 382 ms | goal of 250 ms not reached; order of magnitude only |
-| DS918+ (reference host), re-run from the stamped head after group G5 | not run yet | SSD volume | | | open (task 19, Product Manager) |
+| development host, after the covering index of group G6 (three runs) | 2026-11-15 | local disk | 289 ms, 216 ms, 218 ms | 259, 229, 304, 289, 318 ms; 218, 189, 204, 216, 233 ms; 210, 179, 218, 415, 321 ms | goal of 250 ms reached (median of the three medians 218 ms); order of magnitude only |
+| DS918+ (reference host), re-run from the stamped head after group G6 | not run yet | SSD volume | | | open (task 24, Product Manager) |
 
 The DS918+ run of 2026-11-15 wrote 1,219,780 records in 123 s and folded the values in 27 s, and the same database answered the query in 2,386
 ms: 3.2 times the development host of that day (735 ms), so the reference host does not meet the criterion with the first implementation.
@@ -228,15 +233,15 @@ spread between two runs of the same code is large (the first run after the chang
 
 **Breakdown on the development host** (median of five runs through the timing reader, in ms; the DS918+ is about three times slower):
 
-| Part | Calls | Before G5 (two runs) | After G5 (three runs) |
-| ---- | ----: | -------------------: | --------------------: |
-| rollup steps, `cpu_percent` (8 label sets) | 1 | 97, 85 | 37, 46, 45 |
-| rollup steps, the other seven series | 7 | 101, 79 | 36, 49, 47 |
-| service changes (87,600 records of the year) | 1 | 505, 448 | 137, 167, 168 |
-| gap rows, gap records, kernel events, backup runs, earliest unfolded, previous states | 6 | 19, 17 | 14, 17, 15 |
-| boot reads | 0 | 0, 0 | 0, 0, 0 |
-| engine (the query less the reads) | | 12, not measurable | 3, 16, 6 |
-| median of the breakdown runs | | 734, 618 | 226, 295, 281 |
+| Part | Calls | Before G5 (two runs) | After G5 (three runs) | After G6 (three runs) |
+| ---- | ----: | -------------------: | --------------------: | --------------------: |
+| rollup steps, `cpu_percent` (8 label sets) | 1 | 97, 85 | 37, 46, 45 | 44, 44, 45 |
+| rollup steps, the other seven series | 7 | 101, 79 | 36, 49, 47 | 43, 44, 41 |
+| service changes (87,600 records of the year) | 1 | 505, 448 | 137, 167, 168 | 108, 107, 104 |
+| gap rows, gap records, kernel events, backup runs, earliest unfolded, previous states | 6 | 19, 17 | 14, 17, 15 | 15, 16, 15 |
+| boot reads | 0 | 0, 0 | 0, 0, 0 | 0, 0, 0 |
+| engine (the query less the reads) | | 12, not measurable | 3, 16, 6 | 3, 3, 21 |
+| median of the breakdown runs | | 734, 618 | 226, 295, 281 | 213, 213, 225 |
 
 Before group G5 the service changes took two thirds of the query (the statement alone 443 ms for 1,738 rows over the 87,600 `service_state`
 records: it extracted four members of each record and ran six window functions over a sort by unit) and the rollup steps
@@ -251,8 +256,18 @@ reached 468, 306 and 382 ms, the breakdowns 226 to 295 ms, so the goal is **not 
 (not measured). The remainder is the service changes (about 140 to 170 ms: SQLite fetches and parses 87,600 payloads, about 90 ms in a separate measurement, and
 87,600 rows cross into the program), the rollup steps (about 70 to 95 ms: 15 label sets, each a statement of 4 to 6 ms inside its connection,
 plus the label-set reads and a new reader connection for each call) and the engine. The further options (parallel reads, reader caches or
-pooling, a covering index on `service_state`) are not taken here; they need a decision of their own. The row of the re-run on the DS918+ from
-the stamped head stays open for the Product Manager.
+pooling, a covering index on `service_state`) were not taken in group G5.
+
+**Group G6** ([0217](decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md)) took the covering index: schema step 15 adds
+`records_service_state`, and the three service reads (the stream, the rows of the changes and the previous states) read only the indexed
+expressions, so SQLite answers them from the index without fetching or parsing a payload (`EXPLAIN QUERY PLAN` shows `COVERING INDEX
+records_service_state` for each, pinned by a test). The service changes fell from 137 to 168 ms to 104 to 108 ms; the three runs reached
+289, 216 and 218 ms (the first run of a series after the database is written is the slowest), the goal of at most 250 ms is reached on the
+development host with a median of 218 ms of the three medians, and the DS918+ is estimated at about 0.7 s at the factor of 3.2 (not measured). The
+remainder of the service changes is the 87,600 index rows crossing into the program. **Building the index** on this database (87,600 `service_state` records among 1.2 million) took 257, 243 and 282 ms; this is the cost of
+the upgrade of a database at version 14, during which the writer is busy ([Storage](areas/storage.md), *Migration steps*); at the factor
+of 3.2 about 0.8 to 0.9 s on the DS918+ (not measured). The row of the re-run on the DS918+ from the stamped head stays open for the Product Manager
+(task 24).
 
 ## Log templates
 

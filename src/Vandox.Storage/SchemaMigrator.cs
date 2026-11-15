@@ -14,7 +14,8 @@ internal static class SchemaMigrator
 
     /// <summary>
     /// The statement of schema step 15 (record 0217): the covering partial index over the members of <c>service_state</c>
-    /// records that tell a restart. The service reads of the time-series query use exactly these expressions.
+    /// records that tell a restart, with <c>kind</c> as its last column: SQLite counts the column of the partial predicate
+    /// as read from the table unless the index holds it, and then does not treat the index as covering. The service reads of the time-series query use exactly these expressions.
     /// </summary>
     internal const string ServiceStateIndexStatement = """
                                                        CREATE INDEX records_service_state ON records(
@@ -23,7 +24,8 @@ internal static class SchemaMigrator
                                                          json_extract(data, '$.restarts'),
                                                          json_extract(data, '$.active_enter_at'),
                                                          json_extract(data, '$.active_state'),
-                                                         boot_id) WHERE kind = 'service_state'
+                                                         boot_id,
+                                                         kind) WHERE kind = 'service_state'
                                                        """;
 
     #endregion // Constants
@@ -334,7 +336,8 @@ internal static class SchemaMigrator
                                                               c => c.CommandText = "CREATE INDEX retention_holds_started_at ON retention_holds(started_at)",
                                                               c => c.CommandText = "CREATE INDEX records_removable ON records(kind, captured_at) WHERE origin <> 'import'",
                                                               c => c.CommandText = "CREATE INDEX gaps_to_at ON gaps(to_at)"
-                                                          ])
+                                                          ]),
+                                                      new(15, [c => c.CommandText = ServiceStateIndexStatement])
                                                   ];
 
     #endregion // Fields

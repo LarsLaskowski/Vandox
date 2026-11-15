@@ -93,24 +93,24 @@ internal static class TimeSeriesQueries
     /// <summary>
     /// Streams the service records of a range in order of capture time with the three members that tell a change: unit, restart counter and active enter time.
     /// </summary>
-    internal const string ServiceStream = "SELECT id, CAST(json_extract(data, '$.unit') AS TEXT), COALESCE(json_extract(data, '$.restarts'), 0), CAST(json_extract(data, '$.active_enter_at') AS TEXT) FROM records "
+    internal const string ServiceStream = "SELECT id, CAST(json_extract(data, '$.unit') AS TEXT), COALESCE(json_extract(data, '$.restarts'), 0), CAST(json_extract(data, '$.active_enter_at') AS TEXT) FROM records INDEXED BY records_service_state "
                                           + "WHERE kind = 'service_state' AND captured_at >= $from AND captured_at < $to ORDER BY captured_at, id";
 
     /// <summary>
     /// Reads the service records of a list of record IDs.
     /// </summary>
     internal const string ServiceRows = "SELECT CAST(json_extract(data, '$.unit') AS TEXT), COALESCE(CAST(json_extract(data, '$.active_state') AS TEXT), ''), CAST(json_extract(data, '$.active_enter_at') AS TEXT), "
-                                        + "captured_at, COALESCE(json_extract(data, '$.restarts'), 0), COALESCE(boot_id, ''), id FROM records WHERE kind = 'service_state' AND id IN (SELECT value FROM json_each($ids))";
+                                        + "captured_at, COALESCE(json_extract(data, '$.restarts'), 0), COALESCE(boot_id, ''), id FROM records INDEXED BY records_service_state WHERE kind = 'service_state' AND id IN (SELECT value FROM json_each($ids))";
 
     /// <summary>
     /// Reads the latest service record before a time of each of the units among the most recent service records.
     /// </summary>
-    internal const string PreviousServiceStates = "WITH recent AS (SELECT id, captured_at, COALESCE(boot_id, '') AS boot, data FROM records WHERE kind = 'service_state' AND captured_at < $before "
+    internal const string PreviousServiceStates = "WITH recent AS (SELECT json_extract(data, '$.unit') AS unit, json_extract(data, '$.active_state') AS state, json_extract(data, '$.active_enter_at') AS enter, "
+                                                  + "captured_at, json_extract(data, '$.restarts') AS restarts, boot_id, id FROM records INDEXED BY records_service_state WHERE kind = 'service_state' AND captured_at < $before "
                                                   + "ORDER BY captured_at DESC, id DESC LIMIT $scan), "
-                                                  + "u AS (SELECT CAST(json_extract(data, '$.unit') AS TEXT) AS unit, COALESCE(CAST(json_extract(data, '$.active_state') AS TEXT), '') AS state, "
-                                                  + "CAST(json_extract(data, '$.active_enter_at') AS TEXT) AS enter, captured_at, COALESCE(json_extract(data, '$.restarts'), 0) AS restarts, boot, "
-                                                  + "ROW_NUMBER() OVER (PARTITION BY json_extract(data, '$.unit') ORDER BY captured_at DESC, id DESC) AS rn FROM recent "
-                                                  + "WHERE json_extract(data, '$.unit') IN (SELECT value FROM json_each($units))) "
+                                                  + "u AS (SELECT CAST(unit AS TEXT) AS unit, COALESCE(CAST(state AS TEXT), '') AS state, CAST(enter AS TEXT) AS enter, captured_at, COALESCE(restarts, 0) AS restarts, "
+                                                  + "COALESCE(boot_id, '') AS boot, ROW_NUMBER() OVER (PARTITION BY unit ORDER BY captured_at DESC, id DESC) AS rn FROM recent "
+                                                  + "WHERE unit IN (SELECT value FROM json_each($units))) "
                                                   + "SELECT unit, state, enter, captured_at, restarts, boot FROM u WHERE rn = 1";
 
     /// <summary>

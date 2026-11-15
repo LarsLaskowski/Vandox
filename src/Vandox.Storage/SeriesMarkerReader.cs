@@ -34,7 +34,8 @@ internal static class SeriesMarkerReader
         bound = SeriesTime.Earlier(bound, restarts.Bound);
         bound = SeriesTime.Earlier(bound, backups.Bound);
         bound = SeriesTime.Earlier(bound, DecideRestarts(restarts.Checks, boots, range, items));
-        bound = SeriesTime.Earlier(bound, DecideBackups(backups.Checks, boots, range, items));
+
+        DecideBackups(backups.Checks, boots, range, items);
 
         var sorted = items.OrderBy(item => item.Marker.At).ThenBy(item => item.Marker.Kind).ThenBy(item => item.Id).Select(item => item.Marker).ToList();
 
@@ -334,34 +335,22 @@ internal static class SeriesMarkerReader
     }
 
     /// <summary>
-    /// Adds the backup runs without an end whose state the boot read decides: unknown when a boot follows the start, else running.
+    /// Adds the backup runs without an end whose state the boot read decides: unknown when a boot follows the start, else running. A run is always decided: its interval ends at the
+    /// query time, where the boot read starts, so a read that does not reach the start of the interval holds a boot in it.
     /// </summary>
     /// <param name="checks">The runs without an end</param>
     /// <param name="boots">The boots read</param>
     /// <param name="range">The range</param>
     /// <param name="items">The markers; the new ones are added</param>
-    /// <returns>The time of the earliest undecided run, never before the range, or <c>null</c> when every run is decided</returns>
-    private static DateTimeOffset? DecideBackups(List<(List<BackupRunRow> Records, DateTimeOffset Start)> checks, SeriesBootIndex boots, SeriesRange range, List<(SeriesMarker Marker, long Id)> items)
+    private static void DecideBackups(List<(List<BackupRunRow> Records, DateTimeOffset Start)> checks, SeriesBootIndex boots, SeriesRange range, List<(SeriesMarker Marker, long Id)> items)
     {
-        DateTimeOffset? bound = null;
-
         foreach (var (records, start) in checks)
         {
             var followed = boots.Contains(SeriesTime.Add(start, TimeSpan.FromTicks(1)), SeriesTime.Add(range.Now, TimeSpan.FromTicks(1)));
-
-            if (followed is null)
-            {
-                bound = SeriesTime.Earlier(bound, Later(start, range.From));
-
-                continue;
-            }
-
             var command = records.Select(row => row.Command).FirstOrDefault(text => text.Length > 0) ?? string.Empty;
 
             items.Add((Backup(records[0], start, command, null, null, followed == true ? BackupRunEnd.Unknown : BackupRunEnd.Running), records[0].Id));
         }
-
-        return bound;
     }
 
     /// <summary>

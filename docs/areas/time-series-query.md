@@ -71,13 +71,14 @@ no HTTP route, page, option or listener belongs to it.
 - **The boot read.** The two checks above that ask whether a boot lies in an interval (a restart by a moved enter time, a backup run
   without an end) are answered from one read of the boots per query, not one read per check. The read starts when the first check with a
   non-empty interval needs it: boots newest first from the query time, in pages of 1,001 keyed on capture time and ID, at most ten pages,
-  and it stops below the earliest start of the intervals asked about. A check is *undecided* only when no boot read lies in its interval
-  and the interval reaches below the oldest boot read, which happens when ten full pages did not reach the start of the interval. An
-  undecided check gives no marker (neither a restart nor a backup run without an end) and bounds the time up to which the list of markers
-  is complete at the time its marker would have had: the restart time of the record, the start of the run, never before `from`. The
-  boots are read from the query time, not from the end of the range, so that boots stored after an interval count against the ten
-  pages; a host that stores more than 10,010 boot records after the start of an interval leaves those checks undecided, and the list says
-  so by its completeness time (residual risk: boot records come from the agent, so a flood of them can hide restarts and backup runs
+  and it stops below the earliest start of the intervals asked about. A restart check is *undecided* only when no boot read lies in its
+  interval and the interval reaches below the oldest boot read, which happens when ten full pages did not reach the start of the
+  interval. An undecided restart check gives no marker and bounds the time up to which the list of markers is complete at the time its
+  marker would have had: the restart time of the record, never before `from`. A backup run without an end is never undecided: its interval
+  ends at the query time, where the read starts, so whenever the read does not reach the start of the interval its oldest boot lies in it
+  and the run is *unknown*. The boots are read from the query time, not from the end of the range, so that boots stored after an interval
+  count against the ten pages; a host that stores more than 10,010 boot records after the start of an interval leaves those restart checks undecided, and the list says
+  so by its completeness time (residual risk: boot records come from the agent, so a flood of them can hide restarts
   that lie before them, never invent a marker).
 - Markers are sorted by time, kind and record ID; a record stored twice gives one marker.
 
@@ -118,14 +119,16 @@ collectors are external text from the agent, returned as stored; a view shows th
   points, with markers and gaps, over the database described in [Benchmarks](../BENCHMARKS.md), *Time-series query*) must run in under one
   second, median of five runs, on the reference host. The first run on the reference host (2026-11-15) took 2,386 ms and did not meet it;
   the service changes read in one pass and the rollup steps merged in SQL cut the development-host median from about 700 ms to about 380 ms,
-  a goal of 250 ms there was not reached, and the criterion is open until the run on the reference host after that change (Benchmarks has the
-  numbers and the breakdown).
+  and the covering index `records_service_state` ([Storage](storage.md), *Migration steps*), from which the three reads of service
+  records are answered without a payload, to about 220 ms against the goal of 250 ms there; the criterion stays open until the run on
+  the reference host after that change (Benchmarks has the numbers and the breakdown).
 
 ## Related decisions
 
 - [0214](../decisions/0214-time-series-queries-share-one-resolution-and-one-time-axis-with-bridged-samples.md) — why one resolution and one axis, and why raw samples are bridged between other lines' times.
 - [0215](../decisions/0215-a-service-restart-is-a-rise-of-nrestarts-or-a-new-active-enter-time-of-a-running-or-failed-unit.md) — what counts as a service restart.
 - [0216](../decisions/0216-time-series-context-is-read-in-fixed-windows-around-the-range.md) — why gap records and backup runs are read in fixed windows around the range.
+- [0217](../decisions/0217-service-state-members-are-indexed-for-the-restart-markers.md) — why the members of service records that tell a restart are in a covering index.
 - [0028](../decisions/0028-data-gaps-are-always-recorded.md) — why a span without data is a gap and never drawn as normal.
 
 ## Not here

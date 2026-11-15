@@ -100,6 +100,8 @@ internal static class QueryBenchmark
 
                 Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"folded {folded} values in {watch.Elapsed.TotalSeconds:F0} s"));
 
+                await RebuildServiceIndexAsync(work, cancellationToken).ConfigureAwait(false);
+
                 var service = new TimeSeriesService(store, _policy, new FixedClock(now));
                 var query = new TimeSeriesQuery
                             {
@@ -134,8 +136,46 @@ internal static class QueryBenchmark
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            SqliteConnection.ClearAllPools();
             Directory.Delete(work, true);
+        }
+    }
+
+    /// <summary>
+    /// Drops the service state index of schema step 15 and creates it again from the stored records, which is what the upgrade of a version 14 database does once, and prints the time of the creation.
+    /// </summary>
+    /// <param name="work">The folder of the database</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that completes when the index exists again</returns>
+    private static async Task RebuildServiceIndexAsync(string work, CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection($"Data Source={Path.Combine(work, StorageLimits.FileName)};Pooling=False");
+
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            var command = connection.CreateCommand();
+
+            await using (command.ConfigureAwait(false))
+            {
+                command.CommandText = "DROP INDEX records_service_state";
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+                var watch = Stopwatch.StartNew();
+
+#pragma warning disable CA2100 // the statement is a constant of the store
+                command.CommandText = SchemaMigrator.ServiceStateIndexStatement;
+#pragma warning restore CA2100
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                watch.Stop();
+
+                command.CommandText = "SELECT count(*) FROM records WHERE kind = 'service_state'";
+
+                var count = (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+
+                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"service state index rebuilt over {count} service records in {watch.Elapsed.TotalMilliseconds:F0} ms"));
+            }
         }
     }
 
