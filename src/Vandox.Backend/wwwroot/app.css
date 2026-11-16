@@ -562,3 +562,36 @@ article.report code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.875em;
 }
+
+/* Overview page: the stale mark, the row of a failed unit and the line of a failed refresh. */
+.stale {
+    color: var(--vandox-chart-3);
+    font-weight: 600;
+}
+
+.failed td {
+    border-left: 4px solid var(--vandox-chart-6);
+}
+
+.failed td ~ td {
+    border-left: 0;
+}
+
+.failure {
+    padding: 0.5rem 0.75rem;
+    border-left: 4px solid var(--vandox-chart-3);
+    background: var(--vandox-surface);
+}
+
+table.overview {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+table.overview th,
+table.overview td {
+    text-align: left;
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--vandox-line);
+}

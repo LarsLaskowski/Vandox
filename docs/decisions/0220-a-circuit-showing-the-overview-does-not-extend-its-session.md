@@ -30,6 +30,6 @@ other activity extends it as before ([Web login](../areas/web-login.md), *Sessio
 
 ## Consequences
 
-- An open overview ends its session 1 hour after the last activity elsewhere; the circuit then ends and the user signs in again.
+- An open overview ends its session 1 hour after the last activity elsewhere; within 30 seconds the page's session check goes to `/login`, and the user signs in again.
 - A click on a navigation link of the overview does not extend the session itself; the next page's render does.
 - A future self-refreshing view (history, alerts) takes the same pause.

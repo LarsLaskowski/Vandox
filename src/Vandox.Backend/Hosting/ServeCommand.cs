@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
@@ -13,6 +14,7 @@ using Vandox.Backend.Incidents;
 using Vandox.Backend.Ingest;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
+using Vandox.Backend.Overview;
 using Vandox.Backend.Reports;
 using Vandox.Backend.Retention;
 using Vandox.Backend.Security;
@@ -247,6 +249,9 @@ internal static class ServeCommand
         builder.Services.AddSingleton(_ => new WebReaderGate(LogsView.MaxConcurrentQueries));
         builder.Services.AddSingleton<ILogExplorer>(provider => new GatedLogExplorer(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton<IIncidentBrowser>(provider => new GatedIncidentBrowser(store, provider.GetRequiredService<WebReaderGate>()));
+        builder.Services.AddSingleton<IOverviewReader>(provider => new GatedOverviewReader(store, provider.GetRequiredService<WebReaderGate>()));
+        builder.Services.AddScoped<CircuitConnection>();
+        builder.Services.AddScoped<CircuitHandler>(provider => provider.GetRequiredService<CircuitConnection>());
         builder.Services.AddSingleton(provider => new IncidentWindowReader(new GatedRecordReader(store, provider.GetRequiredService<WebReaderGate>())));
         builder.Services.AddSingleton(hooks.Clock ?? TimeProvider.System);
         builder.Services.AddSingleton(provider => new TimeSeriesService(new GatedTimeSeriesReader(store, provider.GetRequiredService<WebReaderGate>()), RetentionService.CreatePolicy(config), provider.GetRequiredService<TimeProvider>()));

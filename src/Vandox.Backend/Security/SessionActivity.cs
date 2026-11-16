@@ -33,10 +33,15 @@ public sealed class SessionActivity
     {
         Interlocked.Increment(ref _pauses);
 
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return new SessionPauseScope(this);
+    }
+
+    /// <summary>
+    /// Ends one pause.
+    /// </summary>
+    internal void Release()
+    {
+        Interlocked.Decrement(ref _pauses);
     }
 
     #endregion // Methods
