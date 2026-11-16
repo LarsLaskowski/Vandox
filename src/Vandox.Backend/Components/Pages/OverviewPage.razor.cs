@@ -208,7 +208,7 @@ public sealed partial class OverviewPage : ComponentBase, IAsyncDisposable
                                    _updated = Clock.GetUtcNow();
                                }
 
-                               _failure = model is null && failure.Length == 0 ? _failure : failure;
+                               _failure = failure;
                                StateHasChanged();
                            });
     }

@@ -26,13 +26,13 @@ else
     <h2>Data freshness</h2>
     <dl>
         <dt>Last live data</dt>
-        <dd>@Unmarked(_model.LiveData)@if (IsMarked(_model.LiveData)) {<text> </text><span class="stale">stale</span>}</dd>
+        <dd>@Unmarked(_model.LiveData)@if (IsMarked(_model.LiveData)) {@(" ")<span class="stale">stale</span>}</dd>
         <dt>Last data received</dt>
-        <dd>@Unmarked(_model.Received)@if (IsMarked(_model.Received)) {<text> </text><span class="stale">stale</span>}</dd>
+        <dd>@Unmarked(_model.Received)@if (IsMarked(_model.Received)) {@(" ")<span class="stale">stale</span>}</dd>
         <dt>Backfill</dt>
         <dd>@_model.Backfill</dd>
         <dt>Agent spool</dt>
-        <dd>@Unmarked(_model.Spool)@if (IsMarked(_model.Spool)) {<text> </text><span class="stale">stale</span>}</dd>
+        <dd>@Unmarked(_model.Spool)@if (IsMarked(_model.Spool)) {@(" ")<span class="stale">stale</span>}</dd>
     </dl>
 
     <h2>Services</h2>
@@ -66,7 +66,7 @@ else
                             <td>@unit.State</td>
                             <td>@unit.ActiveSince</td>
                             <td>@unit.Restarts</td>
-                            <td>@unit.Recorded@if (unit.Stale) {<text> </text><span class="stale">stale</span>}</td>
+                            <td>@unit.Recorded@if (unit.Stale) {@(" ")<span class="stale">stale</span>}</td>
                         </tr>
                     }
                 </tbody>
@@ -92,9 +92,9 @@ else
                 @foreach (var figure in _model.Figures)
                 {
                     <tr>
-                        <td>@figure.Figure@if (figure.Mount.Count > 0) {<text> </text><ExternalText Runs="figure.Mount" />}</td>
+                        <td>@figure.Figure@if (figure.Mount.Count > 0) {@(" ")<ExternalText Runs="figure.Mount" />}</td>
                         <td>@figure.Value</td>
-                        <td>@figure.Time@if (figure.Stale) {<text> </text><span class="stale">stale</span>}</td>
+                        <td>@figure.Time@if (figure.Stale) {@(" ")<span class="stale">stale</span>}</td>
                     </tr>
                 }
             </tbody>
@@ -123,6 +123,6 @@ else
 
     @if (_model.LatestIncident is { } latest)
     {
-        <p>Latest incident: <a href="@latest.Href">#@latest.Number</a>, first kill @latest.FirstKill, <ExternalText Runs="latest.Victim" />@if (latest.Future) {<text> dated in the future</text>}</p>
+        <p>Latest incident: <a href="@latest.Href">#@latest.Number</a>, first kill @latest.FirstKill, <ExternalText Runs="latest.Victim" />@if (latest.Future) {@(" dated in the future")}</p>
     }
 }
