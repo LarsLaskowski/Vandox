@@ -542,6 +542,316 @@ public class SqliteStoreOverviewTests
     }
 
     /// <summary>
+    /// Without any agent stream the freshness read returns an empty agent ID and no gaps, and still the result of the live scan.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public async Task FreshnessReturnsEmptyAgentIdWithoutAgentStream()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, TimeSeriesSamples.Metric("system", "cpu_user_percent", Now.AddSeconds(-10), 1));
+
+        // Act
+        var freshness = await store.FreshnessAsync(LiveScanLimit, Until, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(string.Empty, freshness.AgentId, "no agent stream gives an empty agent ID");
+        Assert.IsNull(freshness.ReceivedAt, "no agent stream gives no receive time");
+        Assert.IsNull(freshness.LastLiveAt, "the backend metric is not live");
+        Assert.AreEqual(Now.AddSeconds(-10), freshness.ScannedBackTo, "the capture time of the one scanned row");
+        Assert.AreEqual(0, freshness.OpenSequenceGaps, "no agent has no open gap");
+        Assert.IsNull(freshness.MissingStart, "no open gap has a start");
+        Assert.IsNull(freshness.MissingEnd, "no open gap has an end");
+    }
+
+    /// <summary>
+    /// The freshness read refuses a live scan limit outside 1 to 20,000 before any read.
+    /// </summary>
+    /// <param name="liveScanLimit">The live scan limit</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(-1)]
+    [DataRow(20001)]
+    public async Task FreshnessRefusesLiveScanLimitOutOfRange(int liveScanLimit)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.FreshnessAsync(liveScanLimit, Until, TestContext.CancellationToken), "the live scan limit is refused");
+
+        // Assert
+        Assert.AreEqual("store: invalid query: live scan limit must be 1 to 20000", exception.Message, "the rule the limit breaks");
+    }
+
+    /// <summary>
+    /// The service read of an empty store returns an empty page without a newest time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task LatestServiceStatesReturnsEmptyPageForEmptyStore()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        // Act
+        var page = await store.LatestServiceStatesAsync(ServiceQuery(256), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(page.States, "no service state is stored");
+        Assert.AreEqual(0, page.Total, "no unit is counted");
+        Assert.IsNull(page.Newest, "no service record gives no newest time");
+    }
+
+    /// <summary>
+    /// The service read returns a stored state without active state, sub state, enter time and restart counter with empty states, no time and no restarts.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task LatestServiceStatesReturnsEmptyStatesForRecordWithoutMembers()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, Service("a.service", "active", "running", Now.AddHours(-4), 3, Now.AddSeconds(-30)));
+        await TimelineSamples.ExecuteAsync(RetentionSamples.DatabasePath(directory.Path), "UPDATE records SET data = '{\"unit\":\"a.service\"}' WHERE kind = 'service_state'", TestContext.CancellationToken);
+
+        // Act
+        var page = await store.LatestServiceStatesAsync(ServiceQuery(256), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, page.Total, "the unit is counted");
+        Assert.AreEqual("a.service / 0 @-30s", Describe(page.States), "missing states are empty and a missing restart counter is zero");
+        Assert.IsNull(page.States[0].ActiveEnterAt, "a missing enter time gives none");
+    }
+
+    /// <summary>
+    /// The service read refuses a retirement that is not positive or longer than a day, and a limit outside 1 to 1,024, before any read.
+    /// </summary>
+    /// <param name="retirementTicks">The retirement in ticks</param>
+    /// <param name="limit">The number of units returned</param>
+    /// <param name="rule">The rule named in the error</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(0L, 256, "retirement must be positive and at most one day")]
+    [DataRow(-1L, 256, "retirement must be positive and at most one day")]
+    [DataRow(TimeSpan.TicksPerDay + 1, 256, "retirement must be positive and at most one day")]
+    [DataRow(TimeSpan.TicksPerHour, 0, "limit must be 1 to 1024")]
+    [DataRow(TimeSpan.TicksPerHour, 1025, "limit must be 1 to 1024")]
+    public async Task LatestServiceStatesRefusesInvalidQuery(long retirementTicks, int limit, string rule)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = new LatestServiceQuery
+                    {
+                        Retirement = TimeSpan.FromTicks(retirementTicks),
+                        Limit = limit,
+                        Until = Until
+                    };
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.LatestServiceStatesAsync(query, TestContext.CancellationToken), "the query is refused");
+
+        // Assert
+        Assert.AreEqual("store: invalid query: " + rule, exception.Message, "the rule the query breaks");
+    }
+
+    /// <summary>
+    /// The latest-value read returns a series without stored values with no values and no label sets.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task LatestValuesReturnsNoValuesForSeriesWithoutData()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, TimeSeriesSamples.Metric("system", "mem_available_bytes", Now.AddSeconds(-30), 200));
+
+        // Act
+        var result = await store.LatestValuesAsync(ValueQuery(16, new SeriesKey("system", "swap_free_bytes"), new SeriesKey("system", "mem_available_bytes")), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(2, result, "one result per series of the query");
+        Assert.AreEqual("swap_free_bytes", result[0].Series.Name, "the series without data keeps its place in the order of the query");
+        Assert.IsEmpty(result[0].Values, "a series without data has no values");
+        Assert.AreEqual(0, result[0].LabelSets, "a series without data has no label sets");
+        Assert.AreEqual(" = 200 @-30s", Describe(result[1]), "the series with data is read");
+    }
+
+    /// <summary>
+    /// The latest-value read fails with a store error when the stored labels of a kept value are not a JSON object of texts.
+    /// </summary>
+    /// <param name="labels">The stored labels</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("[\"a\"]")]
+    [DataRow("{\"a\":1}")]
+    [DataRow("{\"a\":")]
+    public async Task LatestValuesFailsForStoredLabelsThatAreNoObjectOfTexts(string labels)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, Available("/a", Now.AddSeconds(-30), 1));
+        await TimelineSamples.ExecuteAsync(RetentionSamples.DatabasePath(directory.Path), $"UPDATE metrics SET labels = '{labels}'", TestContext.CancellationToken);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.LatestValuesAsync(ValueQuery(16, new SeriesKey("system", "filesystem_available_bytes")), TestContext.CancellationToken), "the stored labels are refused");
+
+        // Assert
+        Assert.AreEqual("store: reading overview: stored labels are not a JSON object of texts", exception.Message, "the error names the read and the fault");
+    }
+
+    /// <summary>
+    /// The latest-value read counts stored empty labels as the same label set as no labels, returned without labels.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task LatestValuesTreatsStoredEmptyLabelsAsNoLabels()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store,
+                                           string.Empty,
+                                           string.Empty,
+                                           TestContext.CancellationToken,
+                                           TimeSeriesSamples.Metric("system", "mem_available_bytes", Now.AddSeconds(-60), 100),
+                                           TimeSeriesSamples.Metric("system", "mem_available_bytes", Now.AddSeconds(-30), 200));
+        await TimelineSamples.ExecuteAsync(RetentionSamples.DatabasePath(directory.Path), "UPDATE metrics SET labels = '{}' WHERE value = 100", TestContext.CancellationToken);
+
+        // Act
+        var result = await store.LatestValuesAsync(ValueQuery(16, new SeriesKey("system", "mem_available_bytes")), TestContext.CancellationToken);
+
+        // Assert
+        var memory = SeriesOf(result, "mem_available_bytes");
+
+        Assert.AreEqual(" = 200 @-30s", Describe(memory), "the newest value of the one label set, without labels");
+        Assert.AreEqual(1, memory.LabelSets, "empty labels and no labels are one label set");
+    }
+
+    /// <summary>
+    /// The latest-value read returns a stored label whose value is JSON <c>null</c> with an empty value.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task LatestValuesReturnsEmptyValueForStoredNullLabel()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, Available("/a", Now.AddSeconds(-30), 1));
+        await TimelineSamples.ExecuteAsync(RetentionSamples.DatabasePath(directory.Path), "UPDATE metrics SET labels = '{\"mount\":null}'", TestContext.CancellationToken);
+
+        // Act
+        var result = await store.LatestValuesAsync(ValueQuery(16, new SeriesKey("system", "filesystem_available_bytes")), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual("mount= = 1 @-30s", Describe(SeriesOf(result, "filesystem_available_bytes")), "the label with a null value is returned with an empty value");
+    }
+
+    /// <summary>
+    /// The latest-value read refuses a query with no or more than 16 series, a window that is not positive or longer than a day, and label sets outside 1 to 64, before any read.
+    /// </summary>
+    /// <param name="seriesCount">The number of series</param>
+    /// <param name="windowTicks">The window in ticks</param>
+    /// <param name="maxLabelSets">The number of label sets kept per series</param>
+    /// <param name="rule">The rule named in the error</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(0, TimeSpan.TicksPerMinute, 16, "at least one series is required")]
+    [DataRow(17, TimeSpan.TicksPerMinute, 16, "at most 16 series")]
+    [DataRow(1, 0L, 16, "window must be positive and at most one day")]
+    [DataRow(1, -1L, 16, "window must be positive and at most one day")]
+    [DataRow(1, TimeSpan.TicksPerDay + 1, 16, "window must be positive and at most one day")]
+    [DataRow(1, TimeSpan.TicksPerMinute, 0, "label sets must be 1 to 64")]
+    [DataRow(1, TimeSpan.TicksPerMinute, 65, "label sets must be 1 to 64")]
+    public async Task LatestValuesRefusesInvalidQuery(int seriesCount, long windowTicks, int maxLabelSets, string rule)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = new LatestValueQuery
+                    {
+                        Series = Enumerable.Range(0, seriesCount).Select(index => new SeriesKey("system", "series_" + index.ToString(CultureInfo.InvariantCulture))).ToList(),
+                        Window = TimeSpan.FromTicks(windowTicks),
+                        MaxLabelSets = maxLabelSets,
+                        Until = Until
+                    };
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.LatestValuesAsync(query, TestContext.CancellationToken), "the query is refused");
+
+        // Assert
+        Assert.AreEqual("store: invalid query: " + rule, exception.Message, "the rule the query breaks");
+    }
+
+    /// <summary>
+    /// The MariaDB read of a status record without any of the selected members returns an empty availability and no values.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task LatestMariaDbStatusReturnsNoValuesForRecordWithoutMembers()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.WriteAsync(store, string.Empty, string.Empty, TestContext.CancellationToken, MariaDb("mariadb", Now.AddSeconds(-30), "151"));
+        await TimelineSamples.ExecuteAsync(RetentionSamples.DatabasePath(directory.Path), "UPDATE records SET data = '{}' WHERE kind = 'mariadb_status'", TestContext.CancellationToken);
+
+        // Act
+        var status = await store.LatestMariaDbStatusAsync(Until, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(status, "a status record is stored");
+        Assert.AreEqual(Now.AddSeconds(-30), status.CapturedAt, "the capture time of the record");
+        Assert.AreEqual(string.Empty, status.Availability, "no availability gives an empty text");
+        Assert.IsNull(status.ThreadsConnected, "no Threads_connected gives no value");
+        Assert.IsNull(status.MemoryUsed, "no Memory_used gives no value");
+        Assert.IsNull(status.MaxConnections, "no max_connections gives no value");
+    }
+
+    /// <summary>
+    /// The MariaDB read of an empty store returns no status.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task LatestMariaDbStatusReturnsNullForEmptyStore()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        // Act
+        var status = await store.LatestMariaDbStatusAsync(Until, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNull(status, "no status record gives no status");
+    }
+
+    /// <summary>
     /// Creates a batch of consecutive metrics of an agent, one second apart, the last one captured a second before the batch is received.
     /// </summary>
     /// <param name="agentId">The agent ID</param>
