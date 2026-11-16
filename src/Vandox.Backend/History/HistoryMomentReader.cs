@@ -86,26 +86,29 @@ public sealed class HistoryMomentReader
     /// <returns>A task that returns the moment</returns>
     private async Task<HistoryMoment> ReadMomentAsync(DateTimeOffset at, CancellationToken cancellationToken)
     {
-        var (process, before) = await ReadKindAsync(at, RecordKind.ProcessSnapshot, cancellationToken).ConfigureAwait(false);
-        var (connection, _) = await ReadKindAsync(at, RecordKind.ConnectionSnapshot, cancellationToken).ConfigureAwait(false);
+        var (process, before) = await ReadKindAsync(at, RecordKind.ProcessSnapshot, ProcessSnapshotView.FromProcesses, cancellationToken).ConfigureAwait(false);
+        var (connection, _) = await ReadKindAsync(at, RecordKind.ConnectionSnapshot, ConnectionSnapshotView.FromConnections, cancellationToken).ConfigureAwait(false);
 
         return new HistoryMoment
                {
                    At = at,
-                   Process = process is null ? null : ProcessSnapshotView.FromProcesses(process),
+                   Process = process,
                    ProcessBefore = process is null ? null : before,
-                   Connection = connection is null ? null : ConnectionSnapshotView.FromConnections(connection)
+                   Connection = connection
                };
     }
 
     /// <summary>
-    /// Reads the stamps on both sides of a moment and the record of the closest one only.
+    /// Reads the stamps on both sides of a moment and the record of the closest one only, and builds the view of the record so that the record is not held beyond this read.
     /// </summary>
+    /// <typeparam name="TView">The type of the view</typeparam>
     /// <param name="at">The moment</param>
     /// <param name="kind">The snapshot kind</param>
+    /// <param name="build">Builds the view of the record</param>
     /// <param name="cancellationToken">Cancels the read</param>
-    /// <returns>A task that returns the record, or <see langword="null"/> when there is none, and the capture time of the stamp before the moment when the record shown is the one after it</returns>
-    private async Task<(StoredRecord? Record, DateTimeOffset? Before)> ReadKindAsync(DateTimeOffset at, string kind, CancellationToken cancellationToken)
+    /// <returns>A task that returns the view, or <see langword="null"/> when there is none, and the capture time of the stamp before the moment when the record shown is the one after it</returns>
+    private async Task<(TView? View, DateTimeOffset? Before)> ReadKindAsync<TView>(DateTimeOffset at, string kind, Func<StoredRecord, TView> build, CancellationToken cancellationToken)
+        where TView : class
     {
         var before = await _reader.SnapshotStampAsync(Query(at, kind, SnapshotSide.AtOrBefore), cancellationToken).ConfigureAwait(false);
         var after = await _reader.SnapshotStampAsync(Query(at, kind, SnapshotSide.After), cancellationToken).ConfigureAwait(false);
@@ -118,7 +121,12 @@ public sealed class HistoryMomentReader
 
         var record = await _reader.SnapshotAsync(closest, cancellationToken).ConfigureAwait(false);
 
-        return (record, ReferenceEquals(closest, after) ? before?.CapturedAt : null);
+        if (record is null)
+        {
+            return (null, null);
+        }
+
+        return (build(record), ReferenceEquals(closest, after) ? before?.CapturedAt : null);
     }
 
     #endregion // Methods
