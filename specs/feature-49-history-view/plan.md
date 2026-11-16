@@ -269,6 +269,8 @@ Files no unit test can cover: the additions to `src/Vandox.Backend/wwwroot/js/ch
 - New area *History view*, `docs/areas/web-ui-history-view.md`: the page, address, controls, chart, markers, event list, moment panel,
   texts, calls, deadline and memory per circuit. Not here: the query, the store reads, the general web UI and login.
 - `web-ui.md`, `time-series-query.md`, `storage-reading.md`: see *Documentation updates*.
+- Split (Lead decision; *History reads* took `storage-reading.md` past `AREA_MAX_WORDS`): new area *Log search and exploration*,
+  `docs/areas/log-exploration.md`, takes *Log search*, *Log exploration* and their limits; `storage-reading.md` stays as *Storage reading*.
 
 ## Documentation updates
 
@@ -289,6 +291,7 @@ All by the Dev after the code is green, unless marked.
 - `.squad/project.md` (Dev reports the text, the orchestrator writes it): areas 3 and 12 gain `HistoryPage`; area 10 the `/history`
   address and the chart callbacks beside `/logs` and `/report`, and `web-ui-history-view`. *Test doubles* (Tester reports):
   `FakeHistoryReader`, `ScriptedTimeSeriesReader`.
+- The split (Dev): as the Lead's `decide` result lists, file by file.
 - Records 0221 and 0222 (Lead; the orchestrator may apply it verbatim): `Area:` `Web UI` → `History view` once the index row exists.
 
 ## Architecture check

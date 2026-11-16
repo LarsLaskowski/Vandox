@@ -11,7 +11,7 @@
 Issue #49 asks that a click in the chart open the processes and connections of that moment, and that any stored metric can be
 chosen. The processes view (#50) and the network view (#51) do not exist yet. No store read lists the stored metrics, and metric
 names come from agents and imports and are kept for years as hourly rollups. The existing record read
-([Storage reading and log exploration](../areas/storage-reading.md), *Records*) reads a kind forward in time and decodes every
+([Storage reading](../areas/storage-reading.md), *Records*) reads a kind forward in time and decodes every
 record it returns, so finding the snapshot closest to a moment with it would decode every snapshot of the window (up to 40 per kind
 in 10 minutes under memory pressure, more with several sources), each up to the payload limit.
 
@@ -35,7 +35,7 @@ in 10 minutes under memory pressure, more with several sources), each up to the 
 Option 1. The panel shows the snapshot of each kind closest to the moment within 10 minutes, chosen from the ID and time of one row
 per side and then read alone, one kind after the other, so one decoded snapshot is held at a time; the list of metrics is a skip scan of the raw values and the hourly rollups, at most 256 entries; both run through the views' read gate. The
 rules are in [History view](../areas/web-ui-history-view.md) and
-[Storage reading and log exploration](../areas/storage-reading.md).
+[Storage reading](../areas/storage-reading.md).
 
 ## Consequences
 
