@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IOverviewReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
 {
     #region Constants
 
@@ -1335,6 +1335,33 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IOverviewReader
+
+    #region IHistoryReader
+
+    // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+
+    /// <inheritdoc/>
+    public Task<StoredMetricList> StoredMetricsAsync(int limit, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc/>
+    public Task<SnapshotStamp?> SnapshotStampAsync(SnapshotQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc/>
+    public Task<StoredRecord?> SnapshotAsync(SnapshotStamp stamp, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+#pragma warning restore RH2003
+
+    #endregion // IHistoryReader
 
     #region IAsyncDisposable
 
