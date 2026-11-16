@@ -128,6 +128,31 @@ public partial class MainLayoutTests
     }
 
     /// <summary>
+    /// The History entry points to the history and is marked on the history page, with or without a query, but not on the logs or the overview.
+    /// </summary>
+    /// <param name="address">The current address</param>
+    /// <param name="marked">Whether the History entry is marked</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC11")]
+    [DataRow("http://localhost/history", true)]
+    [DataRow("http://localhost/history?metric=system,cpu_percent&range=7d", true)]
+    [DataRow("http://localhost/logs", false)]
+    [DataRow("http://localhost/", false)]
+    public async Task MainLayoutMarksHistoryOnTheHistoryPage(string address, bool marked)
+    {
+        // Act
+        var html = await RenderAsync(SignedIn(), address);
+
+        // Assert
+        var link = HistoryLink().Match(html);
+
+        Assert.IsTrue(link.Success, "the History link");
+        Assert.Contains("href=\"history\"", link.Groups[1].Value, "the History link points to history");
+        Assert.AreEqual(marked, ActiveClass().IsMatch(link.Groups[1].Value), $"the History link is marked: {marked}");
+    }
+
+    /// <summary>
     /// The sign-out form and the main navigation are shown to a signed-in user only: the form posts to <c>logout</c> with an antiforgery token.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -227,6 +252,9 @@ public partial class MainLayoutTests
 
     [GeneratedRegex("<a\\b([^>]*)>\\s*Report\\s*</a>")]
     private static partial Regex ReportLink();
+
+    [GeneratedRegex("<a\\b([^>]*)>\\s*History\\s*</a>")]
+    private static partial Regex HistoryLink();
 
     [GeneratedRegex("<button type=\"button\"([^>]*)>(.*?)</button>", RegexOptions.Singleline)]
     private static partial Regex ThemeButton();

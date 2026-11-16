@@ -56,6 +56,11 @@ internal sealed class FakeHistoryReader : IHistoryReader, IDisposable
     internal Exception? Failure { get; set; }
 
     /// <summary>
+    /// Gets or sets an action that runs after each call entered, or <c>null</c> for none.
+    /// </summary>
+    internal Action? Entered { get; set; }
+
+    /// <summary>
     /// Gets or sets the answer of <see cref="StoredMetricsAsync"/>.
     /// </summary>
     internal StoredMetricList Metrics { get; set; } = new();
@@ -147,6 +152,7 @@ internal sealed class FakeHistoryReader : IHistoryReader, IDisposable
         }
 
         _entered.Release();
+        Entered?.Invoke();
 
         try
         {

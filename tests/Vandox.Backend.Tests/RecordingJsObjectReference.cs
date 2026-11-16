@@ -62,7 +62,7 @@ internal sealed class RecordingJsObjectReference : IJSObjectReference
             return ValueTask.FromResult((TValue)(object)_runtime.CreateReference(identifier));
         }
 
-        return ValueTask.FromResult(default(TValue)!);
+        return ValueTask.FromResult(_runtime.TryAnswer<TValue>(Name, identifier, out var answer) ? answer : default!);
     }
 
     /// <summary>
