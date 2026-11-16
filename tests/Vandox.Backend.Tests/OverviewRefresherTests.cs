@@ -45,6 +45,7 @@ public class OverviewRefresherTests
         var first = await probe.WaitForStartAsync(TestContext.CancellationToken);
 
         await clock.WaitForTimersAsync(OverviewView.RefreshInterval, 1, TestContext.CancellationToken);
+        await IdleAsync(refresher);
 
         clock.Advance(OverviewView.RefreshInterval - TimeSpan.FromSeconds(1));
 
@@ -54,6 +55,7 @@ public class OverviewRefresherTests
 
         var second = await probe.WaitForStartAsync(TestContext.CancellationToken);
 
+        await IdleAsync(refresher);
         clock.Advance(OverviewView.RefreshInterval);
 
         var third = await probe.WaitForStartAsync(TestContext.CancellationToken);
@@ -96,7 +98,7 @@ public class OverviewRefresherTests
         var startsWhileRunning = probe.Starts;
 
         release.SetResult();
-        await probe.WaitForEndAsync(TestContext.CancellationToken);
+        await IdleAsync(refresher);
         clock.Advance(OverviewView.RefreshInterval);
 
         var next = await probe.WaitForStartAsync(TestContext.CancellationToken);
@@ -125,7 +127,7 @@ public class OverviewRefresherTests
         await using var refresher = new OverviewRefresher(clock, connection, probe.RunAsync, faults.Add);
 
         refresher.Start();
-        await probe.WaitForEndAsync(TestContext.CancellationToken);
+        await IdleAsync(refresher);
         await clock.WaitForTimersAsync(OverviewView.RefreshInterval, 1, TestContext.CancellationToken);
         await connection.OnConnectionDownAsync(null!, TestContext.CancellationToken);
 
@@ -159,7 +161,7 @@ public class OverviewRefresherTests
 
         refresher.Start();
         await probe.WaitForStartAsync(TestContext.CancellationToken);
-        await probe.WaitForEndAsync(TestContext.CancellationToken);
+        await IdleAsync(refresher);
         await connection.OnConnectionDownAsync(null!, TestContext.CancellationToken);
 
         // Act
@@ -364,6 +366,7 @@ public class OverviewRefresherTests
         clock.Advance(OverviewView.RefreshInterval);
 
         // Assert
+        Assert.IsTrue(refresher.Current.IsCompleted, "without a refresh the current task is completed");
         Assert.AreEqual(0, probe.Starts, "a disposed refresher runs no refresh");
         Assert.IsFalse(timerCreated, "a disposed refresher starts no timer");
         Assert.IsEmpty(faults, "no refresh failed");
@@ -398,6 +401,16 @@ public class OverviewRefresherTests
         Assert.IsTrue(completedAtOnce, "the second disposal completes at once without an error");
         Assert.AreEqual(1, probe.Starts, "only the refresh at the start ran");
         Assert.IsEmpty(faults, "no refresh failed");
+    }
+
+    /// <summary>
+    /// Waits until the running refresh has ended and the refresher has cleared its running state, so the next trigger is not skipped.
+    /// </summary>
+    /// <param name="refresher">The refresher</param>
+    /// <returns>A task that completes when the refresher is idle</returns>
+    private async Task IdleAsync(OverviewRefresher refresher)
+    {
+        await refresher.Current.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
     }
 
     #endregion // Methods
