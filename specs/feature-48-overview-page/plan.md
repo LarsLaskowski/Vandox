@@ -105,8 +105,8 @@ failed at <time>; no values have been read yet.` `ServeCommand` registers `IOver
 `Touch` otherwise, so an ended session still ends the circuit. `OverviewPage` takes the pause when it starts interactively and disposes
 it in `DisposeAsync`, so no activity of a circuit showing the overview — refresh acknowledgements, and also a click on a navigation link
 of the page — extends the session; the next page's render after navigation does again. An overview left open ends its session 1 hour
-after the last activity elsewhere (HTTP request, another page, another tab), and the circuit then ends at the next acknowledgement
-(rejected reconnect dialog, sign-in again). The handler cannot tell an acknowledgement from user input (fact 17), so pausing per page is
+after the last activity elsewhere (HTTP request, another page, another tab); the page's 30-second session check then goes to `/login`, which disposes the page and its pause (the check of an
+acknowledgement is discarded, record 0103). The handler cannot tell an acknowledgement from user input (fact 17), so pausing per page is
 the only exact form; stopping the refresh after a quiet period would still extend the session by that period. `WebAuthentication`
 registers `SessionActivity` scoped. The skeleton adds `OverviewPage` without `@page`; the implementation adds it and deletes `Home.razor`.
 
@@ -282,3 +282,56 @@ Spec *Out of scope*. Image build check (`.squad/stack.md`) for the new `.razor` 
   `LabelSetTallyTests…` and `LatestValuesKeepsOnlyTheLimitOfLargeLabelSets`.
 - N1 — accepted: area 10 under *Security areas touched*.
 - N2 — accepted: bullet under *Security considerations*.
+
+## Security notes
+
+Security plan review, round 2 (delta check): feature #48, Overview page (`specs/feature-48-overview-page/`, HEAD a9a379e)
+
+All five earlier findings are resolved, and the new `SessionActivity` pause is sound. I have three non-blocking points: one wrong sentence about how the circuit ends, and two small hardening items for the pause.
+
+I read the plan/spec diff, record 0220, `SessionRevalidatingStateProvider.cs`, `WebAuthentication.cs:86-87` and `Components/Routes.razor`. I ran no new measurement. The record-0103 behavior I rely on below (the result of the session check on a render acknowledgement is not awaited) was read from the ASP.NET Core sources when that record was written. My IL probe from round 1 confirms only that the acknowledgement passes the handler, not how its result is handled.
+
+**Earlier findings**
+- **B1 (refreshes kept the session alive): resolved.**
+  - The design is now route (a), keeping the 1-hour idle rule. The tier is raised to `security`, and E15, AC9 and record 0220 are added.
+  - The doc update to web-login.md *Sessions* is listed, and the AC9 tests pin it with `FakeTimeProvider`.
+  - While paused, the check uses `SessionStore.IsActive`, which still finds ended sessions and forgets them (`Find(key, false)` runs `IsEnded`). So a paused circuit cannot keep a session alive, and a revoked or signed-out session is no longer found.
+- **B2 (`max_connections` as plain text): resolved.**
+  - It is now `long? MaxConnections`, parsed invariant from at most 20 ASCII digits, otherwise `unknown`.
+  - The U+202E test is in the AC5 row.
+  - A 20-digit value overflows `long`. With `TryParse` that gives null, which is safe.
+- **B3 (label scan kept every distinct text): resolved.**
+  - `LabelSetTally` keeps at most the limit of texts plus 10,000 hashes of 8 bytes each.
+  - It is pinned by `LabelSetTallyTests…` and `LatestValuesKeepsOnlyTheLimitOfLargeLabelSets`.
+  - The store accepts up to 64 sets, so the worst case is about 4.7 MB per read. The page's own figure of 16 texts is smaller.
+- **N1 (area 10 not listed): resolved.** Area 10 is now under *Security areas touched*.
+- **N2 (plain-string fields): resolved.** The bullet is in *Security considerations*. `active_enter_at` is parsed, and shows `unknown` when it does not parse.
+- **The Devil's Advocate's `until` fix:** every read now ignores records captured more than 90 seconds after now. That stops a forged future record from hiding current data. I see no new risk; the filter is `captured_at <= until` and the indexes stay usable.
+
+**Review of the `SessionActivity` pause**
+- **Can the pause leak?** Only toward a stricter session, never a looser one. A pause that is never released means less extension, so the user is signed out sooner; it never extends a session. Looked at path by path:
+  - Leaving the page disposes the component, which releases the pause.
+  - The service is scoped per circuit, so a pause cannot move to another circuit. A reconnect resumes the same circuit with the overview still shown, which is correct.
+  - Prerendering runs in a different scope and takes no pause.
+  - A sign-in again in another tab moves the circuit to the new session, and the pause still applies.
+- **Can a paused circuit outlive its session?** No. The 30-second revalidation calls `IsActive` (`SessionRevalidatingStateProvider.cs:45-48`). When it fails, the auth state turns anonymous and `AuthorizeRouteView` shows `RedirectToLogin`, which disposes the page, the refresher and the pause. Any user event in between throws at the check and terminates the circuit. At most one more refresh can run before the redirect; that window already exists and web-login.md:97 documents it.
+
+**[NON-BLOCKING] D1. The plan wrongly says the circuit ends at the next acknowledgement.**
+- Plan *Session* paragraph: "the circuit then ends at the next acknowledgement (rejected reconnect dialog, sign-in again)". Record 0220, *Consequences*, says "the circuit then ends".
+- Per record 0103:22 and web-login.md:94, the result of the check on an acknowledgement is discarded. An unattended page actually ends through the 30-second revalidation, which redirects to `/login`.
+- **Smallest fix, verbatim**, replacing the plan sentence "An overview left open ends its session 1 hour after the last activity elsewhere (HTTP request, another page, another tab), and the circuit then ends at the next acknowledgement (rejected reconnect dialog, sign-in again)." with:
+  `An overview left open ends its session 1 hour after the last activity elsewhere (HTTP request, another page, another tab); the page's 30-second session check then goes to `/login`, which disposes the page and its pause (the check of an acknowledgement is discarded, record 0103).`
+- The same correction applies to the first *Consequences* bullet of 0220, verbatim:
+  `- An open overview ends its session 1 hour after the last activity elsewhere; within 30 seconds the page's session check goes to `/login`, and the user signs in again.`
+- Recommendation: fix now; it is a documentation-only change.
+
+**[NON-BLOCKING] D2. A scope released twice could switch the pause off for a later overview page.**
+- `SessionActivity` presumably counts open scopes (the test `PauseHoldsUntilItsLastScopeIsDisposed`). If a scope can be released twice, the count can drop below zero. Then the next overview page's `Pause()` brings it back only to 0, and B1 returns for that circuit.
+- The count is also read from hub threads (the inbound handler) and changed on the dispatcher.
+- **Smallest fix:** each scope releases only once (an `Interlocked.Exchange` flag), and the count uses `Interlocked` / `Volatile`. Add the test `SessionActivityTests.PauseScopeDisposedTwiceReleasesOnce`.
+- Recommendation: fix now (one test).
+
+**[NON-BLOCKING] D3. Release the pause first when the page is disposed.**
+- `OverviewPage.DisposeAsync` should release the pause in a `finally`, or before awaiting the refresher. Then an exception while the refresher is being disposed cannot leave the circuit paused on the next pages.
+- This affects usability only (the user is signed out sooner), not security.
+- Recommendation: fix now, as a note in the plan's *Session* paragraph.
