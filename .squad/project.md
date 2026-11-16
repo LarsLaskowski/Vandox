@@ -24,7 +24,7 @@ protected, where, and the area documents that state its rules.
    [network-and-security-model](../docs/areas/network-and-security-model.md),
    [backend-host](../docs/areas/backend-host.md), [agent-installation](../docs/areas/agent-installation.md).
 3. **Web UI login** — only a signed-in user reads data or writes a note (hash, sessions, CSRF, throttling, trusted
-   proxy). `src/Vandox.Backend/Security/`, `Components/Account/Login.razor`, every page under `Components/Pages/`,
+   proxy). `src/Vandox.Backend/Security/`, `Components/Account/Login.razor`, every page under `Components/Pages/` (among them `HistoryPage`, `/history`),
    `POST /incidents/<number>/notes`, `GET /report/markdown`, `TrustedProxyList` —
    [web-login](../docs/areas/web-login.md), [web-ui](../docs/areas/web-ui.md) and its `web-ui-*.md` views.
 4. **Command signing for remote actions** (planned) — only signed, confirmed commands from a fixed list run —
@@ -54,7 +54,7 @@ protected, where, and the area documents that state its rules.
 10. **Parsing of external input** — hostile input yields an error or a skipped record, never a crash, unbounded
     allocation or hang. `internal/` (every reader of external input); `src/Vandox.Core/` (`Wire`, `Configuration`,
     `LogParsing`, `Signatures`, `Templates`, `Incidents`, `Reports`), `src/Vandox.Import/`, the log search of
-    `src/Vandox.Storage/`, `/logs` and `/report` addresses, `vandoxd` flags, `install.sh` inputs; later Telegram
+    `src/Vandox.Storage/`, `/logs`, `/report` and `/history` addresses (`HistoryAddress`: metrics, range and moment) and the numbers the history chart sends through `HistoryChartEvents` (`Select`, `Pick`), `vandoxd` flags, `install.sh` inputs; later Telegram
     commands — [wire-format](../docs/areas/wire-format.md),
     [wire-format-records](../docs/areas/wire-format-records.md),
     [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
@@ -71,7 +71,7 @@ protected, where, and the area documents that state its rules.
     [backend-host](../docs/areas/backend-host.md), [agent-installation](../docs/areas/agent-installation.md),
     [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
 12. **Logging and display of external data** — external text cannot inject into logs, pages, reports or Telegram.
-    `src/Vandox.Backend/Logging/`, the components and security headers of `src/Vandox.Backend/`, `vandoxd` output, the
+    `src/Vandox.Backend/Logging/`, the components and security headers of `src/Vandox.Backend/` (among them `HistoryPage` and `HistoryChart`: chart labels through `LogText.Escape`, event and snapshot texts through `ExternalText`, the log line `history view: reading failed` without an address value), `vandoxd` output, the
     agent's logger (`internal/agent`) — [web-ui](../docs/areas/web-ui.md) and its `web-ui-*.md` views,
     [forensics-report](../docs/areas/forensics-report.md), [listener-changes](../docs/areas/listener-changes.md),
     [incidents](../docs/areas/incidents.md), [log-templates](../docs/areas/log-templates.md),
@@ -184,12 +184,12 @@ marked planned.
 | MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `DisposeFailingClock` (Backend tests: timers that fail on asynchronous disposal), `RefreshProbe` (Backend tests: the overview refresh delegate), `CountingClock` (Storage tests) | the clock |
-| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader` (Backend tests: records calls, scripted results, can hold or fail a call), `ListLogger` (Backend tests) | store, readers |
+| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader` (Backend tests: records calls, scripted results, can hold or fail a call; `FakeHistoryReader` records the call sequence and chooses stamps as the store does), `ListLogger` (Backend tests) | store, readers |
 | retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
-| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests): counts calls of the real store; `ProbeTimeSeriesReader` (Backend tests): held calls | `ITimeSeriesReader` |
+| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests): counts calls of the real store; `ProbeTimeSeriesReader` (Backend tests): held calls; `ScriptedTimeSeriesReader` (Backend tests): scripted lines and kernel events behind a real `TimeSeriesService`, records calls, can hold or fail | `ITimeSeriesReader` |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
-| Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
+| Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness` (`HistoryPageHarness`: history page over `ScriptedTimeSeriesReader`, `FakeHistoryReader`, a fake clock, a recording navigation manager and a script runtime that answers the chart width), `HistoryChartFixture`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
 | web login (C#) | `BackendFixture`, `LoginTestClient`, `ScriptedPasswordVerifier`, `Fixed*` and `Unset*` providers (Backend tests) | service, browser |
 | ingest (C#) | `IngestRig`, `IngestCall`, `RecordingRecordWriter`, `CountingBodyStream`, `StartingResponseBody` (Backend tests) | request, writer |
 | Telegram Bot API | planned: a fake client | the Bot API |
