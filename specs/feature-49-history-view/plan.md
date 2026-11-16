@@ -353,3 +353,40 @@ Security, plan round: `CHANGES_REQUIRED`, two blocking and four non-blocking fin
 
 As the spec's *Out of scope*: self-healing markers (#71), the gap list (#54), the processes (#50) and network (#51) views, bands, touch
 drag, automatic refresh and links into the view. No further follow-up issue.
+
+## Security notes
+
+All six findings from my plan review are resolved in the revision, so the plan is approved; one new non-blocking finding came out of the delta.
+
+I read the change since my round at `FETCH_HEAD` 8e25b04 on `origin/claude/busy-tesla-im0m00` (from cfa5900) with `git show` and `git diff`, without checking it out. That covers `plan.md`, `spec.md` (S7), `tasks.md` and record 0222.
+
+## My earlier findings
+
+1. **[BLOCKING] Pattern ended in `$`: resolved.** *Address* now uses `^[A-Za-z0-9][A-Za-z0-9._:/@+\-]*\z` as a generated regex with `RegexOptions.CultureInvariant`. `ParseRefusesInvalidValue` has the `%0A` and `%0D` DataRows. In my first round, .NET printed `$ : True  \z : False` for `"cpu_percent\n"`, so `\z` closes the bypass. Times are now read by reusing `LogsAddress.TryReadTime` (made internal) rather than a copy.
+2. **[BLOCKING] Two decoded snapshots per kind: resolved with option (a).**
+   - `SnapshotStampAsync` reads only `id` and `captured_at`.
+   - `SnapshotAsync(stamp)` reads one record by ID and kind.
+   - *Moment* runs the kinds one after the other and drops the first record before the second kind is read.
+   - `ReadAsyncDecodesOneSnapshotAtATime` checks the call order and that one record is read per kind; it is listed under AC9 and AC11.
+   - N2 and *Memory per circuit* ("one decoded snapshot") are now true, and record 0222 (lines 36 and 42) matches.
+   - I re-ran the query plans with `python3 -I /tmp/claude-0/-home-user-Vandox/7d628ade-087e-57b9-93c6-af0ce179da7a/scratchpad/eqp2.py` (SQLite 3.53.1, schema from `SchemaMigrator.cs`). Output:
+     - `AtOrBefore`: `SEARCH records USING COVERING INDEX records_kind_time (kind=? AND captured_at>? AND captured_at<?)` and `USE TEMP B-TREE FOR LAST TERM OF ORDER BY`
+     - `After`: `SEARCH records USING COVERING INDEX records_kind_time (...)`
+     - record read: `SEARCH r USING INTEGER PRIMARY KEY (rowid=?)`
+3. **Value of the *Add* choice, and `ToQuery` not re-checking: resolved.** The choice is now an index into `MetricOptions`, and an invalid index adds nothing. `ToQuery` checks pattern, byte length, the count, times and the combination rules again, and throws as `LogsAddress.ToQuery` does. Tests: `HistoryPageForgedMetricChoiceAddsNothing` and `ToQueryRefusesInvalidValues`.
+4. **Selection and pick checks, and disposal: resolved.**
+   - Values are checked for finiteness and the storable range before any conversion, and again after widening.
+   - `DisposeAsync` calls `Stop()` and disposes the reference; later calls do nothing.
+   - The plan says no static `[JSInvokable]` will be added.
+   - The DataRows are as I proposed, plus a negative tolerance and `StopIgnoresLaterCalls`.
+5. **Source in the snapshot headings: resolved.** Both snapshot views now carry `CapturedAt` and `Source` as `IReadOnlyList<TextRun>`, rendered through `ExternalText`. Tests: `FromEscapesSourceCommandAndUser` and `FromEscapesSource`.
+6. **The `AtOrBefore` sort held full rows: resolved.** The read is now covering, so the temp B-tree holds only `id` and `captured_at` (EXPLAIN output above).
+
+## New finding in the delta
+
+- [NON-BLOCKING] **`HistoryView.RoundUpToSecond` can step past the storable range.** `StorableTime.Max` is not a whole second (`src/Vandox.Core/Model/StorableTime.cs:18`, ticks `713589688368547758`).
+  - If `ProcessBefore` falls within the last fraction of a second below `Max`, rounding up passes `Max`.
+  - `ToQuery` would then throw `InvalidOperationException` in the *Snapshot before this moment* handler and end that user's circuit.
+  - It needs a stored snapshot captured near the end of the storable range, so it is practically unreachable.
+  - Smallest fix: clamp the result to the last whole second at or below `Max`, as `IncidentsView.LogsHref` does with `lastSecond` (`src/Vandox.Backend/Incidents/IncidentsView.cs:222`). Add a DataRow at `Max` to `RoundUpToSecondKeepsWholeSeconds`.
+  - Recommendation: fix now, in the Dev's implementation; no plan revision is needed.
