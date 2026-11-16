@@ -2,8 +2,6 @@ using Microsoft.AspNetCore.Components.Server.Circuits;
 
 namespace Vandox.Backend.Overview;
 
-// Skeleton: removed with the implementation
-#pragma warning disable RH2003, S2325, S4487
 /// <summary>
 /// Tells whether the connection of a circuit is up and raises an event when it is restored.
 /// </summary>
@@ -12,9 +10,9 @@ public sealed class CircuitConnection : CircuitHandler
     #region Fields
 
     /// <summary>
-    /// The handlers of <see cref="Restored"/>.
+    /// Whether the connection is up.
     /// </summary>
-    private EventHandler? _restored;
+    private volatile bool _isConnected = true;
 
     #endregion // Fields
 
@@ -23,20 +21,16 @@ public sealed class CircuitConnection : CircuitHandler
     /// <summary>
     /// Occurs when the connection is up again after it was down.
     /// </summary>
-    public event EventHandler? Restored
-    {
-        add => _restored += value;
-        remove => _restored -= value;
-    }
+    public event EventHandler? Restored;
 
     #endregion // Events
 
     #region Properties
 
     /// <summary>
-    /// Gets a value indicating whether the connection is up.
+    /// Gets a value indicating whether the connection is up; it is up before the first connection, so a prerendered page counts as connected.
     /// </summary>
-    public bool IsConnected { get; } = true;
+    public bool IsConnected => _isConnected;
 
     #endregion // Properties
 
@@ -45,15 +39,25 @@ public sealed class CircuitConnection : CircuitHandler
     /// <inheritdoc/>
     public override Task OnConnectionDownAsync(Circuit circuit, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        _isConnected = false;
+
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
     public override Task OnConnectionUpAsync(Circuit circuit, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var wasDown = _isConnected == false;
+
+        _isConnected = true;
+
+        if (wasDown)
+        {
+            Restored?.Invoke(this, EventArgs.Empty);
+        }
+
+        return Task.CompletedTask;
     }
 
     #endregion // CircuitHandler
 }
-#pragma warning restore RH2003, S2325, S4487
