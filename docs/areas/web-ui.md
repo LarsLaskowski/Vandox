@@ -23,7 +23,7 @@ home network; the views ([Overview page](web-ui-overview.md), [Logs view](web-ui
 - The framework's defaults apply to circuits: a message from the browser is at most 32 KB; at most 100 disconnected circuits are kept for
   reconnecting, each for 3 minutes; the number of connected circuits is not limited.
 - A view that reads the store queries only once the page is interactive: prerendered (the first response) it shows its frame and a
-  waiting text and queries nothing, so its read runs once per page load. The waiting texts are stated per view.
+  waiting text and queries nothing, so its read runs once per page load; the overview page then refreshes every 30 seconds ([Overview page](web-ui-overview.md)). The waiting texts are stated per view.
 
 ### Layout and navigation
 

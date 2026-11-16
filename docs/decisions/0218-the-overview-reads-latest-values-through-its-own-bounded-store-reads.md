@@ -40,7 +40,7 @@ read as the receive time of the agent's highest-numbered record.
   backfill whose current data stays backfilled, or an agent clock far off).
 - The receive time of the highest-numbered record can be older than the newest backfill batch by up to one live send period; a
   backfill without live batches does not occur, because the live stream goes first.
-- An agent whose newest records were removed by retention shows as having sent nothing.
+- An agent whose newest records were removed by retention is still read, without a receive time: *Last data received* shows `unknown`, marked `stale`.
 - Every read ignores records captured more than 90 seconds after the page's now, so a clock far ahead hides no current value; such
   records are not shown.
 - The latest values hold at most the requested number of label texts and count the others by hash, so a scan of large distinct label
