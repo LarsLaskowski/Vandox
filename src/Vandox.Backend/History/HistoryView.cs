@@ -1,9 +1,9 @@
+using System.Globalization;
+
+using Vandox.Core.Model;
 using Vandox.Storage;
 
 namespace Vandox.Backend.History;
-
-// Skeleton: removed with the implementation
-#pragma warning disable RH2003
 
 /// <summary>
 /// The texts, caps and helpers of the history view.
@@ -162,7 +162,15 @@ public static class HistoryView
     /// <returns>The value, such as 24h</returns>
     public static string PresetValue(HistoryPreset preset)
     {
-        throw new NotImplementedException();
+        return preset switch
+               {
+                   HistoryPreset.OneHour => "1h",
+                   HistoryPreset.OneDay => "24h",
+                   HistoryPreset.SevenDays => "7d",
+                   HistoryPreset.ThirtyDays => "30d",
+                   HistoryPreset.OneYear => "1y",
+                   _ => throw new ArgumentOutOfRangeException(nameof(preset))
+               };
     }
 
     /// <summary>
@@ -172,7 +180,15 @@ public static class HistoryView
     /// <returns>The label, such as 24 h</returns>
     public static string PresetLabel(HistoryPreset preset)
     {
-        throw new NotImplementedException();
+        return preset switch
+               {
+                   HistoryPreset.OneHour => "1 h",
+                   HistoryPreset.OneDay => "24 h",
+                   HistoryPreset.SevenDays => "7 d",
+                   HistoryPreset.ThirtyDays => "30 d",
+                   HistoryPreset.OneYear => "1 y",
+                   _ => throw new ArgumentOutOfRangeException(nameof(preset))
+               };
     }
 
     /// <summary>
@@ -182,7 +198,15 @@ public static class HistoryView
     /// <returns>The span</returns>
     public static TimeSpan PresetSpan(HistoryPreset preset)
     {
-        throw new NotImplementedException();
+        return preset switch
+               {
+                   HistoryPreset.OneHour => TimeSpan.FromHours(1),
+                   HistoryPreset.OneDay => TimeSpan.FromDays(1),
+                   HistoryPreset.SevenDays => TimeSpan.FromDays(7),
+                   HistoryPreset.ThirtyDays => TimeSpan.FromDays(30),
+                   HistoryPreset.OneYear => TimeSpan.FromDays(365),
+                   _ => throw new ArgumentOutOfRangeException(nameof(preset))
+               };
     }
 
     /// <summary>
@@ -192,7 +216,17 @@ public static class HistoryView
     /// <returns>The text, such as 5 minutes or 1 hour</returns>
     public static string StepText(TimeSpan step)
     {
-        throw new NotImplementedException();
+        if (step >= TimeSpan.FromDays(1) && step.Ticks % TimeSpan.TicksPerDay == 0)
+        {
+            return Count((long)step.TotalDays, "day");
+        }
+
+        if (step >= TimeSpan.FromHours(1) && step.Ticks % TimeSpan.TicksPerHour == 0)
+        {
+            return Count((long)step.TotalHours, "hour");
+        }
+
+        return Count((long)step.TotalMinutes, "minute");
     }
 
     /// <summary>
@@ -202,7 +236,12 @@ public static class HistoryView
     /// <returns>1 for a width that is not finite or below 1, else the floor of the width, at most 1,000</returns>
     public static int Target(double chartWidth)
     {
-        throw new NotImplementedException();
+        if (double.IsFinite(chartWidth) == false || chartWidth < 1)
+        {
+            return 1;
+        }
+
+        return (int)Math.Floor(Math.Min(chartWidth, MaxTarget));
     }
 
     /// <summary>
@@ -213,7 +252,20 @@ public static class HistoryView
     /// <returns>The range, or <see langword="null"/> when a value is refused</returns>
     public static HistoryRange? Selection(double startSeconds, double endSeconds)
     {
-        throw new NotImplementedException();
+        if (IsStorableSeconds(startSeconds) == false || IsStorableSeconds(endSeconds) == false)
+        {
+            return null;
+        }
+
+        var start = DateTimeOffset.FromUnixTimeSeconds((long)Math.Floor(startSeconds));
+        var end = DateTimeOffset.FromUnixTimeSeconds((long)Math.Ceiling(endSeconds));
+
+        if (StorableTime.Contains(start) == false || StorableTime.Contains(end) == false || start >= end)
+        {
+            return null;
+        }
+
+        return new HistoryRange(start, end);
     }
 
     /// <summary>
@@ -224,7 +276,21 @@ public static class HistoryView
     /// <returns>The moment</returns>
     public static DateTimeOffset Pick(IReadOnlyList<SeriesMarker> markers, HistoryPick pick)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(markers);
+        ArgumentNullException.ThrowIfNull(pick);
+
+        var chosen = pick.At;
+        var near = markers.Select(marker => marker.At).Where(at => (at - pick.At).Duration() <= pick.Tolerance).Order().ToList();
+
+        if (near.Count > 0)
+        {
+            chosen = near.MinBy(at => (at - pick.At).Duration());
+        }
+
+        var floored = new DateTimeOffset(chosen.UtcTicks - (chosen.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
+        var firstSecond = new DateTimeOffset(StorableTime.Min.UtcTicks + (TimeSpan.TicksPerSecond - (StorableTime.Min.UtcTicks % TimeSpan.TicksPerSecond)), TimeSpan.Zero);
+
+        return floored < firstSecond ? firstSecond : floored;
     }
 
     /// <summary>
@@ -234,7 +300,11 @@ public static class HistoryView
     /// <returns>The rounded time</returns>
     public static DateTimeOffset RoundUpToSecond(DateTimeOffset time)
     {
-        throw new NotImplementedException();
+        var lastSecond = new DateTimeOffset(StorableTime.Max.UtcTicks - (StorableTime.Max.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
+        var remainder = time.UtcTicks % TimeSpan.TicksPerSecond;
+        var rounded = remainder == 0 ? time.UtcTicks : time.UtcTicks - remainder + TimeSpan.TicksPerSecond;
+
+        return rounded >= lastSecond.UtcTicks ? lastSecond : new DateTimeOffset(rounded, TimeSpan.Zero);
     }
 
     /// <summary>
@@ -244,7 +314,9 @@ public static class HistoryView
     /// <returns>The options in the order of the list</returns>
     public static IReadOnlyList<SeriesKey> MetricOptions(StoredMetricList list)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(list);
+
+        return [.. list.Metrics.Where(HistoryAddress.IsValidMetric)];
     }
 
     /// <summary>
@@ -254,10 +326,44 @@ public static class HistoryView
     /// <returns>The link</returns>
     public static string HistoryHref(HistoryAddress address)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(address);
+
+        return "history" + address.ToQuery();
+    }
+
+    /// <summary>
+    /// Fills a format text with its arguments.
+    /// </summary>
+    /// <param name="format">The format text</param>
+    /// <param name="arguments">The arguments</param>
+    /// <returns>The text</returns>
+    internal static string Fill(string format, params string[] arguments)
+    {
+        return string.Format(CultureInfo.InvariantCulture, format, [.. arguments]);
+    }
+
+    /// <summary>
+    /// Names a count of a unit.
+    /// </summary>
+    /// <param name="count">The count</param>
+    /// <param name="unit">The singular unit</param>
+    /// <returns>The text, with the plural for any count but one</returns>
+    private static string Count(long count, string unit)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"{count} {unit}{(count == 1 ? string.Empty : "s")}");
+    }
+
+    /// <summary>
+    /// Tells whether a number of Unix seconds is finite and inside the storable range, checked before any conversion.
+    /// </summary>
+    /// <param name="seconds">The seconds</param>
+    /// <returns><c>true</c> when the value can be converted</returns>
+    private static bool IsStorableSeconds(double seconds)
+    {
+        return double.IsFinite(seconds)
+               && seconds >= (StorableTime.Min.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / (double)TimeSpan.TicksPerSecond
+               && seconds <= (StorableTime.Max.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / (double)TimeSpan.TicksPerSecond;
     }
 
     #endregion // Methods
 }
-
-#pragma warning restore RH2003

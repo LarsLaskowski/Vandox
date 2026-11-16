@@ -3,9 +3,6 @@ using Vandox.Storage;
 
 namespace Vandox.Backend.History;
 
-// Skeleton: removed with the implementation
-#pragma warning disable RH2003, S4487
-
 /// <summary>
 /// Reads the history data through the shared gate of the web views, one gate slot per call.
 /// </summary>
@@ -34,6 +31,9 @@ public sealed class GatedHistoryReader : IHistoryReader
     /// <param name="gate">The gate of the reads</param>
     public GatedHistoryReader(IHistoryReader inner, WebReaderGate gate)
     {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(gate);
+
         _inner = inner;
         _gate = gate;
     }
@@ -45,22 +45,20 @@ public sealed class GatedHistoryReader : IHistoryReader
     /// <inheritdoc/>
     public Task<StoredMetricList> StoredMetricsAsync(int limit, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.StoredMetricsAsync(limit, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<SnapshotStamp?> SnapshotStampAsync(SnapshotQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.SnapshotStampAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<StoredRecord?> SnapshotAsync(SnapshotStamp stamp, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.SnapshotAsync(stamp, cancellationToken), cancellationToken);
     }
 
     #endregion // IHistoryReader
 }
-
-#pragma warning restore RH2003, S4487
