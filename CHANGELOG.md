@@ -8,6 +8,11 @@ tag lists the merged pull requests in detail.
 
 ### Added
 
+- **Overview page** (issue #48): the start page `/` now shows, below `Updated <time>`, the data freshness (last live data, last data
+  received, a running backfill and the agent's spool), the latest state of every service unit with `failed` units first, the key figures
+  (memory, swap, pressure, disks, MariaDB) and the open and latest incident. A value older than 5 minutes is marked `stale`, a missing
+  one `unknown`. It refreshes every 30 seconds over the live connection, and its refreshes do not extend the web session. There is no new
+  option, route or listener.
 - **Time-series query service** in the backend (issue #47): for a range, up to 16 series and a target number of points it picks the
   resolution (raw values or a rollup step from 5 minutes to whole days), puts all lines on one time axis, marks spans without data as
   gaps and points between another line's samples as *between samples*, and returns the gaps of the range, the markers (OOM kills, boots,

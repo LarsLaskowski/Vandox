@@ -3,7 +3,7 @@
 ## Scope
 
 How stored data is read from the backend's database ([Storage](storage.md)): record series and kinds, incidents and their notes,
-template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the literal-term log search, and the log exploration
+template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the reads of the overview page, the literal-term log search, and the log exploration
 that serves the logs view with bounded pages. `vandoxd incidents`, `vandoxd report` and the web UI's views rely on it. Every read runs on
 a reader connection and is interrupted by a cancelled token or a passed deadline ([Storage](storage.md), *Database file and connections*).
 
@@ -117,6 +117,30 @@ without a shared transaction, so a batch committed between them can make a total
   agent the store has no stream of.
 - Exact errors: `store: invalid query: agent id is invalid`, `unknown gap state`, `after id must not be negative`, `limit must be 1 to
   1000`.
+
+### Overview reads
+
+The four reads of the overview page ([Overview page](web-ui-overview.md)); each is one reader lease, bounded by rows, and ignores every record captured after its `until` bound (the page passes now plus 90 seconds), so a record dated far ahead hides
+no current data and is not returned.
+
+- **Freshness** (`live scan limit` 1 to 20,000): the agent of `agent_streams` whose highest-numbered record has the latest receive time,
+  with that time; an agent whose record was removed comes after the others (the one with the latest stored capture time first) with no
+  receive time; without a stream row the agent ID is empty. For that agent it returns the number of open sequence gaps, their earliest
+  start and latest end. It scans the newest metric records up to the bound, newest first, at most the limit: the first one stored as
+  live gives the live time; when none is live it returns the capture time of the oldest record read.
+- **Latest values** (1 to 16 series, a window above 0 and at most one day, 1 to 64 label sets): per series, the newest capture time up to the
+  bound, then at most 10,000 rows from the window before it, newest first. Per label set it returns the newest value, the label sets in
+  ordinal order of their stored text, at most the requested number; it also returns the number of distinct label sets of the scan, counted
+  by the first 8 bytes of the SHA-256 of the text (a collision can undercount by one). A read holds at most the requested number of label texts.
+- **MariaDB status**: the newest `mariadb_status` record of source `mariadb` up to the bound, read by `json_extract` of the availability,
+  `Threads_connected`, `Memory_used` and `max_connections`, never decoded whole; `max_connections` is returned as a number only when the
+  stored text is at most 20 ASCII digits that fit a 64-bit integer, else none.
+- **Service states** (a retirement above 0 and at most one day, a limit of 1 to 1,024): the newest `service_state` capture time up to the
+  bound, then the latest record per unit within the retirement before it; units whose state is not `active` first, then by unit in
+  ordinal order, at most the limit, with the number of units and the newest capture time.
+- A broken rule is refused before any read with `store: invalid query: live scan limit must be 1 to 20000`, `at least one series is
+  required`, `at most 16 series`, `window must be positive and at most one day`, `label sets must be 1 to 64`, `retirement must be
+  positive and at most one day` or `limit must be 1 to 1024`.
 
 ### Log search
 
@@ -249,6 +273,7 @@ of the scan ([Storage](storage.md), *Schema*).
 - [0066](../decisions/0066-log-search-takes-literal-terms-only.md) — why log search takes literal terms only.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why the record query pages by ID.
 - [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a cancelled token or deadline interrupts a reader statement.
+- [0218](../decisions/0218-the-overview-reads-latest-values-through-its-own-bounded-store-reads.md) — why the overview has its own bounded reads over the existing indexes.
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view's search chooses between the index and a bounded scan and finds a template's lines by normalizing candidates.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the listener history reads the narrow derived
@@ -268,7 +293,7 @@ of the scan ([Storage](storage.md), *Schema*).
 
 `Vandox.Storage`: `SqliteStore` implements the interfaces the callers depend on (`IRecordReader` with `RecordQuery.AfterId`,
 `ILogSearcher` with `FtsQuery`, `ILogExplorer`, `ILogTemplateReader`, `IIncidentBrowser` with `IncidentSummariesAsync`, `IncidentAsync` and
-`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
+`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IOverviewReader` (`OverviewQueries`, `LabelSetTally`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
 `AgentUidChanges`), `IAgentTimelineReader` with `GapsAsync` and `ClockAsync`, and the record writer, incident store and import tracker of
 [Storage writing](storage-writing.md)). The exploration is `LogFinder` (`SelectiveMatches`, `ProbeBudget`, `PageBudget`; the page reports
 `ScanLimitReached`, `IndexCheckStopped` and `Next`), `LogFinderQueries`, `LineIndex`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`

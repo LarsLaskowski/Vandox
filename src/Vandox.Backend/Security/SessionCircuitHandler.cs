@@ -13,6 +13,8 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     private readonly AuthenticationStateProvider _authenticationStateProvider;
     private readonly SessionStore _sessions;
 
+    private readonly SessionActivity _activity;
+
     private Task<AuthenticationState>? _state;
 
     #endregion // Fields
@@ -24,10 +26,12 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     /// </summary>
     /// <param name="authenticationStateProvider">The authentication state of the circuit</param>
     /// <param name="sessions">The sessions</param>
-    public SessionCircuitHandler(AuthenticationStateProvider authenticationStateProvider, SessionStore sessions)
+    /// <param name="activity">The activity of the circuit</param>
+    public SessionCircuitHandler(AuthenticationStateProvider authenticationStateProvider, SessionStore sessions, SessionActivity activity)
     {
         _authenticationStateProvider = authenticationStateProvider;
         _sessions = sessions;
+        _activity = activity;
 
         _authenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
     }
@@ -37,7 +41,8 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     #region Methods
 
     /// <summary>
-    /// Checks that the session of the circuit is active and extends its idle time.
+    /// Checks that the session of the circuit is active and extends its idle time, except while the activity of the circuit is paused: then the session is only
+    /// checked, so an ended session still ends the circuit (record 0220).
     /// </summary>
     /// <returns>A task that completes when the session is active</returns>
     /// <exception cref="SessionEndedException">The session has ended</exception>
@@ -58,7 +63,7 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
 
         var state = await announced.ConfigureAwait(false);
 
-        if (_sessions.Touch(state.User))
+        if (_activity.IsPaused ? _sessions.IsActive(state.User) : _sessions.Touch(state.User))
         {
             return;
         }

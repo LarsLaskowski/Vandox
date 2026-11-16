@@ -487,7 +487,7 @@ public class ServeTests
 
         // Assert
         Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
-        Assert.Contains("Vandox backend", html, "the signed-in user gets the page");
+        Assert.Contains("<h1>Overview</h1>", html, "the signed-in user gets the overview page");
     }
 
     /// <summary>

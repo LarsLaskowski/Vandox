@@ -1,0 +1,128 @@
+@page "/"
+
+<PageTitle>Overview</PageTitle>
+
+<h1>Overview</h1>
+
+@if (_model is null)
+{
+    @if (_failure.Length == 0)
+    {
+        <p>@Loading</p>
+    }
+}
+else
+{
+    <p>Updated @LogsView.ShowSeconds(_updated)</p>
+}
+
+@if (_failure.Length > 0)
+{
+    <p class="failure">@_failure</p>
+}
+
+@if (_model is not null)
+{
+    <h2>Data freshness</h2>
+    <dl>
+        <dt>Last live data</dt>
+        <dd>@Unmarked(_model.LiveData)@if (IsMarked(_model.LiveData)) {@(" ")<span class="stale">stale</span>}</dd>
+        <dt>Last data received</dt>
+        <dd>@Unmarked(_model.Received)@if (IsMarked(_model.Received)) {@(" ")<span class="stale">stale</span>}</dd>
+        <dt>Backfill</dt>
+        <dd>@_model.Backfill</dd>
+        <dt>Agent spool</dt>
+        <dd>@Unmarked(_model.Spool)@if (IsMarked(_model.Spool)) {@(" ")<span class="stale">stale</span>}</dd>
+    </dl>
+
+    <h2>Services</h2>
+    @if (_model.ServicesStale.Length > 0)
+    {
+        <p class="stale">@_model.ServicesStale</p>
+    }
+
+    @if (_model.ServicesText.Length > 0)
+    {
+        <p>@_model.ServicesText</p>
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="overview">
+                <thead>
+                    <tr>
+                        <th>Unit</th>
+                        <th>State</th>
+                        <th>Active since</th>
+                        <th>Restarts</th>
+                        <th>Recorded</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var unit in _model.Units)
+                    {
+                        <tr class="@(unit.Failed ? "failed" : null)">
+                            <td><ExternalText Runs="unit.Unit" /></td>
+                            <td>@unit.State</td>
+                            <td>@unit.ActiveSince</td>
+                            <td>@unit.Restarts</td>
+                            <td>@unit.Recorded@if (unit.Stale) {@(" ")<span class="stale">stale</span>}</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_model.MoreUnits.Length > 0)
+        {
+            <p>@_model.MoreUnits</p>
+        }
+    }
+
+    <h2>Key figures</h2>
+    <div class="table-scroll">
+        <table class="overview">
+            <thead>
+                <tr>
+                    <th>Figure</th>
+                    <th>Value</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var figure in _model.Figures)
+                {
+                    <tr>
+                        <td>@figure.Figure@if (figure.Mount.Count > 0) {@(" ")<ExternalText Runs="figure.Mount" />}</td>
+                        <td>@figure.Value</td>
+                        <td>@figure.Time@if (figure.Stale) {@(" ")<span class="stale">stale</span>}</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_model.MoreMounts.Length > 0)
+    {
+        <p>@_model.MoreMounts</p>
+    }
+
+    <h2>Incidents</h2>
+    @if (_model.OpenIncidents.Count > 0)
+    {
+        <ul>
+            @foreach (var incident in _model.OpenIncidents)
+            {
+                <li><a href="@incident.Href">#@incident.Number</a>, open, first kill @incident.FirstKill, <ExternalText Runs="incident.Victim" /></li>
+            }
+        </ul>
+    }
+
+    @if (_model.IncidentsText.Length > 0)
+    {
+        <p>@_model.IncidentsText</p>
+    }
+
+    @if (_model.LatestIncident is { } latest)
+    {
+        <p>Latest incident: <a href="@latest.Href">#@latest.Number</a>, first kill @latest.FirstKill, <ExternalText Runs="latest.Victim" />@if (latest.Future) {@(" dated in the future")}</p>
+    }
+}

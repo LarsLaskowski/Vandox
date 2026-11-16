@@ -5,8 +5,8 @@
 The pages `vandoxd` serves on its web listener as a whole: render mode and live connection, layout and navigation, theme, brand files,
 static assets, charts, the display of external text, the shared bound on the views' store reads, and the security headers of the web
 listener together with what the UI framework needs from them. The user relies on it to look at the monitored server in a browser in the
-home network; the views ([Logs view](web-ui-logs-view.md), [Incidents view](web-ui-incidents-view.md),
-[Report page](web-ui-report-page.md); an overview and history views are planned) build on it.
+home network; the views ([Overview page](web-ui-overview.md), [Logs view](web-ui-logs-view.md),
+[Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md); history views are planned) build on it.
 
 ## Behavior
 
@@ -23,7 +23,7 @@ home network; the views ([Logs view](web-ui-logs-view.md), [Incidents view](web-
 - The framework's defaults apply to circuits: a message from the browser is at most 32 KB; at most 100 disconnected circuits are kept for
   reconnecting, each for 3 minutes; the number of connected circuits is not limited.
 - A view that reads the store queries only once the page is interactive: prerendered (the first response) it shows its frame and a
-  waiting text and queries nothing, so its read runs once per page load. The waiting texts are stated per view.
+  waiting text and queries nothing, so its read runs once per page load; the overview page then refreshes every 30 seconds ([Overview page](web-ui-overview.md)). The waiting texts are stated per view.
 
 ### Layout and navigation
 
@@ -32,7 +32,7 @@ home network; the views ([Logs view](web-ui-logs-view.md), [Incidents view](web-
   since every entry would only lead back to it.
 - The login page shows the form as a card centered below the header: the heading *Sign in*, one line that asks for the password of the
   web UI, the message of a failed attempt, the password field (focused when the page loads) and the *Sign in* button in the brand color.
-- The navigation lists the existing pages; the entry of the current page is marked. Today it has four entries, *Overview* (`/`),
+- The navigation lists the existing pages; the entry of the current page is marked. Today it has four entries, *Overview* (`/`, [Overview page](web-ui-overview.md)),
   *Logs* (`logs`), *Incidents* (`incidents`) and *Report* (`report`); each view adds its own. *Logs* is marked on `/logs` and on
   `/logs/templates`, *Incidents* on `/incidents` and on `/incidents/<number>`, *Report* on `/report` (with or without a query),
   *Overview* only on `/`.
@@ -106,12 +106,13 @@ IDs) is shown only through one display that writes it as text, never as markup, 
 
 ### Store reads of the views
 
-- **At most two store calls of the logs view, the incidents view and the report page run at once across the whole service**, whatever the
+- **At most two store calls of the overview page, the logs view, the incidents view and the report page run at once across the whole service**, whatever the
   number of pages and users open; a further call waits for a slot within its own deadline. The store has four reader connections, so two
   stay free for `/healthz` and every other reader.
 - The time-series query ([Time-series queries](time-series-query.md)) shares this gate: each of its store reads takes one slot for that
   call, as the views' calls do.
-- The slot is held per store call (a read of many snapshots takes it once per snapshot). Saving a note does not use it.
+- The slot is held per store call (a read of many snapshots takes it once per snapshot). Saving a note does not use it. The overview page
+  takes one slot for each of the five calls of a refresh, in turn ([Overview page](web-ui-overview.md)).
 - A store call that a view's deadline or the leaving of its page cancels is interrupted in the store
   ([Storage](storage.md), *Database file and connections*).
 
@@ -189,11 +190,13 @@ The ingest listener serves none of this: every UI path, static file and the live
 - [0098](../decisions/0098-web-ui-serves-only-its-own-static-web-assets.md) — why own static web assets only, brand copies, vendored uPlot and a script-set theme.
 - [0099](../decisions/0099-web-listener-security-headers-one-self-only-csp.md) — why one self-only policy set by the application.
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why external text is capped and escaped visibly, and why two reads run at once.
+- [0218](../decisions/0218-the-overview-reads-latest-values-through-its-own-bounded-store-reads.md) — why the overview shares the gate with five calls per refresh.
+- [0219](../decisions/0219-the-overview-refreshes-on-a-timer-that-skips-overlaps-and-pauses-while-disconnected.md) — why the overview refreshes on a timer and pauses while the connection is lost.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view shares the gate of the logs view.
 
 ## Not here
 
-- The views: [Logs view](web-ui-logs-view.md), [Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md).
+- The views: [Overview page](web-ui-overview.md), [Logs view](web-ui-logs-view.md), [Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md).
 - Listeners, port routing, `/healthz`, the container and exposure: [Backend host](backend-host.md).
 - Who may reach the web UI: [Network and security model](network-and-security-model.md).
 - Logo files and color tokens: [BRANDING.md](../BRANDING.md).
@@ -207,7 +210,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 Charts: `Components/Charts` (`TimeSeriesChart`, `ChartData`; a stacked chart is `ChartData` with `stacked: true`, drawn by `createStacked`
 in `js/charts.js`, which sets the bridged cells to `undefined`; `ChartSeries.Bridged`, `ChartData.ToBridges`). External text: `Components/Logs/ExternalText` with the runs of `Logs/LogText` (`LogText.Runs`, `LogText.Escape`,
 `LogText.MaxShortChars`) and `Logs/TextRun`. The read gate: `Logs/WebReaderGate`, taken by `GatedLogExplorer`, `GatedIncidentBrowser`,
-`GatedRecordReader`, `GatedIncidentStore`, `GatedListenerHistoryReader` and `GatedTimeSeriesReader` (`TimeSeries/`). Headers: `Hosting/SecurityHeadersMiddleware`;
+`GatedRecordReader`, `GatedIncidentStore`, `GatedListenerHistoryReader`, `GatedTimeSeriesReader` (`TimeSeries/`) and `GatedOverviewReader` (`Overview/`; with `CircuitConnection`, the connection state of a circuit, which the overview page uses to pause its refresh). Headers: `Hosting/SecurityHeadersMiddleware`;
 `Hosting/ServeCommand`; `wwwroot/`; `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework script
 independently of the sources, as the image build restores before copying them (record 0098). The source scan is `WebSourceScanner` in
 `WebUiContentTests` (tests); in component code (`.razor`, `.cs` under `Components/`) it forbids `MarkupString`, `AddMarkupContent` and

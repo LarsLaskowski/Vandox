@@ -78,7 +78,8 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   when the request is HTTPS as the service sees it, which behind a proxy means: `X-Forwarded-Proto: https` from a trusted proxy (see
   *Reverse proxy trust*).
 - A session ends
-  - 1 hour after its last activity (an authenticated request, or any event, call or navigation of one of its live connections);
+  - 1 hour after its last activity (an authenticated request, or any event, call or navigation of one of its live connections; while
+    a live connection shows the overview page, its activity does not count, see below);
   - 12 hours after the sign-in, whatever the activity;
   - on sign-out;
   - when the service stops: sessions and the keys that protect cookies and forms exist only in memory.
@@ -95,6 +96,11 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   of the component state that an update of root components carries (it happens before the check; no page keeps such state) and the
   data of a transfer from the server to the browser that had already started (no page uses such transfers). A page also
   checks its session every 30 seconds and goes to `/login` when it has ended, which bounds that window.
+- While a live connection shows the overview page, its activity does not extend the session: the refreshes every 30 seconds, and a click
+  on a link of the page, are only checked, so an ended session still ends the connection. An overview left open ends its session 1 hour
+  after the last activity elsewhere (a request, another page, another tab); within 30 seconds the page's session check goes to `/login`,
+  and the user signs in again. The next page's render extends the session again ([Overview page](web-ui-overview.md),
+  [0220](../decisions/0220-a-circuit-showing-the-overview-does-not-extend-its-session.md)).
 
 ### Cross-site requests
 
@@ -187,6 +193,7 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 ## Related decisions
 
 - [0103](../decisions/0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md) — why server-side sessions in memory, a static login page and live connections bound to the session.
+- [0220](../decisions/0220-a-circuit-showing-the-overview-does-not-extend-its-session.md) — why a circuit showing the overview does not extend its session.
 - [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) — why argon2id in strict PHC form, Konscious and `hash-password`.
 - [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why forwarded headers only from configured proxies, the per-client lockout and the overall cap.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why a note is saved by a plain form post with the token to an endpoint behind the session.

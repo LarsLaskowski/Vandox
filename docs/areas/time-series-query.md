@@ -4,7 +4,7 @@
 
 The in-process query of metric lines for a range: which resolution it answers at, the time axis, the state of every point, the list of
 gaps and their mapping to lines, the markers (kills, boots, service restarts, backup runs), up to when the points are complete, the caps,
-the errors and the performance criterion. The views of the web UI (the overview and the history views, planned) call it in process;
+the errors and the performance criterion. The history views of the web UI (planned) call it in process;
 no HTTP route, page, option or listener belongs to it.
 
 ## Behavior

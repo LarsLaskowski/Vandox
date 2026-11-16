@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IOverviewReader, IAsyncDisposable
 {
     #region Constants
 
@@ -1301,6 +1301,40 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // ITimeSeriesReader
+
+    #region IOverviewReader
+
+    /// <inheritdoc/>
+    public Task<AgentFreshness> FreshnessAsync(int liveScanLimit, DateTimeOffset until, CancellationToken cancellationToken)
+    {
+        OverviewQueries.ValidateFreshness(liveScanLimit);
+
+        return ReadAsync(connection => OverviewQueries.ReadFreshnessAsync(connection, liveScanLimit, until, cancellationToken), OverviewQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<LatestSeries>> LatestValuesAsync(LatestValueQuery query, CancellationToken cancellationToken)
+    {
+        OverviewQueries.ValidateValues(query);
+
+        return ReadAsync(connection => OverviewQueries.ReadValuesAsync(connection, query, cancellationToken), OverviewQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<MariaDbLatest?> LatestMariaDbStatusAsync(DateTimeOffset until, CancellationToken cancellationToken)
+    {
+        return ReadAsync(connection => OverviewQueries.ReadMariaDbAsync(connection, until, cancellationToken), OverviewQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ServiceStatePage> LatestServiceStatesAsync(LatestServiceQuery query, CancellationToken cancellationToken)
+    {
+        OverviewQueries.ValidateServices(query);
+
+        return ReadAsync(connection => OverviewQueries.ReadServicesAsync(connection, query, cancellationToken), OverviewQueries.Context, cancellationToken);
+    }
+
+    #endregion // IOverviewReader
 
     #region IAsyncDisposable
 
