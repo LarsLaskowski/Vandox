@@ -341,7 +341,7 @@ public class HistoryChartViewTests
     public void FromCapsEventTexts()
     {
         // Arrange
-        var command = string.Concat(Enumerable.Repeat("a‮", 150));
+        var command = string.Concat(Enumerable.Repeat("a\u202E", 150));
         var markers = new[] { Marker(MarkerKind.OomKill, 5, command, 12) };
 
         // Act
@@ -353,7 +353,7 @@ public class HistoryChartViewTests
         Assert.IsLessThanOrEqualTo(HistoryView.TextRuns, runs.Count, "at most 16 runs");
         Assert.HasCount(expected.Count, runs, "the runs of the display");
         Assert.AreEqual(string.Join('|', expected.Select(run => $"{run.Escaped}:{run.Text}")), string.Join('|', runs.Select(run => $"{run.Escaped}:{run.Text}")), "the same runs as the display builds");
-        Assert.DoesNotContain("‮", string.Concat(runs.Where(run => run.Escaped == false).Select(run => run.Text)), "the control character is only in escaped form");
+        Assert.DoesNotContain("\u202E", string.Concat(runs.Where(run => run.Escaped == false).Select(run => run.Text)), "the control character is only in escaped form");
     }
 
     /// <summary>
@@ -523,7 +523,7 @@ public class HistoryChartViewTests
                                                                 {
                                                                     Kind = MarkerKind.OomKill,
                                                                     At = HistorySamples.Base.AddSeconds(index),
-                                                                    Text = new string('c', 300) + "‮",
+                                                                    Text = new string('c', 300) + "\u202E",
                                                                     Pid = index + 1
                                                                 }).ToList();
         var result = new TimeSeriesResult

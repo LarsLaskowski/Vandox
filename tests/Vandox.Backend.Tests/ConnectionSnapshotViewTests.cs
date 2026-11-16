@@ -238,7 +238,7 @@ public class ConnectionSnapshotViewTests
         var expected = LogText.Runs(text, HistoryView.TextChars, HistoryView.TextRuns);
 
         Assert.AreEqual(string.Join('|', expected.Select(run => $"{run.Escaped}:{run.Text}")), string.Join('|', runs.Select(run => $"{run.Escaped}:{run.Text}")), $"{what}: the runs of the display");
-        Assert.DoesNotContain("‮", string.Concat(runs.Where(run => run.Escaped == false).Select(run => run.Text)), $"{what}: the control character is only escaped");
+        Assert.DoesNotContain("\u202E", string.Concat(runs.Where(run => run.Escaped == false).Select(run => run.Text)), $"{what}: the control character is only escaped");
     }
 
     #endregion // Methods

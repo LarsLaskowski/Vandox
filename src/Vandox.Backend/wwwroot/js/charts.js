@@ -301,16 +301,16 @@ function historyScales() {
     return scales;
 }
 
-function drawLine(ctx, x, top, height, ratio, dash, color, lineWidth) {
+function drawLine(ctx, line) {
     ctx.save();
-    ctx.setLineDash(dash.map(function (length) {
-        return length * ratio;
+    ctx.setLineDash(line.dash.map(function (length) {
+        return length * line.ratio;
     }));
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth * ratio;
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = line.lineWidth * line.ratio;
     ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, top + height);
+    ctx.moveTo(line.x, line.top);
+    ctx.lineTo(line.x, line.top + line.height);
     ctx.stroke();
     ctx.restore();
 }
@@ -336,14 +336,20 @@ function drawMarks(plot, setup, colors, moment) {
             ctx.fillStyle = withAlpha(colors.ink, 0.12);
             ctx.fillRect(x, bbox.top, Math.max(right - x, ratio), bbox.height);
         } else {
-            const dash = mark.kind === "Boot" ? [8, 4] : mark.kind === "ServiceRestart" ? [2, 3] : [];
+            let dash = [];
 
-            drawLine(ctx, x, bbox.top, bbox.height, ratio, dash, colors.ink, 1);
+            if (mark.kind === "Boot") {
+                dash = [8, 4];
+            } else if (mark.kind === "ServiceRestart") {
+                dash = [2, 3];
+            }
+
+            drawLine(ctx, { x: x, top: bbox.top, height: bbox.height, ratio: ratio, dash: dash, color: colors.ink, lineWidth: 1 });
         }
     });
 
     if (moment !== null) {
-        drawLine(ctx, Math.round(plot.valToPos(moment, "x", true)), bbox.top, bbox.height, ratio, [], colors.brand, 2);
+        drawLine(ctx, { x: Math.round(plot.valToPos(moment, "x", true)), top: bbox.top, height: bbox.height, ratio: ratio, dash: [], color: colors.brand, lineWidth: 2 });
     }
 
     ctx.restore();

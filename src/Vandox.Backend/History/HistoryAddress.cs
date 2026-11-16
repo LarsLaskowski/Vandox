@@ -300,7 +300,7 @@ public sealed partial class HistoryAddress
             return NeedsBoth;
         }
 
-        return From is not null && To is not null && From.Value >= To.Value ? Reversed : string.Empty;
+        return From >= To ? Reversed : string.Empty;
     }
 
     /// <summary>
