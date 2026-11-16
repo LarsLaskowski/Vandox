@@ -74,14 +74,24 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     private string _choice = "0";
 
     /// <summary>
-    /// The text of an error of the address or of a control.
+    /// The text of an error of the address; it replaces the page.
     /// </summary>
     private string _error = string.Empty;
 
     /// <summary>
-    /// The text of a failed chart or metric list read.
+    /// The text of a refusal of a control; it is shown with the working page.
+    /// </summary>
+    private string _controlError = string.Empty;
+
+    /// <summary>
+    /// The text of a failed chart read.
     /// </summary>
     private string _failure = string.Empty;
+
+    /// <summary>
+    /// The text of a failed metric list read.
+    /// </summary>
+    private string _listFailure = string.Empty;
 
     /// <summary>
     /// The text of a failed snapshot read.
@@ -257,6 +267,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
         }
 
         _error = string.Empty;
+        _controlError = string.Empty;
 
         return RendererInfo.IsInteractive ? Task.WhenAll(ReadListAsync(), UpdateMomentAsync(), UpdateChartAsync()) : Task.CompletedTask;
     }
@@ -276,6 +287,8 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
 
         return _listRunner.RunAsync(async token =>
                                     {
+                                        _listFailure = string.Empty;
+
                                         var list = await ReadingAsync(() => Reader.StoredMetricsAsync(StorageLimits.MaxStoredMetrics, token)).ConfigureAwait(true);
 
                                         token.ThrowIfCancellationRequested();
@@ -411,12 +424,21 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     }
 
     /// <summary>
-    /// Shows the text of a failed chart or metric list read.
+    /// Shows the text of a failed chart read.
     /// </summary>
     /// <param name="text">The text</param>
     private void FailChart(string text)
     {
         _failure = text;
+    }
+
+    /// <summary>
+    /// Shows the text of a failed metric list read.
+    /// </summary>
+    /// <param name="text">The text</param>
+    private void FailList(string text)
+    {
+        _listFailure = text;
     }
 
     /// <summary>
@@ -443,12 +465,12 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
         }
         catch (InvalidOperationException exception)
         {
-            _error = exception.Message;
+            _controlError = exception.Message;
 
             return;
         }
 
-        _error = string.Empty;
+        _controlError = string.Empty;
         Navigation.NavigateTo(href,
                               new NavigationOptions
                               {
@@ -493,7 +515,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
 
         if (parsed.Error.Length > 0)
         {
-            _error = parsed.Error;
+            _controlError = parsed.Error;
 
             return;
         }
@@ -526,7 +548,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
 
         if (_address.Metrics.Count >= HistoryView.MaxMetrics)
         {
-            _error = HistoryView.TooManyMetricsText;
+            _controlError = HistoryView.TooManyMetricsText;
 
             return;
         }
@@ -665,7 +687,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     protected override void OnInitialized()
     {
         _chartRunner = new PageRunner(Clock, Logger.HistoryReadFailed, HistoryView.ChartTimeoutText, HistoryView.ChartFailureText, FailChart);
-        _listRunner = new PageRunner(Clock, Logger.HistoryReadFailed, HistoryView.ChartTimeoutText, HistoryView.ChartFailureText, FailChart);
+        _listRunner = new PageRunner(Clock, Logger.HistoryReadFailed, HistoryView.ChartTimeoutText, HistoryView.ChartFailureText, FailList);
         _momentRunner = new PageRunner(Clock, Logger.HistoryReadFailed, HistoryView.MomentTimeoutText, HistoryView.MomentFailureText, FailMoment);
 
         if (RendererInfo.IsInteractive)

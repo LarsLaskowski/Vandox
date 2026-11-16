@@ -33,8 +33,7 @@ Everything the page shows is in the address, so it can be bookmarked, shared and
 | `at` | the moment, in the same formats; the formats have no fraction, so a moment is a whole second |
 
 - A key is matched without regard to ASCII case and may be percent-encoded; any other key is ignored; the part after `#` is never read.
-  A raw `+` is read as a plus, not as a space (the logs view reads it as a space): a metric name may hold a plus and none holds a
-  space, so a metric with a plus reads back as written.
+  A raw `+` is read as a space, as the logs view reads it; a metric with a plus is written as `%2B` and reads back as written.
 - Without `range`, `from` and `to` the range is the last 24 hours, and the address is not extended: the *24 h* button is marked, and
   choosing it writes `range=24h`. A preset stays relative: the address holds `1h` and not the time it was chosen, so a copied address
   shows another signed-in user the same metrics and moment over the preset up to their own now. A zoom, *From* and *To* are fixed.
@@ -46,7 +45,8 @@ Everything the page shows is in the address, so it can be bookmarked, shared and
   - `The address gives both a preset range and a start or end time.`;
   - `The address needs both a start and an end time.`;
   - `The address has a start time that is not before its end time.`
-- An address with an error shows the heading, the presets, *From*, *To* and the text, and nothing else; it calls no store method.
+- An address with an error shows the heading, the presets, *From*, *To* and the text, and nothing else; it calls no store method. The
+  text of a control (below) is no address error: it shows with the working page.
 - An address is written only from values checked again (pattern and byte length of every metric, at most 8 distinct, storable times, the
   combination rules), the parameters in the order `metric`, `range` (only for a preset), `from` and `to` (only as a pair), `at`, each
   percent-encoded, a time without seconds when its second is 0. A value the checks refuse is shown as the address text without
@@ -57,7 +57,9 @@ Everything the page shows is in the address, so it can be bookmarked, shared and
 ### Controls
 
 - Presets *1 h*, *24 h*, *7 d*, *30 d*, *1 y*; the current one is marked. *From (UTC)* and *To (UTC)* with *Apply*: both fields are
-  checked with the address rules and show their texts without navigating; empty fields give the default range.
+  checked with the address rules and show their texts without navigating; empty fields give the default range. The text of a control
+  shows after the metric controls and before the chart, with the metric choice, the chosen metrics, the chart, the events and the
+  moment panel still shown; the next navigation clears it.
 - The metric choice lists the stored metrics as `<source> <name>`; *Add* adds the chosen entry (an entry already chosen is ignored),
   *Remove* beside a chosen metric removes it. A ninth metric shows `At most 8 metrics can be drawn at once.`
 - Adding or removing a metric, a preset, *Apply* and a drag selection each write a **new history entry**, so back returns to the
@@ -165,7 +167,8 @@ Times are `yyyy-MM-dd HH:mm:ss` in UTC.
   deadline of **10 seconds**, which includes the wait for a slot.
 - A chart or list read past the deadline shows `Reading the history took longer than 10 seconds and was stopped. Narrow the range or draw
   fewer metrics.`; a store error, and a read the store refuses, show `The history could not be read. The service log has the details.`
-  (both also for the metric list). A moment read shows `Reading the snapshots of this moment took longer than 10 seconds and was
+  (both also for the metric list). The list failure has its own text slot beside the chart failure: a chart read does not clear it, only
+  the start of a list read does. A moment read shows `Reading the snapshots of this moment took longer than 10 seconds and was
   stopped.` and `The snapshots of this moment could not be read. The service log has the details.` in the panel. A failure is logged as
   `history view: reading failed` (event 75, error level) with the exception only, never an address value or a label. A superseded action
   ends silently.

@@ -85,14 +85,14 @@ public sealed partial class HistoryAddress
     /// <summary>
     /// Parses the query string of the address.
     /// </summary>
-    /// <param name="query">The query string, with or without the leading question mark; a plus sign is a plus sign, not a space, because a metric name may hold one and none holds a space</param>
+    /// <param name="query">The query string, with or without the leading question mark; it is read as the logs view reads its own</param>
     /// <returns>The address; its <see cref="Error"/> names the first error</returns>
     public static HistoryAddress Parse(string query)
     {
         ArgumentNullException.ThrowIfNull(query);
 
         var address = new HistoryAddress();
-        var values = QueryHelpers.ParseQuery(query.Replace("+", "%2B", StringComparison.Ordinal));
+        var values = QueryHelpers.ParseQuery(query);
 
         address.Error = address.Read(values);
 

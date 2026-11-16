@@ -57,12 +57,22 @@ else
         </ul>
     }
 
+    @if (_controlError.Length > 0)
+    {
+        <p class="error" role="alert">@_controlError</p>
+    }
+
     @if (RendererInfo.IsInteractive == false)
     {
         <p>@HistoryView.LoadingText</p>
     }
     else
     {
+        @if (_listFailure.Length > 0)
+        {
+            <p class="error" role="alert">@_listFailure</p>
+        }
+
         @if (_failure.Length > 0)
         {
             <p class="error" role="alert">@_failure</p>
