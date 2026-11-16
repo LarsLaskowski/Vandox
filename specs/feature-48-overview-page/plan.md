@@ -1,8 +1,8 @@
 # Plan: Overview page
 
 Source: Issue #48 | [spec.md](spec.md)
-Tier: standard — a new page with new store reads changes behavior but creates, changes or removes no security control (the page stays under the existing `[Authorize]` and shows external text through the existing display).
-Security areas touched: 3 Web UI login (a new page under `Components/Pages/`), 12 Logging and display of external text (unit names, mount points, victims on a page)
+Tier: security — the session check changes (Security B1): activity of a circuit that shows the self-refreshing overview no longer extends the session.
+Security areas touched: 3 Web UI login (a new page under `Components/Pages/`; the session extension in `Security/`), 10 Parsing of external input (label JSON and `json_extract` of stored agent records in the new store reads), 12 Logging and display of external text (unit names, mount points, victims on a page)
 
 ## Problem / root cause
 
@@ -27,22 +27,26 @@ See [spec.md](spec.md): the start page `/` (`Components/Pages/Home.razor`) shows
 | 13 | The views' gate is `WebReaderGate(2)`, one slot per call | `ServeCommand.cs:247`, web-ui.md:109-116 | confirmed |
 | 14 | `HomePageTests`, `RoutesTests:36` (`typeof(Home)`) and `ServeTests:490` (`"Vandox backend"`) depend on the old page | the files | confirmed |
 | 15 | A `CircuitHandler`'s `OnConnectionDownAsync`/`OnConnectionUpAsync` run for the circuit's own connection; tests may pass `null!` for the circuit | to verify: the Dev reads the ASP.NET Core source of `CircuitHost` in step 4 and reports (`SessionCircuitHandlerTests.cs:43` already passes `null!`) | unverified |
+| 17 | A render acknowledgement passes the inbound-activity handler, whose session check calls `SessionStore.Touch`, so a self-refreshing page extends its session every 30 s; the handler's context carries no kind of activity | `SessionCircuitHandler.cs:61,83-90`, `SessionStore.cs:96-101`, record 0103 (context paragraph); Security's IL reading of `CircuitHost` 11.0.0 | confirmed |
+| 18 | Stored `variables` values are any short text; `active_state`, `sub_state` and `availability` are pinned by the decoder at write | `MariaDbStatus.cs:127-128,160`, `ServiceState.cs:80-91` | confirmed |
+| 19 | A record can carry a capture time far after now (a clock ahead is stored, backfilled) | storage.md:64, detection-and-reports.md (*The offset*) | confirmed |
 | 16 | The issue's claims (services, key figures, incidents, freshness, backfill, spool are stored) | facts 1-5, 9; agent.md:149; "open incidents" and backfill "progress" refined in the spec | confirmed |
 
 ## Tests per criterion
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `SqliteStoreOverviewTests.FreshnessReturnsNewestLiveMetricAndHighestNumberReceiveTime`, `FreshnessReportsOldestScannedTimeWhenNoLiveRecordInScan`; `OverviewViewTests.BuildShowsLiveDataAndReceivedTimeWithAges`, `BuildMarksLiveDataStaleAfterFiveMinutes`, `BuildShowsBeforeWhenNoLiveRecordWasScanned`, `BuildShowsAheadByForTimeAfterNow`, `BuildShowsNoLiveDataTextWithoutAgentRecord` | `tests/Vandox.Storage.Tests/SqliteStoreOverviewTests.cs`, `tests/Vandox.Backend.Tests/OverviewViewTests.cs` |
+| AC1 | `SqliteStoreOverviewTests.FreshnessReturnsNewestLiveMetricAndHighestNumberReceiveTime`, `FreshnessReportsOldestScannedTimeWhenNoLiveRecordInScan`; `OverviewViewTests.BuildShowsLiveDataAndReceivedTimeWithAges`, `BuildMarksLiveDataStaleAfterFiveMinutes`, `BuildShowsBeforeWhenNoLiveRecordWasScanned`, `BuildShowsAheadByForTimeAfterNow`, `BuildShowsNoLiveDataTextWithoutAgent`, `BuildShowsReceivedUnknownForAgentWithoutRecords`; `SqliteStoreOverviewTests.FreshnessKeepsAgentWhoseRecordsWereRemoved`, `FreshnessIgnoresRecordsAfterUntil` | `tests/Vandox.Storage.Tests/SqliteStoreOverviewTests.cs`, `tests/Vandox.Backend.Tests/OverviewViewTests.cs` |
 | AC2 | `SqliteStoreOverviewTests.FreshnessReturnsSpanOfOpenSequenceGapsAfterJump`, `FreshnessIgnoresOpenGapsOfOtherAgentIds`; `OverviewViewTests.BuildShowsBackfillRunningWithSpanAndNoCount`, `BuildShowsBackfillStalledWithoutDataForFiveMinutes`, `BuildShowsNoBackfillRunningWithoutOpenGap` | as AC1 |
 | AC3 | `OverviewViewTests.BuildShowsSpoolSizeAndOldestUnsentRecord`, `BuildShowsNothingUnsentForAgeZero`, `BuildMarksSpoolSampleStale`, `BuildShowsSpoolUnknownWithoutSample` | `OverviewViewTests.cs` |
-| AC4 | `SqliteStoreOverviewTests.LatestServiceStatesReturnsLatestPerUnitWithinRetirement`, `LatestServiceStatesOrdersNonActiveFirstAndCountsTotal`; `OverviewViewTests.BuildListsNonActiveUnitsFirstAndMarksFailed`, `BuildMarksServicesStaleWithoutBatchForFiveMinutes`, `BuildMarksUnitStaleAfterOneHourFiveMinutes`, `BuildShowsMoreUnitsBeyondTheCap`; `OverviewPageTests.OverviewPageShowsUnitNameAsExternalText` | Storage and Backend files above, `tests/Vandox.Backend.Tests/OverviewPageTests.cs` |
-| AC5 | `SqliteStoreOverviewTests.LatestValuesReturnsNewestPerLabelSetWithinWindow`, `LatestValuesCountsLabelSetsBeyondTheLimit`, `LatestMariaDbStatusReturnsSelectedMembers`; `OverviewViewTests.BuildShowsKeyFiguresWithTimes`, `BuildMarksFigureStaleAfterFiveMinutes`, `BuildShowsUnknownForMissingFigure`, `BuildShowsNoSwapAndNoShareForZeroTotal`, `BuildShowsMountsUpToTheCapWithMore`; `OverviewTextTests.SizeWritesBinaryUnitsWithOneDecimal`, `ShareWritesPercentWithOneDecimal`, `AgeWritesTheUnitOfItsRange` | as above, `tests/Vandox.Backend.Tests/OverviewTextTests.cs` |
+| AC4 | `SqliteStoreOverviewTests.LatestServiceStatesReturnsLatestPerUnitWithinRetirement`, `LatestServiceStatesOrdersNonActiveFirstAndCountsTotal`, `LatestServiceStatesIgnoresRecordAfterUntil` (current units plus one record a day ahead); `OverviewViewTests.BuildListsNonActiveUnitsFirstAndMarksFailed`, `BuildMarksServicesStaleWithoutBatchForFiveMinutes`, `BuildMarksUnitStaleAfterOneHourFiveMinutes`, `BuildShowsMoreUnitsBeyondTheCap`; `OverviewPageTests.OverviewPageShowsUnitNameAsExternalText` | Storage and Backend files above, `tests/Vandox.Backend.Tests/OverviewPageTests.cs` |
+| AC5 | `SqliteStoreOverviewTests.LatestValuesReturnsNewestPerLabelSetWithinWindow`, `LatestValuesCountsLabelSetsBeyondTheLimit`, `LatestValuesIgnoresValueAfterUntil`, `LatestValuesKeepsOnlyTheLimitOfLargeLabelSets` (300 distinct sets of 32 labels of 1,000 bytes, limit 4), `LatestMariaDbStatusReturnsSelectedMembers`, `LatestMariaDbStatusIgnoresRecordAfterUntil`; `LabelSetTallyTests.TallyKeepsTheSmallestUpToTheLimitAndCountsEverySet` (10,000 distinct adds, at most the limit kept); `OverviewViewTests.BuildShowsKeyFiguresWithTimes`, `BuildMarksFigureStaleAfterFiveMinutes`, `BuildShowsUnknownForMissingFigure`, `BuildShowsNoSwapAndNoShareForZeroTotal`, `BuildShowsMountsUpToTheCapWithMore`, `BuildShowsMaxConnectionsUnknownWhenNotAnInteger` (the value `5` followed by U+202E, built in the test from the code point with `char.ConvertFromUtf32`, shows `unknown`); `OverviewTextTests.SizeWritesBinaryUnitsWithOneDecimal`, `ShareWritesPercentWithOneDecimal`, `AgeWritesTheUnitOfItsRange` | as above, `tests/Vandox.Backend.Tests/OverviewTextTests.cs` |
 | AC6 | `OverviewViewTests.BuildListsOpenIncidentWithLink`, `BuildShowsNoOpenIncidentAndLatestIncident`, `BuildNeverOpensIncidentWithKillAfterNow`, `BuildShowsNoIncidentsText` | `OverviewViewTests.cs` |
-| AC7 | `OverviewRefresherTests.RefresherRefreshesAtStartAndEveryThirtySeconds`, `RefresherSkipsDueRefreshWhileOneRuns`, `RefresherStartsNoRefreshWhileDisconnected`, `RefresherRefreshesWhenConnectionIsRestored`, `RefresherCancelsRefreshAfterTenSeconds`, `RefresherCancelsRunningRefreshOnDispose`; `CircuitConnectionTests.CircuitConnectionRaisesRestoredWhenConnectionComesBack`; `OverviewPageTests.OverviewPageShowsUpdatedTimeAfterRefresh`, `OverviewPageKeepsValuesAndShowsFailureLine` | `tests/Vandox.Backend.Tests/OverviewRefresherTests.cs`, `CircuitConnectionTests.cs`, `OverviewPageTests.cs` |
+| AC7 | `OverviewRefresherTests.RefresherRefreshesAtStartAndEveryThirtySeconds`, `RefresherSkipsDueRefreshWhileOneRuns`, `RefresherStartsNoRefreshWhileDisconnected`, `RefresherRefreshesWhenConnectionIsRestored`, `RefresherCancelsRefreshAfterTenSeconds`, `RefresherCancelsRunningRefreshOnDispose`, `RefresherIgnoresRestoredAfterDispose`; `CircuitConnectionTests.CircuitConnectionRaisesRestoredWhenConnectionComesBack`, `CircuitConnectionRaisesNothingOnFirstConnection`; `OverviewPageTests.OverviewPageShowsUpdatedTimeAfterRefresh`, `OverviewPageKeepsValuesAndShowsFailureLine` | `tests/Vandox.Backend.Tests/OverviewRefresherTests.cs`, `CircuitConnectionTests.cs`, `OverviewPageTests.cs` |
+| AC9 | `SessionCircuitHandlerTests.InboundActivityDoesNotExtendSessionWhilePaused` (`FakeTimeProvider`: activity every 30 s while paused, the check after 1 h since the last unpaused activity throws `SessionEndedException`), `InboundActivityExtendsSessionAfterPauseEnds`; `SessionActivityTests.PauseHoldsUntilItsLastScopeIsDisposed`; `OverviewPageTests.OverviewPagePausesSessionExtensionWhileShown` | `tests/Vandox.Backend.Tests/SessionCircuitHandlerTests.cs`, `SessionActivityTests.cs`, `OverviewPageTests.cs` |
 | AC8 | `OverviewPageTests.OverviewPagePrerenderedShowsLoadingAndReadsNothing`, `OverviewPageRefreshMakesFiveStoreCalls`; `GatedOverviewReaderTests.GatedOverviewReaderTakesOneGateSlotPerCall` | `OverviewPageTests.cs`, `tests/Vandox.Backend.Tests/GatedOverviewReaderTests.cs` |
 
-Store tests write real batches through `SqliteStore` (`TempDirectory`), the jump of AC2 as two agent batches 10^15 numbers apart. Page
+`LabelSetTallyTests` is in `tests/Vandox.Storage.Tests/LabelSetTallyTests.cs`. Store tests write real batches through `SqliteStore` (`TempDirectory`), the jump of AC2 as two agent batches 10^15 numbers apart. Page
 and view tests use `FakeTimeProvider`; the Tester writes the double `FakeOverviewReader` (records calls, scripted results, can hold a call).
 
 ## Approach
@@ -50,17 +54,24 @@ and view tests use `FakeTimeProvider`; the Tester writes the double `FakeOvervie
 **Store (`Vandox.Storage`).** `IOverviewReader`, implemented by `SqliteStore` with the SQL in a new `OverviewQueries`; each method is one
 reader lease and one gate slot (record 0218):
 
+Every read takes `until` (the page passes its now plus 90 seconds, the live allowance) and ignores records captured after it, so a
+clock far ahead hides no current data (DA major 1).
+
 - `FreshnessAsync`: (1) the agent of `agent_streams` whose `max_seq` record (`records_agent_seq`) has the latest `received_at`, with that
-  time; (2) `count(*)`, `min(from_at)`, `max(to_at)` of its open sequence gaps (`gaps_seq_open`); (3) the newest `liveScanLimit` rows of
-  `records` of kind `metric` newest first (`records_kind_time`), the first with `live = 1` gives `LastLiveAt`, none gives
+  time; an agent row whose record is gone (retention) is still returned, the one with the latest `max_captured_at`, with `ReceivedAt`
+  null; no row gives an empty `AgentId`; (2) `count(*)`, `min(from_at)`, `max(to_at)` of its open sequence gaps (`gaps_seq_open`); (3) the newest `liveScanLimit` rows of
+  `records` of kind `metric` captured at or before `until`, newest first (`records_kind_time`), the first with `live = 1` gives `LastLiveAt`, none gives
   `ScannedBackTo`, the oldest row read.
-- `LatestValuesAsync`: per series `max(captured_at)`, then at most 10,000 rows of `[newest - Window, newest]` newest first; the first row
-  per stored label text is kept, label sets counted, the first `MaxLabelSets` in ordinal order of the label text returned with labels
-  parsed.
-- `LatestMariaDbStatusAsync`: the newest `mariadb_status` record of source `mariadb` (`records_kind_source_time`) with `json_extract` of
-  `availability`, `status.Threads_connected`, `status.Memory_used`, `variables.max_connections`; the payload is never decoded whole.
-- `LatestServiceStatesAsync`: newest `captured_at` of `service_state` (`records_kind_time`); over `records_service_state` from
-  `newest - Retirement`, the latest row per unit (`max(captured_at)` grouped by unit), `sub_state` read for those rows only, ordered
+- `LatestValuesAsync`: per series the newest `captured_at` not after `Until`, then at most 10,000 rows of `[newest - Window, newest]`
+  newest first, streamed into a `LabelSetTally` (Security B3): it keeps at most `MaxLabelSets` label texts, the smallest in ordinal order
+  (a new text smaller than the largest kept evicts it), each with its first (newest) row, and counts every distinct text by the first 8
+  bytes of its SHA-256 without keeping the text; each row's text is read, hashed and dropped. A read thus holds at most 16 texts of at
+  most about 74 KB and 10,000 hashes, never every text of the scan. The kept labels are parsed at the end.
+- `LatestMariaDbStatusAsync`: the newest `mariadb_status` record of source `mariadb` not after `until` (`records_kind_source_time`) with `json_extract` of
+  `availability`, `status.Threads_connected`, `status.Memory_used`, `variables.max_connections`; the payload is never decoded whole. `MaxConnections` is the text parsed as a non-negative integer
+  (invariant culture, at most 20 ASCII digits) or null (Security B2), so no stored text reaches the page outside the external-text display.
+- `LatestServiceStatesAsync`: newest `captured_at` of `service_state` not after `Until` (`records_kind_time`); over `records_service_state` from
+  `[newest - Retirement, newest]`, the latest row per unit (`max(captured_at)` grouped by unit), `sub_state` read for those rows only, ordered
   `active_state <> 'active'` first then unit, at most `Limit`, `Total` by `count(*) OVER ()`.
 - Refused before any read with `InvalidQueryException`: `store: invalid query: live scan limit must be 1 to 20000`, `... at least one
   series is required`, `... at most 16 series`, `... window must be positive and at most one day`, `... label sets must be 1 to 64`,
@@ -74,9 +85,11 @@ reader lease and one gate slot (record 0218):
 `OverviewText` (invariant culture).
 
 `CircuitConnection` is a `CircuitHandler` registered scoped and also as `CircuitHandler` (same instance); `IsConnected` starts true
-(prerender). `OverviewRefresher` (record 0219): `Start` runs one refresh, then a timer from `clock.CreateTimer` every 30 s; a tick while a
+(prerender); `Restored` is raised by `OnConnectionUpAsync` only after an `OnConnectionDownAsync` (the first connection also calls up). `OverviewRefresher` (record 0219): `Start` runs one refresh, then a timer from `clock.CreateTimer` every 30 s; a tick while a
 refresh runs or while disconnected starts none; `Restored` starts one unless one runs; each refresh gets a token cancelled after 10 s on
-the clock or by `DisposeAsync`, which also stops the timer and waits for the running refresh. Exceptions other than a cancellation go to
+the clock or by `DisposeAsync`, which also unsubscribes from `Restored` (the scoped connection outlives the page), stops the timer and
+waits for the running refresh. Timer and `Restored` callbacks run off the circuit's dispatcher: the page's refresh delegate reads off it
+and applies the model and `StateHasChanged` through `InvokeAsync`. Exceptions other than a cancellation go to
 the `fault` callback (the page passes them to `DispatchExceptionAsync`).
 
 `OverviewPage` (`@page "/"`, `[Authorize]` from `_Imports`) injects `IOverviewReader`, `IIncidentBrowser`, `TimeProvider`,
@@ -85,7 +98,17 @@ five calls in turn (freshness, latest values, MariaDB, services, `IncidentSummar
 clock's now and sets `Updated`. A deadline, `StoreException` or `InvalidQueryException` keeps the model and shows the failure line; the
 latter two are logged with `OverviewReadFailed` (`overview: reading failed`, EventId 74). Before any success the line reads `Refresh
 failed at <time>; no values have been read yet.` `ServeCommand` registers `IOverviewReader` as `GatedOverviewReader(store, gate)` and
-`CircuitConnection`. The skeleton adds `OverviewPage` without `@page`; the implementation adds it and deletes `Home.razor`.
+`CircuitConnection`. `active_enter_at` is parsed as a time and shown through `LogsView.ShowSeconds`, `unknown` when it does not parse.
+
+**Session (Security B1, record 0220).** `SessionActivity` (`Security/`, scoped per circuit): `Pause()` returns a scope; while one is open
+`IsPaused` is true. `SessionCircuitHandler.CheckSessionAsync` uses `SessionStore.IsActive` (check without extending) while paused and
+`Touch` otherwise, so an ended session still ends the circuit. `OverviewPage` takes the pause when it starts interactively and disposes
+it in `DisposeAsync`, so no activity of a circuit showing the overview — refresh acknowledgements, and also a click on a navigation link
+of the page — extends the session; the next page's render after navigation does again. An overview left open ends its session 1 hour
+after the last activity elsewhere (HTTP request, another page, another tab), and the circuit then ends at the next acknowledgement
+(rejected reconnect dialog, sign-in again). The handler cannot tell an acknowledgement from user input (fact 17), so pausing per page is
+the only exact form; stopping the refresh after a quiet period would still extend the session by that period. `WebAuthentication`
+registers `SessionActivity` scoped. The skeleton adds `OverviewPage` without `@page`; the implementation adds it and deletes `Home.razor`.
 
 **Layout** (the page's markup; classes in `app.css`, no `style` attributes):
 
@@ -113,12 +136,18 @@ failed at <time>; no values have been read yet.` `ServeCommand` registers `IOver
    its throughput for a read-only page; the bounded scan answers with a lower bound instead (record 0218).
 3. **Push on ingest instead of a timer** — lost: couples ingest to circuits and fans out every 4 s (record 0219).
 4. **Reuse `PageRunner`** — lost: it cancels the running read on a new one, so a slow store would never finish a refresh (record 0219).
+5. **Session: let refreshes extend the session** (rule changed to "an open overview keeps its session") — lost: an unattended tab would
+   keep a session for 12 hours against the idle rule (record 0220).
+6. **Session: stop refreshing after a quiet period** — lost: the page sees no user input, and the last refresh still extends the
+   session by the period (record 0220).
 
 ## Affected projects and types
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| Vandox.Storage | `IOverviewReader`, `AgentFreshness`, `LatestValueQuery`, `LatestSeries`, `LatestValue`, `MariaDbLatest`, `LatestServiceQuery`, `ServiceStatePage`, `LatestServiceState`, `OverviewQueries` | new |
+| Vandox.Storage | `IOverviewReader`, `AgentFreshness`, `LatestValueQuery`, `LatestSeries`, `LatestValue`, `MariaDbLatest`, `LatestServiceQuery`, `ServiceStatePage`, `LatestServiceState`, `LabelSetTally`, `OverviewQueries` | new |
+| Vandox.Backend | `Security/SessionActivity` | new |
+| Vandox.Backend | `Security/SessionCircuitHandler`, `Security/WebAuthentication` | the pause in the session check; registration |
 | Vandox.Storage | `SqliteStore` | implements `IOverviewReader` |
 | Vandox.Backend | `Overview/GatedOverviewReader`, `CircuitConnection`, `OverviewRefresher`, `OverviewView`, `OverviewText`, `OverviewData`, `OverviewModel`, `OverviewUnitRow`, `OverviewFigureRow`, `OverviewIncidentRow` | new |
 | Vandox.Backend | `Components/Pages/OverviewPage.razor`, `.razor.cs` | new; `Home.razor` deleted |
@@ -130,13 +159,14 @@ Each type is public sealed with { get; init; } properties unless stated; a type'
 
 Vandox.Storage:
 
-- `IOverviewReader { Task<AgentFreshness> FreshnessAsync(int liveScanLimit, CancellationToken cancellationToken); Task<IReadOnlyList<LatestSeries>> LatestValuesAsync(LatestValueQuery query, CancellationToken cancellationToken); Task<MariaDbLatest?> LatestMariaDbStatusAsync(CancellationToken cancellationToken); Task<ServiceStatePage> LatestServiceStatesAsync(LatestServiceQuery query, CancellationToken cancellationToken) }` (public interface; SqliteStore implements all four, public)
+- `IOverviewReader { Task<AgentFreshness> FreshnessAsync(int liveScanLimit, DateTimeOffset until, CancellationToken cancellationToken); Task<IReadOnlyList<LatestSeries>> LatestValuesAsync(LatestValueQuery query, CancellationToken cancellationToken); Task<MariaDbLatest?> LatestMariaDbStatusAsync(DateTimeOffset until, CancellationToken cancellationToken); Task<ServiceStatePage> LatestServiceStatesAsync(LatestServiceQuery query, CancellationToken cancellationToken) }` (public interface; SqliteStore implements all four, public)
 - `AgentFreshness { string AgentId; DateTimeOffset? ReceivedAt; DateTimeOffset? LastLiveAt; DateTimeOffset? ScannedBackTo; int OpenSequenceGaps; DateTimeOffset? MissingStart; DateTimeOffset? MissingEnd }`
-- `LatestValueQuery { IReadOnlyList<SeriesKey> Series; TimeSpan Window; int MaxLabelSets }`
+- `LatestValueQuery { IReadOnlyList<SeriesKey> Series; TimeSpan Window; int MaxLabelSets; DateTimeOffset Until }`
 - `LatestSeries { SeriesKey Series; IReadOnlyList<LatestValue> Values; int LabelSets }`
 - `LatestValue { IReadOnlyDictionary<string, string> Labels; DateTimeOffset CapturedAt; double Value }`
-- `MariaDbLatest { DateTimeOffset CapturedAt; string Availability; double? ThreadsConnected; double? MemoryUsed; string? MaxConnections }`
-- `LatestServiceQuery { TimeSpan Retirement; int Limit }`
+- `MariaDbLatest { DateTimeOffset CapturedAt; string Availability; double? ThreadsConnected; double? MemoryUsed; long? MaxConnections }`
+- `LatestServiceQuery { TimeSpan Retirement; int Limit; DateTimeOffset Until }`
+- `LabelSetTally(int limit)` (internal sealed class; internal void Add(string labels, DateTimeOffset capturedAt, double value), internal int Count { get; }, internal IReadOnlyList<(string Labels, DateTimeOffset CapturedAt, double Value)> Kept { get; } in ordinal order of the labels)
 - `ServiceStatePage { IReadOnlyList<LatestServiceState> States; int Total; DateTimeOffset? Newest }`
 - `LatestServiceState { string Unit; string ActiveState; string SubState; string? ActiveEnterAt; long Restarts; DateTimeOffset CapturedAt }`
 
@@ -155,6 +185,11 @@ Vandox.Backend, namespace Vandox.Backend.Overview:
 - `OverviewPage` (public sealed partial class in Components/Pages, : ComponentBase, IAsyncDisposable)
 - `BackendLog.OverviewReadFailed(this ILogger logger, Exception exception)` (internal static partial)
 
+Vandox.Backend, namespace Vandox.Backend.Security:
+
+- `SessionActivity.Pause()` (public sealed class SessionActivity with public IDisposable Pause() and public bool IsPaused { get; })
+- `SessionCircuitHandler(AuthenticationStateProvider authenticationStateProvider, SessionStore sessions, SessionActivity activity)` (the changed constructor)
+
 Deleted: Home.razor (Components/Pages) is removed in step 6. Names checked: no nested type, at most four parameters, no parameter
 named after another language's keyword, no enum.
 
@@ -165,8 +200,9 @@ named after another language's keyword, no enum.
 `tests/Vandox.Backend.Tests/FakeOverviewReader.cs`.
 
 Existing test code: the Tester, in step 5, deletes `tests/Vandox.Backend.Tests/HomePageTests.cs` (its assertions are the replaced page),
-changes `RoutesTests.cs:36` to `typeof(OverviewPage)` and `ServeTests.cs:490` to the heading `Overview` (both fail until the route
-moves). No signature changes.
+changes `RoutesTests.cs:36` to `typeof(OverviewPage)` and `ServeTests.cs:490` to assert `<h1>Overview</h1>` (the navigation link
+already says *Overview*; both fail until the route moves). The changed `SessionCircuitHandler` constructor: the Dev adds `new
+SessionActivity()` at `SessionCircuitHandlerTests.cs:32,70,71,100,145,204,238` in step 4, mechanically.
 
 Code no unit test can cover: none (`app.css` holds no code; the page is rendered in tests).
 
@@ -191,6 +227,9 @@ All by the Dev, after the code is green:
 - `CHANGELOG.md` *Unreleased*, *Added*: the overview page.
 - `.squad/project.md` *Test doubles*, Blazor row: `FakeOverviewReader` — the Tester reports the text, the orchestrator writes it.
 - `docs/areas/README.md` index row of *Web UI* (scope "the views": add the overview).
+- `docs/areas/web-login.md` *Sessions* (lines 79-80): the activity of a live connection extends the session except while it shows the
+  overview, whose refreshes are no activity; link record 0220.
+- `docs/areas/storage-reading.md` *Overview reads*: the `until` bound and the label-set tally with its memory bound.
 
 ## Architecture check
 
@@ -199,17 +238,47 @@ The read gate bounds the page's load (record 0219 states the cost).
 
 ## Security considerations
 
-- [x] No limits on parsed input: the page parses nothing external; label JSON read from the store is bounded by the wire format (32
-  labels) and parsed for at most 64 label sets per series.
+- [x] Limits on parsed input: label JSON read from the store is bounded by the wire format (32 labels, values of at most 1,024 UTF-8
+  bytes, checked at decode) and parsed for at most 16 kept label sets per series; a read holds at most 16 label texts and 10,000
+  8-byte hashes (B3); `max_connections` is parsed from at most 20 ASCII digits, else null.
 - [x] Exceptions: `StoreException`, `InvalidQueryException` and the deadline reach the user only as `Refresh failed at <time>; …`
   (no exception text); others go to the framework's error banner.
 - External text (units, mounts, victims) only through `ExternalText` runs; links only `incidents/<number>` from `IncidentsView.IncidentHref`.
+- Plain strings only for values the decoder pins at write (`active_state`, `sub_state`, `availability`: `ServiceState.cs:80-91`,
+  `MariaDbStatus.cs:160`) and for numbers and times the view formats itself (`active_enter_at` parsed, never shown as stored;
+  `max_connections` as a parsed integer) (N2).
+- Sessions: an ended session still ends the overview's circuit (the paused check uses `IsActive`); the pause covers only circuits
+  showing the overview and ends with the page (B1, record 0220).
 
 ## Decision records
 
 - `docs/decisions/0218-the-overview-reads-latest-values-through-its-own-bounded-store-reads.md` (Proposed)
 - `docs/decisions/0219-the-overview-refreshes-on-a-timer-that-skips-overlaps-and-pauses-while-disconnected.md` (Proposed)
+- `docs/decisions/0220-a-circuit-showing-the-overview-does-not-extend-its-session.md` (Proposed)
 
 ## Out of scope / follow-ups
 
 Spec *Out of scope*. Image build check (`.squad/stack.md`) for the new `.razor` files and `app.css`: run by the Dev before the review.
+
+## Challenge
+
+- Major 1 (a record dated after now hides current data) — accepted: every read takes `until` = now + 90 s and anchors on the newest
+  record not after it (*Approach*); later records are not shown (spec E13); store tests with current records plus one a day ahead for
+  metrics, services and MariaDB (AC1, AC4, AC5 rows).
+- Minor 2 (refresher threading, handler leak, first up) — accepted: `InvokeAsync`, unsubscribe in `DisposeAsync`, `Restored` only after a
+  down; tests `RefresherIgnoresRestoredAfterDispose`, `CircuitConnectionRaisesNothingOnFirstConnection`.
+- Minor 3 (ServeTests passes through the navigation link) — accepted: it asserts `<h1>Overview</h1>`.
+- Minor 4 (agent row without records) — accepted: the agent is kept with `ReceivedAt` null, shown `unknown` and `stale`; the E1 text only
+  without any agent row (spec E14); tests `FreshnessKeepsAgentWhoseRecordsWereRemoved`, `BuildShowsReceivedUnknownForAgentWithoutRecords`.
+
+## Security review
+
+- B1 (refreshes defeat the idle timeout) — confirmed in the code (fact 17). Decided (a), keep the rule: a circuit showing the overview
+  pauses session extension (`SessionActivity`), the check without extension still ends an ended session; spec AC9/E15, tests in the AC9
+  row, record 0220, `web-login.md` *Sessions* states the exception. Because this changes the session check, the tier is raised to
+  `security`.
+- B2 (`max_connections` as plain text) — accepted: `long? MaxConnections`, parsed or `unknown`; test with U+202E (AC5 row); spec AC5.
+- B3 (the label scan keeps every distinct text) — accepted: `LabelSetTally` keeps at most the limit and counts by hash; tests
+  `LabelSetTallyTests…` and `LatestValuesKeepsOnlyTheLimitOfLargeLabelSets`.
+- N1 — accepted: area 10 under *Security areas touched*.
+- N2 — accepted: bullet under *Security considerations*.

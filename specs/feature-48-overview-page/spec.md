@@ -23,18 +23,17 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 
 ## Errors and edge cases
 
-- E1: Empty store or no agent record yet: *Data freshness* shows `No live data has arrived yet. Install the agent, or import logs as
+- E1: Empty store or no agent ever stored: *Data freshness* shows `No live data has arrived yet. Install the agent, or import logs as
   the README describes.`, *Services* `No service state is stored.`, each key figure `unknown`, *Incidents* `No incidents are stored.
   Run vandoxd incidents after an import.`; the page is no error.
-- E2: Current records arrive but are stored as backfilled ([Detection, alerts and reports](../../docs/areas/detection-and-reports.md),
-  *Live data and backfill*): the newest batch received (AC1) shows that data arrives, so it is not read as a stopped agent.
+- E2: Current records are stored as backfilled: the newest batch received (AC1) shows that data arrives.
 - E3: An open sequence gap exists but no batch has been received for more than 5 minutes: the backfill line reads `Backfill stalled:
   data from <start> to <end> is missing, no data received since <time>.` instead of the running form.
 - E4: A figure the latest sample lacks (MariaDB `down` or without `Memory_used`, no PSI on the kernel) shows `unknown` (MariaDB: its
   availability `down` or `not answering`), never 0. A swap total of 0 shows `no swap`; a share whose total is 0 shows no percentage.
 - E5: A refresh fails or passes its 10-second deadline: the page keeps the values it shows and adds `Refresh failed at <time>; the values
   are from <time>.` (before any values: `; no values have been read yet.`); the next refresh runs on schedule and removes the line when it succeeds.
-- E6: A refresh still running when the next is due: the due one is skipped.
+- E6: A refresh due while one runs is skipped.
 - E7: The user leaves the page or closes it: refreshing stops and a running read is cancelled. While the live connection is lost the
   page makes no store call; it refreshes at once when the connection is back.
 - E8: Unit names, mount points and incident victims are external text from the agent: shown only through the web UI's external text
@@ -47,7 +46,12 @@ data is never normal (`.squad/project.md`, *Guarantees*).
   numbers never issued: the page shows no count of missing records.
 - E12: Open sequence gaps of another agent ID than that of the newest batch received (an agent ID replaced) are not counted as a backfill.
 - E13: A time after now (a clock ahead, a forged or mis-zoned kill) shows its age as `ahead by <age>`; an incident whose first kill lies
-  after now is never open and is marked `dated in the future` where it is listed.
+  after now is never open and is marked `dated in the future` where it is listed. Records captured more than 90 seconds after now (the
+  live allowance) are not used for freshness, services, figures or MariaDB, so a clock far ahead cannot hide current data.
+- E14: An agent is known but its newest records were removed by retention: *Last data received* shows `unknown` marked `stale`, not
+  the E1 text.
+- E15: Refreshes are no session activity: an idle open overview ends its session 1 hour after the last activity
+  ([Web login](../../docs/areas/web-login.md), *Sessions*).
 
 ## Non-functional requirements
 
@@ -66,7 +70,7 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 - AC1: *Data freshness* shows the capture time and age of the newest `metric` record stored as live among the newest 20,000 metric
   records, or `before <time>` (the oldest of them) when none of them is live, marked `stale` when older than 5 minutes; and the receive
   time and age of the newest batch received, read as that of the agent's highest-numbered record (the live stream's latest batch); with
-  no agent record, the text of E1. (S1, S4, E1, E2, E13, N5)
+  no agent, the text of E1. (S1, S4, E1, E2, E13, E14, N5)
 - AC2: While an open sequence gap of the agent ID of the newest batch exists and a batch was received within 5 minutes, *Data
   freshness* shows `Backfill running: data from <start> to <end> is missing.`, the earliest start and latest end of those gaps, followed
   by the spool line of AC3; no count of missing records is shown, also for a gap over a jump of 10^15 numbers; otherwise the stalled
@@ -81,8 +85,9 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 - AC5: *Key figures* shows, each from its latest value of the agent's sources (`system`, `mariadb`, `agent`) with that value's time: available memory (`mem_available_bytes`, and its
   share of `mem_total_bytes`), swap used of total, PSI `pressure_avg60` of memory, CPU and I/O (`some`, and `full` for memory and I/O),
   available space and its share per mount of E9 (`filesystem_available_bytes`, `filesystem_size_bytes`), and MariaDB's availability,
-  `Threads_connected` of `max_connections`, `Memory_used` and `mariadb_memory_max_bytes`; a value older than 5 minutes is marked
-  `stale`, a missing one `unknown`, a zero total as E4. (S1, S4, E1, E4, E9, E10)
+  `Threads_connected` of `max_connections` (shown only as a non-negative integer, else `unknown`), `Memory_used` and
+  `mariadb_memory_max_bytes`; a value older than 5 minutes is marked
+  `stale`, a missing one `unknown`, a zero total as E4. (S1, S4, E1, E4, E9, E10, E13)
 - AC6: *Incidents* lists the open incidents — the page's own term: window end after now and first kill not after now — newest first
   with number (linked to `incidents/<number>`), first kill and victim, else `No open incident.`, and always the latest stored incident
   with its number, first kill and a link (marked as E13 when its kill lies after now), or the text of E1. (S6, E1, E8, E10, E13)
@@ -91,6 +96,8 @@ data is never normal (`.squad/project.md`, *Guarantees*).
   (S2, E5, E6, E7)
 - AC8: Prerendered the page shows its heading and `Loading…` and makes no store call; one refresh makes at most a fixed number of store
   calls, each through the shared read gate. (N1, N2, N3)
+- AC9: While the page shows the overview, its circuit's activity does not extend the session; a session whose last activity was more
+  than 1 hour ago ends at the next check even though the page kept refreshing. (E15)
 
 ## Out of scope
 
@@ -127,3 +134,11 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 - Minor 6 — accepted: AC6 defines the page's own term without a first kill after now, E13 marks it; with that, no window cap is needed.
 - Minor 7 — accepted: no store call while disconnected (E7, AC7). Minor 8 — accepted: the E1 texts point to the agent, the import and
   `vandoxd incidents`.
+
+## Amendments
+
+| Criterion | Change | Reason | Step | Decided by |
+| --------- | ------ | ------ | ---- | ---------- |
+| AC1 | an agent without stored records shows `unknown`, not the E1 text (E14) | plan challenge minor 4 | 2 | Lead |
+| AC5 | `max_connections` only as a non-negative integer; records more than 90 s after now ignored (E13) | Security B2, plan challenge major 1 | 2 | Lead |
+| AC9 | added: the overview's refreshes do not extend the session (E15) | Security B1 | 2 | Lead |

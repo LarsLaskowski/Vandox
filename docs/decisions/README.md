@@ -256,4 +256,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0217 | The members of service records that tell a restart are kept in a covering partial index | Accepted | 2026-11-15 |
 | 0218 | The overview reads the latest values through its own bounded store reads, not the time-series query | Proposed | 2026-11-16 |
 | 0219 | The overview refreshes on a 30-second timer that skips overlaps and pauses while the connection is lost | Proposed | 2026-11-16 |
+| 0220 | A circuit showing the overview does not extend its session | Proposed | 2026-11-16 |
 <!-- project:end index -->

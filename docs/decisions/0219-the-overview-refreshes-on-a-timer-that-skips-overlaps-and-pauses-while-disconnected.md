@@ -32,4 +32,4 @@ while one runs is skipped, none starts while the circuit's connection is down, a
 - Load grows with open overview pages: at most five gate slots per page every 30 seconds; many open pages can delay the other views'
   calls within their own deadlines.
 - Data shown is up to 30 seconds old plus the agent's send period; the page states `Updated <time>`.
-- A connection state handler per circuit is added beside the session check.
+- A connection state handler per circuit is added beside the session check; the refreshes do not extend the session (record 0220).
