@@ -257,4 +257,6 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0218 | The overview reads the latest values through its own bounded store reads, not the time-series query | Accepted | 2026-11-16 |
 | 0219 | The overview refreshes on a 30-second timer that skips overlaps and pauses while the connection is lost | Accepted | 2026-11-16 |
 | 0220 | A circuit showing the overview does not extend its session | Accepted | 2026-11-16 |
+| 0221 | The history view draws every metric on its own scale with two drawn axes and the step's extremes in the legend | Proposed | 2026-11-16 |
+| 0222 | The history view reads the moment's snapshots and the metric list through its own bounded reads | Proposed | 2026-11-16 |
 <!-- project:end index -->

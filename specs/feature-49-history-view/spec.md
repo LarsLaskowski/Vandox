@@ -1,7 +1,7 @@
 # Spec: History view
 
 Source: Issue #49
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -38,7 +38,8 @@ in a chart to what the server was doing then; the time-series query of #47
 - S7: The process snapshot of a moment is the stored one closest to it within 10 minutes either side, of any source; on a tie the
   earlier, then the lower record ID. The panel shows `Process snapshot of <time> UTC (<source>)`, the 20 programs with the most memory
   (program, processes, CPU %, memory) with `and <n> more programs` beyond 20, and the 20 listed processes with the most memory (PID,
-  user, command, CPU %, memory) with `<listed> of <total> processes are listed.` when the snapshot's `total` is higher. Memory is PSS
+  user, command, CPU %, memory) with `and <n> more processes` beyond 20 and `<listed> of <total> processes are listed.` when the
+  snapshot's `total` is higher. Memory is PSS
   where the snapshot has it, else RSS, and the column says which. When the snapshot shown is later than the moment (the extra snapshot
   after an OOM kill is, and no longer lists the victim), the panel offers *Snapshot before this moment* with the time of the latest one
   within 10 minutes before, which sets the moment to that time.
@@ -61,7 +62,7 @@ in a chart to what the server was doing then; the time-series query of #47
   is not before its end time.`, `The address names more than 8 metrics.`, `The address gives both a preset range and a start or end
   time.` and `The address needs both a start and an end time.` An address with an error shows the text and the controls and calls no
   store method.
-- E2: A ninth metric cannot be added: `At most 8 metrics can be drawn at once.`
+- E2: No ninth metric: `At most 8 metrics can be drawn at once.`
 - E3: A chosen metric without a value in the range: `<source> <name> has no values in this range.`, never for a metric the query cut.
 - E4: More than 64 lines: the first 64 are drawn and `Only 64 lines can be drawn; lines of <metrics> are left out.` names the metrics
   the query cut (some of their lines may be drawn).
