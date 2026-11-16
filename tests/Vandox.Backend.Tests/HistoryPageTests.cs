@@ -161,7 +161,7 @@ public partial class HistoryPageTests
 
         // Act
         await harness.PressAsync(label);
-        await harness.WaitForRawReadsAsync(2);
+        await harness.WaitForDrawsAsync(2);
 
         // Assert
         Assert.HasCount(1, harness.Navigation.Navigations, "one navigation");
