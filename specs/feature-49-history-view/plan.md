@@ -319,3 +319,118 @@ read gate, deadline, external-text display, self-only policy (no new file, no in
 
 As the spec's *Out of scope*: self-healing markers (#71), the gap list (#54), the processes (#50) and network (#51) views, bands, touch
 drag, automatic refresh and links into the view. No follow-up issue is needed beyond those that exist.
+
+## Challenge notes
+
+Devil's Advocate, mode plan: feature 49, history view (specs/feature-49-history-view)
+
+The plan holds up. I found no major objections and 7 minor ones.
+
+**Assumptions I checked**
+- **Fact 7 (index seeks) holds.** I recreated the schema DDL from `src/Vandox.Storage/SchemaMigrator.cs:40-68,296-326` in Python's sqlite3 (SQLite 3.53.1) and ran EXPLAIN QUERY PLAN on the plan's statements:
+  - Every metric skip-scan statement is a `SEARCH`. On `metrics` it uses `metrics_source_name_time` (covering). On `metric_rollups_1h` it reports `USING PRIMARY KEY`.
+  - With 2,000,000 rows of one source, every statement ran a constant 20 to 38 VM steps (counted with a progress handler). That includes the bare-column form `SELECT source, min(name) … WHERE source = (SELECT min(source) …)`. So each statement really is one seek.
+  - Both snapshot statements are `SEARCH records USING INDEX records_kind_time`. The AtOrBefore one also reports `USE TEMP B-TREE FOR LAST TERM OF ORDER BY`, because it orders `captured_at DESC, id` with id ascending.
+- **Fact 16 (first JSInvokable) holds.** There is no `JSInvokable` or `DotNetObjectReference` in `src`. `ServeCommand.cs:263` sets no `CircuitOptions`, so the defaults apply.
+- **Facts 4, 14, 19 and 20 hold.** No metric-listing read exists among the store interfaces. uPlot's `mouseUp` (`uPlot.esm.js:5833-5848`) calls `setSelect` only when there is a selection and it changed. `PageRunner.cs:111-118` and `IncidentsView.cs:218-232` match the plan.
+- **Need:** no `/history` page or nav entry exists yet (`MainLayout.razor:24-27`), so a no-change result does not apply.
+- **Reuse:** I checked whether the existing `IRecordReader.RecordsAsync` could serve the snapshots. It only reads forward and decodes every record, so record 0222's reason for a new read stands.
+
+**Minor objections** (instructions for the Dev, Tester and Reviewer)
+
+1. **The metric list can be stuck behind the width report.** The plan reads the metric list only after the chart component reports its width (plan.md:98-99). Without metrics the page shows "only the controls" (plan.md:148). If the chart host is not rendered then, no width arrives, the list is never read, and no first metric can be added.
+   - Dev: always render the chart host (empty) and take its width, or read the list on the first interactive render whatever the width.
+   - Tester: add a `HistoryPage` test where an address without `metric` still reads the metric list and shows its options.
+
+2. **A chart change and a moment change can arrive together.** plan.md:102-103 does not say what happens then. `at` is kept on range changes (E10) but replaced on clicks. So Back from an entry whose `at` was replaced can change both the chart and `at`. An `if chart … else if at …` build would leave the panel showing the wrong moment.
+   - Dev: start the chart action when `SameChart` is false and the moment action whenever `At` differs, independently.
+   - Tester: add a `HistoryPage` test for a location change that alters both.
+
+3. **"Snapshot before this moment" can loop.** Agent capture times are sub-second (`internal/sysstats/sysstats.go:133` uses `run.Start`; `internal/scheduler/runner.go:399`). If the moment is set to the before-snapshot's time floored (E1), that snapshot is now *after* the moment. `AtOrBefore` then misses it, and the panel offers *Snapshot before this moment* again for an older snapshot.
+   - Dev: set that moment to the snapshot time rounded **up** to the second, so `AtOrBefore` finds it.
+   - Tester: write `ReadAsyncOffersTheSnapshotBefore` (or a page test) with sub-second capture times, and assert that following the button shows that snapshot without offering the button again.
+
+4. **Name check and time parsing.**
+   - The name rule is written with `$` (plan.md:90). In .NET, `$` also matches before a trailing `\n`, which would accept `%0A`. The model's pattern uses `\z` (`src/Vandox.Core/Model/Check.cs:298`), but it is internal to Vandox.Core and the Backend has no `InternalsVisibleTo`. Dev: write the new regex with `\z`.
+   - "Times parse as in `LogsAddress`" (plan.md:91), but `LogsAddress.TryReadTime` is private (`src/Vandox.Backend/Logs/LogsAddress.cs:274`). Dev: make it internal and reuse it rather than copy it. This adds `LogsAddress.cs` to the affected files.
+
+5. **Query-plan tests must match what SQLite actually reports.** In `StoredMetricsSeeksTheIndexes` and `SnapshotSeeksTheKindTimeIndex`:
+   - accept `USING PRIMARY KEY` for `metric_rollups_1h`, a WITHOUT ROWID table;
+   - accept `USE TEMP B-TREE FOR LAST TERM OF ORDER BY` for the AtOrBefore statement;
+   - fail on any `SCAN`, and on a temp B-tree for the metric statements.
+
+   Dev: do not change `id` to `DESC` to get a cleaner plan. Ascending `id` is what the spec's "lower record ID on a tie" requires.
+
+6. **The new chart path must keep the documented chart guarantees** of `docs/areas/web-ui.md:71-74`:
+   - times not strictly ascending, a length mismatch or a non-finite value (averages, minimums and maximums included) are refused before anything reaches the browser;
+   - the chart is redrawn on a theme change with the same data.
+
+   Dev: on `vandox-themechange` and a color-scheme change, `createHistory` must rebuild its scales, axes, hooks, marks and the moment, as `createChart`'s `build()` does (`charts.js` `build`). Tester: cover the refusal in `HistoryChartViewTests` or `HistoryChartInteropTests`.
+
+7. **`HistoryView.Target` takes a value from the browser** (the width). It must return at least 1 for 0, negative, NaN or infinite widths, or the query is refused with `target must be 1 to 2000`. Tester: add those rows to `TargetIsTheChartWidthAtMostThousand`.
+
+**Files**
+- /home/user/Vandox/specs/feature-49-history-view/plan.md
+- /home/user/Vandox/src/Vandox.Backend/Logs/LogsAddress.cs
+- /home/user/Vandox/src/Vandox.Core/Model/Check.cs
+- /home/user/Vandox/src/Vandox.Backend/wwwroot/js/charts.js
+- /home/user/Vandox/docs/areas/web-ui.md
+- Query-plan check scripts: /tmp/claude-0/-home-user-Vandox/7d628ade-087e-57b9-93c6-af0ce179da7a/scratchpad/eqp.py and /tmp/claude-0/-home-user-Vandox/7d628ade-087e-57b9-93c6-af0ce179da7a/scratchpad/timing.py
+
+## Security notes
+
+Security plan review: feature 49, History view. I read `specs/feature-49-history-view/spec.md` and `plan.md` at cfa5900.
+
+The tier stays `standard`, and I agree with it. The plan adds no authorization, session, header or route change. `[Authorize]` comes from `Components/Pages/_Imports.razor`, and `RoutesTests` covers every routable page. The new `JSInvokable` methods are instance methods on a `DotNetObjectReference`, so only the page's own signed-in circuit can call them. Dropping values that are not finite or out of range is input handling. Areas 3, 10 and 12 are the right list, and I found no area the plan touches without listing it.
+
+## Measurements I ran
+
+1. **How .NET's `$` anchor treats a trailing newline.** I built a console project in the scratchpad (`/tmp/claude-0/-home-user-Vandox/7d628ade-087e-57b9-93c6-af0ce179da7a/scratchpad/rx/Program.cs`, run with `dotnet run`). It matches `"cpu_percent\n"` against the plan's pattern and against the same pattern ending in `\z`. Output: `$ : True  \z : False`.
+2. **Query plans of the new statements (fact 7).** Script `/tmp/claude-0/-home-user-Vandox/7d628ade-087e-57b9-93c6-af0ce179da7a/scratchpad/eqp.py`, run with `python3 -I`. It uses the schema of `SchemaMigrator.cs` steps 2 and 14 on SQLite 3.53.1; the store's bundled e_sqlite3 may be a different version, so the Tester's planned test still decides. Every statement of the metric skip scan is a `SEARCH`, for example `SEARCH metrics USING COVERING INDEX metrics_source_name_time (source=? AND name>?)` and `SEARCH metric_rollups_1h USING PRIMARY KEY (source=? AND name>?)`. The `After` read is `SEARCH records USING INDEX records_kind_time (kind=? AND captured_at>? AND captured_at<?)`. The `AtOrBefore` read is the same `SEARCH` plus `USE TEMP B-TREE FOR LAST TERM OF ORDER BY` (see N3).
+
+## Findings
+
+1. [BLOCKING] **The metric name pattern accepts a trailing line feed.** plan.md, *Address*, says each part matches `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`. In .NET, `$` also matches before a final `\n`, so `?metric=system,cpu_percent%0A` decodes through `QueryHelpers.ParseQuery` and passes (measurement 1). The value then counts as validated, contrary to E1 and N3. It goes into the bound query parameters, the E3 and E4 texts, the chosen-metric list, the axis labels, and the address that `ToQuery` writes back for sharing (S10). The C# validator of the same wire-format pattern already ends in `\z` (`src/Vandox.Core/Model/Check.cs:298`). None of the AC1 DataRows of `ParseRefusesInvalidValue` would catch this.
+   - Smallest fix: in plan.md, *Address*, replace the pattern with `^[A-Za-z0-9][A-Za-z0-9._:/@+\-]*\z` (with `RegexOptions.CultureInvariant`).
+   - Add the DataRows "a part ending in a line feed (`%0A`)" and "a part ending in `%0D`" to `ParseRefusesInvalidValue`.
+
+2. [BLOCKING] **The bound of one decoded snapshot at a time does not hold for the planned moment reader.** Spec N2 and the plan's *Memory per circuit* both say "one decoded snapshot (bounded by the 16 MiB payload) while a panel is built".
+   - `HistoryMomentReader.ReadAsync` makes the `AtOrBefore` and `After` calls for each kind. `SnapshotAsync` returns a full `StoredRecord` ("the payload is decoded once").
+   - `Closest(StoredRecord? atOrBefore, StoredRecord? after, DateTimeOffset at)` then needs both records of a kind, so two decoded payloads of up to 16 MiB each are held at once. If the process record is kept while the connection reads run, more are held.
+   - No planned test pins this bound; `FromStaysWithinTheCaps` covers only the chart.
+   - Fix, either one:
+     - (a) Read each side's `id` and `captured_at` without the payload, pick the closest, then read only that record (one decoded snapshot, as stated).
+     - (b) Restate the bound truthfully in spec N2, in *Memory per circuit* and in the area document: "at most two decoded snapshots, the two sides of one kind; the first kind's views are built and its records dropped before the second kind is read".
+   - With either fix, `HistoryMomentReaderTests` should get a test that pins the order: the process records are dropped before the connection reads start, for example by asserting on the fake's call sequence and the records it hands out.
+
+3. [NON-BLOCKING] **Values from the browser can reach `ToQuery` unchecked.** Under *Page*, the select's *Add* value is browser-supplied: a circuit can send any string as the bound value. `HistoryAddress.ToQuery` throws only when `Error` is set; unlike `LogsAddress.ToQuery` (`src/Vandox.Backend/Logs/LogsAddress.cs`, which calls `Validate()`), it does not check the values again. A forged value would be percent-encoded into the address and refused when the address is parsed again, so nothing is injected. It still contradicts the plan's "no address is computed from browser input without validation".
+   - Smallest fix: *Add* accepts only an entry of `HistoryView.MetricOptions(...)`, matched by index or ordinal equality. `ToQuery` checks the metric pattern, the count and the times, as `LogsAddress.ToQuery` does.
+   - Add a test that sends a forged select value.
+   - Recommendation: fix now.
+
+4. [NON-BLOCKING] **The selection and pick values need a check before any conversion, and the callback reference needs disposal.**
+   - `HistoryView.Selection` and `HistoryChartEvents.Pick` should test finiteness and the storable range on the `double` seconds before any `DateTimeOffset` conversion. They should test it again after widening outward with floor and ceiling, because a ceiling at the storable maximum can step outside it.
+   - `HistoryChart.DisposeAsync` should dispose the `DotNetObjectReference`, and a callback that arrives after disposal should do nothing.
+   - The plan should state that no static `[JSInvokable]` is added: a static one is callable by any circuit, signed in or not.
+   - Smallest fix: one sentence each in plan.md, *Chart*. Add DataRows to `SelectionRefusesInvalidValues` and `PickIgnoresInvalidValues`: NaN, ±Infinity, ±1e300, the storable maximum minus 0.5 s as the end, and a negative tolerance. Add a `HistoryChart` test that a callback after disposal does nothing.
+   - Recommendation: fix now.
+
+5. [NON-BLOCKING] **The snapshot headings put the source outside the external-text display.** S7 and S8 headings embed `<source>` in a plain `string Heading` (plan, *Signatures*, `ProcessSnapshotView` and `ConnectionSnapshotView`). `docs/areas/web-ui.md`, *External text*, lists sources as external text, to be shown only through the display. Snapshot sources pass the wire name pattern at ingest today, so this is consistency, not an exploit.
+   - Smallest fix: give each heading its source as `IReadOnlyList<TextRun> Source` built with `LogText.Runs(…, 256, 16)` and render it through `ExternalText`.
+   - Recommendation: fix now.
+
+6. [NON-BLOCKING] **The `AtOrBefore` statement sorts full rows.** `ORDER BY captured_at DESC, id` against `records_kind_time` needs `USE TEMP B-TREE FOR LAST TERM OF ORDER BY` (measurement 2). The sorter holds `SELECT`ed rows, including `data` of up to 16 MiB, for every snapshot that shares the first capture time. That is bounded and rare, but it is retained payload outside N2.
+   - Fix 2(a) removes this: sort only `id, captured_at`. Otherwise mention it in the memory figure.
+   - Recommendation: fix with finding 2.
+
+## Checked without finding
+
+- The `/history` address follows the logs view's parser. I checked key case (`ParseQuery` matches keys without regard to case), percent-encoded keys, `+` read as a space (`ToQuery` escapes it), and the fragment (dropped by `Uri.Query`).
+- The times use the formats and storable range of `LogsAddress`; `at` is floored before any read.
+- Error texts name the parameter, never the value. `InvalidQueryException` messages carry no values (`TimeSeriesService.cs:145-147`, `docs/areas/time-series-query.md`, *Errors*).
+- `HistoryReadFailed` logs the exception only, through the JSON-line logger.
+- Links are `history` plus `ToQuery`, or `IncidentsView.LogsHref`.
+- Chart labels and axes go through `LogText.Escape(…, 64)`. uPlot writes labels with `textContent` and `nodeValue` (`uPlot.esm.js:3253, 5250`) and draws axis labels on the canvas.
+- No inline style or script is needed, so the security headers stay unchanged.
+- `MaximumReceiveMessageSize` and `DetailedErrors` are not overridden: `ServeCommand.cs:263` uses the defaults, so the 32 KB limit holds and exception details stay out of the browser.
+- The gate keeps cross-user concurrency at two, and E15's cancellation leaves each circuit at most one chart action and one moment action.
