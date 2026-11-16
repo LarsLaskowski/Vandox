@@ -146,7 +146,7 @@ only the controls and `Choose one or more metrics to draw.`
 
 **Memory per circuit** (for the area document): chart data at most 64 × 1,999 × 3 doubles (about 3 MiB) plus the result while built
 (about 9 MiB); 1,000 events of 256 characters in 16 runs (about 1.5 MiB); 256 metric keys; one decoded snapshot (16 MiB payload) while a
-panel is built, then lists of 20. The Dev states the measured figures.
+panel is built, then lists of 20. The figures are derived from the types' fields, not measured, and the area document says so.
 
 ## Options considered
 
