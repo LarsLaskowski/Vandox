@@ -79,6 +79,24 @@ public sealed class OverviewRefresher : IAsyncDisposable
 
     #endregion // Constructors
 
+    #region Properties
+
+    /// <summary>
+    /// Gets the task of the running refresh, which completes only after the refresh cleared its running state, or a completed task when none runs.
+    /// </summary>
+    internal Task Current
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _current;
+            }
+        }
+    }
+
+    #endregion // Properties
+
     #region Methods
 
     /// <summary>
