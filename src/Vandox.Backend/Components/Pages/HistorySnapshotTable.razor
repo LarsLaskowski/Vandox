@@ -1,5 +1,6 @@
 @if (Table.Rows.Count > 0)
 {
+    <div class="table-scroll">
     <table class="snapshot">
         <caption>@Table.Heading</caption>
         <thead>
@@ -22,6 +23,7 @@
             }
         </tbody>
     </table>
+    </div>
 
     @if (Table.More.Length > 0)
     {

@@ -11,14 +11,14 @@
     }
 </div>
 
-<form class="filters history-range" @onsubmit="Apply" @onsubmit:preventDefault>
+<form class="filters history-range" @onsubmit:preventDefault>
     <label>From (UTC)
         <input type="datetime-local" step="1" name="from" value="@_from" @onchange="args => _from = args.Value?.ToString() ?? string.Empty" />
     </label>
     <label>To (UTC)
         <input type="datetime-local" step="1" name="to" value="@_to" @onchange="args => _to = args.Value?.ToString() ?? string.Empty" />
     </label>
-    <button type="submit">@ApplyText</button>
+    <button type="submit" @onclick="Apply" @onclick:preventDefault>@ApplyText</button>
 </form>
 
 @if (_error.Length > 0)
@@ -27,7 +27,7 @@
 }
 else
 {
-    <form class="filters history-metrics" @onsubmit="AddMetric" @onsubmit:preventDefault>
+    <form class="filters history-metrics" @onsubmit:preventDefault>
         <label>Metric
             <select name="metric" value="@_choice" @onchange="args => _choice = args.Value?.ToString() ?? string.Empty">
                 @for (var index = 0; index < _options.Count; index++)
@@ -36,7 +36,7 @@ else
                 }
             </select>
         </label>
-        <button type="submit">@AddText</button>
+        <button type="submit" @onclick="AddMetric" @onclick:preventDefault>@AddText</button>
     </form>
 
     @if (_listCut)
@@ -96,6 +96,7 @@ else
             @if (_view is { Events.Count: > 0 })
             {
                 <h2>Events</h2>
+                <div class="table-scroll">
                 <table class="history-events">
                     <thead>
                         <tr>
@@ -115,6 +116,7 @@ else
                         }
                     </tbody>
                 </table>
+                </div>
             }
         }
 
