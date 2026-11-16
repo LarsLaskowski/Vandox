@@ -1338,28 +1338,30 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
     #region IHistoryReader
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-
     /// <inheritdoc/>
     public Task<StoredMetricList> StoredMetricsAsync(int limit, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        HistoryQueries.ValidateLimit(limit);
+
+        return ReadAsync(connection => HistoryQueries.ReadMetricsAsync(connection, limit, cancellationToken), HistoryQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<SnapshotStamp?> SnapshotStampAsync(SnapshotQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        HistoryQueries.ValidateStamp(query);
+
+        return ReadAsync(connection => HistoryQueries.ReadStampAsync(connection, query, cancellationToken), HistoryQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<StoredRecord?> SnapshotAsync(SnapshotStamp stamp, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
-    }
+        ArgumentNullException.ThrowIfNull(stamp);
+        HistoryQueries.ValidateKind(stamp.Kind);
 
-#pragma warning restore RH2003
+        return ReadAsync(connection => HistoryQueries.ReadSnapshotAsync(connection, stamp, cancellationToken), HistoryQueries.Context, cancellationToken);
+    }
 
     #endregion // IHistoryReader
 
