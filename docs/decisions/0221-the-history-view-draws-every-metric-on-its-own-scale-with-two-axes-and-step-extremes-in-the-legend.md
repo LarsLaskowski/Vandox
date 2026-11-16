@@ -1,6 +1,6 @@
 # 0221: The history view draws every metric on its own scale with two drawn axes and the step's extremes in the legend
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-16
 - **Area:** History view
 - **Source:** Issue #49

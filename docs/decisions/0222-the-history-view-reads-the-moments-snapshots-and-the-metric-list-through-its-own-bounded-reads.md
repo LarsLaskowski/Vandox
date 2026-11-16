@@ -1,6 +1,6 @@
 # 0222: The history view reads the moment's snapshots and the metric list through its own bounded reads
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-16
 - **Area:** History view
 - **Source:** Issue #49
