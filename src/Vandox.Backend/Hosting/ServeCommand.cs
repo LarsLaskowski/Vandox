@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Cli;
 using Vandox.Backend.Components;
+using Vandox.Backend.History;
 using Vandox.Backend.Incidents;
 using Vandox.Backend.Ingest;
 using Vandox.Backend.Logging;
@@ -249,6 +250,7 @@ internal static class ServeCommand
         builder.Services.AddSingleton(_ => new WebReaderGate(LogsView.MaxConcurrentQueries));
         builder.Services.AddSingleton<ILogExplorer>(provider => new GatedLogExplorer(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton<IIncidentBrowser>(provider => new GatedIncidentBrowser(store, provider.GetRequiredService<WebReaderGate>()));
+        builder.Services.AddSingleton<IHistoryReader>(provider => new GatedHistoryReader(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton<IOverviewReader>(provider => new GatedOverviewReader(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddScoped<CircuitConnection>();
         builder.Services.AddScoped<CircuitHandler>(provider => provider.GetRequiredService<CircuitConnection>());

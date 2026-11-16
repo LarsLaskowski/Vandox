@@ -1,0 +1,30 @@
+@if (Table.Rows.Count > 0)
+{
+    <table class="snapshot">
+        <caption>@Table.Heading</caption>
+        <thead>
+            <tr>
+                @foreach (var column in Table.Columns)
+                {
+                    <th scope="col">@column</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in Table.Rows)
+            {
+                <tr>
+                    @foreach (var cell in row.Cells)
+                    {
+                        <td><ExternalText Runs="cell" /></td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @if (Table.More.Length > 0)
+    {
+        <p class="note">@Table.More</p>
+    }
+}

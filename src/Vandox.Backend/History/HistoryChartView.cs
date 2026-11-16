@@ -95,6 +95,29 @@ public sealed class HistoryChartView
     }
 
     /// <summary>
+    /// Gives the same view with another moment, sharing its times and lines, so that the chart only moves its mark.
+    /// </summary>
+    /// <param name="moment">The moment; it is marked only inside the range</param>
+    /// <param name="range">The range of the view</param>
+    /// <returns>The view</returns>
+    internal HistoryChartView WithMoment(DateTimeOffset? moment, HistoryRange range)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+
+        return new HistoryChartView
+               {
+                   Times = Times,
+                   Lines = Lines,
+                   Axes = Axes,
+                   Marks = Marks,
+                   Events = Events,
+                   Notes = Notes,
+                   StepNote = StepNote,
+                   Moment = moment is not null && moment.Value >= range.Start && moment.Value <= range.End ? moment : null
+               };
+    }
+
+    /// <summary>
     /// Builds the line of a series.
     /// </summary>
     /// <param name="line">The series</param>
