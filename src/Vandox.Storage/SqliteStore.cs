@@ -1304,33 +1304,35 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
     #region IOverviewReader
 
-    // Skeleton: removed with the implementation
-#pragma warning disable RH2003
     /// <inheritdoc/>
     public Task<AgentFreshness> FreshnessAsync(int liveScanLimit, DateTimeOffset until, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        OverviewQueries.ValidateFreshness(liveScanLimit);
+
+        return ReadAsync(connection => OverviewQueries.ReadFreshnessAsync(connection, liveScanLimit, until, cancellationToken), OverviewQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<LatestSeries>> LatestValuesAsync(LatestValueQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        OverviewQueries.ValidateValues(query);
+
+        return ReadAsync(connection => OverviewQueries.ReadValuesAsync(connection, query, cancellationToken), OverviewQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<MariaDbLatest?> LatestMariaDbStatusAsync(DateTimeOffset until, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return ReadAsync(connection => OverviewQueries.ReadMariaDbAsync(connection, until, cancellationToken), OverviewQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<ServiceStatePage> LatestServiceStatesAsync(LatestServiceQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
-    }
+        OverviewQueries.ValidateServices(query);
 
-#pragma warning restore RH2003
+        return ReadAsync(connection => OverviewQueries.ReadServicesAsync(connection, query, cancellationToken), OverviewQueries.Context, cancellationToken);
+    }
 
     #endregion // IOverviewReader
 
