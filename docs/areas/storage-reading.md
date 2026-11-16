@@ -149,8 +149,7 @@ existing index, never a scan.
 - **Stored metrics** (a limit of 1 to 256, refused otherwise with `store: invalid query: limit must be 1 to 256`): every source and name
   that has a raw value in `metrics` or a bucket in `metric_rollups_1h`, merged without repeats, by source, then name, in the byte order of
   their UTF-8 form (as SQLite orders text), the first *limit* of them; the result says whether a further metric exists. It is a skip
-  scan: the first source with its first name, then the next name of that source, then the first name of the next source, one index seek
-  per entry (`metrics(source, name, captured_at)`, the primary key of the hourly rollups), at most *limit* + 1 entries per table. Its cost
+  scan: the first source with its first name, then the next name of that source, then the first name of the next source, one index seek per entry within a source and three for an entry that starts the next source (`metrics(source, name, captured_at)`, the primary key of the hourly rollups), at most *limit* + 1 entries per table. Its cost
   grows with the entries read, not with the stored rows.
 - **Snapshot stamp** (a kind, a moment, a window and a side): the ID and capture time, nothing else, of the snapshot of the kind closest to
   the moment on one side. *At or before* takes capture times from the moment minus the window up to the moment, the latest first;

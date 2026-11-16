@@ -19,7 +19,7 @@ in 10 minutes under memory pressure, more with several sources), each up to the 
 
 1. **A panel in the history view, fed by bounded reads per kind** (the ID and time of the latest snapshot at or before the moment and
    of the earliest after it, within 10 minutes, one row each over `records(kind, captured_at)`, then the closest one's record by ID),
-   **and a skip scan for the metric list** (one index seek per listed metric over `metrics(source, name, …)` and the hourly rollups'
+   **and a skip scan for the metric list** (one to three index seeks per listed metric over `metrics(source, name, …)` and the hourly rollups'
    primary key, capped at 256).
 2. **Both sides read as full records** and the closer kept — holds two decoded payloads of up to the payload limit per kind, and the
    `AtOrBefore` sort holds whole rows.
@@ -41,6 +41,6 @@ rules are in [History view](../areas/web-ui-history-view.md) and
 
 - A moment costs up to six store calls (per kind two ID-and-time reads and one record read), and one decode per kind.
 - A snapshot removed by retention between the reads shows as none within 10 minutes.
-- The list's cost grows with the number of listed metrics (at most 257 seeks per table), not with the stored rows.
+- The list's cost grows with the number of listed metrics (at most 3 × 256 + 1 seeks per table), not with the stored rows.
 - A host with more than 256 metrics lists the first 256 in order; the others can be named in the address.
 - The processes and network views may later link to a moment of the history view instead of reading snapshots themselves.

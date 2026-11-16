@@ -188,8 +188,7 @@ display, at most 256 characters in at most 16 runs.
   larger part of a moment read: the stamps are read first and only the chosen record is decoded, and `HistoryMomentReader` builds each
   view inside the per-kind read and drops the record before the next kind, so one decoded snapshot (up to the 16 MiB payload limit as
   bytes plus its parsed document, whose size is not measured) is held at a time; the two views stay until the panel is built. The number of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
-- The page makes no call that scans: the stamp and record reads seek the indexes, and the metric list costs one index seek per listed
-  entry ([Storage reading](storage-reading.md), *History reads*).
+- The page makes no call that scans: the stamp and record reads seek the indexes, and the metric list costs one to three index seeks per listed entry ([Storage reading](storage-reading.md), *History reads*).
 - A browser script cannot call anything but the two instance methods of the chart's reference (selection and click); both drop a value
   that is not finite, outside the storable range or, for the tolerance, outside 0 to one day, and do nothing after the chart was
   disposed. The framework's limit for a message from the browser, 32 KB, stays.
