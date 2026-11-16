@@ -696,6 +696,214 @@ public class OverviewViewTests
     }
 
     /// <summary>
+    /// With open sequence gaps but no known receive time the backfill shows the stalled form with the receive time unknown.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public void BuildShowsBackfillStalledWithUnknownReceiveTime()
+    {
+        // Arrange
+        var data = new OverviewData
+                   {
+                       Freshness = Gaps(new AgentFreshness
+                                        {
+                                            AgentId = "agent-1"
+                                        },
+                                        1)
+                   };
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual("Backfill stalled: data from 2026-10-01 07:00:00 to 2026-10-01 09:00:00 is missing, no data received since unknown.", model.Backfill, "the stalled form without a receive time");
+    }
+
+    /// <summary>
+    /// The services are marked stale with the receive time unknown when the agent has no known receive time.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public void BuildMarksServicesStaleWithUnknownReceiveTime()
+    {
+        // Arrange
+        var data = new OverviewData
+                   {
+                       Freshness = new AgentFreshness
+                                   {
+                                       AgentId = "agent-1"
+                                   },
+                       Services = Services(1, Unit("a.service", "active", "running", null, 0, Now.AddSeconds(-30)))
+                   };
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual("stale: no data received since unknown", model.ServicesStale, "the stale text without a receive time");
+    }
+
+    /// <summary>
+    /// A figure whose series the read returns without any value shows unknown, as does one the read lacks.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public void BuildShowsUnknownForSeriesWithoutValues()
+    {
+        // Arrange
+        var data = Fresh(Now.AddSeconds(-30), Now.AddSeconds(-10));
+
+        data.Values = OverviewView.Series.Select(series => Series(series.Source, series.Name)).ToList();
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual("Available memory|unknown, Swap|unknown, Memory pressure|unknown, CPU pressure|unknown, I/O pressure|unknown, Disk|unknown, MariaDB|unknown, MariaDB connections|unknown, MariaDB memory|unknown",
+                        string.Join(", ", model.Figures.Select(row => $"{row.Figure}|{row.Value}")),
+                        "every figure of a series without values is unknown");
+        Assert.AreEqual(Unknown, model.Spool, "a spool series without values is unknown");
+    }
+
+    /// <summary>
+    /// Without a memory total the available memory shows no share and the time of the available value.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public void BuildShowsAvailableMemoryWithoutShareWhenTotalIsMissing()
+    {
+        // Arrange
+        var data = Fresh(Now.AddSeconds(-30), Now.AddSeconds(-10));
+
+        data.Values = [Series("system", "mem_available_bytes", Value(Now.AddSeconds(-40), 2 * GiB))];
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual("Available memory||2.0 GiB|2026-10-01 09:59:20|", DescribeFigures(model.Figures.Where(row => row.Figure == "Available memory")), "no share without a total");
+    }
+
+    /// <summary>
+    /// A figure made of two values shows the older of their two times, whichever of them is older.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public void BuildShowsOlderTimeOfTwoValues()
+    {
+        // Arrange
+        var data = Fresh(Now.AddSeconds(-30), Now.AddSeconds(-10));
+
+        data.Values = [
+                          Series("system", "mem_available_bytes", Value(Now.AddSeconds(-40), 2 * GiB)),
+                          Series("system", "mem_total_bytes", Value(Now.AddSeconds(-20), 8 * GiB)),
+                          Series("system", "swap_used_bytes", Value(Now.AddSeconds(-20), GiB)),
+                          Series("system", "swap_total_bytes", Value(Now.AddSeconds(-50), 4 * GiB))
+                      ];
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual("Available memory||2.0 GiB (25.0 % of 8.0 GiB)|2026-10-01 09:59:20|\n"
+                        + "Swap||1.0 GiB of 4.0 GiB used (25.0 %)|2026-10-01 09:59:10|",
+                        DescribeFigures(model.Figures.Where(row => row.Figure is "Available memory" or "Swap")),
+                        "the older time of the first value, then of the second");
+    }
+
+    /// <summary>
+    /// A mount without a size shows its available space without a share, and a value without a mount label shows an empty mount.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public void BuildShowsMountWithoutSizeWithoutShare()
+    {
+        // Arrange
+        var data = Fresh(Now.AddSeconds(-30), Now.AddSeconds(-10));
+
+        data.Values = [
+                          Series("system", "filesystem_available_bytes", Value(Now.AddSeconds(-30), 10 * GiB, "/"), Value(Now.AddSeconds(-30), GiB, "/data"), Value(Now.AddSeconds(-30), 2 * GiB)),
+                          Series("system", "filesystem_size_bytes", Value(Now.AddSeconds(-20), 40 * GiB, "/"))
+                      ];
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual("Disk|/|10.0 GiB available (25.0 %) of 40.0 GiB|2026-10-01 09:59:30|\n"
+                        + "Disk|/data|1.0 GiB available|2026-10-01 09:59:30|\n"
+                        + "Disk||2.0 GiB available|2026-10-01 09:59:30|",
+                        DescribeFigures(model.Figures.Where(row => row.Figure == "Disk")),
+                        "the size of another mount is not used");
+    }
+
+    /// <summary>
+    /// An availability the page does not know, such as the empty one of a status record without members, shows every MariaDB figure as unknown.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public void BuildShowsMariaDbUnknownForUnknownAvailability()
+    {
+        // Arrange
+        var data = Fresh(Now.AddSeconds(-30), Now.AddSeconds(-10));
+
+        data.MariaDb = new MariaDbLatest
+                       {
+                           CapturedAt = Now.AddSeconds(-30)
+                       };
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual(Unknown, ValueOf(model, "MariaDB"), "an unknown availability");
+        Assert.AreEqual(Unknown, ValueOf(model, "MariaDB connections"), "no connections without the server up");
+        Assert.AreEqual(Unknown, ValueOf(model, "MariaDB memory"), "no memory without the server up");
+    }
+
+    /// <summary>
+    /// The MariaDB memory shows the older time of the status record and of the memory limit.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public void BuildShowsMariaDbMemoryWithOlderTimeOfLimit()
+    {
+        // Arrange
+        var data = Figures(Now.AddSeconds(-30));
+
+        data.Values = [Series("mariadb", "mariadb_memory_max_bytes", Value(Now.AddMinutes(-10), 2 * GiB))];
+
+        // Act
+        var model = OverviewView.Build(data, Now);
+
+        // Assert
+        Assert.AreEqual("MariaDB||up|2026-10-01 09:59:30|\n"
+                        + "MariaDB connections||12 of 151|2026-10-01 09:59:30|\n"
+                        + "MariaDB memory||512.0 MiB of at most 2.0 GiB|2026-10-01 09:50:00|stale",
+                        DescribeFigures(model.Figures.Where(row => row.Figure.StartsWith("MariaDB", StringComparison.Ordinal))),
+                        "the memory row takes the older time of the limit");
+    }
+
+    /// <summary>
+    /// The overview reads the series of its figures and of the spool, at most the 16 series one read allows.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC3")]
+    [TestCategory("AC5")]
+    public void SeriesNamesTheSeriesOfTheFiguresAndTheSpool()
+    {
+        // Act
+        var series = string.Join(", ", OverviewView.Series.Select(key => $"{key.Source}/{key.Name}"));
+
+        // Assert
+        Assert.AreEqual("system/mem_available_bytes, system/mem_total_bytes, system/swap_used_bytes, system/swap_total_bytes, system/pressure_avg60, "
+                        + "system/filesystem_available_bytes, system/filesystem_size_bytes, mariadb/mariadb_memory_max_bytes, agent/agent_spool_bytes, agent/agent_spool_age_seconds",
+                        series,
+                        "the series of the key figures and the spool");
+        Assert.IsLessThanOrEqualTo(16, OverviewView.Series.Count, "no more series than one read allows");
+    }
+
+    /// <summary>
     /// Creates the reads of an agent with a live time and a receive time and nothing else.
     /// </summary>
     /// <param name="lastLiveAt">The capture time of the newest live record, or <c>null</c> for none</param>

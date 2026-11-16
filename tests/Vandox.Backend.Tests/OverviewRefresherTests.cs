@@ -276,5 +276,129 @@ public class OverviewRefresherTests
         Assert.IsEmpty(faults, "no refresh failed");
     }
 
+    /// <summary>
+    /// A restore while a refresh runs starts no second refresh, and none is made up after the running one ends.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task RefresherSkipsRestoredWhileRefreshRuns()
+    {
+        // Arrange
+        var clock = new TimerSignalingClock(Start);
+        var connection = new CircuitConnection();
+        var faults = new List<Exception>();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var probe = new RefreshProbe
+                          {
+                              Hold = release.Task
+                          };
+        var refresher = new OverviewRefresher(clock, connection, probe.RunAsync, faults.Add);
+
+        refresher.Start();
+        await probe.WaitForStartAsync(TestContext.CancellationToken);
+        await connection.OnConnectionDownAsync(null!, TestContext.CancellationToken);
+
+        // Act
+        await connection.OnConnectionUpAsync(null!, TestContext.CancellationToken);
+
+        var startsWhileRunning = probe.Starts;
+
+        release.SetResult();
+        await refresher.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, startsWhileRunning, "the restore while a refresh runs starts no second one");
+        Assert.AreEqual(1, probe.Starts, "the skipped refresh is not made up");
+        Assert.AreEqual(1, probe.MaxInFlight, "refreshes never overlap");
+        Assert.IsEmpty(faults, "no refresh failed");
+    }
+
+    /// <summary>
+    /// An exception of a refresh other than a cancellation is handed to the fault callback.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task RefresherHandsRefreshExceptionToFault()
+    {
+        // Arrange
+        var clock = new TimerSignalingClock(Start);
+        var failure = new InvalidOperationException("the read failed");
+        var fault = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var refresher = new OverviewRefresher(clock, new CircuitConnection(), _ => Task.FromException(failure), exception => fault.TrySetResult(exception));
+
+        // Act
+        refresher.Start();
+
+        var received = await fault.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSame(failure, received, "the exception of the refresh reaches the fault callback");
+    }
+
+    /// <summary>
+    /// Start on a disposed refresher runs no refresh and starts no timer.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task RefresherStartedAfterDisposeRunsNoRefresh()
+    {
+        // Arrange
+        var clock = new TimerSignalingClock(Start);
+        var faults = new List<Exception>();
+
+        using var probe = new RefreshProbe();
+        var refresher = new OverviewRefresher(clock, new CircuitConnection(), probe.RunAsync, faults.Add);
+
+        await refresher.DisposeAsync();
+
+        // Act
+        refresher.Start();
+
+        var timerCreated = clock.WaitForTimersAsync(OverviewView.RefreshInterval, 1, TestContext.CancellationToken).IsCompleted;
+
+        clock.Advance(OverviewView.RefreshInterval);
+
+        // Assert
+        Assert.AreEqual(0, probe.Starts, "a disposed refresher runs no refresh");
+        Assert.IsFalse(timerCreated, "a disposed refresher starts no timer");
+        Assert.IsEmpty(faults, "no refresh failed");
+    }
+
+    /// <summary>
+    /// Disposing a refresher a second time completes at once without an error.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task RefresherDisposesTwiceWithoutError()
+    {
+        // Arrange
+        var clock = new TimerSignalingClock(Start);
+        var faults = new List<Exception>();
+
+        using var probe = new RefreshProbe();
+        var refresher = new OverviewRefresher(clock, new CircuitConnection(), probe.RunAsync, faults.Add);
+
+        refresher.Start();
+        await probe.WaitForStartAsync(TestContext.CancellationToken);
+        await refresher.DisposeAsync();
+
+        // Act
+        var second = refresher.DisposeAsync().AsTask();
+        var completedAtOnce = second.IsCompletedSuccessfully;
+
+        await second;
+
+        // Assert
+        Assert.IsTrue(completedAtOnce, "the second disposal completes at once without an error");
+        Assert.AreEqual(1, probe.Starts, "only the refresh at the start ran");
+        Assert.IsEmpty(faults, "no refresh failed");
+    }
+
     #endregion // Methods
 }

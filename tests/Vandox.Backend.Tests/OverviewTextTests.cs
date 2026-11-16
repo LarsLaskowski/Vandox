@@ -11,19 +11,22 @@ public class OverviewTextTests
     #region Methods
 
     /// <summary>
-    /// A size is written in the largest binary unit it reaches, with one decimal.
+    /// A size below 1 KiB is written in whole bytes, a larger one in the largest binary unit it reaches, at most TiB, with one decimal.
     /// </summary>
     /// <param name="bytes">The size in bytes</param>
     /// <param name="expected">The expected text</param>
     [TestMethod]
     [TestCategory("AC3")]
     [TestCategory("AC5")]
+    [DataRow(0d, "0 B")]
+    [DataRow(1023d, "1023 B")]
     [DataRow(1024d, "1.0 KiB")]
     [DataRow(1536d, "1.5 KiB")]
     [DataRow(1048576d, "1.0 MiB")]
     [DataRow(3435973837d, "3.2 GiB")]
     [DataRow(8589934592d, "8.0 GiB")]
     [DataRow(1099511627776d, "1.0 TiB")]
+    [DataRow(1125899906842624d, "1024.0 TiB")]
     public void SizeWritesBinaryUnitsWithOneDecimal(double bytes, string expected)
     {
         // Act
