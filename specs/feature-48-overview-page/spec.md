@@ -1,7 +1,7 @@
 # Spec: Overview page
 
 Source: Issue #48
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -11,8 +11,8 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 
 ## Scenarios
 
-- S1: Given the agent sends live data, when the signed-in user opens *Overview* (`/`), then the page shows, in this order, the sections
-  *Data freshness*, *Services*, *Key figures* and *Incidents*, and below the heading the line `Updated <time>`.
+- S1: Given live data, when the user opens *Overview* (`/`), then it shows *Data freshness*, *Services*, *Key figures* and *Incidents*
+  in this order, below `Updated <time>`.
 - S2: Given the page is open, when 30 seconds have passed, then it redraws with new data without a page load.
 - S3: Given the agent backfills after a backend outage, when the user opens the page, then *Data freshness* says a backfill is running
   and shows its progress until it is done.
@@ -33,7 +33,7 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 - E4: A figure the latest sample lacks (MariaDB `down` or without `Memory_used`, no PSI on the kernel) shows `unknown` (MariaDB: its
   availability `down` or `not answering`), never 0. A swap total of 0 shows `no swap`; a share whose total is 0 shows no percentage.
 - E5: A refresh fails or passes its 10-second deadline: the page keeps the values it shows and adds `Refresh failed at <time>; the values
-  are from <time>.`; the next refresh runs on schedule and removes the line when it succeeds.
+  are from <time>.` (before any values: `; no values have been read yet.`); the next refresh runs on schedule and removes the line when it succeeds.
 - E6: A refresh still running when the next is due: the due one is skipped.
 - E7: The user leaves the page or closes it: refreshing stops and a running read is cancelled. While the live connection is lost the
   page makes no store call; it refreshes at once when the connection is back.
@@ -41,7 +41,8 @@ data is never normal (`.squad/project.md`, *Guarantees*).
   display ([Web UI](../../docs/areas/web-ui.md), *External text*), so a forged name carries no markup or direction control.
 - E9: A unit or mount removed from the agent's configuration: a unit is listed until its latest record is more than 2 hours older than
   the newest service record, a mount until its latest value is more than 10 minutes older than the newest file system value.
-- E10: Many records: the page shows at most 256 units, 16 mounts and 20 open incidents, with `and <n> more` for the rest.
+- E10: Many records: the page shows at most 256 units and 16 mounts, with `and <n> more` for the rest (incident windows never overlap,
+  so at most one incident is open).
 - E11: The agent's numbers jumped ([Agent spool](../../docs/areas/agent-spool.md), *Sequence numbers*), so an open sequence gap spans
   numbers never issued: the page shows no count of missing records.
 - E12: Open sequence gaps of another agent ID than that of the newest batch received (an agent ID replaced) are not counted as a backfill.
@@ -62,9 +63,10 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 
 ## Acceptance criteria
 
-- AC1: *Data freshness* shows the capture time and age of the newest agent `metric` record stored as live, marked `stale` when its age
-  exceeds 5 minutes, and the receive time and age of the newest agent batch received; with no agent record, the text of E1. (S1, S4, E1,
-  E2, E13, N5)
+- AC1: *Data freshness* shows the capture time and age of the newest `metric` record stored as live among the newest 20,000 metric
+  records, or `before <time>` (the oldest of them) when none of them is live, marked `stale` when older than 5 minutes; and the receive
+  time and age of the newest batch received, read as that of the agent's highest-numbered record (the live stream's latest batch); with
+  no agent record, the text of E1. (S1, S4, E1, E2, E13, N5)
 - AC2: While an open sequence gap of the agent ID of the newest batch exists and a batch was received within 5 minutes, *Data
   freshness* shows `Backfill running: data from <start> to <end> is missing.`, the earliest start and latest end of those gaps, followed
   by the spool line of AC3; no count of missing records is shown, also for a gap over a jump of 10^15 numbers; otherwise the stalled
@@ -76,7 +78,7 @@ data is never normal (`.squad/project.md`, *Guarantees*).
   count; units whose state is not `active` come first, then by unit name in ordinal order; a `failed` unit is marked; names are shown as
   external text. The section is marked `stale` with the newest batch's receive time when no batch was received for more than 5
   minutes, and a unit whose latest record is more than 1 hour 5 minutes old is marked `stale` with its time. (S4, S5, E1, E8, E9, E10)
-- AC5: *Key figures* shows, each from its latest stored value with that value's time: available memory (`mem_available_bytes`, and its
+- AC5: *Key figures* shows, each from its latest value of the agent's sources (`system`, `mariadb`, `agent`) with that value's time: available memory (`mem_available_bytes`, and its
   share of `mem_total_bytes`), swap used of total, PSI `pressure_avg60` of memory, CPU and I/O (`some`, and `full` for memory and I/O),
   available space and its share per mount of E9 (`filesystem_available_bytes`, `filesystem_size_bytes`), and MariaDB's availability,
   `Threads_connected` of `max_connections`, `Memory_used` and `mariadb_memory_max_bytes`; a value older than 5 minutes is marked
@@ -110,11 +112,8 @@ data is never normal (`.squad/project.md`, *Guarantees*).
 
 ## Area documents
 
-- New `docs/areas/web-ui-overview.md` (Overview page) with its index row: the sections and their texts, the sources of every figure,
-  staleness and `unknown`, the backfill line, the refresh with its interval, deadline, pause and failure line, the caps and the memory
-  per circuit.
-- `docs/areas/web-ui.md`: the overview among the views in *Scope*, *Store reads of the views* and *Not here* (no longer planned).
-- `docs/areas/time-series-query.md`: names the overview only if it calls the query.
+- New `docs/areas/web-ui-overview.md` (Overview page): sections, texts, sources, staleness, refresh, caps, memory per circuit.
+- `docs/areas/web-ui.md` and `storage-reading.md`: the overview and its reads; the full list is in `plan.md`.
 
 ## Challenge
 
