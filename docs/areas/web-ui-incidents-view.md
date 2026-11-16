@@ -6,7 +6,7 @@ The pages of the [web UI](web-ui.md) that show the stored incidents: the list (`
 (`/incidents/<number>`) with the charts of its window and its notes, and the note endpoint (`POST /incidents/<number>/notes`), the first
 write of the web UI. The user relies on it to look at an outage and to write down what was found. The incidents themselves are built
 by `vandoxd incidents` ([Incidents](incidents.md)); the store reads and the note save are in
-[Storage reading and log exploration](storage-reading.md) and [Storage writing](storage-writing.md).
+[Storage reading](storage-reading.md) and [Storage writing](storage-writing.md).
 
 ## Behavior
 
@@ -26,7 +26,7 @@ by `vandoxd incidents` ([Incidents](incidents.md)); the store reads and the note
   import.` The position of the page is not in the address.
 - The page reads summaries, not whole incidents: the columns of an incident and a few fields of its document (first victim, last kill,
   hypothesis), decoded row by row, so a page of 20 holds one document's bytes at a time
-  ([Storage reading and log exploration](storage-reading.md), *Incidents*).
+  ([Storage reading](storage-reading.md), *Incidents*).
 
 ### Incident page (`/incidents/<number>`)
 
@@ -134,7 +134,7 @@ run ([0207](../decisions/0207-incidents-view-shows-each-external-text-in-at-most
 - The general web UI (render mode, gate, external-text display, headers, circuits): [Web UI](web-ui.md); the other views:
   [Logs view](web-ui-logs-view.md), [Report page](web-ui-report-page.md).
 - How incidents are built and merged: [Incidents](incidents.md).
-- How summaries and notes are read and saved: [Storage reading and log exploration](storage-reading.md),
+- How summaries and notes are read and saved: [Storage reading](storage-reading.md),
   [Storage writing](storage-writing.md).
 - Sessions and the antiforgery token: [Web login](web-login.md).
 

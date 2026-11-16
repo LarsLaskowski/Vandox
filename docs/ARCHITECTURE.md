@@ -482,7 +482,7 @@ Implemented by `src/Vandox.Storage`:
   The logs view does not use this search directly: it searches in bounded pages, from the full-text index when the words match fewer
   than a cap of rows and otherwise by a time-ordered scan of at most a fixed number of lines, and finds a template's lines by
   normalizing the candidates its words select ([0106](decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md);
-  rules in [Storage reading and log exploration](areas/storage-reading.md), *Log exploration*).
+  rules in [Log search and exploration](areas/log-exploration.md), *Log exploration*).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogExplorer` (the logs view), `ILogTemplateReader`,
   `IImportTracker`, `IIncidentStore` and `IIncidentBrowser` (the incidents view: summaries, one incident, notes), `IRetentionStore` (the retention job: fold, kill scan, removal, holds), `IRollupReader` (the rollup buckets of a series), `ITimeSeriesReader` (the reads of the time-series query), `IOverviewReader` (the latest values of the overview page) and `IHistoryReader` (the metric list and the snapshot closest to a moment for the history view); a consumer that depends on the store's semantics is tested against the real store.

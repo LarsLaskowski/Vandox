@@ -6,7 +6,7 @@ The backend's database: the file and how it is opened, the connections and how a
 its migrations, retention in outline and the write-throughput criterion. A database file written by one version of the backend must stay readable
 by the next, whichever language implements it, so the schema below is part of the contract. How batches are written is in
 [Storage writing](storage-writing.md), how stored data is read and searched in
-[Storage reading and log exploration](storage-reading.md); what a record means is in the [wire format](wire-format.md), how the log
+[Storage reading](storage-reading.md) and [Log search and exploration](log-exploration.md); what a record means is in the [wire format](wire-format.md), how the log
 import tracks files on top of this store in [Log import](log-import.md).
 
 ## Database file and connections
@@ -84,7 +84,7 @@ agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, ag
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
 - The log exploration relies on `records(kind, source, captured_at)` and `records(kind, captured_at)` serving the order of its scan; a
   statement plan that stopped using them would turn a page into a sort of every log line of the range
-  ([Storage reading and log exploration](storage-reading.md), *Log exploration*).
+  ([Log search and exploration](log-exploration.md), *Log exploration*).
 
 ### Migration steps
 
@@ -177,7 +177,7 @@ stored once") is tested against the real store; fakes for other consumers only r
 
 - How batches, incidents, notes and import state are written, deduplicated and counted: [Storage writing](storage-writing.md).
 - How records, incidents, listener findings and gaps are read, and log search and exploration:
-  [Storage reading and log exploration](storage-reading.md).
+  [Storage reading](storage-reading.md) and [Log search and exploration](log-exploration.md).
 - The meaning of the records and the batch format: [Wire format](wire-format.md), [Wire format records](wire-format-records.md).
 - How import files are found, hashed and resumed: [Log import](log-import.md).
 - The container's volumes and memory limit: [Backend host](backend-host.md).

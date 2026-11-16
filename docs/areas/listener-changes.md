@@ -58,8 +58,7 @@ changed listeners and no new listener is a finding of its own kind, **found by t
 
 ## What the report reads
 
-The report reads the derived tables `connection_marks` and `listener_comparisons` ([Storage](storage.md), [Storage reading and log
-exploration](storage-reading.md), *Listener history*) after its first pass over the incidents, by four small reads: the counts of the
+The report reads the derived tables `connection_marks` and `listener_comparisons` ([Storage](storage.md), [Storage reading](storage-reading.md), *Listener history*) after its first pass over the incidents, by four small reads: the counts of the
 lowest 64 agent IDs, the latest 20 findings after an agent start, the latest 20 findings of the agent and the latest 20 findings of the
 agent with changes only. No connection snapshot is read or decoded by the report; the write path decodes the snapshots around an agent
 start when it stores them.
@@ -172,8 +171,7 @@ PID, times and counts are plain text. The backend's log holds no listener, comma
 - The agent's own listener check, `inventory`, socket UIDs and the unconnected UDP rule: [Agent connections](agent-connections.md); the
   fields of `connection_snapshot`: [Wire format records](wire-format-records.md).
 - The rows `connection_marks` and `listener_comparisons`, when they are written and how many listeners they keep: [Storage
-  writing](storage-writing.md), *Listener marks and comparisons*; how they are read: [Storage reading and log
-  exploration](storage-reading.md), *Listener history*; their schema: [Storage](storage.md).
+  writing](storage-writing.md), *Listener marks and comparisons*; how they are read: [Storage reading](storage-reading.md), *Listener history*; their schema: [Storage](storage.md).
 - The rest of the report and its formats: [Forensics report](forensics-report.md); the report page: [Report page](web-ui-report-page.md).
 
 ## Implementation

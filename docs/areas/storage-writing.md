@@ -219,7 +219,7 @@ The limits and exact error texts are stated with each rule above. A refused batc
 ## Not here
 
 - The database file, connections, schema, migrations, retention and the throughput criterion: [Storage](storage.md).
-- Reading, log search and log exploration: [Storage reading and log exploration](storage-reading.md).
+- Reading, log search and log exploration: [Storage reading](storage-reading.md) and [Log search and exploration](log-exploration.md).
 - Template normalization: [Log templates](log-templates.md); the listener comparison rules: [Listener changes](listener-changes.md);
   the live rule and its constants: [Detection, alerts and reports](detection-and-reports.md); incident building: [Incidents](incidents.md).
 - The acknowledgement of a batch: [Ingest endpoint](ingest-endpoint.md); how the import uses its state: [Log import](log-import.md).

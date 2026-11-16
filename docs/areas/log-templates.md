@@ -85,9 +85,9 @@ error that names the rule. Every value reaches the database as a bound parameter
 - **Templates of a range:** the templates with at least one line in the hours that start in the range, optionally of one source and one
   program, each with its number of lines in those hours, most lines first, then by identity, at most 1,000 (the logs view asks for 200).
   The count is kept per UTC hour, so a range that starts or ends inside an hour counts that **whole hour**. A template is fetched by its
-  number. The rules and error texts are in [Storage reading and log exploration](storage-reading.md), *Log exploration*.
+  number. The rules and error texts are in [Log search and exploration](log-exploration.md), *Log exploration*.
 - **Lines of a template:** the stored log lines of the template's source and program whose message normalizes to the template's text,
-  found by normalizing candidates that the template's literal words select ([Storage reading and log exploration](storage-reading.md),
+  found by normalizing candidates that the template's literal words select ([Log search and exploration](log-exploration.md),
   *Log exploration*), so the result is exactly the lines the statistics counted as long as the normalization rules have not changed since
   they were counted; after a change of the rules without a rebuild, the lines of an old template are those that normalize to its text
   under the **current** rules, and may differ from its count.
@@ -163,8 +163,7 @@ covered hours than the minimum no usual level is known and nothing is reported.
 - The tables of the statistics: [Storage](storage.md), *Schema*; how the write path counts a batch's lines and the rebuild by
   `vandoxd templates`: [Storage writing](storage-writing.md), *Template statistics* and *Template rebuild*; the command line of `vandoxd
   templates`: [Backend host](backend-host.md), *Command line and exit codes*.
-- The search for the lines of a template and the rules of the logs view's queries: [Storage reading and log
-  exploration](storage-reading.md), *Log exploration*; their display: [Logs view](web-ui-logs-view.md).
+- The search for the lines of a template and the rules of the logs view's queries: [Log search and exploration](log-exploration.md), *Log exploration*; their display: [Logs view](web-ui-logs-view.md).
 - Recognizing known kinds of events: [Log signatures](log-signatures.md).
 
 ## Implementation

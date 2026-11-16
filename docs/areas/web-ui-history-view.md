@@ -7,7 +7,7 @@ chart of up to eight metrics with its notes, the list of events, and the panel o
 snapshot closest to a point in time. It covers the texts, the calls and the deadline, and the caps with the memory per circuit. The user
 relies on it to look at chosen metrics over a period side by side and to see what the server was doing at a moment of the chart. The
 query behind the chart is [Time-series queries](time-series-query.md); the three reads the page adds are described in
-[Storage reading and log exploration](storage-reading.md), *History reads*.
+[Storage reading](storage-reading.md), *History reads*.
 
 ## Behavior
 
@@ -184,12 +184,12 @@ display, at most 256 characters in at most 16 runs.
   the query result (at most 64 lines of 1,999 points; a point holds a state, four doubles, a time and a count, about 80 bytes: about
   11 MiB) and the view of the chart (per point three nullable doubles and a flag, 49 bytes at a step: about 6 MiB; 17 bytes at raw
   resolution: about 2 MiB), the 1,000 events (about 1.5 MiB of runs) and the lists of the panel (20 rows, a few hundred KiB at most). A
-  draw builds one more copy of the columns (about 2 MiB) and the message to the browser while it runs. The decoded snapshots are the
-  larger part of a moment read: the stamps are read first and only the chosen record is decoded, but the process record is still held
-  while the connection record is read, so two snapshots (each up to the 16 MiB payload limit as bytes plus its parsed document, whose
-  size is not measured) exist until the panel is built. The number of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
+  draw builds one more copy of the columns (about 2 MiB) and the message to the browser while it runs. The decoded snapshot is the
+  larger part of a moment read: the stamps are read first and only the chosen record is decoded, and `HistoryMomentReader` builds each
+  view inside the per-kind read and drops the record before the next kind, so one decoded snapshot (up to the 16 MiB payload limit as
+  bytes plus its parsed document, whose size is not measured) is held at a time; the two views stay until the panel is built. The number of circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
 - The page makes no call that scans: the stamp and record reads seek the indexes, and the metric list costs one index seek per listed
-  entry ([Storage reading and log exploration](storage-reading.md), *History reads*).
+  entry ([Storage reading](storage-reading.md), *History reads*).
 - A browser script cannot call anything but the two instance methods of the chart's reference (selection and click); both drop a value
   that is not finite, outside the storable range or, for the tolerance, outside 0 to one day, and do nothing after the chart was
   disposed. The framework's limit for a message from the browser, 32 KB, stays.
@@ -202,7 +202,7 @@ display, at most 256 characters in at most 16 runs.
 
 ## Not here
 
-- The query, its resolutions, caps and markers: [Time-series queries](time-series-query.md); the store reads: [Storage reading and log exploration](storage-reading.md).
+- The query, its resolutions, caps and markers: [Time-series queries](time-series-query.md); the store reads: [Storage reading](storage-reading.md).
 - The chart in general, the gate, external text and circuits: [Web UI](web-ui.md); the login: [Web login](web-login.md).
 - The logs the link opens: [Logs view](web-ui-logs-view.md); how snapshots are recorded: [Agent system metrics](agent-system-metrics.md),
   [Agent connections](agent-connections.md); how long they are kept: [Retention and rollups](retention.md).

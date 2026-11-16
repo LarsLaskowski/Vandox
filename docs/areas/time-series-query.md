@@ -131,7 +131,7 @@ collectors are external text from the agent, returned as stored; a view shows th
 
 ## Not here
 
-- The store reads and their limits: [Storage reading and log exploration](storage-reading.md), *Time-series reads*.
+- The store reads and their limits: [Storage reading](storage-reading.md), *Time-series reads*.
 - The fold into rollups, the periods and the watermark: [Retention and rollups](retention.md).
 - The chart, its between-samples state and the shared gate: [Web UI](web-ui.md).
 - The view that calls the query: [History view](web-ui-history-view.md).

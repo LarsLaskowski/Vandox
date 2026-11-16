@@ -82,7 +82,7 @@ whether the data shown is current.
 ## Limits and errors
 
 - **Store reads.** Each of the five calls takes one slot of the views' read gate ([Web UI](web-ui.md), *Store reads of the views*);
-  the page makes no further store call. The reads are described in [Storage reading and log exploration](storage-reading.md),
+  the page makes no further store call. The reads are described in [Storage reading](storage-reading.md),
   *Overview reads*.
 - **Memory per circuit** is bounded by the caps: one model of at most 256 unit rows, 16 mounts and 20 incident summaries, with external
   text capped like the other views; the store reads of a refresh hold at most 16 label texts per series.
@@ -98,7 +98,7 @@ whether the data shown is current.
 
 ## Not here
 
-- The reads themselves and their bounds: [Storage reading and log exploration](storage-reading.md).
+- The reads themselves and their bounds: [Storage reading](storage-reading.md).
 - The gate, circuits, external text and navigation: [Web UI](web-ui.md); the session rule: [Web login](web-login.md).
 - The incident page: [Incidents view](web-ui-incidents-view.md); what the agent records: [Wire format records](wire-format-records.md).
 - Health thresholds, alerts and charts of history: not built yet.
