@@ -33,7 +33,7 @@ public class RoutesTests
 
         // Assert
         Assert.Contains(typeof(Login), pages, "the login page is routable");
-        Assert.Contains(typeof(Home), others, "the home page is routable");
+        Assert.Contains(typeof(OverviewPage), others, "the overview page is routable");
         Assert.IsEmpty(unprotected, "pages without [Authorize]: " + string.Join(", ", unprotected));
         Assert.IsEmpty(anonymous, "pages with [AllowAnonymous]: " + string.Join(", ", anonymous));
         Assert.IsNotEmpty(typeof(Login).GetCustomAttributes<AllowAnonymousAttribute>(false), "the login page allows anonymous access");

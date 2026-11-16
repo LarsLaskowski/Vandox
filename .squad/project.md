@@ -183,8 +183,8 @@ marked planned.
 | agent state | a real store in `t.TempDir()` (`internal/agentstate`) | `agent-state.json` |
 | MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
-| time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `CountingClock` (Storage tests) | the clock |
-| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `ListLogger` (Backend tests) | store, readers |
+| time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `DisposeFailingClock` (Backend tests: timers that fail on asynchronous disposal), `RefreshProbe` (Backend tests: the overview refresh delegate), `CountingClock` (Storage tests) | the clock |
+| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader` (Backend tests: records calls, scripted results, can hold or fail a call), `ListLogger` (Backend tests) | store, readers |
 | retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
 | time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests): counts calls of the real store; `ProbeTimeSeriesReader` (Backend tests): held calls | `ITimeSeriesReader` |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |

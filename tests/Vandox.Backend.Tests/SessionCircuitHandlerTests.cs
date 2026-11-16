@@ -255,6 +255,132 @@ public class SessionCircuitHandlerTests
     }
 
     /// <summary>
+    /// While the activity is paused, inbound activity every 30 seconds does not extend the session: the check after 1 hour since the last unpaused activity (the sign-in) ends the circuit.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task InboundActivityDoesNotExtendSessionWhilePaused()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var sessions = new SessionStore(clock);
+        var ticket = NewTicket();
+        var activity = new SessionActivity();
+
+        await sessions.StoreAsync(ticket);
+
+        using var pause = activity.Pause();
+        using var handler = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions, activity);
+        var calls = 0;
+        var inbound = handler.CreateInboundActivityHandler(_ =>
+                                                           {
+                                                               calls++;
+
+                                                               return Task.CompletedTask;
+                                                           });
+
+        await ActEveryThirtySecondsAsync(clock, inbound, 119);
+
+        // Act
+        clock.Advance(TimeSpan.FromSeconds(31));
+
+        await Assert.ThrowsExactlyAsync<SessionEndedException>(() => inbound(null!), "the check 1 hour and 1 second after the sign-in");
+
+        // Assert
+        Assert.AreEqual(119, calls, "the activity within the hour passed");
+        Assert.IsFalse(sessions.IsActive(ticket.Principal), "the paused activity did not extend the session");
+    }
+
+    /// <summary>
+    /// After the pause ends, inbound activity extends the session again.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task InboundActivityExtendsSessionAfterPauseEnds()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var sessions = new SessionStore(clock);
+        var ticket = NewTicket();
+        var activity = new SessionActivity();
+
+        await sessions.StoreAsync(ticket);
+
+        using var handler = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions, activity);
+        var calls = 0;
+        var inbound = handler.CreateInboundActivityHandler(_ =>
+                                                           {
+                                                               calls++;
+
+                                                               return Task.CompletedTask;
+                                                           });
+        var pause = activity.Pause();
+
+        await ActEveryThirtySecondsAsync(clock, inbound, 60);
+        pause.Dispose();
+
+        // Act
+        await ActEveryThirtySecondsAsync(clock, inbound, 1);
+        clock.Advance(TimeSpan.FromMinutes(59));
+        await inbound(null!);
+
+        // Assert
+        Assert.AreEqual(62, calls, "every activity passed: 89.5 minutes after the sign-in, 59 minutes after the first activity after the pause");
+        Assert.IsTrue(sessions.IsActive(ticket.Principal), "the activity after the pause extended the session");
+    }
+
+    /// <summary>
+    /// While the activity is paused, an ended session still ends the circuit at the next inbound activity.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task InboundActivityEndsCircuitOfEndedSessionWhilePaused()
+    {
+        // Arrange
+        var sessions = new SessionStore(new FakeTimeProvider());
+        var ticket = NewTicket();
+        var key = await sessions.StoreAsync(ticket);
+        var activity = new SessionActivity();
+
+        using var pause = activity.Pause();
+        using var handler = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions, activity);
+        var calls = 0;
+        var inbound = handler.CreateInboundActivityHandler(_ =>
+                                                           {
+                                                               calls++;
+
+                                                               return Task.CompletedTask;
+                                                           });
+
+        await sessions.RemoveAsync(key);
+
+        // Act
+        await Assert.ThrowsExactlyAsync<SessionEndedException>(() => inbound(null!), "the ended session while paused");
+
+        // Assert
+        Assert.AreEqual(0, calls, "the next handler did not run");
+    }
+
+    /// <summary>
+    /// Advances the clock by 30 seconds and runs one inbound activity, a number of times.
+    /// </summary>
+    /// <param name="clock">The clock</param>
+    /// <param name="inbound">The inbound activity handler</param>
+    /// <param name="count">The number of activities</param>
+    /// <returns>A task that completes when every activity passed</returns>
+    private static async Task ActEveryThirtySecondsAsync(FakeTimeProvider clock, Func<Microsoft.AspNetCore.Components.Server.Circuits.CircuitInboundActivityContext, Task> inbound, int count)
+    {
+        for (var index = 0; index < count; index++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(30));
+            await inbound(null!);
+        }
+    }
+
+    /// <summary>
     /// Creates a ticket with a new session claim.
     /// </summary>
     /// <returns>The ticket</returns>

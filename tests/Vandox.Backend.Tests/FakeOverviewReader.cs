@@ -49,6 +49,11 @@ internal sealed class FakeOverviewReader : IOverviewReader, IDisposable
     internal Exception? Failure { get; set; }
 
     /// <summary>
+    /// Gets or sets a callback that runs with the member name when a call enters, before it is recorded, or <c>null</c> for none.
+    /// </summary>
+    internal Action<string>? Entered { get; set; }
+
+    /// <summary>
     /// Gets or sets the answer of <see cref="FreshnessAsync"/>.
     /// </summary>
     internal AgentFreshness Freshness { get; set; } = new();
@@ -121,6 +126,8 @@ internal sealed class FakeOverviewReader : IOverviewReader, IDisposable
     /// <returns>A task that returns the answer</returns>
     private async Task<TResult> RunAsync<TResult>(string name, object? argument, TResult answer, CancellationToken cancellationToken)
     {
+        Entered?.Invoke(name);
+
         lock (_lock)
         {
             _calls.Add((name, argument, cancellationToken));
