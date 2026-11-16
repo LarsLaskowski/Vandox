@@ -1,5 +1,6 @@
 using System.Text;
 
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Incidents;
@@ -21,6 +22,11 @@ public class OverviewPageTests
     /// The event id of the log entry of a failed read.
     /// </summary>
     private const int ReadFailedEventId = 74;
+
+    /// <summary>
+    /// The stale mark after a value: a space, then the static span, which the test renderer writes as the encoded text of its markup frame.
+    /// </summary>
+    private const string StaleMarkup = " &lt;span class=&quot;stale&quot;&gt;stale&lt;/span&gt;";
 
     #endregion // Constants
 
@@ -83,6 +89,7 @@ public class OverviewPageTests
         var firstSummaries = harness.Browser.Queries<IncidentListQuery>(FakeIncidentBrowser.IncidentSummaries);
 
         await WaitForTimerAsync(clock, OverviewView.RefreshInterval);
+        await IdleAsync(clock);
         clock.Advance(OverviewView.RefreshInterval);
         await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now.Add(OverviewView.RefreshInterval)), StringComparison.Ordinal));
 
@@ -120,6 +127,7 @@ public class OverviewPageTests
 
         harness.Reader.Freshness = Freshness(Now.AddSeconds(20));
         await WaitForTimerAsync(clock, OverviewView.RefreshInterval);
+        await IdleAsync(clock);
 
         // Act
         clock.Advance(OverviewView.RefreshInterval);
@@ -160,6 +168,7 @@ public class OverviewPageTests
         await harness.AddAsync();
         await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now), StringComparison.Ordinal));
         await WaitForTimerAsync(clock, OverviewView.RefreshInterval);
+        await IdleAsync(clock);
         clock.Advance(OverviewView.RefreshInterval);
         await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now.Add(OverviewView.RefreshInterval)), StringComparison.Ordinal));
 
@@ -190,6 +199,7 @@ public class OverviewPageTests
         await harness.AddAsync();
         await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now), StringComparison.Ordinal));
         await WaitForTimerAsync(clock, OverviewView.RefreshInterval);
+        await IdleAsync(clock);
         harness.Reader.Failure = new StoreException("store: reading: disk I/O error");
 
         // Act
@@ -199,6 +209,7 @@ public class OverviewPageTests
         var failed = harness.Html();
 
         harness.Reader.Failure = null;
+        await IdleAsync(clock);
         clock.Advance(OverviewView.RefreshInterval);
         await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now.AddSeconds(60)), StringComparison.Ordinal));
 
@@ -253,6 +264,7 @@ public class OverviewPageTests
         await harness.AddAsync();
         await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now), StringComparison.Ordinal));
         await WaitForTimerAsync(clock, OverviewView.RefreshInterval);
+        await IdleAsync(clock);
         await harness.Connection.OnConnectionDownAsync(null!, TestContext.CancellationToken);
 
         // Act
@@ -395,13 +407,332 @@ public class OverviewPageTests
     }
 
     /// <summary>
+    /// Stale freshness values, stale services and a stale unit carry the stale mark, and the units beyond the shown ones are counted.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [TestCategory("AC3")]
+    [TestCategory("AC4")]
+    public async Task OverviewPageMarksStaleFreshnessAndServices()
+    {
+        // Arrange
+        await using var harness = Harness(new TimerSignalingClock(Now));
+
+        harness.Reader.Freshness = new AgentFreshness
+                                   {
+                                       AgentId = "agent-1",
+                                       ReceivedAt = Now.AddMinutes(-6),
+                                       LastLiveAt = Now.AddMinutes(-10)
+                                   };
+        harness.Reader.Values = [
+                                    Series("agent", "agent_spool_bytes", Value(Now.AddMinutes(-10), 1536 * 1024)),
+                                    Series("agent", "agent_spool_age_seconds", Value(Now.AddMinutes(-10), 0))
+                                ];
+        harness.Reader.Services = new ServiceStatePage
+                                  {
+                                      States = [
+                                                   new LatestServiceState
+                                                   {
+                                                       Unit = "a.service",
+                                                       ActiveState = "active",
+                                                       SubState = "running",
+                                                       CapturedAt = Now.AddMinutes(-70)
+                                                   }
+                                               ],
+                                      Total = 3,
+                                      Newest = Now.AddMinutes(-70)
+                                  };
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now), StringComparison.Ordinal));
+
+        // Assert
+        var html = harness.Html();
+
+        Assert.Contains("<dd>2026-10-01 09:50:00 (10 min ago)" + StaleMarkup + "</dd>", html, "the stale live data with its mark");
+        Assert.Contains("<dd>2026-10-01 09:54:00 (6 min ago)" + StaleMarkup + "</dd>", html, "the stale receive time with its mark");
+        Assert.Contains("<dd>1.5 MiB, nothing unsent, as of 2026-10-01 09:50:00" + StaleMarkup + "</dd>", html, "the stale spool with its mark");
+        Assert.Contains("<p class=\"stale\">stale: no data received since 2026-10-01 09:54:00</p>", html, "the services are marked stale");
+        Assert.Contains("<td>2026-10-01 08:50:00" + StaleMarkup + "</td>", html, "the stale unit with its mark");
+        Assert.Contains("<p>and 2 more</p>", html, "the units beyond the shown ones");
+    }
+
+    /// <summary>
+    /// A figure row shows its mount as external text and its stale mark, and the mounts beyond the shown ones are counted.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task OverviewPageShowsMountAndStaleFigure()
+    {
+        // Arrange
+        var mount = $"/m{char.ConvertFromUtf32(0x202E)}x";
+
+        await using var harness = Harness(new TimerSignalingClock(Now));
+
+        harness.Reader.Values = [
+                                    new LatestSeries
+                                    {
+                                        Series = new SeriesKey("system", "filesystem_available_bytes"),
+                                        Values = [
+                                                     new LatestValue
+                                                     {
+                                                         CapturedAt = Now.AddMinutes(-10),
+                                                         Value = 1024,
+                                                         Labels = new Dictionary<string, string>
+                                                                  {
+                                                                      ["mount"] = mount
+                                                                  }
+                                                     }
+                                                 ],
+                                        LabelSets = 3
+                                    }
+                                ];
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now), StringComparison.Ordinal));
+
+        // Assert
+        var html = harness.Html();
+
+        Assert.Contains($"<td>Disk {ExternalHtml(mount)}</td>", html, "the disk row with its mount as external text after a space");
+        Assert.Contains("<td>1.0 KiB available</td>", html, "the available space of the mount");
+        Assert.Contains("<td>2026-10-01 09:50:00" + StaleMarkup + "</td>", html, "the time of the disk row with its stale mark");
+        Assert.DoesNotContain(char.ConvertFromUtf32(0x202E), html, "the direction control never reaches the page as itself");
+        Assert.Contains("<p>and 2 more mounts</p>", html, "the mounts beyond the shown ones");
+    }
+
+    /// <summary>
+    /// An open incident is listed with its link, and a latest incident whose first kill is after now is marked as dated in the future.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task OverviewPageListsOpenIncidentAndMarksFutureLatest()
+    {
+        // Arrange
+        await using var harness = Harness(new TimerSignalingClock(Now));
+
+        harness.Browser.Summaries = [
+                                        Incident(9, Now.AddHours(1), Now.AddHours(2), "php-fpm"),
+                                        Incident(7, Now.AddMinutes(-50), Now.AddMinutes(30), "mysqld")
+                                    ];
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now), StringComparison.Ordinal));
+
+        // Assert
+        var html = harness.Html();
+
+        Assert.Contains($"<ul><li><a href=\"incidents/7\">#7</a>, open, first kill 2026-10-01 09:10:00, {ExternalHtml("mysqld")}</li></ul>", html, "the open incident with its link");
+        Assert.Contains($"<p>Latest incident: <a href=\"incidents/9\">#9</a>, first kill 2026-10-01 11:00:00, {ExternalHtml("php-fpm")} dated in the future</p>", html, "the latest incident marked as dated in the future");
+    }
+
+    /// <summary>
+    /// Without an open incident the page says so and shows the latest incident without the future mark.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task OverviewPageShowsLatestIncidentWithoutOpenOne()
+    {
+        // Arrange
+        await using var harness = Harness(new TimerSignalingClock(Now));
+
+        harness.Browser.Summaries = [Incident(5, Now.AddHours(-2), Now.AddHours(-1), "mysqld")];
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForHtmlAsync(html => html.Contains(Updated(Now), StringComparison.Ordinal));
+
+        // Assert
+        var html = harness.Html();
+
+        Assert.Contains("<p>No open incident.</p>", html, "the text without an open incident");
+        Assert.DoesNotContain("<ul>", html, "no list of open incidents");
+        Assert.Contains($"<p>Latest incident: <a href=\"incidents/5\">#5</a>, first kill 2026-10-01 08:00:00, {ExternalHtml("mysqld")}</p>", html, "the latest incident without the future mark");
+    }
+
+    /// <summary>
+    /// A first refresh refused as an invalid query shows the failure line without values and is logged as a failed read, without the exception text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task OverviewPageShowsFailureLineForInvalidQuery()
+    {
+        // Arrange
+        await using var harness = Harness(new TimerSignalingClock(Now));
+
+        harness.Reader.Failure = new InvalidQueryException("store: invalid query: limit must be 1 to 1024");
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForHtmlAsync(html => html.Contains("<p class=\"failure\">", StringComparison.Ordinal));
+
+        // Assert
+        var html = harness.Html();
+
+        Assert.Contains("<p class=\"failure\">Refresh failed at 2026-10-01 10:00:00; no values have been read yet.</p>", html, "the failure line without values");
+        Assert.DoesNotContain("invalid query", html, "no exception text reaches the page");
+        Assert.HasCount(1, harness.Logger.Entries.Where(entry => entry.EventId.Id == ReadFailedEventId && entry.Level == LogLevel.Warning).ToList(), "the refused read is logged once");
+    }
+
+    /// <summary>
+    /// A page left while its refresh reads shows nothing of that refresh.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task OverviewPageAppliesNothingWhenLeftDuringRefresh()
+    {
+        // Arrange
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var left = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var harness = Harness(new TimerSignalingClock(Now));
+
+        harness.Reader.Hold = hold.Task;
+        await harness.AddAsync();
+        await harness.Reader.WaitForEntryAsync(TestContext.CancellationToken);
+
+        var page = harness.Page;
+
+        harness.Browser.Before = (_, _) =>
+                                 {
+                                     left.TrySetResult(page.DisposeAsync().AsTask());
+
+                                     return Task.CompletedTask;
+                                 };
+
+        // Act
+        hold.SetResult();
+
+        var disposal = await left.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        await disposal.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        AssertNothingApplied(harness);
+    }
+
+    /// <summary>
+    /// A page left after its refresh handed the new values to the dispatcher, but before they were applied, shows nothing of that refresh.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task OverviewPageAppliesNothingWhenLeftBeforeUpdateRuns()
+    {
+        // Arrange
+        var dispatcher = new HookingDispatcher();
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var left = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var harness = Harness(new TimerSignalingClock(Now), dispatcher);
+
+        harness.Reader.Hold = hold.Task;
+        await harness.AddAsync();
+        await harness.Reader.WaitForEntryAsync(TestContext.CancellationToken);
+
+        var page = harness.Page;
+
+        dispatcher.BeforeNextAction(() => left.TrySetResult(page.DisposeAsync().AsTask()));
+
+        // Act
+        hold.SetResult();
+
+        var disposal = await left.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        await disposal.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        AssertNothingApplied(harness);
+    }
+
+    /// <summary>
+    /// Checks that a page left during its first refresh still shows the waiting text, made every read of the refresh and released its pause.
+    /// </summary>
+    /// <param name="harness">The harness</param>
+    private static void AssertNothingApplied(OverviewPageHarness harness)
+    {
+        var html = harness.Html();
+
+        Assert.Contains($"<p>{LogViewSamples.Enc("Loading…")}</p>", html, "the waiting text stays");
+        Assert.DoesNotContain("Updated", html, "no values of the refresh are shown");
+        Assert.HasCount(4, harness.Reader.Calls, "the overview reads of the refresh ran");
+        Assert.HasCount(1, harness.Browser.Queries<IncidentListQuery>(FakeIncidentBrowser.IncidentSummaries), "the incident read of the refresh ran");
+        Assert.IsEmpty(harness.Renderer.Exceptions, "nothing is rendered after the page was left");
+        Assert.IsFalse(harness.Activity.IsPaused, "the pause is released");
+    }
+
+    /// <summary>
+    /// Creates the result of one series.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="name">The metric name</param>
+    /// <param name="value">The one value</param>
+    /// <returns>The series</returns>
+    private static LatestSeries Series(string source, string name, LatestValue value)
+    {
+        return new LatestSeries
+               {
+                   Series = new SeriesKey(source, name),
+                   Values = [value],
+                   LabelSets = 1
+               };
+    }
+
+    /// <summary>
+    /// Creates a value without labels.
+    /// </summary>
+    /// <param name="at">The capture time</param>
+    /// <param name="value">The value</param>
+    /// <returns>The value</returns>
+    private static LatestValue Value(DateTimeOffset at, double value)
+    {
+        return new LatestValue
+               {
+                   CapturedAt = at,
+                   Value = value
+               };
+    }
+
+    /// <summary>
+    /// Creates an incident summary whose window starts 10 minutes before its first kill.
+    /// </summary>
+    /// <param name="id">The number</param>
+    /// <param name="firstKillAt">The time of the first kill</param>
+    /// <param name="end">The end of the window</param>
+    /// <param name="victim">The first victim</param>
+    /// <returns>The summary</returns>
+    private static IncidentSummary Incident(long id, DateTimeOffset firstKillAt, DateTimeOffset end, string victim)
+    {
+        return new IncidentSummary
+               {
+                   Id = id,
+                   Start = firstKillAt.AddMinutes(-10),
+                   End = end,
+                   FirstKillAt = firstKillAt,
+                   LastKillAt = firstKillAt,
+                   KillCount = 1,
+                   FirstVictim = victim
+               };
+    }
+
+    /// <summary>
     /// Creates a harness whose reader answers with a fresh agent.
     /// </summary>
     /// <param name="clock">The clock of the page</param>
+    /// <param name="dispatcher">The dispatcher of the renderer, or <c>null</c> for the default one</param>
     /// <returns>The harness</returns>
-    private static OverviewPageHarness Harness(TimeProvider clock)
+    private static OverviewPageHarness Harness(TimeProvider clock, Dispatcher? dispatcher = null)
     {
-        var harness = new OverviewPageHarness(clock);
+        var harness = new OverviewPageHarness(clock, dispatcher);
 
         harness.Reader.Freshness = Freshness(Now.AddSeconds(-30));
 
@@ -494,6 +825,18 @@ public class OverviewPageTests
     private Task WaitForTimerAsync(TimerSignalingClock clock, TimeSpan dueTime)
     {
         return clock.WaitForTimersAsync(dueTime, 1, TestContext.CancellationToken).WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Waits until the page's refresher, the target of the refresh timer, has ended its refresh and cleared its running state, so the next trigger is not skipped.
+    /// </summary>
+    /// <param name="clock">The clock the refresher created its timer on</param>
+    /// <returns>A task that completes when the refresher is idle</returns>
+    private async Task IdleAsync(TimerSignalingClock clock)
+    {
+        var refresher = clock.TimerTargets.OfType<OverviewRefresher>().Single();
+
+        await refresher.Current.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
     }
 
     #endregion // Methods

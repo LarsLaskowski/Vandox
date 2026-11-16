@@ -23,10 +23,12 @@ internal sealed class ComponentTestRenderer : Renderer
     /// <param name="serviceProvider">The services the components are created from</param>
     /// <param name="loggerFactory">The logger factory</param>
     /// <param name="interactive">Whether <see cref="RendererInfo"/> says that the renderer is interactive, as in a circuit; a component that queries only then runs its query</param>
-    internal ComponentTestRenderer(IServiceProvider serviceProvider, ILoggerFactory loggerFactory, bool interactive = true)
+    /// <param name="dispatcher">The dispatcher, or <c>null</c> for the default one</param>
+    internal ComponentTestRenderer(IServiceProvider serviceProvider, ILoggerFactory loggerFactory, bool interactive = true, Dispatcher? dispatcher = null)
         : base(serviceProvider, loggerFactory)
     {
         _rendererInfo = new RendererInfo("Server", interactive);
+        Dispatcher = dispatcher ?? Dispatcher.CreateDefault();
     }
 
     #endregion // Constructors
@@ -170,6 +172,16 @@ internal sealed class ComponentTestRenderer : Renderer
 
                                           return id;
                                       });
+    }
+
+    /// <summary>
+    /// Gets the instance of a rendered component.
+    /// </summary>
+    /// <param name="componentId">The ID of the component</param>
+    /// <returns>The component</returns>
+    internal IComponent Component(int componentId)
+    {
+        return GetComponentState(componentId).Component;
     }
 
     /// <summary>
@@ -365,7 +377,7 @@ internal sealed class ComponentTestRenderer : Renderer
     #region Renderer
 
     /// <inheritdoc />
-    public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
+    public override Dispatcher Dispatcher { get; }
 
     /// <inheritdoc />
     protected override RendererInfo RendererInfo => _rendererInfo;

@@ -25,6 +25,11 @@ internal sealed class TimerSignalingClock : FakeTimeProvider
     /// </summary>
     private readonly List<(TimeSpan DueTime, int Count, TaskCompletionSource Source)> _waiters = [];
 
+    /// <summary>
+    /// The target of the callback of every timer created on the clock.
+    /// </summary>
+    private readonly List<object?> _targets = [];
+
     #endregion // Fields
 
     #region Constructors
@@ -46,6 +51,24 @@ internal sealed class TimerSignalingClock : FakeTimeProvider
     }
 
     #endregion // Constructors
+
+    #region Properties
+
+    /// <summary>
+    /// Gets the target of the callback of every timer created on the clock, in creation order, such as the object whose method the timer calls.
+    /// </summary>
+    internal IReadOnlyList<object?> TimerTargets
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return [.. _targets];
+            }
+        }
+    }
+
+    #endregion // Properties
 
     #region Methods
 
@@ -86,6 +109,7 @@ internal sealed class TimerSignalingClock : FakeTimeProvider
         lock (_lock)
         {
             _dueTimes.Add(dueTime);
+            _targets.Add(callback.Target);
 
             foreach (var waiter in _waiters.Where(candidate => _dueTimes.Count(due => due == candidate.DueTime) >= candidate.Count).ToList())
             {

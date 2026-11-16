@@ -49,7 +49,8 @@ internal sealed class OverviewPageHarness : IAsyncDisposable
     /// Initializes a new instance of the <see cref="OverviewPageHarness"/> class.
     /// </summary>
     /// <param name="clock">The clock of the page</param>
-    internal OverviewPageHarness(TimeProvider clock)
+    /// <param name="dispatcher">The dispatcher of the renderer, or <c>null</c> for the default one</param>
+    internal OverviewPageHarness(TimeProvider clock, Dispatcher? dispatcher = null)
     {
         Clock = clock;
         Reader = new FakeOverviewReader();
@@ -66,7 +67,7 @@ internal sealed class OverviewPageHarness : IAsyncDisposable
                                            .AddSingleton(Activity)
                                            .BuildServiceProvider();
 
-        Renderer = new ComponentTestRenderer(_services, _services.GetRequiredService<ILoggerFactory>());
+        Renderer = new ComponentTestRenderer(_services, _services.GetRequiredService<ILoggerFactory>(), dispatcher: dispatcher);
     }
 
     #endregion // Constructors
@@ -107,6 +108,11 @@ internal sealed class OverviewPageHarness : IAsyncDisposable
     /// Gets the interactive renderer.
     /// </summary>
     internal ComponentTestRenderer Renderer { get; }
+
+    /// <summary>
+    /// Gets the added page.
+    /// </summary>
+    internal OverviewPage Page => (OverviewPage)Renderer.Component(RootId);
 
     #endregion // Properties
 
