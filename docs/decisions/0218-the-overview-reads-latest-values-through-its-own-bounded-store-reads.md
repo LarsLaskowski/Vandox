@@ -1,6 +1,6 @@
 # 0218: The overview reads the latest values through its own bounded store reads, not the time-series query
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-16
 - **Area:** Web UI
 - **Source:** Issue #48

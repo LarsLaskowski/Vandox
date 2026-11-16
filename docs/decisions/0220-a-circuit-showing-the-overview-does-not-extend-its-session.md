@@ -1,6 +1,6 @@
 # 0220: A circuit showing the overview does not extend its session
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-16
 - **Area:** Web login
 - **Source:** Issue #48

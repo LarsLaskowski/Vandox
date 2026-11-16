@@ -1,6 +1,6 @@
 # 0219: The overview refreshes on a 30-second timer that skips overlaps and pauses while the connection is lost
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-16
 - **Area:** Web UI
 - **Source:** Issue #48
