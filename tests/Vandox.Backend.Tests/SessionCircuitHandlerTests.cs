@@ -29,7 +29,7 @@ public class SessionCircuitHandlerTests
 
         await sessions.StoreAsync(ticket);
 
-        var handler = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions);
+        var handler = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions, new SessionActivity());
         var calls = 0;
         var inbound = handler.CreateInboundActivityHandler(_ =>
                                                            {
@@ -67,8 +67,8 @@ public class SessionCircuitHandlerTests
             return Task.CompletedTask;
         }
 
-        var ended = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions).CreateInboundActivityHandler(Next);
-        var anonymous = new SessionCircuitHandler(new FixedAuthenticationStateProvider(new ClaimsPrincipal(new ClaimsIdentity())), sessions).CreateInboundActivityHandler(Next);
+        var ended = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions, new SessionActivity()).CreateInboundActivityHandler(Next);
+        var anonymous = new SessionCircuitHandler(new FixedAuthenticationStateProvider(new ClaimsPrincipal(new ClaimsIdentity())), sessions, new SessionActivity()).CreateInboundActivityHandler(Next);
 
         await sessions.RemoveAsync(key);
 
@@ -97,7 +97,7 @@ public class SessionCircuitHandlerTests
         await sessions.RemoveAsync(await sessions.StoreAsync(ended));
 
         var provider = new FixedAuthenticationStateProvider(active.Principal);
-        var handler = new SessionCircuitHandler(provider, sessions);
+        var handler = new SessionCircuitHandler(provider, sessions, new SessionActivity());
         var calls = 0;
         var inbound = handler.CreateInboundActivityHandler(_ =>
                                                            {
@@ -142,7 +142,7 @@ public class SessionCircuitHandlerTests
         var first = firstActive ? active.Principal : anonymous;
         var announced = firstActive ? other.Principal : active.Principal;
         var provider = new FixedAuthenticationStateProvider(first);
-        using var handler = new SessionCircuitHandler(provider, sessions);
+        using var handler = new SessionCircuitHandler(provider, sessions, new SessionActivity());
         var calls = 0;
         var inbound = handler.CreateInboundActivityHandler(_ =>
                                                            {
@@ -201,7 +201,7 @@ public class SessionCircuitHandlerTests
             await sessions.RemoveAsync(key);
         }
 
-        using var handler = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions);
+        using var handler = new SessionCircuitHandler(new FixedAuthenticationStateProvider(ticket.Principal), sessions, new SessionActivity());
         var calls = 0;
         var inbound = handler.CreateInboundActivityHandler(_ =>
                                                            {
@@ -235,7 +235,7 @@ public class SessionCircuitHandlerTests
     public async Task SessionCircuitHandlerWithoutKnownStateProcessesNoEvent()
     {
         // Arrange
-        using var handler = new SessionCircuitHandler(new UnsetAuthenticationStateProvider(), new SessionStore(new FakeTimeProvider()));
+        using var handler = new SessionCircuitHandler(new UnsetAuthenticationStateProvider(), new SessionStore(new FakeTimeProvider()), new SessionActivity());
         var calls = 0;
         var inbound = handler.CreateInboundActivityHandler(_ =>
                                                            {

@@ -13,6 +13,11 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     private readonly AuthenticationStateProvider _authenticationStateProvider;
     private readonly SessionStore _sessions;
 
+    // Skeleton: removed with the implementation
+#pragma warning disable S4487
+    private readonly SessionActivity _activity;
+#pragma warning restore S4487
+
     private Task<AuthenticationState>? _state;
 
     #endregion // Fields
@@ -24,10 +29,12 @@ internal sealed class SessionCircuitHandler : CircuitHandler, IDisposable
     /// </summary>
     /// <param name="authenticationStateProvider">The authentication state of the circuit</param>
     /// <param name="sessions">The sessions</param>
-    public SessionCircuitHandler(AuthenticationStateProvider authenticationStateProvider, SessionStore sessions)
+    /// <param name="activity">The activity of the circuit</param>
+    public SessionCircuitHandler(AuthenticationStateProvider authenticationStateProvider, SessionStore sessions, SessionActivity activity)
     {
         _authenticationStateProvider = authenticationStateProvider;
         _sessions = sessions;
+        _activity = activity;
 
         _authenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
     }

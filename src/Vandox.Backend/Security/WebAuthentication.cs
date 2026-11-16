@@ -84,6 +84,7 @@ internal static class WebAuthentication
         services.AddAuthorizationBuilder().SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
         services.AddCascadingAuthenticationState();
         services.AddScoped<AuthenticationStateProvider, SessionRevalidatingStateProvider>();
+        services.AddScoped<SessionActivity>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<CircuitHandler, SessionCircuitHandler>());
         services.AddAntiforgery(options =>
                                 {
