@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 
+using Vandox.Backend.Components.Charts;
 using Vandox.Backend.History;
 using Vandox.Backend.Hosting;
 using Vandox.Backend.Logs;
@@ -180,6 +181,17 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     /// </summary>
     [Inject]
     private ILogger<HistoryPage> Logger { get; set; } = null!;
+
+    /// <summary>
+    /// Gets the parameters of the chart: the view and the callbacks of the width, the selection and the click.
+    /// </summary>
+    private Dictionary<string, object?> ChartParameters => new()
+                                                           {
+                                                               [nameof(HistoryChart.View)] = _view,
+                                                               [nameof(HistoryChart.OnWidth)] = EventCallback.Factory.Create<double>(this, OnWidthAsync),
+                                                               [nameof(HistoryChart.OnSelect)] = EventCallback.Factory.Create<HistoryRange>(this, OnSelectAsync),
+                                                               [nameof(HistoryChart.OnPick)] = EventCallback.Factory.Create<HistoryPick>(this, OnPickAsync)
+                                                           };
 
     #endregion // Properties
 

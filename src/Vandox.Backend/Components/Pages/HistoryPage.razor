@@ -91,7 +91,7 @@ else
                 }
             }
 
-            <HistoryChart View="_view" OnWidth="OnWidthAsync" OnSelect="OnSelectAsync" OnPick="OnPickAsync" />
+            <HistoryChart @attributes="ChartParameters" />
 
             @if (_view is { Events.Count: > 0 })
             {
