@@ -254,6 +254,8 @@ public partial class HistoryPageTests
 
         // Assert
         Assert.Contains(Enc(text), harness.Html(), "the text of the address");
+        Assert.IsNotEmpty(harness.WithClass("history-chart"), "the chart host is still shown");
+        Assert.IsNotEmpty(harness.Buttons("Remove"), "the metric controls are still shown");
         Assert.IsEmpty(harness.Navigation.Navigations, "nothing is navigated to");
         Assert.HasCount(1, harness.Series.RawQueries, "the chart is not read again");
     }
@@ -499,6 +501,30 @@ public partial class HistoryPageTests
     }
 
     /// <summary>
+    /// The failure of the metric list read stays shown after a chart read succeeds.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC11")]
+    public async Task HistoryPageListFailureStaysAfterChartRead()
+    {
+        // Arrange
+        await using var harness = Started(OneMetric);
+
+        harness.Reader.Failure = new InvalidOperationException("secret detail of the store");
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForDrawsAsync(1);
+        await harness.WaitForAsync(() => harness.Reader.Calls.Count >= 1);
+        await harness.WaitForHtmlAsync(html => html.Contains(Enc(HistoryView.ChartFailureText), StringComparison.Ordinal));
+
+        // Assert
+        Assert.Contains(Enc(HistoryView.ChartFailureText), harness.Html(), "the list failure is still shown after the chart was read");
+        Assert.IsNotEmpty(harness.WithClass("history-chart"), "the chart is drawn");
+    }
+
+    /// <summary>
     /// A ninth metric is refused with the text of the limit and writes no address.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -526,6 +552,8 @@ public partial class HistoryPageTests
 
         // Assert
         Assert.Contains(Enc("At most 8 metrics can be drawn at once."), harness.Html(), "the text of the limit");
+        Assert.IsNotEmpty(harness.WithClass("history-chart"), "the chart host is still shown");
+        Assert.IsNotEmpty(harness.Buttons("Remove"), "the metric controls are still shown");
         Assert.IsEmpty(harness.Navigation.Navigations, "nothing is navigated to");
     }
 

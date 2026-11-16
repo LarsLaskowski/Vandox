@@ -131,6 +131,7 @@ public class HistoryAddressTests
     [DataRow("metric=cpu&range=2h&at=x", "metric")]
     [DataRow("range=2h&from=x&at=x", "range")]
     [DataRow("at=x&from=y", "from")]
+    [DataRow("?metric=a,b+c", "metric")]
     public void ParseRefusesInvalidValue(string query, string name)
     {
         // Arrange
@@ -284,7 +285,7 @@ public class HistoryAddressTests
     [DataRow("")]
     [DataRow("?metric=system,cpu_percent")]
     [DataRow("?metric=system,cpu_percent&metric=system,mem_available_bytes&range=30d&at=2026-10-01T10:00:30")]
-    [DataRow("?metric=a.b:c/d@e+f-g,h&from=2026-10-01T10:00:05&to=2026-10-02T11:30&at=2026-10-01T10:00")]
+    [DataRow("?metric=a.b:c/d@e%2Bf-g,h&from=2026-10-01T10:00:05&to=2026-10-02T11:30&at=2026-10-01T10:00")]
     [DataRow("?range=1y")]
     public void ToQueryReadsBackTheSameAddress(string query)
     {
