@@ -8,6 +8,12 @@ tag lists the merged pull requests in detail.
 
 ### Added
 
+- **History view** (issue #49): the new page *History* (`/history`) draws up to 8 chosen metrics over a range (the presets *1 h* to
+  *1 y* or *From* and *To*, in UTC) in one chart, each metric on its own scale with the first two axes drawn, a line per label set, a
+  step's minimum, average and maximum in the legend and markers for OOM kills, boots, service restarts and backup runs, and lists
+  the events below it. A drag zooms into a period; a click picks a moment and shows the process and the connection snapshot closest to it
+  within 10 minutes, with a link to the logs of that moment. Metrics, range and moment are in the address. There is no new option, route
+  or listener.
 - **Overview page** (issue #48): the start page `/` now shows, below `Updated <time>`, the data freshness (last live data, last data
   received, a running backfill and the agent's spool), the latest state of every service unit with `failed` units first, the key figures
   (memory, swap, pressure, disks, MariaDB) and the open and latest incident. A value older than 5 minutes is marked `stale`, a missing

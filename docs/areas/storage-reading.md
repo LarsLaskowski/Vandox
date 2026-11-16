@@ -3,7 +3,7 @@
 ## Scope
 
 How stored data is read from the backend's database ([Storage](storage.md)): record series and kinds, incidents and their notes,
-template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the reads of the overview page, the literal-term log search, and the log exploration
+template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the reads of the overview page, the reads of the history view (the stored metrics and the snapshot closest to a moment), the literal-term log search, and the log exploration
 that serves the logs view with bounded pages. `vandoxd incidents`, `vandoxd report` and the web UI's views rely on it. Every read runs on
 a reader connection and is interrupted by a cancelled token or a passed deadline ([Storage](storage.md), *Database file and connections*).
 
@@ -142,6 +142,29 @@ no current data and is not returned.
   required`, `at most 16 series`, `window must be positive and at most one day`, `label sets must be 1 to 64`, `retirement must be
   positive and at most one day` or `limit must be 1 to 1024`.
 
+### History reads
+
+The three reads of the history view ([History view](web-ui-history-view.md)); each is one reader lease and one or a few seeks of an
+existing index, never a scan.
+
+- **Stored metrics** (a limit of 1 to 256, refused otherwise with `store: invalid query: limit must be 1 to 256`): every source and name
+  that has a raw value in `metrics` or a bucket in `metric_rollups_1h`, merged without repeats, by source, then name, in the byte order of
+  their UTF-8 form (as SQLite orders text), the first *limit* of them; the result says whether a further metric exists. It is a skip
+  scan: the first source with its first name, then the next name of that source, then the first name of the next source, one index seek
+  per entry (`metrics(source, name, captured_at)`, the primary key of the hourly rollups), at most *limit* + 1 entries per table. Its cost
+  grows with the entries read, not with the stored rows.
+- **Snapshot stamp** (a kind, a moment, a window and a side): the ID and capture time, nothing else, of the snapshot of the kind closest to
+  the moment on one side. *At or before* takes capture times from the moment minus the window up to the moment, the latest first;
+  *after* from after the moment up to the moment plus the window, the earliest first; among records of one capture time the lower ID wins.
+  It returns nothing when no snapshot lies in the window. The kind must be `process_snapshot` or `connection_snapshot`
+  (`store: invalid query: kind must be a snapshot kind`), the window above 0 and at most one day (`store: invalid query: window must be
+  positive and at most one day`) and the moment within the storable range (`store: invalid query: at must be within the storable range`).
+  The read seeks `records(kind, captured_at)`; the *at or before* side adds a temporary tree for the ID term of its order, which holds
+  only the two columns read.
+- **Snapshot record**: the record of a stamp, by ID and kind (the kind rule above), read and decoded like a record of the record
+  reads, so one payload is decoded. It returns nothing when retention removed the record after the stamp was read.
+- The view reads the stamps of both sides and decodes only the record of the closer one, so no read decodes a snapshot it does not show.
+
 ### Log search
 
 A search takes literal terms only; the text is never passed to FTS5 as a query.
@@ -274,6 +297,7 @@ of the scan ([Storage](storage.md), *Schema*).
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why the record query pages by ID.
 - [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a cancelled token or deadline interrupts a reader statement.
 - [0218](../decisions/0218-the-overview-reads-latest-values-through-its-own-bounded-store-reads.md) — why the overview has its own bounded reads over the existing indexes.
+- [0222](../decisions/0222-the-history-view-reads-the-moments-snapshots-and-the-metric-list-through-its-own-bounded-reads.md) — why the history view has its own metric list and snapshot reads.
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view's search chooses between the index and a bounded scan and finds a template's lines by normalizing candidates.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the listener history reads the narrow derived
@@ -287,13 +311,13 @@ of the scan ([Storage](storage.md), *Schema*).
 - The database file, connections, interruption of reader statements, schema and retention: [Storage](storage.md).
 - How the rows are written: [Storage writing](storage-writing.md).
 - The template queries and the normalization: [Log templates](log-templates.md).
-- The page that shows the search, its address and its deadline: [Logs view](web-ui-logs-view.md).
+- The page that shows the search, its address and its deadline: [Logs view](web-ui-logs-view.md); the page of the history reads: [History view](web-ui-history-view.md).
 
 ## Implementation
 
 `Vandox.Storage`: `SqliteStore` implements the interfaces the callers depend on (`IRecordReader` with `RecordQuery.AfterId`,
 `ILogSearcher` with `FtsQuery`, `ILogExplorer`, `ILogTemplateReader`, `IIncidentBrowser` with `IncidentSummariesAsync`, `IncidentAsync` and
-`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IOverviewReader` (`OverviewQueries`, `LabelSetTally`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
+`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IOverviewReader` (`OverviewQueries`, `LabelSetTally`), `IHistoryReader` (`HistoryQueries`, `SkipCursor`; `StoredMetricList`, `SnapshotQuery`, `SnapshotStamp`, `SnapshotSide`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
 `AgentUidChanges`), `IAgentTimelineReader` with `GapsAsync` and `ClockAsync`, and the record writer, incident store and import tracker of
 [Storage writing](storage-writing.md)). The exploration is `LogFinder` (`SelectiveMatches`, `ProbeBudget`, `PageBudget`; the page reports
 `ScanLimitReached`, `IndexCheckStopped` and `Next`), `LogFinderQueries`, `LineIndex`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`

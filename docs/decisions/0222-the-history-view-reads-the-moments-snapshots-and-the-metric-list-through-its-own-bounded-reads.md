@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-16
-- **Area:** Web UI
+- **Area:** History view
 - **Source:** Issue #49
 - **Supersedes:** —
 

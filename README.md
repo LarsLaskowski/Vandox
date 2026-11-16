@@ -398,6 +398,15 @@ their counts and charts a template's lines per hour. Every filter is in the addr
 Template numbers change when the template statistics are rebuilt (*Rebuild template statistics* below). The pages, their limits
 and their messages: [Logs view](docs/areas/web-ui-logs-view.md).
 
+### Trace metrics over time
+
+The web UI draws chosen metrics over a period under *History* (`/history`). All times are **UTC**. Choose one or more metrics (up to 8)
+from the list and a range with the presets *1 h* to *1 y* or *From* and *To*; every metric has its own vertical scale, the first two have
+an axis, and the chart marks OOM kills, boots, service restarts and backup runs. Drag across the chart to zoom into a period; click in
+it to pick a moment, which shows the process and the connection snapshot closest to it (within 10 minutes) and a link to the logs
+around it. Everything is in the address, so a view can be bookmarked and shared; a preset stays relative to the time it is opened.
+The page and its limits: [History view](docs/areas/web-ui-history-view.md).
+
 ### Reconstruct incidents
 
 `vandoxd incidents` rebuilds the outage incidents from everything stored, so run it after each import (it needs no
