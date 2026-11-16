@@ -42,7 +42,7 @@ in a chart to what the server was doing then; the time-series query of #47
   snapshot's `total` is higher. Memory is PSS
   where the snapshot has it, else RSS, and the column says which. When the snapshot shown is later than the moment (the extra snapshot
   after an OOM kill is, and no longer lists the victim), the panel offers *Snapshot before this moment* with the time of the latest one
-  within 10 minutes before, which sets the moment to that time.
+  within 10 minutes before, which sets the moment to that time rounded up to the whole second, so that snapshot lies at or before it.
 - S8: The connection snapshot is chosen by the same rule: `Connection snapshot of <time> UTC (<source>)`, the count of every protocol
   and state, the 20 processes and the 20 remote addresses with the most connections, each with `and <n> more` beyond 20. For a
   counts-only snapshot (`aggregates_only`: every regular agent snapshot) the remotes are headed `Top remote addresses (the snapshot
