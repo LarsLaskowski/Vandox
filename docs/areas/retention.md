@@ -78,7 +78,7 @@ needs in [Storage writing](storage-writing.md).
   late value is later. A bucket past its tier's period is not created.
 - A raw value is never removed before it is folded: removal skips every metric above the watermark. A database of an earlier version
   folds all its stored values first, in steps, and removes after.
-- Readers take buckets of one series in a range, oldest first, with `IRollupReader` ([Storage reading and log exploration](storage-reading.md)); the time-series query ([Time-series queries](time-series-query.md)) reads steps of them and the earliest value not yet folded.
+- Readers take buckets of one series in a range, oldest first, with `IRollupReader` ([Storage reading](storage-reading.md)); the time-series query ([Time-series queries](time-series-query.md)) reads steps of them and the earliest value not yet folded.
 
 ## The job
 
@@ -149,7 +149,7 @@ operation and SQLite's message). A pass that changed nothing writes nothing.
 ## Not here
 
 - The tables and their migration step: [Storage](storage.md). How a batch is written and deduplicated: [Storage writing](storage-writing.md).
-- Reading rollups: [Storage reading and log exploration](storage-reading.md). Charts of rollups are a later feature.
+- Reading rollups: [Storage reading](storage-reading.md). Charts of rollups are a later feature.
 - What the incident reconstruction and the report do with removed data: [Incidents](incidents.md), [Forensics report](forensics-report.md).
 - The options and their error text: [Configuration options](configuration-options.md).
 

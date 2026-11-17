@@ -27,8 +27,7 @@ changes](listener-changes.md). Operators and the later rule engine rely on it.
 
 The backend classifies **every agent record as live or backfilled** when it stores it (record 0130, amending 0022). The decision is
 final: a stored record is never updated, so a record that was backfilled never becomes live and can never alert later. No alert exists yet
-that reads the classification; the rule engine (#56, #61) and the gap views (#54) are its readers, through the store ([Storage reading and log
-exploration](storage-reading.md)). The header's `mode` and `clock_offset_ns` are not used; the agent sends no clock offset.
+that reads the classification; the rule engine (#56, #61) and the gap views (#54) are its readers, through the store ([Storage reading](storage-reading.md)). The header's `mode` and `clock_offset_ns` are not used; the agent sends no clock offset.
 
 - **The rule.** A record is **live** exactly when its *lateness* lies within the allowance of its kind and no open sequence gap of its
   agent starts below its number; otherwise it is backfilled. Lateness is the batch's receive time minus the record's capture time

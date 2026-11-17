@@ -63,6 +63,11 @@ public static class StorageLimits
     public const int MaxQueryLimit = 10000;
 
     /// <summary>
+    /// The largest number of stored metrics one list read returns.
+    /// </summary>
+    public const int MaxStoredMetrics = 256;
+
+    /// <summary>
     /// The largest number of terms in a log search text.
     /// </summary>
     public const int MaxSearchTerms = 16;

@@ -28,9 +28,26 @@ internal sealed class RecordingNavigationManager : NavigationManager
     /// </summary>
     internal List<string> Targets { get; } = [];
 
+    /// <summary>
+    /// Gets the navigations in order: the address and the options of each.
+    /// </summary>
+    internal List<(string Uri, NavigationOptions Options)> Navigations { get; } = [];
+
     #endregion // Properties
 
     #region Methods
+
+    /// <summary>
+    /// Changes the address as the browser does after the user edited it or went back: the address is applied and the change is announced, but no navigation
+    /// is recorded.
+    /// </summary>
+    /// <param name="uri">The absolute or base-relative address</param>
+    internal void Go(string uri)
+    {
+        Uri = ToAbsoluteUri(uri).ToString();
+
+        NotifyLocationChanged(false);
+    }
 
     /// <summary>
     /// Sets the current address without recording a navigation.
@@ -49,6 +66,7 @@ internal sealed class RecordingNavigationManager : NavigationManager
     protected override void NavigateToCore(string uri, NavigationOptions options)
     {
         Targets.Add(uri);
+        Navigations.Add((uri, options));
 
         Uri = ToAbsoluteUri(uri).ToString();
 

@@ -580,5 +580,13 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 74, Level = LogLevel.Warning, Message = "overview: reading failed")]
     internal static partial void OverviewReadFailed(this ILogger logger, Exception exception);
 
+    /// <summary>
+    /// Logs that reading the history view failed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The exception of the read</param>
+    [LoggerMessage(EventId = 75, Level = LogLevel.Error, Message = "history view: reading failed")]
+    internal static partial void HistoryReadFailed(this ILogger logger, Exception exception);
+
     #endregion // Methods
 }

@@ -5,7 +5,7 @@
 The two pages of the [web UI](web-ui.md) that read the stored log lines: the search (`/logs`) and the template list
 (`/logs/templates`). It covers their address, what they show, their calls and deadline, and their limits. The user relies on it to
 find the log lines around a moment and the templates a source logs. The store behind them is the log exploration of
-[Storage reading and log exploration](storage-reading.md), the templates are those of [Log templates](log-templates.md).
+[Log search and exploration](log-exploration.md), the templates are those of [Log templates](log-templates.md).
 
 ## Behavior
 
@@ -23,7 +23,7 @@ is written only from validated values: the parameters in this order, each percen
 
 | Parameter | Value |
 | --------- | ----- |
-| `q` | the search text (the literal-term rules of [Storage reading and log exploration](storage-reading.md), *Log search*) |
+| `q` | the search text (the literal-term rules of [Log search and exploration](log-exploration.md), *Log search*) |
 | `source` | one source, exact |
 | `program` | one program, exact |
 | `severity` | `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info` or `debug` (lower case); shows lines with that priority or a more severe one, and no line without a priority |
@@ -129,7 +129,7 @@ that are escaped, which are longer when written out. A page keeps the capped tex
 
 - The general web UI (render mode, gate, external-text display, headers, circuits): [Web UI](web-ui.md); the other views:
   [Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md).
-- The search and its bounds in the store: [Storage reading and log exploration](storage-reading.md).
+- The search and its bounds in the store: [Log search and exploration](log-exploration.md).
 - Templates and their statistics: [Log templates](log-templates.md).
 - The login: [Web login](web-login.md).
 

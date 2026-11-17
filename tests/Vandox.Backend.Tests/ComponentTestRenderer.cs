@@ -48,6 +48,11 @@ internal sealed class ComponentTestRenderer : Renderer
     /// </summary>
     internal List<Exception> Exceptions { get; } = [];
 
+    /// <summary>
+    /// Gets or sets an action that runs after each render batch, or <c>null</c> for none.
+    /// </summary>
+    internal Action? Rendered { get; set; }
+
     #endregion // Properties
 
     #region Methods
@@ -392,6 +397,7 @@ internal sealed class ComponentTestRenderer : Renderer
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
     {
         Interlocked.Exchange(ref _rendered, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+        Rendered?.Invoke();
 
         return Task.CompletedTask;
     }

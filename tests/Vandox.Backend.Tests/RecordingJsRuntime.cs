@@ -11,6 +11,8 @@ internal sealed class RecordingJsRuntime : IJSRuntime
 
     private readonly Dictionary<(string Target, string Identifier), Exception> _failures = [];
 
+    private readonly Dictionary<(string Target, string Identifier), object> _answers = [];
+
     #endregion // Fields
 
     #region Properties
@@ -19,6 +21,11 @@ internal sealed class RecordingJsRuntime : IJSRuntime
     /// Gets or sets the gate that holds back the completion of every <c>create</c> call; <see langword="null"/> completes the call at once.
     /// </summary>
     internal TaskCompletionSource? CreateGate { get; set; }
+
+    /// <summary>
+    /// Gets or sets an action that runs after each recorded call, or <see langword="null"/> for none.
+    /// </summary>
+    internal Action? Recorded { get; set; }
 
     /// <summary>
     /// Gets every call of the runtime and of the references it handed out, in the order they were made.
@@ -46,6 +53,39 @@ internal sealed class RecordingJsRuntime : IJSRuntime
     }
 
     /// <summary>
+    /// Makes the calls of an identifier on a target return a value when the caller asks for that type.
+    /// </summary>
+    /// <param name="target">The target: <c>runtime</c>, <c>module</c> or <c>chart</c></param>
+    /// <param name="identifier">The identifier</param>
+    /// <param name="value">The value to return</param>
+    internal void Answer(string target, string identifier, object value)
+    {
+        _answers[(target, identifier)] = value;
+    }
+
+    /// <summary>
+    /// Gets the scripted answer of a call.
+    /// </summary>
+    /// <typeparam name="TValue">The type the caller asks for</typeparam>
+    /// <param name="target">The target</param>
+    /// <param name="identifier">The identifier</param>
+    /// <param name="value">Receives the answer</param>
+    /// <returns><see langword="true"/> when an answer of that type is scripted</returns>
+    internal bool TryAnswer<TValue>(string target, string identifier, out TValue value)
+    {
+        if (_answers.TryGetValue((target, identifier), out var answer) && answer is TValue typed)
+        {
+            value = typed;
+
+            return true;
+        }
+
+        value = default!;
+
+        return false;
+    }
+
+    /// <summary>
     /// Lets the next calls of an identifier on a target succeed again after <see cref="Fail"/>.
     /// </summary>
     /// <param name="target">The target: <c>runtime</c>, <c>module</c> or <c>chart</c></param>
@@ -62,6 +102,7 @@ internal sealed class RecordingJsRuntime : IJSRuntime
     internal void Record(RecordedJsCall call)
     {
         Calls.Add(call);
+        Recorded?.Invoke();
 
         if (_failures.TryGetValue((call.Target, call.Identifier), out var exception))
         {
@@ -79,7 +120,7 @@ internal sealed class RecordingJsRuntime : IJSRuntime
         var name = identifier switch
                    {
                        "import" => "module",
-                       "create" or "createStacked" => "chart",
+                       "create" or "createStacked" or "createHistory" => "chart",
                        _ => identifier
                    };
         var reference = new RecordingJsObjectReference(this, name);
@@ -109,7 +150,7 @@ internal sealed class RecordingJsRuntime : IJSRuntime
             return ValueTask.FromResult((TValue)(object)CreateReference(identifier));
         }
 
-        return ValueTask.FromResult(default(TValue)!);
+        return ValueTask.FromResult(TryAnswer<TValue>("runtime", identifier, out var answer) ? answer : default!);
     }
 
     #endregion // IJSRuntime

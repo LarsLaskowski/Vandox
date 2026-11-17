@@ -1,0 +1,197 @@
+@page "/history"
+
+<PageTitle>History</PageTitle>
+
+<h1>History</h1>
+
+<div class="history-presets" role="group" aria-label="Range">
+    @foreach (var preset in Presets)
+    {
+        <button type="button" class="@PresetClass(preset)" @onclick="() => ApplyPreset(preset)">@HistoryView.PresetLabel(preset)</button>
+    }
+</div>
+
+<form class="filters history-range" @onsubmit:preventDefault>
+    <label>From (UTC)
+        <input type="datetime-local" step="1" name="from" value="@_from" @onchange="args => _from = args.Value?.ToString() ?? string.Empty" />
+    </label>
+    <label>To (UTC)
+        <input type="datetime-local" step="1" name="to" value="@_to" @onchange="args => _to = args.Value?.ToString() ?? string.Empty" />
+    </label>
+    <button type="submit" @onclick="Apply" @onclick:preventDefault>@ApplyText</button>
+</form>
+
+@if (_error.Length > 0)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else
+{
+    <form class="filters history-metrics" @onsubmit:preventDefault>
+        <label>Metric
+            <select name="metric" value="@_choice" @onchange="args => _choice = args.Value?.ToString() ?? string.Empty">
+                @for (var index = 0; index < _options.Count; index++)
+                {
+                    <option value="@index">@_options[index].Source @_options[index].Name</option>
+                }
+            </select>
+        </label>
+        <button type="submit" @onclick="AddMetric" @onclick:preventDefault>@AddText</button>
+    </form>
+
+    @if (_listCut)
+    {
+        <p class="note">@HistoryView.MetricListCutText</p>
+    }
+
+    @if (_address.Metrics.Count > 0)
+    {
+        <ul class="history-chosen">
+            @foreach (var metric in _address.Metrics)
+            {
+                <li>
+                    <span>@metric.Source @metric.Name</span>
+                    <button type="button" @onclick="() => RemoveMetric(metric)">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+
+    @if (_controlError.Length > 0)
+    {
+        <p class="error" role="alert">@_controlError</p>
+    }
+
+    @if (RendererInfo.IsInteractive == false)
+    {
+        <p>@HistoryView.LoadingText</p>
+    }
+    else
+    {
+        @if (_listFailure.Length > 0)
+        {
+            <p class="error" role="alert">@_listFailure</p>
+        }
+
+        @if (_failure.Length > 0)
+        {
+            <p class="error" role="alert">@_failure</p>
+        }
+
+        @if (_address.Metrics.Count == 0)
+        {
+            <p>@HistoryView.ChooseMetricsText</p>
+        }
+        else if (_future)
+        {
+            <p class="note">@HistoryView.FutureRangeText</p>
+        }
+        else
+        {
+            @if (_view is not null)
+            {
+                @foreach (var note in _view.Notes)
+                {
+                    <p class="note">@note</p>
+                }
+
+                @if (_view.StepNote.Length > 0)
+                {
+                    <p class="note">@_view.StepNote</p>
+                }
+            }
+
+            <HistoryChart @attributes="ChartParameters" />
+
+            @if (_view is { Events.Count: > 0 })
+            {
+                <h2>Events</h2>
+                <div class="table-scroll">
+                <table class="history-events">
+                    <thead>
+                        <tr>
+                            <th scope="col">Time (UTC)</th>
+                            <th scope="col">Kind</th>
+                            <th scope="col">Text</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _view.Events)
+                        {
+                            <tr>
+                                <td><button type="button" class="link" @onclick="() => SetMoment(row.At)">@LogsView.ShowSeconds(row.At)</button></td>
+                                <td>@row.Kind</td>
+                                <td><ExternalText Runs="row.Text" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+            }
+        }
+
+        @if (_address.At is { } at)
+        {
+            <section class="history-moment" aria-label="Moment">
+                <h2>Moment @LogsView.ShowSeconds(at) UTC</h2>
+                <p><a href="@IncidentsView.LogsHref(at)">Logs of this moment</a></p>
+
+                @if (_momentFailure.Length > 0)
+                {
+                    <p class="error" role="alert">@_momentFailure</p>
+                }
+                else if (_moment is null)
+                {
+                    <p>@HistoryView.LoadingText</p>
+                }
+                else
+                {
+                    @if (_moment.Process is { } process)
+                    {
+                        <h3>Process snapshot of @LogsView.ShowSeconds(process.CapturedAt) UTC (<ExternalText Runs="process.Source" />)</h3>
+
+                        @if (_moment.ProcessBefore is { } before)
+                        {
+                            <p><button type="button" @onclick="() => SnapshotBefore(before)">Snapshot before this moment (@LogsView.ShowSeconds(before) UTC)</button></p>
+                        }
+
+                        @if (process.Note.Length > 0)
+                        {
+                            <p class="note">@process.Note</p>
+                        }
+
+                        <HistorySnapshotTable Table="process.Programs" />
+                        <HistorySnapshotTable Table="process.Processes" />
+
+                        @if (process.ListedOfTotal.Length > 0)
+                        {
+                            <p class="note">@process.ListedOfTotal</p>
+                        }
+                    }
+                    else
+                    {
+                        <p>@HistoryView.NoProcessSnapshotText</p>
+                    }
+
+                    @if (_moment.Connection is { } connection)
+                    {
+                        <h3>Connection snapshot of @LogsView.ShowSeconds(connection.CapturedAt) UTC (<ExternalText Runs="connection.Source" />)</h3>
+
+                        @if (connection.Note.Length > 0)
+                        {
+                            <p class="note">@connection.Note</p>
+                        }
+
+                        <HistorySnapshotTable Table="connection.States" />
+                        <HistorySnapshotTable Table="connection.Processes" />
+                        <HistorySnapshotTable Table="connection.Remotes" />
+                    }
+                    else
+                    {
+                        <p>@HistoryView.NoConnectionSnapshotText</p>
+                    }
+                }
+            </section>
+        }
+    }
+}

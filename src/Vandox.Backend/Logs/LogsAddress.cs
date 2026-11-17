@@ -226,6 +226,21 @@ public sealed class LogsAddress
     }
 
     /// <summary>
+    /// Reads a time in the form of the address.
+    /// </summary>
+    /// <param name="value">The text</param>
+    /// <param name="time">The time in UTC</param>
+    /// <returns><c>true</c> when the text is a time of the storable range in one of the two forms</returns>
+    internal static bool TryReadTime(string value, out DateTimeOffset time)
+    {
+        time = default;
+
+        return value.All(character => TimeCharacters.Contains(character, StringComparison.Ordinal))
+               && DateTimeOffset.TryParseExact(value, _timeFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out time)
+               && StorableTime.Contains(time);
+    }
+
+    /// <summary>
     /// Formats a user text with one argument.
     /// </summary>
     /// <param name="format">The format</param>
@@ -263,21 +278,6 @@ public sealed class LogsAddress
         }
 
         return bytes <= MaxValueBytes;
-    }
-
-    /// <summary>
-    /// Reads a time in the form of the address.
-    /// </summary>
-    /// <param name="value">The text</param>
-    /// <param name="time">The time in UTC</param>
-    /// <returns><c>true</c> when the text is a time of the storable range in one of the two forms</returns>
-    private static bool TryReadTime(string value, out DateTimeOffset time)
-    {
-        time = default;
-
-        return value.All(character => TimeCharacters.Contains(character, StringComparison.Ordinal))
-               && DateTimeOffset.TryParseExact(value, _timeFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out time)
-               && StorableTime.Contains(time);
     }
 
     /// <summary>

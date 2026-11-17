@@ -4,7 +4,7 @@
 
 The in-process query of metric lines for a range: which resolution it answers at, the time axis, the state of every point, the list of
 gaps and their mapping to lines, the markers (kills, boots, service restarts, backup runs), up to when the points are complete, the caps,
-the errors and the performance criterion. The history views of the web UI (planned) call it in process;
+the errors and the performance criterion. The history view of the web UI ([History view](web-ui-history-view.md)) calls it in process;
 no HTTP route, page, option or listener belongs to it.
 
 ## Behavior
@@ -131,10 +131,10 @@ collectors are external text from the agent, returned as stored; a view shows th
 
 ## Not here
 
-- The store reads and their limits: [Storage reading and log exploration](storage-reading.md), *Time-series reads*.
+- The store reads and their limits: [Storage reading](storage-reading.md), *Time-series reads*.
 - The fold into rollups, the periods and the watermark: [Retention and rollups](retention.md).
 - The chart, its between-samples state and the shared gate: [Web UI](web-ui.md).
-- The views that call the query: planned.
+- The view that calls the query: [History view](web-ui-history-view.md).
 
 ## Implementation
 

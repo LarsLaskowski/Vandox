@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IOverviewReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
 {
     #region Constants
 
@@ -1335,6 +1335,35 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IOverviewReader
+
+    #region IHistoryReader
+
+    /// <inheritdoc/>
+    public Task<StoredMetricList> StoredMetricsAsync(int limit, CancellationToken cancellationToken)
+    {
+        HistoryQueries.ValidateLimit(limit);
+
+        return ReadAsync(connection => HistoryQueries.ReadMetricsAsync(connection, limit, cancellationToken), HistoryQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<SnapshotStamp?> SnapshotStampAsync(SnapshotQuery query, CancellationToken cancellationToken)
+    {
+        HistoryQueries.ValidateStamp(query);
+
+        return ReadAsync(connection => HistoryQueries.ReadStampAsync(connection, query, cancellationToken), HistoryQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<StoredRecord?> SnapshotAsync(SnapshotStamp stamp, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stamp);
+        HistoryQueries.ValidateKind(stamp.Kind);
+
+        return ReadAsync(connection => HistoryQueries.ReadSnapshotAsync(connection, stamp, cancellationToken), HistoryQueries.Context, cancellationToken);
+    }
+
+    #endregion // IHistoryReader
 
     #region IAsyncDisposable
 

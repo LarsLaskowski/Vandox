@@ -40,5 +40,24 @@ public class RoutesTests
         Assert.IsNotEmpty(typeof(Login).GetCustomAttributes<ExcludeFromInteractiveRoutingAttribute>(false), "the login page is rendered statically");
     }
 
+    /// <summary>
+    /// The history page is routable at <c>/history</c> and requires authorization.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public void RoutesHistoryPageRoutesToHistoryAndRequiresAuthorization()
+    {
+        // Arrange
+        var type = typeof(HistoryPage);
+
+        // Act
+        var templates = type.GetCustomAttributes<RouteAttribute>(false).Select(route => route.Template).ToArray();
+
+        // Assert
+        Assert.Contains("/history", templates, "the history page is routed at /history");
+        Assert.IsNotEmpty(type.GetCustomAttributes<AuthorizeAttribute>(true), "the history page requires authorization");
+        Assert.IsEmpty(type.GetCustomAttributes<AllowAnonymousAttribute>(true), "the history page does not allow anonymous access");
+    }
+
     #endregion // Methods
 }
