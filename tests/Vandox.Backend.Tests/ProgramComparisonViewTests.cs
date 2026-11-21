@@ -204,7 +204,7 @@ public class ProgramComparisonViewTests
     /// <returns>The figures</returns>
     private static ProgramFigures Snapshot(DateTimeOffset capturedAt, bool listsEveryProgram, params (string Program, double RssMebibytes, double Cpu)[] programs)
     {
-        return Figures(capturedAt, listsEveryProgram, [.. programs.Select(program => (program.Program, Figure(program.RssMebibytes * Mebibyte, null, program.Cpu)))]);
+        return Figures(capturedAt, listsEveryProgram, [.. programs.Select(program => (program.Program, Figure(program.RssMebibytes, null, program.Cpu)))]);
     }
 
     /// <summary>
