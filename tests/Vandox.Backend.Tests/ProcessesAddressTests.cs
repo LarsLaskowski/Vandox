@@ -461,6 +461,25 @@ public class ProcessesAddressTests
     }
 
     /// <summary>
+    /// Parsing no query and comparing with no address are refused.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public void ProcessesAddressRefusesNullArguments()
+    {
+        // Arrange
+        var address = ProcessesAddress.Parse(string.Empty);
+
+        // Act
+        var query = Assert.Throws<ArgumentNullException>(() => ProcessesAddress.Parse(null!), "no query");
+        var other = Assert.Throws<ArgumentNullException>(() => address.SameChart(null!), "no address");
+
+        // Assert
+        Assert.AreEqual("query", query.ParamName, "the query parameter");
+        Assert.AreEqual("other", other.ParamName, "the other parameter");
+    }
+
+    /// <summary>
     /// Gives the error text of an invalid value.
     /// </summary>
     /// <param name="name">The name of the parameter</param>

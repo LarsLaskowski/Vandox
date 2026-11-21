@@ -400,6 +400,58 @@ public partial class ProcessesPageTests
     }
 
     /// <summary>
+    /// The source choice shows the source the charts show: the address's own source, or without one the listed source with the latest bucket.
+    /// </summary>
+    /// <param name="query">The query of the address</param>
+    /// <param name="expected">The chosen source</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    [DataRow("", Agent)]
+    [DataRow("?source=import", Import)]
+    public async Task ProcessesPageSelectsTheShownSourceInTheChoice(string query, string expected)
+    {
+        // Arrange
+        await using var harness = new ProcessesPageHarness(query);
+
+        harness.Rollups.Sources = ProcessesSamples.SourceList(false, (Agent, ProcessesPageHarness.Now.AddMinutes(-5)), (Import, ProcessesPageHarness.Now.AddHours(-3)));
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForDrawsAsync(2);
+
+        // Assert
+        Assert.AreEqual(expected, harness.Field("source").Attributes["value"], "the value of the select is the shown source");
+    }
+
+    /// <summary>
+    /// <c>Cancel</c> of the armed state stops waiting for the second point without writing an address, and <c>Compare from here</c> is offered again.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task ProcessesPageCancelLeavesTheArmedState()
+    {
+        // Arrange
+        await using var harness = new ProcessesPageHarness(MomentQuery);
+
+        await harness.AddAsync();
+        await harness.WaitForDrawsAsync(2);
+        await harness.WaitForAsync(() => harness.Buttons(CompareFromHere).Count == 1);
+        await harness.PressAsync(CompareFromHere);
+        await harness.WaitForTextAsync(ArmedText);
+
+        // Act
+        await harness.PressAsync("Cancel");
+        await harness.WaitForAsync(() => harness.Buttons(CompareFromHere).Count == 1);
+
+        // Assert
+        Assert.DoesNotContain(ArmedText, harness.Text(), "the second point is no longer awaited");
+        Assert.IsEmpty(harness.Buttons("Cancel"), "the cancel button is gone");
+        Assert.IsEmpty(harness.Navigation.Navigations, "nothing is navigated to");
+    }
+
+    /// <summary>
     /// <c>Compare from here</c> arms the second point; the next click writes it as <c>compare</c>, keeps the moment and replaces the entry of the history, and the
     /// panel <c>Comparison</c> takes the place of <c>Top processes</c>.
     /// </summary>

@@ -197,6 +197,29 @@ public class ProcessesMomentReaderTests
     }
 
     /// <summary>
+    /// When the earlier point has no snapshot within ten minutes, the text names it as the first or the second point as it was given.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task ProcessesMomentReaderSaysWhichPointHasNoSnapshotWhenTheEarlierOneHasNone()
+    {
+        // Arrange
+        var near = HistorySamples.Base.AddMinutes(10);
+        var far = HistorySamples.Base.AddHours(3);
+
+        using var inner = Reader((1, "agent", far));
+
+        // Act
+        var firstMissing = await new ProcessesMomentReader(inner).CompareAsync("agent", near, far, TestContext.CancellationToken);
+        var secondMissing = await new ProcessesMomentReader(inner).CompareAsync("agent", far, near, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual("No process snapshot was stored within 10 minutes of the first point.", firstMissing.Text, "the earlier point was given first");
+        Assert.AreEqual("No process snapshot was stored within 10 minutes of the second point.", secondMissing.Text, "the earlier point was given second");
+    }
+
+    /// <summary>
     /// Two points whose closest snapshot is the same one give the text to choose points further apart and no rows.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

@@ -196,6 +196,25 @@ public class ProgramComparisonViewTests
     }
 
     /// <summary>
+    /// A comparison without one of the two snapshots is refused.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public void ProgramComparisonViewCompareRefusesAMissingSnapshot()
+    {
+        // Arrange
+        var figures = ProcessesSamples.Figures(HistorySamples.Base, true);
+
+        // Act
+        var first = Assert.Throws<ArgumentNullException>(() => ProgramComparisonView.Compare(null!, figures), "no earlier snapshot");
+        var second = Assert.Throws<ArgumentNullException>(() => ProgramComparisonView.Compare(figures, null!), "no later snapshot");
+
+        // Assert
+        Assert.AreEqual("earlier", first.ParamName, "the earlier parameter");
+        Assert.AreEqual("later", second.ParamName, "the later parameter");
+    }
+
+    /// <summary>
     /// Creates the figures of a snapshot of the source <c>agent</c> from programs with their RSS in MiB and their CPU percent.
     /// </summary>
     /// <param name="capturedAt">The capture time</param>

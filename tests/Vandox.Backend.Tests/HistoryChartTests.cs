@@ -60,6 +60,31 @@ public class HistoryChartTests
     }
 
     /// <summary>
+    /// The host carries the default label without one and the given label with one.
+    /// </summary>
+    /// <param name="label">The label that is given, or null</param>
+    /// <param name="expected">The accessible name of the host</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [DataRow(null, "History chart")]
+    [DataRow("Memory per program", "Memory per program")]
+    [DataRow("CPU per program", "CPU per program")]
+    public async Task HistoryChartLabelsTheHostWithItsLabel(string? label, string expected)
+    {
+        // Arrange
+        await using var fixture = new HistoryChartFixture(View(1), label);
+
+        // Act
+        var id = await fixture.AddAsync();
+
+        // Assert
+        var host = fixture.Renderer.Elements(id).Single(element => element.Tag == "div");
+
+        Assert.AreEqual(expected, host.Attributes["aria-label"], "the host's accessible name");
+    }
+
+    /// <summary>
     /// Without a view the chart reports its width and draws nothing.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
