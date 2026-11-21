@@ -37,14 +37,12 @@ snapshots.
 
 ## Errors and edge cases
 
-- E1: A snapshot is a PSS snapshot when it lists at least one program and every listed program carries `pss_bytes` (the agent drops a
-  program's PSS when one of its processes has none: `internal/procstats/snapshot.go`). A program's PSS average is its PSS sum over the
+- E1: A snapshot is a PSS snapshot when it lists at least one program and every listed program carries `pss_bytes`. A program's PSS average is its PSS sum over the
   bucket's PSS snapshots; an RSS snapshot (a legacy import, an agent without `CAP_SYS_PTRACE`) counts toward RSS only, and a range
   holding one reads as RSS (S5).
 - E2: A snapshot that does not list every program: the sum of its programs' `count` differs from `total`, `total` is absent and
-  `complete` is false, or it lists no program (the agent's size fallback can drop them all). The agent's regular snapshots list only
-  the top 25 processes and so have `complete` false while their programs cover every process read; they count as listing every program
-  when the counts add up to `total`.
+  `complete` is false, or it lists no program. A regular agent snapshot (`complete` false, top 25 processes) lists every program when the
+  counts add up to `total`.
 - E3: A snapshot with more than 50 programs: the 50 with the highest memory in the snapshot's own key (PSS for a PSS snapshot, else
   RSS) and the 50 with the highest CPU % are folded by name, ties by program name in ordinal order, every other program into *other
   programs* of that snapshot, so the bucket's total stays exact; a program outside the cut reads lower in that bucket, without a flag.
@@ -52,26 +50,24 @@ snapshots.
   bucket holds at most 500 named programs per source: the first 500 names it meets in fold order stay named, any further name folds into
   *other programs*.
 - E5: Sums that would overflow (forged values near 2^64 bytes or a huge CPU %) are clamped to the range of a double, as in the
-  metric rollups, so a fold step never fails on them.
+  metric rollups, in the fold and in every sum the read computes, so a fold step never fails on them and a read returns finite values.
 - E6: A read with an unknown source, an empty range or no bucket: empty result, no error; a range beyond the storable range, an *n*
   below 1 or above 50, a step that is not one of the query's steps or a range of more than 2,000 steps: the store's invalid-query
   error. A step below one hour over a range that starts before the 5-minute period returns what the 5-minute buckets still hold, gaps
   before, with the starts-before flag set.
-- E7: The database busy or a step failing: the fold step rolls back with the retention job's warning or error line and is retried at
-  the next tick; no snapshot is removed while it is not folded.
+- E7: The database busy or a step failing: the fold step rolls back with the job's warning or error line and is retried at the next
+  tick.
 - E8: A database of an earlier version: its stored snapshots are folded first, in bounded steps, before any snapshot is removed.
 - E9: A stored snapshot whose data does not decode is skipped by the fold, counted in its log line, passed by the fold's position and
   removed with its period, so it never stops folding or removal.
 
 ## Non-functional requirements
 
-- N1: No new configuration option: the buckets follow `retention.rollups_5m` and `retention.rollups_1h`; imported snapshots are
-  folded too and their buckets follow the same periods.
+- N1: No new configuration option: the buckets of every origin follow `retention.rollups_5m` and `retention.rollups_1h`.
 - N2: A fold step reads at most a bounded number of snapshots and bytes, holds at most one step's data in memory, and stays within
   the work of one ingest batch on the reference host, measured with the storage benchmark (the figures are the plan's).
-- N3: A read holds in memory at most *n* + 1 lines of at most 2,000 steps, whatever the number of stored buckets or programs, and
-  runs on a reader connection under the caller's cancellation; a 1-year range of the reference database returns within the
-  10-second deadline of the views (#50 N4, the measurement is the plan's).
+- N3: A read holds at most *n* + 1 lines of at most 2,000 steps in memory, runs on a reader connection under the caller's
+  cancellation, and returns a 1-year range of the reference database within the views' 10-second deadline (#50 N4).
 - N4: The disk growth of the rollups per day of a reference host is measured and stated in the area document; the free-space floor
   `ingest.min_free` stays the bound of last resort against forged program names.
 - N5: The service log adds counts only (snapshots folded and skipped, buckets folded and removed), never a program name.
@@ -89,7 +85,7 @@ snapshots.
   that key, *other programs*, the incomplete count per step, gaps, the folded-until time, the starts-before flag and E6's results
   (S5, S6, E1, E6).
 - AC5: The source list returns the sources with per-program buckets in a range with their latest bucket time within the range (S6).
-- AC6: Overflowing sums are clamped, hostile names are stored as received, and the log lines carry counts only (E4, E5, N5).
+- AC6: Overflowing sums are clamped in the fold and the read, which returns only finite values; hostile names are stored as received, and the log lines carry counts only (E4, E5, N5).
 - AC7: The fold step, the read and the disk growth meet the figures of N2, N3 and N4 on the reference host (N2, N3, N4).
 
 ## Out of scope
@@ -140,3 +136,9 @@ snapshots.
   states that each snapshot weighs equally, as in the metric rollups; time weighting is out of scope.
 - Minor 6 (source list time) — accepted: S6 and AC5 return each source's latest bucket within the range, so #50 S6 can pick the default
   source.
+
+## Amendments
+
+| Criterion | Change | Reason | Step | Decided by |
+| --------- | ------ | ------ | ---- | ---------- |
+| AC6 | Clamping extends to the read, which returns only finite values (E5 too) | Security plan review: sums of forged CPU values reached Infinity in the read | 3 | Lead |
