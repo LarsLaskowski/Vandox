@@ -181,3 +181,47 @@ are counted in the log); the agent is untouched; backfill classification is unto
 ## Out of scope / follow-ups
 
 The processes view (#50); connection history (#51).
+
+## Challenge notes
+
+Devil's Advocate, plan challenge: feature #458 (specs/feature-458-process-rollups/plan.md, spec.md, tasks.md, record 0223)
+
+The plan holds up on its main points. I checked these against the code and they are right:
+- Removal walk (`RetentionRemover.IsRemovable`, src/Vandox.Storage/RetentionRemover.cs:504-529): each pass starts over, so a snapshot kept as unfolded is looked at again on the next pass. Retention.md:95-96 says the same.
+- Imported records are never walked (`RetentionQueries.WalkRecords`, `origin <> 'import'`).
+- `ReadNumber` returns 0 when the key is missing (RetentionSession.cs:72-77), so after the upgrade the stored snapshots fold first (E8).
+- Log events 76 and 77 are free; 60-75 are taken.
+- Stored payloads have already passed `Validate()` at ingest (RecordRules.cs:32).
+- Every agent's process snapshots carry source `processes` (internal/procstats/procstats.go:33). Legacy imports use their own source, so imported and live snapshots never mix in one bucket.
+- There is no no-change outcome: no existing code keeps per-program history past `retention.snapshots`.
+- The tier (`standard`, areas 9 and 10) is right.
+
+The objections below are all minor: each is a detail the Dev or Tester can follow without changing the plan.
+
+minor 1: catching decode errors and dead code. Why it matters: the program fold now runs in the metric fold's transaction, so any exception it does not catch stops both folds on every tick.
+- Evidence: `RunRetentionAsync` (src/Vandox.Storage/SqliteStore.cs:510-537) turns only a `SqliteException` into a `StoreException`. `RetentionService.RollUpAsync` (src/Vandox.Backend/Retention/RetentionService.cs:117-125) catches only `StoreException` and cancellation. The plan's skip list (Approach, *Fold*) names only NULL data, `JsonException`, `InvalidOperationException` and a payload that is not a `ProcessSnapshot`. `JsonSerializer` can also throw `NotSupportedException`.
+- Instruction for the Dev: skip and count a row on any exception from decoding that one row, not only the two named types. Also skip a decoded snapshot whose `Validate()` returns an error, which covers a null entry in `programs`.
+- Instruction for the Dev: drop the "duplicate names merged" branch, or keep it with a comment and a test. It cannot be reached, because `ProcessSnapshot.Validate` refuses duplicate program names (src/Vandox.Core/Model/ProcessSnapshot.cs, the `names` HashSet loop) before anything is stored. As written it is an untested branch that counts against the *Coverage gate*.
+
+minor 2: PSS columns must merge correctly when they are NULL. Why it matters: a NOT NULL failure here would stop the fold for good.
+- Evidence: in SQLite 3.53.1, `min(NULL,5)`, `max(NULL,5)` and `NULL+5` all return NULL (I ran this). The plan leaves `pss_min`/`pss_max` NULL when there is no PSS snapshot, and copies the metric clamp `MIN(MAX(sum + excluded.sum, $low), $high)` (RetentionQueries.cs, `UpsertFiveMinutes`).
+- Instruction for the Dev: write the upserts for `pss_min`, `pss_max` and `pss_sum` (program rows and totals) so a NULL on either side keeps the other value, for example with `coalesce`/`CASE`. Declare `pss_sum` so a step of RSS snapshots only writes 0, not NULL.
+- Instruction for the Tester: add a test that folds one bucket in two steps, first only RSS snapshots, then a PSS snapshot, and the reverse order. Assert that the step commits and that the RSS columns and totals stay right.
+
+minor 3: the empty result against the tier test.
+- Evidence: plan *Read* says "Query 1 … no row → empty result", before `StartsBeforeBuckets` and `EarliestUnfolded` are worked out. *Tests per criterion* for AC4 expects `SqliteStoreProgramRollupsReadsTheTierOfTheStep` ("30-minute step over a range older than the 5-minute period: gaps, flag set"). If the range lies wholly before the 5-minute period it has no 5-minute totals row, so by the plan's own rule the result is empty and the flag is not set.
+- Instruction for the Dev: compute `StartsBeforeBuckets` and `EarliestUnfolded` for the empty result too, so a caller can tell "nothing stored" from "use a coarser step".
+- Instruction for the Tester: in that test, let the range start before the 5-minute horizon and end inside it (gaps first, then values, flag set). Add one case with a range wholly before the horizon: empty lines, flag set.
+
+minor 4: the step axis is not specified.
+- Evidence: the plan defines `ProgramRollupResult.Times` only as "the step starts". docs/areas/time-series-query.md (*Points*, "At a step") fixes the times as multiples of the step since the Unix epoch (UTC), the first being the step that holds `from`, each point covering its whole step. #50 draws these lines next to the metric lines.
+- Instruction for the Dev: align the steps exactly that way.
+- Instruction for the Tester: count the 2,000-step cap as steps overlapping the range on that grid. Assert the first time for a `from` that is not on a step boundary.
+
+minor 5: the benchmark for N2/N3 measures only typical data. Why it matters: the bound in retention.md (lines 90-93, "a step is meant to stay within the work of one ingest batch") now covers a metric step plus a program step under one write lock.
+- Evidence: plan *Benchmark* times fold steps over snapshots of 80 programs, and the read over 80 programs. The worst step is 10,000 metric rows plus a program part that hits the 2 MiB budget, or a single first row of up to 16 MiB (plan fact 7) with up to 4,096 programs and 1,024-byte names (fact 3).
+- Instruction for the Dev: add to `--programs` one worst-case fold step (a full metric step plus the largest snapshots the wire allows). Report it next to the typical figures in docs/BENCHMARKS.md, so AC7 states the bound and not only the typical case.
+
+minor 6: "The write path is unchanged" is not quite true.
+- Evidence: plan *Architecture check*. Schema step 16 adds the partial index `records_process_fold` on `records`. It is updated on every insert and delete of a process snapshot, and step 16 builds it with a scan of the whole `records` table at start-up. `records_removable` (SchemaMigrator.cs:337) is the precedent.
+- Instruction for the Dev: say this in storage.md (index cost and the one-time build at migration). Measure how long step 16 takes on the benchmark database.
