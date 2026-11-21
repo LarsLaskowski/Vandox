@@ -28,7 +28,8 @@ public class SeriesLadderTests
     [DataRow(24, 24, 60)]
     [DataRow(24, 12, 120)]
     [DataRow(24, 1, 1440)]
-    [DataRow(240, 5, 2880)]
+    [DataRow(240, 5, 4320)]
+    [DataRow(240, 6, 2880)]
     public void SeriesLadderChooseTakesTheSmallestStepWithinTheTarget(int hours, int target, int expectedMinutes)
     {
         // Arrange
