@@ -259,4 +259,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0220 | A circuit showing the overview does not extend its session | Accepted | 2026-11-16 |
 | 0221 | The history view draws every metric on its own scale with two drawn axes and the step's extremes in the legend | Accepted | 2026-11-16 |
 | 0222 | The history view reads the moment's snapshots and the metric list through its own bounded reads | Accepted | 2026-11-16 |
+| 0223 | Process snapshots are folded into per-program buckets beside a source total, by record ID | Accepted | 2026-11-21 |
 <!-- project:end index -->

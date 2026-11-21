@@ -502,6 +502,142 @@ public class RetentionServiceTests
     }
 
     /// <summary>
+    /// A fold pass logs the process snapshots folded and skipped and the program buckets written, summed over its steps, in a line of its own; a pass that only skipped snapshots logs it too, and a removal pass logs the program rows removed per tier, also when nothing else was removed.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task RetentionServiceLogsProgramRollupAndRemovalCounts()
+    {
+        // Arrange
+        var store = new ScriptedRetentionStore();
+        var capture = new IngestLogCapture();
+        var events = new ListLogger();
+
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                Values = 3,
+                                                Buckets = 2,
+                                                Snapshots = 5,
+                                                SkippedSnapshots = 1,
+                                                ProgramBuckets = 4,
+                                                More = true
+                                            }));
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                Snapshots = 7,
+                                                SkippedSnapshots = 2,
+                                                ProgramBuckets = 6,
+                                                More = false
+                                            }));
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                SkippedSnapshots = 4,
+                                                More = false
+                                            }));
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                More = false
+                                            }));
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             ProgramFiveMinuteRows = 3,
+                             ProgramHourlyRows = 4,
+                             More = true
+                         });
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             ProgramFiveMinuteRows = 30,
+                             ProgramHourlyRows = 40,
+                             More = false
+                         });
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             ProgramHourlyRows = 9,
+                             More = false
+                         });
+
+        using var factory = CreateFactory(capture, events);
+        using var service = new RetentionService(store, Policy(), new FakeTimeProvider(_start), factory.CreateLogger("vandoxd"));
+
+        // Act
+        await service.RollUpAsync(TestContext.CancellationToken);
+
+        var first = capture.Entries.Select(entry => entry.Text).ToList();
+
+        await service.RollUpAsync(TestContext.CancellationToken);
+
+        var second = capture.Entries.Select(entry => entry.Text).Skip(first.Count).ToList();
+
+        await service.RollUpAsync(TestContext.CancellationToken);
+
+        var third = capture.Entries.Count - first.Count - second.Count;
+
+        await service.RemoveAsync(TestContext.CancellationToken);
+
+        await service.RemoveAsync(TestContext.CancellationToken);
+
+        var removals = capture.Entries.Skip(first.Count + second.Count + third).Select(entry => entry.Text).ToList();
+        var program = capture.Entries.Where(entry => entry.Text.StartsWith("retention program rollup", StringComparison.Ordinal)).ToList();
+
+        // Assert
+        Assert.Contains("retention program rollup 12 3 10", first, "the first pass: the snapshots, skipped snapshots and buckets of its two steps");
+        Assert.Contains("retention rollup 3 2", first, "the line of the values is not changed");
+        Assert.AreSequenceEqual(["retention program rollup 0 4 0"], second, "a pass that only skipped snapshots logs its line");
+        Assert.AreEqual(0, third, "a pass that folded nothing logs nothing");
+        Assert.HasCount(2, program, "one line per pass with a count");
+        AssertValues(program[0], ("Snapshots", "12"), ("Skipped", "3"), ("Buckets", "10"));
+        Assert.Contains("retention removal program rollups 33 44", removals, "the rows of both tiers, summed over the steps");
+        Assert.Contains("retention removal program rollups 0 9", removals, "a pass that removed only hourly program rows logs its line");
+        Assert.DoesNotContain(text => text.StartsWith(RecordsLine, StringComparison.Ordinal) || text.StartsWith(DerivedLine, StringComparison.Ordinal), removals, "no other removal line is written");
+        Assert.AreEqual(2, events.Entries.Count(entry => entry.Level == LogLevel.Information && entry.EventId.Id == 76), "the program rollup lines are information events 76");
+        Assert.AreEqual(2, events.Entries.Count(entry => entry.Level == LogLevel.Information && entry.EventId.Id == 77), "the removal lines are information events 77");
+    }
+
+    /// <summary>
+    /// The program lines carry counts only: their fields are numbers and their text holds no other text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task RetentionServiceLogsProgramCountsWithoutNames()
+    {
+        // Arrange
+        var store = new ScriptedRetentionStore();
+        var capture = new IngestLogCapture();
+        var events = new ListLogger();
+
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                Snapshots = 2,
+                                                SkippedSnapshots = 1,
+                                                ProgramBuckets = 3,
+                                                More = false
+                                            }));
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             ProgramFiveMinuteRows = 5,
+                             ProgramHourlyRows = 6,
+                             More = false
+                         });
+
+        using var factory = CreateFactory(capture, events);
+        using var service = new RetentionService(store, Policy(), new FakeTimeProvider(_start), factory.CreateLogger("vandoxd"));
+
+        // Act
+        await service.RollUpAsync(TestContext.CancellationToken);
+        await service.RemoveAsync(TestContext.CancellationToken);
+
+        var entries = capture.Entries.Where(entry => entry.Text.Contains("program rollup", StringComparison.Ordinal)).ToList();
+
+        // Assert
+        Assert.AreSequenceEqual(["retention program rollup 2 1 3", "retention removal program rollups 5 6"], entries.Select(entry => entry.Text).ToList(), "only the template text and the counts");
+        AssertValues(entries[0], ("Snapshots", "2"), ("Skipped", "1"), ("Buckets", "3"));
+        AssertValues(entries[1], ("FiveMinuteRows", "5"), ("HourlyRows", "6"));
+        Assert.IsTrue(entries.All(entry => entry.Values.Values.All(value => long.TryParse(value, out _))), "every field is a number");
+    }
+
+    /// <summary>
     /// Returns the periods of a policy in the order of the keys.
     /// </summary>
     /// <param name="policy">The policy</param>

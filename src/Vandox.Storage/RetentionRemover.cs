@@ -19,6 +19,14 @@ internal sealed class RetentionRemover
 
     private const string HourlyBuckets = "rollups_1h";
 
+    private const string ProgramFiveMinuteRows = "program_rollups_5m";
+
+    private const string ProgramFiveMinuteTotals = "program_rollup_totals_5m";
+
+    private const string ProgramHourlyRows = "program_rollups_1h";
+
+    private const string ProgramHourlyTotals = "program_rollup_totals_1h";
+
     private const string TemplateHours = "template_hours";
 
     private const string Incidents = "incidents";
@@ -30,6 +38,10 @@ internal sealed class RetentionRemover
     private const long MergePages = -64;
 
     private const string UpperParameter = "$upper";
+
+    private const string SourceParameter = "$source";
+
+    private const string BucketParameter = "$bucket";
 
     private const string LimitParameter = "$limit";
 
@@ -52,6 +64,10 @@ internal sealed class RetentionRemover
                                                    GapRows,
                                                    FiveMinuteBuckets,
                                                    HourlyBuckets,
+                                                   ProgramFiveMinuteRows,
+                                                   ProgramFiveMinuteTotals,
+                                                   ProgramHourlyRows,
+                                                   ProgramHourlyTotals,
                                                    TemplateHours,
                                                    Incidents,
                                                    Holds
@@ -64,6 +80,7 @@ internal sealed class RetentionRemover
     private readonly long _highestId;
     private readonly long _scanned;
     private readonly long _watermark;
+    private readonly long _programWatermark;
     private readonly long? _eventsHorizon;
     private readonly Dictionary<string, int> _counts = [with(StringComparer.Ordinal)];
 
@@ -91,6 +108,7 @@ internal sealed class RetentionRemover
         _highestId = session.ReadHighestId();
         _scanned = session.ReadNumber(RetentionQueries.KillScanKey);
         _watermark = session.ReadNumber(RetentionQueries.RollupWatermarkKey);
+        _programWatermark = session.ReadNumber(RetentionQueries.ProgramRollupWatermarkKey);
         _eventsHorizon = policy.Events is null ? null : StorageTime.ToNanoseconds(now - policy.Events.Value);
     }
 
@@ -206,6 +224,8 @@ internal sealed class RetentionRemover
                    Gaps = Count(GapRows),
                    FiveMinuteValues = Count(FiveMinuteBuckets),
                    HourlyValues = Count(HourlyBuckets),
+                   ProgramFiveMinuteRows = Count(ProgramFiveMinuteRows) + Count(ProgramFiveMinuteTotals),
+                   ProgramHourlyRows = Count(ProgramHourlyRows) + Count(ProgramHourlyTotals),
                    TemplateHours = Count(TemplateHours),
                    RemovedIncidents = Count(Incidents),
                    Holds = Count(Holds),
@@ -238,8 +258,8 @@ internal sealed class RetentionRemover
                    RecordKind.ProcessSnapshot or RecordKind.ConnectionSnapshot or RecordKind.MariaDbStatus => _policy.Snapshots,
                    RecordKind.KernelEvent or RecordKind.ServiceState or RecordKind.BackupRun => _policy.Events,
                    GapRecords or GapRows => GapPeriod(),
-                   FiveMinuteBuckets => _policy.FiveMinuteRollups,
-                   HourlyBuckets or TemplateHours => _policy.HourlyRollups,
+                   FiveMinuteBuckets or ProgramFiveMinuteRows or ProgramFiveMinuteTotals => _policy.FiveMinuteRollups,
+                   HourlyBuckets or ProgramHourlyRows or ProgramHourlyTotals or TemplateHours => _policy.HourlyRollups,
                    _ => _policy.Incidents
                };
     }
@@ -278,6 +298,10 @@ internal sealed class RetentionRemover
                    GapRows => Walk(limit => ReadGaps(position, horizon, limit), row => RemoveGap(row, position)),
                    FiveMinuteBuckets => Walk(limit => ReadBuckets(RetentionQueries.WalkFiveMinutes, horizon, limit), row => RemoveBucket(RetentionQueries.DeleteFiveMinutes, row)),
                    HourlyBuckets => Walk(limit => ReadBuckets(RetentionQueries.WalkHourly, horizon, limit), row => RemoveBucket(RetentionQueries.DeleteHourly, row)),
+                   ProgramFiveMinuteRows => Walk(limit => ReadProgramRows(RetentionQueries.WalkProgramFiveMinutes, horizon, limit), row => RemoveProgramRow(RetentionQueries.DeleteProgramFiveMinutes, row)),
+                   ProgramFiveMinuteTotals => Walk(limit => ReadProgramTotals(RetentionQueries.WalkProgramTotalFiveMinutes, horizon, limit), row => RemoveProgramTotal(RetentionQueries.DeleteProgramTotalFiveMinutes, row)),
+                   ProgramHourlyRows => Walk(limit => ReadProgramRows(RetentionQueries.WalkProgramHourly, horizon, limit), row => RemoveProgramRow(RetentionQueries.DeleteProgramHourly, row)),
+                   ProgramHourlyTotals => Walk(limit => ReadProgramTotals(RetentionQueries.WalkProgramTotalHourly, horizon, limit), row => RemoveProgramTotal(RetentionQueries.DeleteProgramTotalHourly, row)),
                    TemplateHours => Walk(limit => ReadTemplateHours(position, horizon, limit), row => RemoveTemplateHour(row, position)),
                    Incidents => Walk(limit => ReadIncidents(position, horizon, limit), row => RemoveIncident(row, position)),
                    Holds => Walk(limit => ReadHolds(position, horizon, limit), row => RemoveHold(row, position)),
@@ -513,6 +537,11 @@ internal sealed class RetentionRemover
             return row.Id <= _watermark;
         }
 
+        if (kind == RecordKind.ProcessSnapshot)
+        {
+            return row.Id <= _programWatermark;
+        }
+
         if (kind != RecordKind.ConnectionSnapshot)
         {
             return true;
@@ -667,7 +696,71 @@ internal sealed class RetentionRemover
     /// <returns><c>true</c> when the bucket was removed</returns>
     private bool RemoveBucket(string sql, RetentionBucketRow row)
     {
-        return _session.Statement(sql).Set("$source", row.Source).Set("$name", row.Name).Set("$labels", row.Labels).Set("$bucket", row.Bucket).Execute() > 0;
+        return _session.Statement(sql).Set(SourceParameter, row.Source).Set("$name", row.Name).Set("$labels", row.Labels).Set(BucketParameter, row.Bucket).Execute() > 0;
+    }
+
+    /// <summary>
+    /// Reads a page of the oldest program rows of a tier below the horizon.
+    /// </summary>
+    /// <param name="sql">The walk statement of the tier</param>
+    /// <param name="horizon">The bucket start before which a bucket has expired</param>
+    /// <param name="limit">The page size</param>
+    /// <returns>The program rows</returns>
+    private List<RetentionProgramRow> ReadProgramRows(string sql, long horizon, int limit)
+    {
+        var rows = new List<RetentionProgramRow>();
+
+        using var reader = _session.Statement(sql).Set(UpperParameter, horizon).Set(LimitParameter, (long)limit).Query();
+
+        while (reader.Read())
+        {
+            rows.Add(new RetentionProgramRow(reader.GetString(0), reader.GetInt64(1), reader.GetString(2)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Removes a program row.
+    /// </summary>
+    /// <param name="sql">The delete statement of the tier</param>
+    /// <param name="row">The program row</param>
+    /// <returns><c>true</c> when the row was removed</returns>
+    private bool RemoveProgramRow(string sql, RetentionProgramRow row)
+    {
+        return _session.Statement(sql).Set(SourceParameter, row.Source).Set(BucketParameter, row.Bucket).Set("$program", row.Program).Execute() > 0;
+    }
+
+    /// <summary>
+    /// Reads a page of the oldest program totals of a tier below the horizon.
+    /// </summary>
+    /// <param name="sql">The walk statement of the tier</param>
+    /// <param name="horizon">The bucket start before which a bucket has expired</param>
+    /// <param name="limit">The page size</param>
+    /// <returns>The buckets</returns>
+    private List<SourceBucketKey> ReadProgramTotals(string sql, long horizon, int limit)
+    {
+        var rows = new List<SourceBucketKey>();
+
+        using var reader = _session.Statement(sql).Set(UpperParameter, horizon).Set(LimitParameter, (long)limit).Query();
+
+        while (reader.Read())
+        {
+            rows.Add(new SourceBucketKey(reader.GetString(0), reader.GetInt64(1)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Removes the total of a bucket.
+    /// </summary>
+    /// <param name="sql">The delete statement of the tier</param>
+    /// <param name="row">The bucket</param>
+    /// <returns><c>true</c> when the total was removed</returns>
+    private bool RemoveProgramTotal(string sql, SourceBucketKey row)
+    {
+        return _session.Statement(sql).Set(SourceParameter, row.Source).Set(BucketParameter, row.Bucket).Execute() > 0;
     }
 
     /// <summary>
@@ -701,13 +794,13 @@ internal sealed class RetentionRemover
     {
         position.Set(row.Hour, row.TemplateId);
 
-        if (RetentionSession.Exists(_session.Statement(RetentionQueries.HasLogLine).Set("$source", row.Source).Set("$from", row.Hour).Set("$to", row.Hour + HourNs)))
+        if (RetentionSession.Exists(_session.Statement(RetentionQueries.HasLogLine).Set(SourceParameter, row.Source).Set("$from", row.Hour).Set("$to", row.Hour + HourNs)))
         {
             return false;
         }
 
         _session.Statement(RetentionQueries.DeleteTemplateHour).Set("$id", row.TemplateId).Set("$hour", row.Hour).Execute();
-        _session.Statement(RetentionQueries.DeleteSourceHour).Set("$source", row.Source).Set("$hour", row.Hour).Execute();
+        _session.Statement(RetentionQueries.DeleteSourceHour).Set(SourceParameter, row.Source).Set("$hour", row.Hour).Execute();
         Delete(RetentionQueries.DeleteEmptyTemplate, row.TemplateId);
 
         return true;

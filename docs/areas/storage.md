@@ -42,12 +42,12 @@ import tracks files on top of this store in [Log import](log-import.md).
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is **15**. Times are Unix nanoseconds in `INTEGER` columns.
+The schema version is stored in `meta.schema_version`; the current version is **16**. Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
 | ----- | ------- |
-| `meta` | key and value; the schema version, the run marker `template_rebuild` from the start of a template rebuild until one completes, and the retention state: `rollup_after_id` (the record ID up to which metric values are folded), `kill_scan_after_id` (the record ID up to which kernel events are scanned for OOM kills; both absent read as 0) and `sample_time_floor` (the capture time below which agent sample times were removed; absent for none) |
+| `meta` | key and value; the schema version, the run marker `template_rebuild` from the start of a template rebuild until one completes, and the retention state: `rollup_after_id` (the record ID up to which metric values are folded), `program_rollup_after_id` (the record ID up to which process snapshots are folded into the program rollups), `kill_scan_after_id` (the record ID up to which kernel events are scanned for OOM kills; the three absent read as 0) and `sample_time_floor` (the capture time below which agent sample times were removed; absent for none) |
 | `records` | one row per record: `id`, `kind`, `origin` (`agent`, `backend` or `import`), `source`, `agent_id`, `seq`, `captured_at`, `received_at`, `boot_id`, `clock_offset_ns`, `data` (the record's payload as the `data` object of the wire format, without the kind, which is the `kind` column, for every kind except metrics and log lines; `NULL` there), `live` (`CHECK (live IN (0, 1))`: 1 when the record was classified as live data when it was stored, 0 for backfilled data and for every record of origin `import` or `backend`; set in the insert, never changed) |
 | `metrics` | typed rows for metric records: `record_id`, `source`, `name`, `captured_at`, `value`, `unit`, `labels` (JSON object or `NULL`) |
 | `log_lines` | typed rows for log lines: `record_id`, `log`, `program`, `pid`, `priority`, `message`, `truncated`, `host`, `event` |
@@ -65,6 +65,8 @@ All tables are `STRICT`.
 | `agent_clock_samples` | the clock bounds of an agent: `agent_id`, `sort` (`counted` or `run`), `bucket` (the receive time floored to 10 seconds) and `bound_ns` (the largest bound of the bucket); primary key `(agent_id, sort, bucket)`, without row ID; at most 64 rows per agent and sort, the oldest dropped |
 | `agent_sample_times` | one row per distinct capture time of an agent's stored `metric` records: `agent_id`, `captured_at`, `min_seq` and `max_seq` (the lowest and highest number of a metric at that time); primary key `(agent_id, captured_at)`, without row ID; the rows below the raw horizon are removed by retention except each agent's newest ([Retention and rollups](retention.md)) |
 | `metric_rollups_5m` and `metric_rollups_1h` | the 5-minute and hourly buckets of a metric series: `source`, `name`, `labels` (the labels as stored, `''` for none), `bucket` (the start), `min_value`, `max_value`, `sum_value` (REAL), `count` (`CHECK (count >= 1)`), `last_value`, `last_at` and `last_record_id` (the latest value by capture time, ties by record ID); primary key `(source, name, labels, bucket)`, without row ID |
+| `program_rollups_5m` and `program_rollups_1h` | the per-program buckets of the process snapshots of a source: `source`, `bucket` (the start), `program` (as received, up to 1,024 bytes), `seen` (`CHECK (seen >= 1)`: the snapshots of the bucket that name the program), `rss_min`, `rss_max`, `rss_sum`, `pss_min`, `pss_max` (`NULL` while no PSS snapshot is in the bucket), `pss_sum` (0 then) and `cpu_min`, `cpu_max`, `cpu_sum` (all REAL); primary key `(source, bucket, program)`, without row ID |
+| `program_rollup_totals_5m` and `program_rollup_totals_1h` | the total of a source in a bucket: `source`, `bucket`, `snapshots` (`CHECK (snapshots >= 1)`), `pss_snapshots`, `incomplete` (the snapshots that did not list every program), `named` (the programs the bucket names, at most 500), and `rss_sum`, `pss_sum`, `cpu_sum` over all programs; primary key `(source, bucket)`, without row ID ([Program rollups](program-rollups.md)) |
 | `retention_holds` | the windows retention keeps for the agent's OOM kills: `id`, `started_at` and `ended_at` (`CHECK (ended_at > started_at)`); stored holds never overlap |
 | `gaps` | the gaps of an agent: `id` (`AUTOINCREMENT`), `agent_id`, `kind` (`sequence` or `time`), `cause`, `state` (`open`, `closed` or `final`), `first_seq` and `last_seq` (a sequence gap's missing numbers, `CHECK (first_seq <= last_seq)`, `NULL` for a time gap), `from_seq` and `to_seq` (a time gap's bounding samples' highest and lowest metric numbers, `NULL` for a sequence gap), `from_at` and `to_at` (the span in the agent's raw capture times; for a sequence gap the capture time of the highest record before it and of the record after it), `detected_at` and `changed_at` |
 
@@ -78,7 +80,7 @@ agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, ag
 (`connection_marks_changes`, the findings with changes only); `listener_comparisons(captured_at DESC, agent_id, seq DESC)` where
 `finding = 1` (`listener_comparisons_findings`); `gaps(agent_id, first_seq)` where `kind = 'sequence'` and `state <> 'closed'`
 (`gaps_seq`) and, apart, where `state = 'open'` (`gaps_seq_open`); `gaps(agent_id, from_at)`, unique, where `kind = 'time'` and
-`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader); `metric_rollups_5m(bucket)` and `metric_rollups_1h(bucket)`; `retention_holds(started_at)`; `records(kind, captured_at)` where `origin <> 'import'` (`records_removable`, the walk of a removal step); `gaps(to_at)` (`gaps_to_at`); the covering partial index `records_service_state` on `records(captured_at, json_extract(data, '$.unit'), json_extract(data, '$.restarts'), json_extract(data, '$.active_enter_at'), json_extract(data, '$.active_state'), boot_id, kind)` where `kind = 'service_state'`.
+`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader); `metric_rollups_5m(bucket)` and `metric_rollups_1h(bucket)`; `bucket` of each of the four program rollup tables (`program_rollups_5m_bucket`, `program_rollup_totals_5m_bucket`, `program_rollups_1h_bucket`, `program_rollup_totals_1h_bucket`); `records(id)` where `kind = 'process_snapshot'` (`records_process_fold`, below); `retention_holds(started_at)`; `records(kind, captured_at)` where `origin <> 'import'` (`records_removable`, the walk of a removal step); `gaps(to_at)` (`gaps_to_at`); the covering partial index `records_service_state` on `records(captured_at, json_extract(data, '$.unit'), json_extract(data, '$.restarts'), json_extract(data, '$.active_enter_at'), json_extract(data, '$.active_state'), boot_id, kind)` where `kind = 'service_state'`.
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -121,6 +123,14 @@ What each step after the first adds, and how data stored before it reads:
   records among 1.2 million took 243 to 282 ms on the development host and 899 ms on the DS918+ (`docs/BENCHMARKS.md`, *Time-series query*). A `service_state`
   payload that is not valid JSON would fail the step (`store: migration 15: …`, rolled back, version 14 kept) and its insert;
   the backend only stores payloads it serialized itself.
+- **16** adds the four program rollup tables with their indexes and the partial index `records_process_fold` on `records(id)` where
+  `kind = 'process_snapshot'` (record [0223](../decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md)).
+  The tables are empty and `program_rollup_after_id` is absent (0), so the retention job folds the process snapshots stored before it
+  before it removes any of them ([Program rollups](program-rollups.md)). The fold reads the snapshots above the watermark through the
+  index by name (`INDEXED BY`), one index search, where `records(kind, captured_at)` would need a sort. **Write cost:** the index has one
+  entry per process snapshot, added when a snapshot is inserted and removed with it, and a record of any other kind only checks its
+  `kind`. **Build:** the step scans `records` once while the writer is busy: 21 ms on the development host for a database of 8,760
+  process snapshots (a version 15 database reverted by hand, so only the index build and the creation of the tables, `docs/BENCHMARKS.md`, *Program rollups*).
 
 ### Migrations
 
@@ -133,7 +143,7 @@ What each step after the first adds, and how data stored before it reads:
 
 ## Retention
 
-The backend removes expired data and keeps rollups of the raw metric values in a background job. The periods, what outlives them, the
+The backend removes expired data and keeps rollups of the raw metric values and of the process snapshots in a background job. The periods, what outlives them, the
 steps and the log lines are in [Retention and rollups](retention.md). In the file: retention deletes rows in bounded steps and never
 vacuums, so the file does not shrink and freed pages are reused; the stream rows of agents and the clock samples are never removed.
 
@@ -170,6 +180,8 @@ stored once") is tested against the real store; fakes for other consumers only r
 - [0208](../decisions/0208-metric-rollups-are-folded-from-new-rows-by-record-id-never-recomputed-from-raw.md) to
   [0213](../decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md) — why the rollup tables, the
   removal by period, the holds, the resend rule, the unshrunk file and the sample-time floor exist.
+- [0223](../decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md) — why the program rollup tables, the
+  watermark of process snapshots and the index `records_process_fold` exist.
 - [0204](../decisions/0204-sql-command-text-meets-ca2100-through-justified-suppressions-at-the-command-helpers.md) — why a helper that takes
   the statement text suppresses CA2100 with a reason instead of the callers assigning it.
 
@@ -185,5 +197,5 @@ stored once") is tested against the real store; fakes for other consumers only r
 ## Implementation
 
 `Vandox.Storage`: `SqliteStore` (opening, connections), `DatabaseFile` (file creation and the refusal of links), `SchemaMigrator`
-(steps), `RollupFolder` (the fold step), `RetentionRemover` (the removal step), `ReaderQuery` (the progress handler on reader connections), `StorageLimits`; the connections set Microsoft.Data.Sqlite's
+(steps), `RollupFolder` and `ProgramRollupFolder` (the fold step), `RetentionRemover` (the removal step), `ReaderQuery` (the progress handler on reader connections), `StorageLimits`; the connections set Microsoft.Data.Sqlite's
 `DefaultTimeout` next to the busy timeout. The throughput benchmark is `tools/Vandox.StorageBenchmark`.

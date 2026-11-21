@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IProgramRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
 {
     #region Constants
 
@@ -352,6 +352,25 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                    Pooling = false,
                    DefaultTimeout = BusyTimeoutSeconds
                }.ToString();
+    }
+
+    /// <summary>
+    /// Combines the results of the metric fold and the program fold of one step.
+    /// </summary>
+    /// <param name="metrics">The result of the metric fold</param>
+    /// <param name="programs">The result of the program fold</param>
+    /// <returns>The combined result, with more to fold when either has more</returns>
+    private static RollupStepResult Combine(RollupStepResult metrics, RollupStepResult programs)
+    {
+        return new RollupStepResult
+               {
+                   Values = metrics.Values,
+                   Buckets = metrics.Buckets,
+                   Snapshots = programs.Snapshots,
+                   SkippedSnapshots = programs.SkippedSnapshots,
+                   ProgramBuckets = programs.ProgramBuckets,
+                   More = metrics.More || programs.More
+               };
     }
 
     /// <summary>
@@ -1075,7 +1094,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         ArgumentNullException.ThrowIfNull(policy);
 
-        return RunRetentionAsync(RollupContext, true, (session, token) => RollupFolder.Fold(session, policy, now, token), cancellationToken);
+        return RunRetentionAsync(RollupContext, true, (session, token) => Combine(RollupFolder.Fold(session, policy, now, token), ProgramRollupFolder.Fold(session, policy, now, token)), cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -1212,6 +1231,28 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IRollupReader
+
+    #region IProgramRollupReader
+
+    /// <inheritdoc/>
+    public Task<ProgramRollupResult> ProgramRollupsAsync(ProgramRollupQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ProgramRollupQueries.Validate(query);
+
+        return ReadAsync(connection => ProgramRollupQueries.ReadAsync(connection, query, cancellationToken), ProgramRollupQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ProgramSourceList> ProgramSourcesAsync(ProgramSourceQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ProgramRollupQueries.ValidateSources(query);
+
+        return ReadAsync(connection => ProgramRollupQueries.ReadSourcesAsync(connection, query, cancellationToken), ProgramRollupQueries.Context, cancellationToken);
+    }
+
+    #endregion // IProgramRollupReader
 
     #region ITimeSeriesReader
 
