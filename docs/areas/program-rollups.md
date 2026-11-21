@@ -87,15 +87,15 @@ Both reads run on a reader connection under the caller's cancellation ([Storage]
 
 ## Disk and time
 
-Measured with `--programs` of the storage benchmark on the development host (`docs/BENCHMARKS.md`, *Program rollups*; the DS918+ run is
-not yet recorded there):
+Measured with `--programs` of the storage benchmark on the development host and on the DS918+ SSD volume (`docs/BENCHMARKS.md`, *Program
+rollups*); the figures below are those of the DS918+, the development host measured about a quarter to two fifths of them:
 
-- A day of one snapshot a minute (1,440 snapshots of 80 programs) added 703 pages of 4,096 bytes (2,812 KiB) and folded in 376 ms in
+- A day of one snapshot a minute (1,440 snapshots of 80 programs) added 703 pages of 4,096 bytes (2,812 KiB) and folded in 1,464 ms in
   6 steps.
-- A fold step beside 10,000 metric values and 500 snapshots of 80 programs took a median of 125 ms and folded 275 snapshots, which the
-  2 MiB budget limits; the median ingest batch of the same run took 517 ms.
-- A year of 8,760 hourly snapshots folded in 11,382 ms in 32 steps; a one-year read at a 6-hour step, memory, *n* = 10, took a median
-  of 382 ms.
+- A fold step beside 10,000 metric values and 500 snapshots of 80 programs took a median of 317 ms and folded 275 snapshots, which the
+  2 MiB budget limits; the median ingest batch of the same run took 1,667 ms.
+- A year of 8,760 hourly snapshots folded in 50,399 ms in 32 steps; a one-year read at a 6-hour step, memory, *n* = 10, took a median
+  of 1,270 ms, within the views' 10-second deadline.
 - The 5-minute tier costs about as many rows per day as the named programs times 288, the hourly tier the named programs times 24. The free-space
   floor `ingest.min_free` stays the bound of last resort against names forged to fill the tables ([Retention and rollups](retention.md),
   *Limits and errors*).
