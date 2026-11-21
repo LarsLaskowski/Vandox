@@ -93,7 +93,7 @@ internal static class RollupFolder
     /// <param name="period">The period of the tier, or <c>null</c> for unlimited</param>
     /// <param name="now">The current time</param>
     /// <returns>The nanoseconds, or the smallest number when the tier keeps everything</returns>
-    private static long HorizonOf(TimeSpan? period, DateTimeOffset now)
+    internal static long HorizonOf(TimeSpan? period, DateTimeOffset now)
     {
         return period is null ? long.MinValue : StorageTime.ToNanoseconds(now - period.Value);
     }
@@ -104,7 +104,7 @@ internal static class RollupFolder
     /// <param name="nanoseconds">The instant</param>
     /// <param name="width">The width of the bucket</param>
     /// <returns>The start of the bucket</returns>
-    private static long Floor(long nanoseconds, long width)
+    internal static long Floor(long nanoseconds, long width)
     {
         var remainder = nanoseconds % width;
 

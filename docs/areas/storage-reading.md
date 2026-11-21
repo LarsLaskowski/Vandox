@@ -3,7 +3,7 @@
 ## Scope
 
 How stored data is read from the backend's database ([Storage](storage.md)): record series and kinds, incidents and their notes,
-template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the reads of the overview page, the reads of the history view (the stored metrics and the snapshot closest to a moment); the log search and exploration of the logs view are in [Log search and exploration](log-exploration.md). `vandoxd incidents`, `vandoxd report` and the web UI's views rely on it. Every read runs on
+template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the reads of the overview page, the reads of the history view (the stored metrics and the snapshot closest to a moment), the per-program rollups; the log search and exploration of the logs view are in [Log search and exploration](log-exploration.md). `vandoxd incidents`, `vandoxd report` and the web UI's views rely on it. Every read runs on
 a reader connection and is interrupted by a cancelled token or a passed deadline ([Storage](storage.md), *Database file and connections*).
 
 ## Behavior
@@ -29,6 +29,12 @@ a reader connection and is interrupted by a cancelled token or a passed deadline
   follow the rules of a record query; a missing source or name, or an unknown tier, is refused as an invalid query.
 - A bucket carries its minimum, average (the sum over the count), maximum, last value with its capture time and count, and its labels as
   stored (empty for none). A bucket is current only up to the last fold step, at most 5 minutes behind ([Retention and rollups](retention.md)).
+
+### Program rollups
+
+The top programs of a source per step and the sources that have program buckets are read from the per-program rollups through
+`IProgramRollupReader`, with their own limits and errors (at most 50 programs, 2,000 steps, 256 sources; `store: reading program rollups`),
+described in [Program rollups](program-rollups.md), *Reading*.
 
 ### Time-series reads
 
@@ -172,6 +178,7 @@ existing index, never a scan.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why the record query pages by ID.
 - [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a cancelled token or deadline interrupts a reader statement.
 - [0218](../decisions/0218-the-overview-reads-latest-values-through-its-own-bounded-store-reads.md) — why the overview has its own bounded reads over the existing indexes.
+- [0223](../decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md) — why the per-program rollups have their own read.
 - [0222](../decisions/0222-the-history-view-reads-the-moments-snapshots-and-the-metric-list-through-its-own-bounded-reads.md) — why the history view has its own metric list and snapshot reads.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the listener history reads the narrow derived
@@ -192,7 +199,7 @@ existing index, never a scan.
 
 `Vandox.Storage`: `SqliteStore` implements the interfaces the callers depend on (`IRecordReader` with `RecordQuery.AfterId`,
 `ILogTemplateReader`, `IIncidentBrowser` with `IncidentSummariesAsync`, `IncidentAsync` and
-`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IOverviewReader` (`OverviewQueries`, `LabelSetTally`), `IHistoryReader` (`HistoryQueries`, `SkipCursor`; `StoredMetricList`, `SnapshotQuery`, `SnapshotStamp`, `SnapshotSide`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
+`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IOverviewReader` (`OverviewQueries`, `LabelSetTally`), `IProgramRollupReader` (`ProgramRollupQueries`), `IHistoryReader` (`HistoryQueries`, `SkipCursor`; `StoredMetricList`, `SnapshotQuery`, `SnapshotStamp`, `SnapshotSide`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
 `AgentUidChanges`), `IAgentTimelineReader` with `GapsAsync` and `ClockAsync`, and the record writer, incident store and import tracker of
 [Storage writing](storage-writing.md)). The reads are `ReaderQuery`, `TemplateQueries`, `ListenerQueries`, `AgentTimelineQueries`, `IncidentRepository` and `IncidentNoteRepository`. A
 broken rule is an `InvalidQueryException`, a cancellation an `OperationCanceledException`, a missing string an `ArgumentNullException`.

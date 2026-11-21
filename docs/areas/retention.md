@@ -29,7 +29,7 @@ needs in [Storage writing](storage-writing.md).
   comparison with a finding), follows `retention.events` instead of `snapshots` ([Listener changes](listener-changes.md)). The rows of
   `connection_marks` and `listener_comparisons` go with their record.
 - The record with the highest ID is never removed, so record IDs keep increasing. A record above the position of the kill scan is not
-  removed yet, and neither is a metric value above the rollup watermark (both below).
+  removed yet, and neither is a metric value above the rollup watermark, nor a process snapshot above the program rollup watermark (all below).
 - `agent_streams` and `agent_clock_samples` are never removed.
 
 ## Events and gaps
@@ -78,6 +78,10 @@ needs in [Storage writing](storage-writing.md).
   late value is later. A bucket past its tier's period is not created.
 - A raw value is never removed before it is folded: removal skips every metric above the watermark. A database of an earlier version
   folds all its stored values first, in steps, and removes after.
+- The same fold also folds the `process_snapshot` records above a second watermark, `program_rollup_after_id`, into per-program buckets
+  of their source; the same period rules apply (`rollups_5m` and `rollups_1h`), no option is added, and a process snapshot is never
+  removed before it is folded, one that does not decode included, which the fold skips and passes ([Program rollups](program-rollups.md)).
+  Connection snapshots and `mariadb_status` records are removed by `retention.snapshots` as before.
 - Readers take buckets of one series in a range, oldest first, with `IRollupReader` ([Storage reading](storage-reading.md)); the time-series query ([Time-series queries](time-series-query.md)) reads steps of them and the earliest value not yet folded.
 
 ## The job
@@ -88,11 +92,14 @@ needs in [Storage writing](storage-writing.md).
   removal pass: the kill scan, then removal steps until nothing is left. Removal therefore starts at start-up and runs at least
   hourly; once caught up, data goes within a day after its period ends.
 - **Steps are bounded.** One fold step reads at most 10,000 metric values and stops after the row that takes the labels it has read
-  past 2 MiB (the first row is always taken). One removal step removes at most 5,000 records of one kind, or as many rows of one
+  past 2 MiB (the first row is always taken), and, in the same transaction, at most 500 process snapshots and stops after the row that takes
+  their stored data past 2 MiB (the first row is always taken); it has more to do when either part does. One removal step removes at most 5,000 records of one kind, or as many rows of one
   derived table, and examines at most 20,000 index entries and 1,000 windows, in one transaction. A step is meant to stay within the work of one
   ingest batch of 10,000 records; the storage benchmark measures it (`docs/BENCHMARKS.md`, *Retention steps*).
 - A removal pass walks the kinds in this order, each until it is empty: raw metric values, log lines, snapshots, events, gap rows,
-  5-minute rollups, hourly rollups, template hours, incidents, holds. A cursor of kind, capture time and ID carries the pass from step
+  5-minute rollups, hourly rollups, the program rows and the program totals of the 5-minute tier, the same two of the hourly tier, template
+  hours, incidents, holds. A program row or total is removed when its bucket start lies before `now − retention.rollups_5m` or
+  `now − retention.rollups_1h` of its tier, and a process snapshot only when its record ID is at or below `program_rollup_after_id`. A cursor of kind, capture time and ID carries the pass from step
   to step, so a record that is kept is examined once per pass. Imported records are not in the index the walk uses, and the walk
   steps over a hold in one jump.
 - For each record the step removes, in this order: its full-text entry (`log_fts`), its typed row, its connection mark, its listener
@@ -121,10 +128,14 @@ The job writes these lines of the service log ([Backend host](backend-host.md), 
 | 69 | information | `retention rollup`: `Values`, `Buckets` | after a fold pass that folded at least one value |
 | 70 | information | `retention removal records`: `MetricValues`, `LogLines`, `Snapshots`, `Events`, `Gaps` | after a removal pass that removed at least one of these |
 | 73 | information | `retention removal derived`: `FiveMinuteValues`, `HourlyValues`, `TemplateHours`, `Incidents`, `Holds` | after a removal pass that removed at least one of these |
+| 76 | information | `retention program rollup`: `Snapshots`, `Skipped`, `Buckets` | after a fold pass that folded or skipped at least one process snapshot or wrote at least one program bucket |
+| 77 | information | `retention removal program rollups`: `FiveMinuteRows`, `HourlyRows` | after a removal pass that removed at least one program row or total |
 | 71 | warning | `retention step busy`: `Operation` | a step found the database busy |
 | 72 | error | `retention step failed`: `Operation`, `Error` | a step failed |
 
-The counts are the sums of the pass's steps. `{Operation}` is `fold`, `scan` or `remove`; `{Error}` is the store's error text (the
+The counts are the sums of the pass's steps; `Snapshots` and `Skipped` are the process snapshots folded and the undecodable ones skipped,
+`Buckets` the program buckets written (a bucket of a tier counts once per step that writes it), and `FiveMinuteRows` and `HourlyRows` the program rows and totals removed per tier.
+Event 76 and 77 carry no program name. `{Operation}` is `fold`, `scan` or `remove`; `{Error}` is the store's error text (the
 operation and SQLite's message). A pass that changed nothing writes nothing.
 
 ## Limits and errors
@@ -145,6 +156,7 @@ operation and SQLite's message). A pass that changed nothing writes nothing.
 - [`decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md`](../decisions/0211-a-resent-record-whose-stored-copy-was-removed-is-not-stored-again.md) — why a resend after removal is skipped.
 - [`decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md`](../decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md) — why the file does not shrink and each log step merges the full-text index.
 - [`decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md`](../decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md) — why sample times are pruned below a floor that opens no time gap.
+- [`decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md`](../decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md) — why process snapshots are folded into per-program buckets and removed only below their own watermark.
 
 ## Not here
 
@@ -155,6 +167,6 @@ operation and SQLite's message). A pass that changed nothing writes nothing.
 
 ## Implementation
 
-`Vandox.Backend`: `RetentionService` (the job and its log lines), `KillHoldScanner`. `Vandox.Storage`: `RollupFolder`, `RetentionRemover`,
+`Vandox.Backend`: `RetentionService` (the job and its log lines), `KillHoldScanner`. `Vandox.Storage`: `RollupFolder`, `ProgramRollupFolder`, `RetentionRemover`,
 `RetentionQueries`, `SqliteStore` (`IRetentionStore`, `IRollupReader`). The step times are measured with `tools/Vandox.StorageBenchmark`
 (`docs/BENCHMARKS.md`, *Retention steps*).

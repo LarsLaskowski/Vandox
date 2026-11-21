@@ -102,10 +102,11 @@ sub-command in [Log import](log-import.md).
   message is a fixed text.
 - The level is `log.level`; until the configuration is loaded, start-up errors are logged at `info`. The framework's own categories log
   from warning level unless the level is `debug`, so the health probe does not fill the log.
-- The retention job ([Retention and rollups](retention.md)) writes five lines under the logger `retention`, with counts as attributes and
+- The retention job ([Retention and rollups](retention.md)) writes seven lines under the logger `retention`, with counts as attributes and
   never stored text: `retention rollup` (event 69, information, `Values`, `Buckets`), `retention removal records` (70, information,
   `MetricValues`, `LogLines`, `Snapshots`, `Events`, `Gaps`), `retention removal derived` (73, information, `FiveMinuteValues`,
-  `HourlyValues`, `TemplateHours`, `Incidents`, `Holds`), `retention step busy` (71, warning, `Operation`) and `retention step failed`
+  `HourlyValues`, `TemplateHours`, `Incidents`, `Holds`), `retention program rollup` (76, information, `Snapshots`, `Skipped`, `Buckets`), `retention removal program rollups` (77, information,
+  `FiveMinuteRows`, `HourlyRows`), `retention step busy` (71, warning, `Operation`) and `retention step failed`
   (72, error, `Operation`, `Error`, the store's error text). A pass that changed nothing writes nothing.
 
 ## Shutdown

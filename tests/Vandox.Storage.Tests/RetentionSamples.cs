@@ -12,6 +12,11 @@ internal static class RetentionSamples
     #region Constants
 
     /// <summary>
+    /// Undoes schema step 16: the four per-program rollup tables with their indexes, the process snapshot fold index and the meta key of the program fold.
+    /// </summary>
+    internal const string UndoStepSixteen = "DROP INDEX records_process_fold; DROP TABLE program_rollups_5m; DROP TABLE program_rollup_totals_5m; DROP TABLE program_rollups_1h; DROP TABLE program_rollup_totals_1h; DELETE FROM meta WHERE key = 'program_rollup_after_id'";
+
+    /// <summary>
     /// Undoes schema step 15: the covering index of the service state members.
     /// </summary>
     internal const string UndoStepFifteen = "DROP INDEX IF EXISTS records_service_state";

@@ -14,6 +14,11 @@ internal static class RetentionQueries
     internal const string RollupWatermarkKey = "rollup_after_id";
 
     /// <summary>
+    /// The <c>meta</c> key of the highest process snapshot record ID the program fold has read.
+    /// </summary>
+    internal const string ProgramRollupWatermarkKey = "program_rollup_after_id";
+
+    /// <summary>
     /// The <c>meta</c> key of the raw horizon below which sample times are pruned.
     /// </summary>
     internal const string SampleFloorKey = "sample_time_floor";
@@ -264,6 +269,113 @@ internal static class RetentionQueries
     /// </summary>
     internal const string HasNotedIncident = "SELECT 1 FROM incidents WHERE started_at <= $end AND ended_at >= $start "
                                              + "AND EXISTS (SELECT 1 FROM incident_notes WHERE incident_notes.incident_id = incidents.id) LIMIT 1";
+
+    /// <summary>
+    /// Reads the next process snapshots of the program fold.
+    /// </summary>
+    internal const string ReadProcessSnapshots = "SELECT id, source, captured_at, data FROM records INDEXED BY records_process_fold WHERE kind = 'process_snapshot' AND id > $after ORDER BY id LIMIT $limit";
+
+    /// <summary>
+    /// Reads the number of programs a 5-minute program bucket names.
+    /// </summary>
+    internal const string ReadNamedFiveMinutes = "SELECT named FROM program_rollup_totals_5m WHERE source = $source AND bucket = $bucket";
+
+    /// <summary>
+    /// Reads the number of programs an hourly program bucket names.
+    /// </summary>
+    internal const string ReadNamedHourly = "SELECT named FROM program_rollup_totals_1h WHERE source = $source AND bucket = $bucket";
+
+    /// <summary>
+    /// Looks for the row of a program in a 5-minute bucket.
+    /// </summary>
+    internal const string HasProgramFiveMinutes = "SELECT 1 FROM program_rollups_5m WHERE source = $source AND bucket = $bucket AND program = $program";
+
+    /// <summary>
+    /// Looks for the row of a program in an hourly bucket.
+    /// </summary>
+    internal const string HasProgramHourly = "SELECT 1 FROM program_rollups_1h WHERE source = $source AND bucket = $bucket AND program = $program";
+
+    /// <summary>
+    /// Merges a program into the 5-minute program rollups.
+    /// </summary>
+    internal const string UpsertProgramFiveMinutes = "INSERT INTO program_rollups_5m" + ProgramUpsertTail;
+
+    /// <summary>
+    /// Merges a program into the hourly program rollups.
+    /// </summary>
+    internal const string UpsertProgramHourly = "INSERT INTO program_rollups_1h" + ProgramUpsertTail;
+
+    /// <summary>
+    /// Merges the total of a source into the 5-minute program totals.
+    /// </summary>
+    internal const string UpsertProgramTotalFiveMinutes = "INSERT INTO program_rollup_totals_5m" + ProgramTotalUpsertTail;
+
+    /// <summary>
+    /// Merges the total of a source into the hourly program totals.
+    /// </summary>
+    internal const string UpsertProgramTotalHourly = "INSERT INTO program_rollup_totals_1h" + ProgramTotalUpsertTail;
+
+    /// <summary>
+    /// Reads the oldest 5-minute program rows below a bound.
+    /// </summary>
+    internal const string WalkProgramFiveMinutes = "SELECT source, bucket, program FROM program_rollups_5m WHERE bucket < $upper ORDER BY bucket LIMIT $limit";
+
+    /// <summary>
+    /// Deletes a 5-minute program row.
+    /// </summary>
+    internal const string DeleteProgramFiveMinutes = "DELETE FROM program_rollups_5m WHERE source = $source AND bucket = $bucket AND program = $program";
+
+    /// <summary>
+    /// Reads the oldest 5-minute program totals below a bound.
+    /// </summary>
+    internal const string WalkProgramTotalFiveMinutes = "SELECT source, bucket FROM program_rollup_totals_5m WHERE bucket < $upper ORDER BY bucket LIMIT $limit";
+
+    /// <summary>
+    /// Deletes a 5-minute program total.
+    /// </summary>
+    internal const string DeleteProgramTotalFiveMinutes = "DELETE FROM program_rollup_totals_5m WHERE source = $source AND bucket = $bucket";
+
+    /// <summary>
+    /// Reads the oldest hourly program rows below a bound.
+    /// </summary>
+    internal const string WalkProgramHourly = "SELECT source, bucket, program FROM program_rollups_1h WHERE bucket < $upper ORDER BY bucket LIMIT $limit";
+
+    /// <summary>
+    /// Deletes an hourly program row.
+    /// </summary>
+    internal const string DeleteProgramHourly = "DELETE FROM program_rollups_1h WHERE source = $source AND bucket = $bucket AND program = $program";
+
+    /// <summary>
+    /// Reads the oldest hourly program totals below a bound.
+    /// </summary>
+    internal const string WalkProgramTotalHourly = "SELECT source, bucket FROM program_rollup_totals_1h WHERE bucket < $upper ORDER BY bucket LIMIT $limit";
+
+    /// <summary>
+    /// Deletes an hourly program total.
+    /// </summary>
+    internal const string DeleteProgramTotalHourly = "DELETE FROM program_rollup_totals_1h WHERE source = $source AND bucket = $bucket";
+
+    /// <summary>
+    /// The columns and the merge of a program row, the same in both tiers: sums clamp to the range of a double, and a missing PSS side keeps the other.
+    /// </summary>
+    private const string ProgramUpsertTail = "(source, bucket, program, seen, rss_min, rss_max, rss_sum, pss_min, pss_max, pss_sum, cpu_min, cpu_max, cpu_sum) "
+                                             + "VALUES ($source, $bucket, $program, $seen, $rssMin, $rssMax, $rssSum, $pssMin, $pssMax, $pssSum, $cpuMin, $cpuMax, $cpuSum) "
+                                             + "ON CONFLICT(source, bucket, program) DO UPDATE SET seen = seen + excluded.seen, "
+                                             + "rss_min = min(rss_min, excluded.rss_min), rss_max = max(rss_max, excluded.rss_max), rss_sum = MIN(MAX(rss_sum + excluded.rss_sum, $low), $high), "
+                                             + "pss_min = CASE WHEN pss_min IS NULL THEN excluded.pss_min WHEN excluded.pss_min IS NULL THEN pss_min ELSE min(pss_min, excluded.pss_min) END, "
+                                             + "pss_max = CASE WHEN pss_max IS NULL THEN excluded.pss_max WHEN excluded.pss_max IS NULL THEN pss_max ELSE max(pss_max, excluded.pss_max) END, "
+                                             + "pss_sum = MIN(MAX(pss_sum + excluded.pss_sum, $low), $high), "
+                                             + "cpu_min = min(cpu_min, excluded.cpu_min), cpu_max = max(cpu_max, excluded.cpu_max), cpu_sum = MIN(MAX(cpu_sum + excluded.cpu_sum, $low), $high)";
+
+    /// <summary>
+    /// The columns and the merge of a source total, the same in both tiers: sums clamp to the range of a double.
+    /// </summary>
+    private const string ProgramTotalUpsertTail = "(source, bucket, snapshots, pss_snapshots, incomplete, named, rss_sum, pss_sum, cpu_sum) "
+                                                  + "VALUES ($source, $bucket, $snapshots, $pssSnapshots, $incomplete, $named, $rssSum, $pssSum, $cpuSum) "
+                                                  + "ON CONFLICT(source, bucket) DO UPDATE SET snapshots = snapshots + excluded.snapshots, pss_snapshots = pss_snapshots + excluded.pss_snapshots, "
+                                                  + "incomplete = incomplete + excluded.incomplete, named = excluded.named, "
+                                                  + "rss_sum = MIN(MAX(rss_sum + excluded.rss_sum, $low), $high), pss_sum = MIN(MAX(pss_sum + excluded.pss_sum, $low), $high), "
+                                                  + "cpu_sum = MIN(MAX(cpu_sum + excluded.cpu_sum, $low), $high)";
 
     #endregion // Constants
 }

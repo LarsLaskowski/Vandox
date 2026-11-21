@@ -22,6 +22,8 @@ internal sealed class RetentionRemovalTotals
     private int _templateHours;
     private int _incidents;
     private int _holds;
+    private int _programFiveMinuteRows;
+    private int _programHourlyRows;
 
     #endregion // Fields
 
@@ -43,10 +45,12 @@ internal sealed class RetentionRemovalTotals
         _templateHours = Sum(_templateHours, step.TemplateHours);
         _incidents = Sum(_incidents, step.RemovedIncidents);
         _holds = Sum(_holds, step.Holds);
+        _programFiveMinuteRows = Sum(_programFiveMinuteRows, step.ProgramFiveMinuteRows);
+        _programHourlyRows = Sum(_programHourlyRows, step.ProgramHourlyRows);
     }
 
     /// <summary>
-    /// Logs the line of the records and the line of the derived data, each when one of its counts is not zero.
+    /// Logs the line of the records, the line of the derived data and the line of the program rollups, each when one of its counts is not zero.
     /// </summary>
     /// <param name="logger">The logger</param>
     internal void Log(ILogger logger)
@@ -59,6 +63,11 @@ internal sealed class RetentionRemovalTotals
         if (new[] { _fiveMinuteValues, _hourlyValues, _templateHours, _incidents, _holds }.Any(count => count > 0))
         {
             logger.RetentionDerivedRemoved(_fiveMinuteValues, _hourlyValues, _templateHours, _incidents, _holds);
+        }
+
+        if (_programFiveMinuteRows > 0 || _programHourlyRows > 0)
+        {
+            logger.RetentionProgramRollupsRemoved(_programFiveMinuteRows, _programHourlyRows);
         }
     }
 

@@ -588,5 +588,24 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 75, Level = LogLevel.Error, Message = "history view: reading failed")]
     internal static partial void HistoryReadFailed(this ILogger logger, Exception exception);
 
+    /// <summary>
+    /// Logs the process snapshots one fold run rolled up into per-program buckets.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="snapshots">The process snapshots folded</param>
+    /// <param name="skipped">The process snapshots skipped because they could not be decoded or validated</param>
+    /// <param name="buckets">The program buckets written</param>
+    [LoggerMessage(EventId = 76, Level = LogLevel.Information, Message = "retention program rollup {Snapshots} {Skipped} {Buckets}")]
+    internal static partial void RetentionProgramsRolledUp(this ILogger logger, long snapshots, long skipped, long buckets);
+
+    /// <summary>
+    /// Logs the per-program rollup rows one removal run removed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="fiveMinuteRows">The 5-minute rows removed</param>
+    /// <param name="hourlyRows">The hourly rows removed</param>
+    [LoggerMessage(EventId = 77, Level = LogLevel.Information, Message = "retention removal program rollups {FiveMinuteRows} {HourlyRows}")]
+    internal static partial void RetentionProgramRollupsRemoved(this ILogger logger, int fiveMinuteRows, int hourlyRows);
+
     #endregion // Methods
 }
