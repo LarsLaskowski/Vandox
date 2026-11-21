@@ -1,7 +1,7 @@
 # Spec: Processes view
 
 Source: Issue #50
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -16,9 +16,9 @@ time and no comparison. Process snapshots are removed after `retention.snapshots
 
 - S1: Given per-program rollups of a source, when the signed-in user chooses *Processes* in the navigation (between *History* and
   *Logs*), then `/processes` shows, for the last 24 hours, the chart *Memory per program*: one stacked area per program, the 10 programs
-  with the highest average memory over the range, the highest at the bottom, and `Other programs` on top (every other program of the
-  source, those the rollups cut or capped included), so that the top edge is the source's average total. A program a snapshot does not
-  name counts 0 in it. The heading says `Memory (PSS)` when every folded snapshot of the range is a PSS snapshot, else `Memory (RSS)`
+  with the highest average memory over the range, the highest at the bottom, and `Other programs` on top (every other program, cut
+  or capped ones included), so that the top edge is the source's average total. A program a snapshot does not
+  name counts 0 in it. The vertical axis says `Memory (PSS), MiB` when every folded snapshot of the range is a PSS snapshot, else `Memory (RSS), MiB`
   for the whole range with the note `RSS counts shared memory in every program that maps it, so the stack can exceed the server's
   memory.`
 - S2: Given the same page, then the chart *CPU per program* below it stacks the CPU % of its own 10 programs with the highest average CPU
@@ -45,7 +45,7 @@ time and no comparison. Process snapshots are removed after `retention.snapshots
   the same source), and the link *History of this moment* to `/history` with that moment, whose panel shows the closest snapshot of any
   source.
 - S6: Given a moment, when the user presses *Compare from here* and then clicks another time in a chart, then that click writes
-  `compare`, keeps `at` and replaces the history entry, and the panel *Comparison* shows, for the source's snapshots closest to the two
+  `compare`, keeps `at` and replaces the history entry, and the panel *Comparison* shows in place of *Top processes*, for the source's snapshots closest to the two
   points (the earlier is the base), one row per program: memory at each point, its change, CPU % at each point, and the state `new`
   (only at the later point), `gone` (only at the earlier point) or none; memory is PSS when every program of both snapshots has one,
   else RSS for both, and the column says which; rows by memory change descending, then program name; at most 20 rows, then `and <n>
@@ -85,7 +85,7 @@ time and no comparison. Process snapshots are removed after `retention.snapshots
 - E11: Either compared snapshot does not list every program (#458's definition, as in E4; a legacy import's snapshot cut short): no row
   is marked `new` or `gone`, the left-out counts read `and <n> more programs.`, and the panel says `One of the two snapshots does not
   list every program, so no program is marked new or gone.` A program the two snapshots name differently (the two legacy import
-  formats) shows as two programs, as it does in the charts.
+  formats) shows as two programs.
 
 ## Non-functional requirements
 
@@ -102,7 +102,7 @@ time and no comparison. Process snapshots are removed after `retention.snapshots
 ## Acceptance criteria
 
 - AC1: `/processes` shows the stacked chart *Memory per program* of the 10 programs with the highest average memory in the range plus
-  `Other programs`, with the heading and note of the memory key the read names (S1, S8, N5).
+  `Other programs`, with the axis label and note of the memory key the read names (S1, S8, N5).
 - AC2: The page shows the stacked chart *CPU per program* of its own top 10 plus `Other programs` (S2, S8).
 - AC3: The step, the step text and the legend follow S3, a missing program reading 0 and its minimum 0 (S3).
 - AC4: Range presets, *From*/*To* and a drag selection set the range in the address; `source`, `at` and `compare` follow S4, with the
