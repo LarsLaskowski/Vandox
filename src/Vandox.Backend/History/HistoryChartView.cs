@@ -61,6 +61,11 @@ public sealed class HistoryChartView
     /// </summary>
     public DateTimeOffset? Moment { get; init; }
 
+    /// <summary>
+    /// Gets whether the lines are drawn stacked.
+    /// </summary>
+    public bool Stacked { get; init; }
+
     #endregion // Properties
 
     #region Methods

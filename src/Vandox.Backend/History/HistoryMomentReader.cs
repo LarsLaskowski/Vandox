@@ -60,6 +60,21 @@ public sealed class HistoryMomentReader
         return ReadMomentAsync(at, cancellationToken);
     }
 
+#pragma warning disable RH2003, S2325 // Skeleton: removed with the implementation
+    /// <summary>
+    /// Reads the record of the snapshot of a kind closest to a moment, of one source or of any.
+    /// </summary>
+    /// <param name="kind">The snapshot kind</param>
+    /// <param name="source">The source; <see langword="null"/> is any source</param>
+    /// <param name="at">The moment</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the record, or <see langword="null"/> when there is none</returns>
+    public Task<ClosestSnapshot?> ClosestAsync(string kind, string? source, DateTimeOffset at, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S2325 // Skeleton: removed with the implementation
+
     /// <summary>
     /// Builds a stamp query.
     /// </summary>
