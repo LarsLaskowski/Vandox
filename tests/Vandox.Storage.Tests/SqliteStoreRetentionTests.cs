@@ -1059,6 +1059,151 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
+    /// A process snapshot past its period is removed only once the program fold has read it: a pass before the fold keeps it, the pass after the fold removes it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task SqliteStoreRemoveExpiredKeepsUnfoldedProcessSnapshots()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = RetentionSamples.Defaults();
+        var now = Samples.Base.AddDays(31);
+
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ProgramSamples.Snapshot(Samples.Base.AddSeconds(10), ProgramSamples.Source, ProgramSamples.Program("nginx", 1, 100, 1)));
+        await RetentionSamples.FoldAllAsync(store, policy, now, TestContext.CancellationToken);
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ProgramSamples.Snapshot(Samples.Base.AddSeconds(20), ProgramSamples.Source, ProgramSamples.Program("nginx", 1, 300, 3)));
+        await WriteMarkerAsync(store, now);
+        await RetentionSamples.MarkScannedAsync(store, [], TestContext.CancellationToken);
+
+        // Act
+        var before = await RetentionSamples.RemovePassAsync(store, policy, now, TestContext.CancellationToken);
+        var kept = await CountAsync(directory, $"SELECT count(*) FROM records WHERE kind = 'process_snapshot' AND captured_at = {RetentionSamples.Ns(Samples.Base.AddSeconds(20))}");
+        var folded = await CountAsync(directory, $"SELECT count(*) FROM records WHERE kind = 'process_snapshot' AND captured_at = {RetentionSamples.Ns(Samples.Base.AddSeconds(10))}");
+        var after = await RetentionSamples.RetainAsync(store, policy, now, [], TestContext.CancellationToken);
+        var left = await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'process_snapshot'");
+
+        // Assert
+        Assert.AreEqual(1, before.Sum(step => step.Snapshots), "only the folded snapshot is reported removed");
+        Assert.AreEqual(1L, kept, "the snapshot the fold has not read stays");
+        Assert.AreEqual(0L, folded, "the folded snapshot goes");
+        Assert.AreEqual(1, after.Sum(step => step.Snapshots), "the snapshot goes after the next fold");
+        Assert.AreEqual(0L, left, "no process snapshot is left");
+    }
+
+    /// <summary>
+    /// A stored process snapshot that does not decode is passed by the fold's position and removed with its period.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task SqliteStoreRemoveExpiredRemovesSkippedUndecodableSnapshot()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var now = Samples.Base.AddDays(31);
+        var id = await ProgramSamples.InsertRawAsync(directory.Path, "forged", Samples.Base.AddSeconds(10), "not json", TestContext.CancellationToken);
+
+        await WriteMarkerAsync(store, now);
+
+        // Act
+        var steps = await RetentionSamples.RetainAsync(store, RetentionSamples.Defaults(), now, [], TestContext.CancellationToken);
+        var left = await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'process_snapshot'");
+        var watermark = await CountAsync(directory, ProgramSamples.Watermark);
+        var buckets = await CountAsync(directory, "SELECT (SELECT count(*) FROM program_rollups_5m) + (SELECT count(*) FROM program_rollup_totals_5m)");
+
+        // Assert
+        Assert.AreEqual(id, watermark, "the fold's position is past the undecodable snapshot");
+        Assert.AreEqual(1, steps.Sum(step => step.Snapshots), "the snapshot is reported removed");
+        Assert.AreEqual(0L, left, "the snapshot is removed");
+        Assert.AreEqual(0L, buckets, "it left no bucket");
+    }
+
+    /// <summary>
+    /// Connection snapshots and MariaDB status keep their removal without the program fold, while a process snapshot of the same age stays until it is folded.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task SqliteStoreRemoveExpiredRemovesConnectionSnapshotsWithoutProgramFold()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = RetentionSamples.Defaults();
+        var now = Samples.Base.AddDays(31);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          RetentionSamples.OfKind(RecordKind.ConnectionSnapshot, RecordOrigin.Backend, Samples.Base),
+                                          RetentionSamples.OfKind(RecordKind.MariaDbStatus, RecordOrigin.Backend, Samples.Base),
+                                          RetentionSamples.OfKind(RecordKind.ProcessSnapshot, RecordOrigin.Backend, Samples.Base));
+        await WriteMarkerAsync(store, now);
+        await RetentionSamples.MarkScannedAsync(store, [], TestContext.CancellationToken);
+
+        // Act
+        var steps = await RetentionSamples.RemovePassAsync(store, policy, now, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0L, await CountAsync(directory, "SELECT count(*) FROM records WHERE kind IN ('connection_snapshot', 'mariadb_status')"), "the connection snapshot and the MariaDB status are removed");
+        Assert.AreEqual(1L, await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'process_snapshot'"), "the unfolded process snapshot stays");
+        Assert.AreEqual(2, steps.Sum(step => step.Snapshots), "two snapshots are reported removed");
+    }
+
+    /// <summary>
+    /// The per-program buckets of each tier are removed once past the period of the tier, rows and totals alike, and counted per tier; newer buckets stay.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task SqliteStoreRemoveExpiredRemovesProgramBucketsPastTheirPeriods()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = new RetentionPolicy
+                     {
+                         Raw = RetentionSamples.Days(1),
+                         FiveMinuteRollups = RetentionSamples.Days(1),
+                         HourlyRollups = RetentionSamples.Days(2),
+                         Logs = RetentionSamples.Days(1),
+                         Snapshots = RetentionSamples.Days(1),
+                         Events = RetentionSamples.Days(3),
+                         KillWindowBefore = TimeSpan.FromHours(1),
+                         KillWindowAfter = TimeSpan.FromMinutes(30)
+                     };
+        var now = Samples.Base.AddDays(3);
+        var old5m = ProgramSamples.FiveMinutes(now.AddDays(-1).AddMinutes(-10));
+        var new5m = ProgramSamples.FiveMinutes(now.AddHours(-1));
+        var old1h = ProgramSamples.Hour(now.AddDays(-2).AddHours(-1));
+        var new1h = ProgramSamples.Hour(now.AddHours(-1));
+
+        await InsertProgramBucketAsync(directory, "5m", old5m, ["a", "b", "c"]);
+        await InsertProgramBucketAsync(directory, "5m", new5m, ["a"]);
+        await InsertProgramBucketAsync(directory, "1h", old1h, ["a", "b"]);
+        await InsertProgramBucketAsync(directory, "1h", new1h, ["a"]);
+        await RetentionSamples.MarkScannedAsync(store, [], TestContext.CancellationToken);
+
+        // Act
+        var steps = await RetentionSamples.RemovePassAsync(store, policy, now, TestContext.CancellationToken);
+        var programs5m = await RowsAsync(directory, "SELECT bucket FROM program_rollups_5m");
+        var totals5m = await RowsAsync(directory, "SELECT bucket FROM program_rollup_totals_5m");
+        var programs1h = await RowsAsync(directory, "SELECT bucket FROM program_rollups_1h");
+        var totals1h = await RowsAsync(directory, "SELECT bucket FROM program_rollup_totals_1h");
+
+        // Assert
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new5m)], programs5m, "the 5-minute program rows older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new5m)], totals5m, "the 5-minute totals older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new1h)], programs1h, "the hourly program rows older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new1h)], totals1h, "the hourly totals older than the period go");
+        Assert.AreEqual(4, steps.Sum(step => step.ProgramFiveMinuteRows), "four 5-minute rows are reported removed: three programs and the total");
+        Assert.AreEqual(3, steps.Sum(step => step.ProgramHourlyRows), "three hourly rows are reported removed: two programs and the total");
+    }
+
+    /// <summary>
     /// Imported records stay past every period.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -1802,6 +1947,29 @@ public partial class SqliteStoreRetentionTests
 #pragma warning restore CA2100
 
         await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts the program rows of a source and a bucket of a tier and the total of the bucket.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="tier">The table suffix, <c>5m</c> or <c>1h</c></param>
+    /// <param name="bucket">The bucket start</param>
+    /// <param name="programs">The program names</param>
+    /// <returns>A task that completes when the rows are stored</returns>
+    private async Task InsertProgramBucketAsync(TempDirectory directory, string tier, DateTimeOffset bucket, string[] programs)
+    {
+        var ns = RetentionSamples.Ns(bucket);
+        var sql = new System.Text.StringBuilder();
+
+        foreach (var program in programs)
+        {
+            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO program_rollups_{tier}(source, bucket, program, seen, rss_min, rss_max, rss_sum, pss_min, pss_max, pss_sum, cpu_min, cpu_max, cpu_sum) VALUES ('processes', {ns}, '{program}', 1, 1, 1, 1, NULL, NULL, 0, 1, 1, 1);");
+        }
+
+        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO program_rollup_totals_{tier}(source, bucket, snapshots, pss_snapshots, incomplete, named, rss_sum, pss_sum, cpu_sum) VALUES ('processes', {ns}, 1, 0, 0, {programs.Length}, {programs.Length}, 0, {programs.Length})");
+
+        await RetentionSamples.ExecuteAsync(directory.Path, sql.ToString(), TestContext.CancellationToken);
     }
 
     /// <summary>
