@@ -317,8 +317,10 @@ dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> 
 | DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained linux-x64, branch head 75e433a) | 2026-11-21 | SSD volume | 1,667 ms (3,923, 1,846, 1,537, 1,667, 1,616 ms) | 317 ms (steps 1 to 10: 1,215, 480, 369, 379, 317, 270, 304, 286, 274, 38 ms; 275 snapshots and 60 to 61 program buckets per step) | `page_count` 2,996 to 3,699 at 4,096-byte pages (+2,812 KiB); fold 1,464 ms in 6 steps | 50,399 ms in 32 steps (1,368 to 1,707 ms per step, 550 program buckets each) | 1,270 ms (1,527, 1,257, 1,270, 1,264, 1,284 ms; 1,460 steps, 10 programs) | 62 ms (a version 15 database reverted by hand: the tables and the index build only) | 10,000 metrics and one 4,096-program snapshot: 185 ms in 1 step; one snapshot of about 16 MiB: 103 ms in 1 step | **N2 met** (fold step 317 ms within the median batch of 1,667 ms); **N3 met** (read far within 10 s) |
 
 The development-host row shows the order of magnitude: the fold step (125 ms) is at about a quarter of that run's median batch (517 ms),
-and the read is far below the deadline. On the DS918+ the median fold step (317 ms) is about 19 % of the median batch (1,667 ms) and the
-one-year read (1,270 ms) is far within the 10-second deadline; the published tool was the self-contained build, because the NAS has no .NET 11 runtime
+and the read is far below the deadline. On the DS918+ the median fold step (317 ms) is about 19 % of the median batch (1,667 ms), which meets
+N2. A step whose snapshots each fall into a bucket of their own, as in the year of hourly snapshots that a first fold after an upgrade resembles
+(550 program buckets per step), took 1,368 to 1,707 ms: at most about 2 % above the median batch and below the slowest batch (3,923 ms). The
+one-year read (1,270 ms) is far within the 10-second deadline. The published tool was the self-contained build, because the NAS has no .NET 11 runtime
 (*Retention steps*). The first batch (3,923 ms) wrote into a fresh file and the first fold step (1,215 ms) held the first 10,000 metric values.
 
 ## Log templates
