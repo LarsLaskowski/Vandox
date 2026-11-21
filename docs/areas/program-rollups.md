@@ -70,7 +70,8 @@ Both reads run on a reader connection under the caller's cancellation ([Storage]
   - A step without a folded snapshot is a gap: `null` in a line and in *other programs*, 0 in the incomplete count.
   - *Other programs* is the average of the total of the source less the named programs, computed from the clamped sums and kept within 0 and
     `double.MaxValue`; it includes the programs cut or capped in the fold. The named programs and *other programs* add up to the source's
-    average total.
+    average total, unless a fold step commits between the read's queries, which share one reader connection without a shared transaction: then a
+    step's named programs can differ from its total by that fold step's snapshots, and *other programs* stays at 0 at the least.
   - **The memory key**: the read returns PSS and ranks by it when every folded snapshot of the range is a PSS snapshot, else RSS for the
     whole range; it names the key. The key is one per range. For CPU the key is absent.
   - `EarliestUnfolded` is the earliest capture time of the source's process snapshots not yet folded (none when all are), and
