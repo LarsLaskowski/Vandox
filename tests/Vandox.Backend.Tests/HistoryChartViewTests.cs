@@ -549,6 +549,52 @@ public class HistoryChartViewTests
     }
 
     /// <summary>
+    /// Marking another moment keeps the stacked flag of the view, and the other parts of the view, and leaves a view that is not stacked unstacked.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public void HistoryChartViewWithMomentKeepsStacked()
+    {
+        // Arrange
+        var line = new HistoryLine
+                   {
+                       Label = "nginx",
+                       Values = [1.0, 2.0, 3.0]
+                   };
+        var stacked = new HistoryChartView
+                      {
+                          Times = [HistorySamples.Base, HistorySamples.Base.AddMinutes(20), HistorySamples.Base.AddMinutes(40)],
+                          Lines = [line],
+                          Axes = ["Memory (PSS), MiB"],
+                          Notes = ["a note"],
+                          StepNote = "a step note",
+                          Stacked = true
+                      };
+        var plain = new HistoryChartView
+                    {
+                        Times = stacked.Times,
+                        Lines = stacked.Lines
+                    };
+        var moment = HistorySamples.Base.AddMinutes(10);
+
+        // Act
+        var marked = stacked.WithMoment(moment, _range);
+        var outside = stacked.WithMoment(HistorySamples.Base.AddHours(2), _range);
+        var unmarked = plain.WithMoment(moment, _range);
+
+        // Assert
+        Assert.IsTrue(marked.Stacked, "the marked view is stacked");
+        Assert.IsTrue(outside.Stacked, "a moment outside the range keeps the flag too");
+        Assert.IsFalse(unmarked.Stacked, "a view that is not stacked stays so");
+        Assert.AreEqual(moment, marked.Moment, "the moment inside the range");
+        Assert.IsNull(outside.Moment, "no moment outside the range");
+        Assert.AreSame(stacked.Lines, marked.Lines, "the lines are kept");
+        Assert.AreSequenceEqual(["Memory (PSS), MiB"], marked.Axes.ToArray(), "the axes are kept");
+        Assert.AreSequenceEqual(["a note"], marked.Notes.ToArray(), "the notes are kept");
+        Assert.AreEqual("a step note", marked.StepNote, "the step note is kept");
+    }
+
+    /// <summary>
     /// Gives the lines of a result at raw resolution, the resolution of <see cref="Result"/>.
     /// </summary>
     /// <param name="lines">The lines</param>
