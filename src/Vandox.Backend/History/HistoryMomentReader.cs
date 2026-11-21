@@ -60,7 +60,6 @@ public sealed class HistoryMomentReader
         return ReadMomentAsync(at, cancellationToken);
     }
 
-#pragma warning disable RH2003, S2325 // Skeleton: removed with the implementation
     /// <summary>
     /// Reads the record of the snapshot of a kind closest to a moment, of one source or of any.
     /// </summary>
@@ -69,24 +68,41 @@ public sealed class HistoryMomentReader
     /// <param name="at">The moment</param>
     /// <param name="cancellationToken">Cancels the read</param>
     /// <returns>A task that returns the record, or <see langword="null"/> when there is none</returns>
-    public Task<ClosestSnapshot?> ClosestAsync(string kind, string? source, DateTimeOffset at, CancellationToken cancellationToken)
+    public async Task<ClosestSnapshot?> ClosestAsync(string kind, string? source, DateTimeOffset at, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var before = await _reader.SnapshotStampAsync(Query(at, kind, source, SnapshotSide.AtOrBefore), cancellationToken).ConfigureAwait(false);
+        var after = await _reader.SnapshotStampAsync(Query(at, kind, source, SnapshotSide.After), cancellationToken).ConfigureAwait(false);
+        var closest = Closest(before, after, at);
+
+        if (closest is null)
+        {
+            return null;
+        }
+
+        var record = await _reader.SnapshotAsync(closest, cancellationToken).ConfigureAwait(false);
+
+        if (record is null)
+        {
+            return null;
+        }
+
+        return new ClosestSnapshot(record, ReferenceEquals(closest, after) ? before?.CapturedAt : null);
     }
-#pragma warning restore RH2003, S2325 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Builds a stamp query.
     /// </summary>
     /// <param name="at">The moment</param>
     /// <param name="kind">The snapshot kind</param>
+    /// <param name="source">The source, or <see langword="null"/> for any</param>
     /// <param name="side">The side of the moment</param>
     /// <returns>The query</returns>
-    private static SnapshotQuery Query(DateTimeOffset at, string kind, SnapshotSide side)
+    private static SnapshotQuery Query(DateTimeOffset at, string kind, string? source, SnapshotSide side)
     {
         return new SnapshotQuery
                {
                    Kind = kind,
+                   Source = source,
                    At = at,
                    Window = HistoryView.MomentWindow,
                    Side = side
@@ -125,23 +141,9 @@ public sealed class HistoryMomentReader
     private async Task<(TView? View, DateTimeOffset? Before)> ReadKindAsync<TView>(DateTimeOffset at, string kind, Func<StoredRecord, TView> build, CancellationToken cancellationToken)
         where TView : class
     {
-        var before = await _reader.SnapshotStampAsync(Query(at, kind, SnapshotSide.AtOrBefore), cancellationToken).ConfigureAwait(false);
-        var after = await _reader.SnapshotStampAsync(Query(at, kind, SnapshotSide.After), cancellationToken).ConfigureAwait(false);
-        var closest = Closest(before, after, at);
+        var closest = await ClosestAsync(kind, null, at, cancellationToken).ConfigureAwait(false);
 
-        if (closest is null)
-        {
-            return (null, null);
-        }
-
-        var record = await _reader.SnapshotAsync(closest, cancellationToken).ConfigureAwait(false);
-
-        if (record is null)
-        {
-            return (null, null);
-        }
-
-        return (build(record), ReferenceEquals(closest, after) ? before?.CapturedAt : null);
+        return closest is null ? (null, null) : (build(closest.Record), closest.Before);
     }
 
     #endregion // Methods

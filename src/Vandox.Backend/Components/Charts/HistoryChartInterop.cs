@@ -96,7 +96,7 @@ public sealed class HistoryChartInterop : IAsyncDisposable
     /// <param name="events">The reference that receives the selection and the click</param>
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns whether the chart was drawn</returns>
-    /// <exception cref="ArgumentException">The view holds times that are not ascending, lines of another length or a value that is not finite</exception>
+    /// <exception cref="ArgumentException">The view holds times that are not ascending, lines of another length, a value that is not finite or, when stacked, a line on another scale</exception>
     public async Task<bool> RenderAsync(ElementReference host, HistoryChartView view, DotNetObjectReference<HistoryChartEvents> events, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -108,6 +108,7 @@ public sealed class HistoryChartInterop : IAsyncDisposable
         var setup = new
                     {
                         axes = view.Axes,
+                        stacked = view.Stacked,
                         lines = view.Lines.Select(line => new
                                                           {
                                                               label = line.Label,
@@ -218,6 +219,12 @@ public sealed class HistoryChartInterop : IAsyncDisposable
         for (var index = 0; index < view.Lines.Count; index++)
         {
             var line = view.Lines[index];
+
+            if (view.Stacked && line.Scale != 0)
+            {
+                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"The line {index} of the stacked chart is not on the first scale."), nameof(view));
+            }
+
             var invalid = HasBadLength(line.Values, view.Times.Count)
                           || HasBadLength(line.Minimums, view.Times.Count, true)
                           || HasBadLength(line.Maximums, view.Times.Count, true)

@@ -15,7 +15,7 @@ public sealed class HistoryChartView
     /// <summary>
     /// The number of chart colors; lines beyond them repeat the colors dashed.
     /// </summary>
-    private const int ColorCount = 6;
+    internal const int ColorCount = 6;
 
     #endregion // Constants
 
@@ -100,6 +100,16 @@ public sealed class HistoryChartView
     }
 
     /// <summary>
+    /// Formats a time as <c>yyyy-MM-dd HH:mm:ss</c>, UTC.
+    /// </summary>
+    /// <param name="time">The time</param>
+    /// <returns>The text</returns>
+    internal static string FormatTime(DateTimeOffset time)
+    {
+        return time.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Gives the same view with another moment, sharing its times and lines, so that the chart only moves its mark.
     /// </summary>
     /// <param name="moment">The moment; it is marked only inside the range</param>
@@ -118,7 +128,8 @@ public sealed class HistoryChartView
                    Events = Events,
                    Notes = Notes,
                    StepNote = StepNote,
-                   Moment = moment is not null && moment.Value >= range.Start && moment.Value <= range.End ? moment : null
+                   Moment = moment is not null && moment.Value >= range.Start && moment.Value <= range.End ? moment : null,
+                   Stacked = Stacked
                };
     }
 
@@ -230,16 +241,6 @@ public sealed class HistoryChartView
         }
 
         return marker.End == BackupRunEnd.Running ? $"{marker.Text}, running" : $"{marker.Text}, end unknown";
-    }
-
-    /// <summary>
-    /// Formats a time as <c>yyyy-MM-dd HH:mm:ss</c>, UTC.
-    /// </summary>
-    /// <param name="time">The time</param>
-    /// <returns>The text</returns>
-    private static string FormatTime(DateTimeOffset time)
-    {
-        return time.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
     }
 
     /// <summary>

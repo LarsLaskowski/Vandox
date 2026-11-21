@@ -1,8 +1,8 @@
+using Vandox.Core.Model;
 using Vandox.Storage;
 
 namespace Vandox.Backend.Processes;
 
-#pragma warning disable RH2003 // Skeleton: removed with the implementation
 /// <summary>
 /// The programs of one process snapshot reduced to their figures.
 /// </summary>
@@ -41,10 +41,28 @@ public sealed class ProgramFigures
     /// <returns>The figures</returns>
     public static ProgramFigures FromRecord(StoredRecord record)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(record);
+
+        if (record.Record.Data is not ProcessSnapshot snapshot)
+        {
+            throw new ArgumentException("The record is no process snapshot.", nameof(record));
+        }
+
+        var programs = new Dictionary<string, ProgramFigure>(StringComparer.Ordinal);
+
+        foreach (var program in snapshot.Programs ?? [])
+        {
+            programs[program.Program] = new ProgramFigure(program.RssBytes, program.PssBytes, program.CpuPercent);
+        }
+
+        return new ProgramFigures
+               {
+                   CapturedAt = record.Record.CapturedAt,
+                   Source = record.Record.Source,
+                   ListsEveryProgram = snapshot.ListsEveryProgram(),
+                   Programs = programs
+               };
     }
 
     #endregion // Methods
 }
-
-#pragma warning restore RH2003 // Skeleton: removed with the implementation
