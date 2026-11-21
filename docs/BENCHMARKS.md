@@ -318,8 +318,9 @@ dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> 
 
 The development-host row shows the order of magnitude: the fold step (125 ms) is at about a quarter of that run's median batch (517 ms),
 and the read is far below the deadline. On the DS918+ the median fold step (317 ms) is about 19 % of the median batch (1,667 ms), which meets
-N2. A step whose snapshots each fall into a bucket of their own, as in the year of hourly snapshots that a first fold after an upgrade resembles
-(550 program buckets per step), took 1,368 to 1,707 ms: at most about 2 % above the median batch and below the slowest batch (3,923 ms). The
+N2. A step whose snapshots each fall into a bucket of their own, as in the year of hourly snapshots
+(550 program buckets per step), took 1,368 to 1,707 ms: at most about 2 % above the median batch and below the slowest batch (3,923 ms); the first
+fold after an upgrade of an agent's snapshots, taken every minute, resembles the day of N4 instead (1,464 ms in 6 steps). The
 one-year read (1,270 ms) is far within the 10-second deadline. The published tool was the self-contained build, because the NAS has no .NET 11 runtime
 (*Retention steps*). The first batch (3,923 ms) wrote into a fresh file and the first fold step (1,215 ms) held the first 10,000 metric values.
 
