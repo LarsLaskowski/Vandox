@@ -34,12 +34,20 @@ public static class SeriesLadder
     /// <param name="policy">The retention policy</param>
     /// <returns>The step</returns>
     /// <exception cref="ArgumentOutOfRangeException">The target is below 1 or above the maximum</exception>
-#pragma warning disable RH2003 // Skeleton: removed with the implementation
     public static TimeSpan Choose(DateTimeOffset start, DateTimeOffset end, DateTimeOffset now, int target, RetentionPolicy policy)
     {
-        throw new NotImplementedException();
+        ArgumentOutOfRangeException.ThrowIfLessThan(target, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(target, TimeSeriesService.MaxTarget);
+
+        return Choose(new SeriesRange
+                      {
+                          From = start,
+                          End = end,
+                          Now = now,
+                          Target = target
+                      },
+                      policy);
     }
-#pragma warning restore RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Chooses the smallest step for which at most the target steps overlap the range; a step under an hour needs the 5-minute rollups to reach the range.

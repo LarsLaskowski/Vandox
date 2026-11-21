@@ -57,12 +57,19 @@ public sealed class ProcessSnapshot : IPayload
     /// Determines whether the snapshot lists every program: it names a program, and its program counts add up to the total, or without a total the list is complete.
     /// </summary>
     /// <returns><c>true</c> when the list names every program of the server</returns>
-#pragma warning disable RH2003, S2325 // Skeleton: removed with the implementation
     public bool ListsEveryProgram()
     {
-        throw new NotImplementedException();
+        var programs = Programs ?? [];
+
+        if (programs.Count == 0)
+        {
+            return false;
+        }
+
+        var counts = programs.Sum(program => (long)program.Count);
+
+        return Total is { } total ? counts == total : Complete;
     }
-#pragma warning restore RH2003, S2325 // Skeleton: removed with the implementation
 
     #endregion // Methods
 
