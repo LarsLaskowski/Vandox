@@ -148,3 +148,79 @@ No guarantee of `.squad/project.md` is weakened: the page is behind the login on
 ## Out of scope / follow-ups
 
 The spec's *Out of scope*; a stacked chart with gaps for the incidents view.
+
+## Security notes
+
+## Security plan review: feature 50, processes view (mode `plan`, round 1)
+
+I reviewed `/home/user/Vandox/specs/feature-50-processes-view/spec.md` and `/home/user/Vandox/specs/feature-50-processes-view/plan.md` at head `d0d07fd`. The plan is approved with 5 non-blocking findings.
+
+### Tier and security areas
+- **Tier `standard` stands.** The page gets `[Authorize]` from `src/Vandox.Backend/Components/Pages/_Imports.razor:2`, which already exists, and there is no new route outside Blazor and no new listener. `HistoryChartEvents` keeps its checks. The plan only applies the existing escaping (`LogText.Escape`/`Runs`) to new places, and the main injection guards don't change: Blazor encodes its output, and uPlot writes labels as text (`wwwroot/lib/uplot/uPlot.esm.js:3253`, where `text.textContent = s.label`). No guard is created, changed or removed.
+- **The three areas listed (3, 10, 12) are complete.** The new SQL in `HistoryQueries` is parameterized reads only. The benchmark under `tools/` ships nowhere. The log line carries only the exception's type name (`Logging/JsonLineLogger.cs:186`), so neither a program name nor an address value can reach the log.
+
+### What I checked and found sound
+- **`source` guard, every form the parser accepts.** `QueryHelpers.ParseQuery` percent-decodes, turns `+` into a space and merges keys case-insensitively, so `Source=a&source=b` is caught by the repeated-parameter error. The existing pattern ends in `\z` (`HistoryAddress.cs:250`), so a trailing line feed is refused. It is ASCII-only, so string length equals byte length, and `source=` with no value counts as absent. Times go through `LogsAddress.TryReadTime`, which checks the storable range when it parses (`Logs/LogsAddress.cs:238-240`), so `compare` gets the same check as `at`. Stored sources follow the same name pattern (`Core/Model/DataRecord.cs:90`, `Check.cs:298`), so showing source names as plain text matches E10.
+- **Chart numbers.** `Pick` and `Select` stay behind `HistoryChartEvents`. The chart width is clamped by `HistoryView.Target` (`HistoryView.cs:237-245`, which gives 1 to 1,000). That keeps the step count within `MaxProgramRollupSteps` (2,000), and the store re-checks it (`ProgramRollupQueries.cs:79-93`).
+- **Per-source seek: measured.** I recreated the `records` schema and indexes from `SchemaMigrator.cs:40-56` and 200,000 rows in Python's sqlite3 (SQLite 3.53.1). I ran `python3 -I /tmp/claude-0/-home-user-Vandox/99f9eb5f-bb52-56b8-9cea-0907a7c903c4/scratchpad/qp.py`, which prints the query plan of both planned statements (`… WHERE kind = $kind AND source = $source AND captured_at <= $at AND captured_at >= $from ORDER BY captured_at DESC, id LIMIT 1` and its `After` counterpart), before and after `ANALYZE`. Output:
+  ```
+  no stats before ['SEARCH records USING COVERING INDEX records_kind_source_time (kind=? AND source=? AND captured_at>? AND captured_at<?)', 'USE TEMP B-TREE FOR LAST TERM OF ORDER BY']
+  no stats after ['SEARCH records USING COVERING INDEX records_kind_source_time (kind=? AND source=? AND captured_at>? AND captured_at<?)']
+  after ANALYZE before [same as above, with the temp B-tree for the last term]
+  after ANALYZE after [same SEARCH]
+  ```
+  Both statements seek the index. The temp B-tree only orders rows with the same `captured_at` (the `id` tie-break), so the "two index seeks" claim of N3 holds. The existing any-source statement has the same shape. The plan's `SnapshotStampOfASourceSeeksTheKindSourceTimeIndex` pins this against the SQLite that ships with Microsoft.Data.Sqlite.
+- **Deadline.** Reader statements are interrupted by the token (record 0097, `docs/areas/storage-reading.md:7`), so the 10-second deadline needs no new measurement. Fact 12 (N4) is a performance figure; it does not guard anything.
+- **Gate.** `IHistoryReader` is already registered as `GatedHistoryReader` (`Hosting/ServeCommand.cs:253`), so `ProcessesMomentReader` reads through the gate.
+- **Decoded snapshot.** The plan keeps the history view's rule: one decoded snapshot (at most 16 MiB, `StorageLimits.MaxPayloadBytes`) held at a time. `CompareAsync` reduces the first snapshot it reads to `ProgramFigures` before reading the second. Program and process lists are capped at 4,096 entries (`ProcessSnapshot.Validate`, `ModelLimits.MaxItems`).
+
+### Findings
+
+1. **[NON-BLOCKING] The gate on the new rollup reader is not pinned by a test (N2, AC9).** `IProgramRollupReader` has no registration yet, and the plan's registration line (`Hosting/ServeCommand.cs | registration`) does not say that `ProcessesChartReader` gets `GatedProgramRollupReader(store, gate)`. `GatedProgramRollupReaderTakesASlotPerCall` tests the wrapper but not the wiring. If `SqliteStore` were passed in directly, the page would read the store outside the shared gate and no test would catch it. The test that checks this wiring for the other readers is `tests/Vandox.Backend.Tests/ServeTests.cs:1049-1069` (for example `the reader of the time-series service is gated`).
+   - Smallest fix: in that test, assert that the registered `ProcessesChartReader` holds a `GatedProgramRollupReader` that uses the same `WebReaderGate` and wraps the store. Add the assertion under AC9 in *Tests per criterion*.
+   - Recommendation: fix now.
+
+2. **[NON-BLOCKING] `ProcessesAddress.ToQuery` and the source select need the history address's write-side checks.** `HistoryAddress.ToQuery` checks every value again before writing it and escapes the source (`HistoryAddress.cs:139-152`, `Uri.EscapeDataString(metric.Source)`). The plan says only that `ProcessesAddress` "writes them in that order". The name pattern allows `+`, and `ParseQuery` decodes an unescaped `+` to a space, so a source such as `web+1` written as-is fails its own address on reload. `Source` also has a public setter, and the page sets it from a `<select>` whose value the browser can send freely over the circuit.
+   - Smallest fix: `ToQuery` checks `Source` against the name pattern and `Compare` against `StorableTime` (throwing like `HistoryAddress.ToQuery`), and writes `source` with `Uri.EscapeDataString`. The select handler accepts only a source in the shown list (or the address's own) and ignores anything else.
+   - Tests: `ProcessesAddressToQueryEscapesTheSource` (`a+b` round-trips), `ProcessesAddressToQueryRefusesAnInvalidSource`, and a page test that an unlisted select value changes nothing.
+   - Recommendation: fix now.
+
+3. **[NON-BLOCKING] No test pins external text in the *Comparison* table (E10, AC9).** `ProgramComparisonView.Table` carries program names, which are hostile text of up to 1,024 bytes, but none of the plan's `ProgramComparisonView…` tests covers how they are displayed. `ProcessesPageShowsSnapshotTextsAsExternalText` reads as covering *Top processes* only. If the cell is built as `new TextRun(program, false)` rather than through `LogText.Runs` (as `ProcessSnapshotView.cs` does), Blazor still encodes the text, but a bidi override or a control character would be shown raw.
+   - Smallest fix: add `ProgramComparisonViewShowsProgramNamesAsExternalText` (a name containing U+202E and U+0007 yields escaped runs), or name both panels in the page test.
+   - Recommendation: fix now.
+
+4. **[NON-BLOCKING] *Memory per circuit* leaves out the size of `ProgramFigures` (N3).** `ProgramFigures` is the value kept while the second snapshot is decoded, and the plan names it without a size. The size is bounded: at most 4,096 programs (`ModelLimits.MaxItems`, enforced by `ProcessSnapshot.Validate`), each name at most 1,024 bytes (at most 2 KiB as UTF-16), so about 8.5 MiB at worst. Separately, the comparison briefly builds up to 8,192 union rows before sorting and cutting to 20. N3 says the area document states the caps and the memory they imply, so this figure belongs there.
+   - Smallest fix: add to the plan's *Memory per circuit* and to `web-ui-processes-view.md`: "one `ProgramFigures` of the earlier snapshot (at most 4,096 programs of names up to 1,024 bytes, about 8.5 MiB at most), and while the comparison is built at most 8,192 rows before the cut to 20".
+   - Recommendation: fix now (documentation only).
+
+5. **[NON-BLOCKING] The new public `SeriesLadder.Choose` overload skips the check on `target`.** Today `target` reaches `Choose` only through `TimeSeriesService`, which requires 1 to `MaxTarget` (`Storage/TimeSeriesService.cs:147`). The plan makes `SeriesLadder` public with an overload that takes `int target` directly. Reading `Storage/SeriesLadder.cs` (I did not run it): with `target = 0`, `DayStep` divides by `TimeSpan.TicksPerDay * target`, which throws `DivideByZeroException`. With a negative `target`, its `while (Overlapping(...) > target)` loop never ends. The page always passes at least 1 through `HistoryView.Target`, so the page cannot trigger it, but any other caller of the public overload can.
+   - Smallest fix: the overload throws `ArgumentOutOfRangeException` when `target < 1` or `target > MaxTarget`, with a test `SeriesLadderChooseRefusesATargetBelowOne`.
+   - Recommendation: fix now.
+
+Not raised: the cut marker that `LogText.Escape(…, 64)` appends makes a label longer than 64 characters. That is the Reviewer's call. I also noted, without raising it, that a local user on the monitored server could name a program `Other programs`: U+00A0 (no-break space) is not escaped, so that band's legend entry would look like the summed line. The incidents chart already has this. If it is taken up, it belongs in an issue as general hardening.
+
+## Challenge notes
+
+Devil's Advocate, mode `plan`: feature #50, Processes view (specs/feature-50-processes-view/)
+
+I checked the plan's facts against the code and found no problem with them. Facts 1–9 hold: ProgramRollupQueries.cs:102-199, SeriesLadder.cs:33-40, HistoryQueries.cs:54-59 and :173-199, SchemaMigrator.cs:55, ProgramRollupFolder.cs:138, HistoryView.cs:277, MainLayout.razor:24-28, BackendLog.cs:588 (event 78 is free). The step ladder matches the steps the rollup read accepts, including the switch to the 5-minute tier below one hour. The rollup read returns gaps as null in every program line and in Others at once, which is the stacking rule the plan needs. No `RESULT: NO CHANGE` applies: nothing in the code draws programs over time or compares two snapshots. Mixing a stacked mode into `createHistory` is the right reuse.
+
+**M1 (major) — the moment and comparison panels have no defined source once the default source changes or cannot be chosen.**
+- **What the plan says:** "Without `source` in the address the moment action starts once the chart action has chosen the source." Spec S4 keeps `at` and `compare` when the range changes, and leaves the address without `source` when the default is used.
+- **The default source depends on the range:** it is the source with the latest bucket in the range (`ProgramRollupQueries.SourcesSql`, `max(bucket) … WHERE bucket >= $from AND bucket < $to`). So with two sources (agent and import), a new range can switch the shown source while `at` and `compare` stay.
+- **What the copied pattern does then:** `HistoryPage.UpdateMomentAsync` (HistoryPage.razor.cs:380-386) reads again only when `at` changes. The panel would keep the old source's snapshot or comparison next to charts of another source. Decision 0224 rejected exactly that (option 5).
+- **No source chosen at all:** if the chart action ends in E1 (no source in the range), times out or fails, the moment action never starts. HistoryPage.razor's moment section then shows `LoadingText` for good (`_moment is null` and no failure text).
+- **Why major:** neither the spec nor the plan says what the panel shows in these cases, and no AC5/AC6 test covers them.
+- **Two ways to fix it, for the Lead to choose:**
+  - (a) A click that sets `at` also writes the shown source into the address. This is simplest and makes the panel's source explicit; it changes the wording of S4's "the address is not extended".
+  - (b) Key the moment action on (chosen source, `at`, `compare`), and state the panel text for "no source chosen" and for a failed chart action.
+
+**Minor 1 — keep `Stacked` in `WithMoment`.** `HistoryChartView.WithMoment` (HistoryChartView.cs:103-118) copies each property by name. Copy the new `Stacked` property there and add a test that `WithMoment` keeps `Stacked`. Otherwise a view re-marked before its first draw (`HistoryChart.DrawAsync` renders a not-yet-drawn view through `RenderAsync`) is drawn as plain lines.
+
+**Minor 2 — render both chart hosts before the first read.** HistoryPage.razor always renders `<HistoryChart>` (outside the error and future branches), and the read waits for `_widthKnown` (HistoryPage.razor.cs:332, :581-587). On `/processes`, render both `HistoryChart` hosts with `View` null until the first result arrives. Leave them out for E1 only once the width is known, so the first read is never stuck waiting for a width. Both charts report a width; let only the first start a chart action (a `SameChart` guard as in HistoryPage).
+
+**Minor 3 — check for duplicated page code.** The plan deals with duplication for the address only. ProcessesPage would repeat HistoryPage's `ReadingAsync`, `LoadAddressAsync`, `Go`, `Changed`, `ApplyPreset`, `Apply`, `OnSelectAsync`, `SetMoment`, `SnapshotBefore`, `IsThisPage`, `OnLocationChanged` and `HandleLocationAsync` (HistoryPage.razor.cs:216-260, :458-530, :594-685). It would also repeat the process-snapshot markup of HistoryPage.razor's moment section. Show *Top processes* through a component extracted from that markup and used by both pages. Check SonarQube's duplication condition on the draft pull request before the review.
+
+**Minor 4 — give each chart its own accessible name.** HistoryChart.razor hard-codes `aria-label="History chart"`, so both charts on `/processes` would be announced the same way. Add a label parameter that defaults to `History chart`, and pass `Memory per program` and `CPU per program`.
+
+**Minor 5 — list the new test doubles in `.squad/project.md`.** The `.squad/project.md` text reported to the orchestrator covers areas 3, 10 and 12 only. The *Test doubles* row (`.squad/project.md:192`) lists the page harnesses and fakes; add `ProcessesPageHarness` and `FakeProgramRollupReader` to it.
