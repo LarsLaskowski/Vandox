@@ -666,7 +666,7 @@ public class SqliteStoreProgramRollupTests
         // Arrange
         using var directory = new TempDirectory();
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
-        string[] names = ["\u0000", "\u0001", "‮", "\U0001F600", "q\"u'o\\te", "100%_", "x'); DROP TABLE records; --", new string('a', 1024)];
+        string[] names = ["\u0000", "\u0001", "\u202E", "\U0001F600", "q\"u'o\\te", "100%_", "x'); DROP TABLE records; --", new string('a', 1024)];
         var programs = names.Select((name, index) => ProgramSamples.Program(name, 1, (ulong)((names.Length - index) * 1000), 1)).ToArray();
 
         await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ProgramSamples.Snapshot(Samples.Base.AddSeconds(10), ProgramSamples.Source, programs));
@@ -1174,7 +1174,7 @@ public class SqliteStoreProgramRollupTests
         // Arrange
         using var directory = new TempDirectory();
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
-        string[] names = ["\u0000", "\u0001", "‮", "\U0001F600", "q\"u'o\\te", "100%_", "x'); DROP TABLE records; --", new string('a', 1024)];
+        string[] names = ["\u0000", "\u0001", "\u202E", "\U0001F600", "q\"u'o\\te", "100%_", "x'); DROP TABLE records; --", new string('a', 1024)];
         var programs = names.Select((name, index) => ProgramSamples.Program(name, 1, (ulong)((names.Length - index) * 1000), 1)).ToArray();
 
         await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, programs));
