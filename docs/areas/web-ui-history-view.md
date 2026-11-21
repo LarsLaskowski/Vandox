@@ -130,11 +130,11 @@ Times are `yyyy-MM-dd HH:mm:ss` in UTC.
   `Moment <time> UTC` (`yyyy-MM-dd HH:mm:ss`), the link *Logs of this moment* and the two snapshots. The link is `logs` with `from` 30
   seconds before the moment and `to` 5 minutes after it, clipped to the storable range. While the snapshots are read the panel says
   `Loading…`.
-- **Which snapshot.** Of each kind (process, connection), of any source, the stored snapshot closest to the moment within **10 minutes**
+- **Which snapshot.** Of each kind (process, connection), of any source (the link *History of this moment* of the processes view opens this panel, which can therefore show another source's snapshot than the processes view does), the stored snapshot closest to the moment within **10 minutes**
   either side: the latest at or before it and the earliest after it are compared; the nearer wins, the one at or before on equal
   distance, and among snapshots of one capture time the lower record ID. A change of the moment alone reads only these snapshots; the
   chart is not read again and its running read is not cancelled.
-- **Process snapshot.** The heading is `Process snapshot of <time> UTC (<source>)`. Two tables follow, each with at most 20 rows:
+- **Process snapshot.** The panel is the component that the [Processes view](web-ui-processes-view.md) shows too, there for the snapshot of one source. The heading is `Process snapshot of <time> UTC (<source>)`. Two tables follow, each with at most 20 rows:
   *Programs* (program, processes, CPU %, memory), by memory descending and then by program name, and *Processes* (PID, user, command, CPU %,
   memory), by memory descending and then by PID; beyond 20 each ends with `and <n> more programs` or `and <n> more processes`. Memory is the
   PSS when every entry of that list has one, else the RSS, and the column says which (`Memory (PSS)`, `Memory (RSS)`); sizes are in binary
@@ -208,14 +208,16 @@ display, at most 256 characters in at most 16 runs.
 - The chart in general, the gate, external text and circuits: [Web UI](web-ui.md); the login: [Web login](web-login.md).
 - The logs the link opens: [Logs view](web-ui-logs-view.md); how snapshots are recorded: [Agent system metrics](agent-system-metrics.md),
   [Agent connections](agent-connections.md); how long they are kept: [Retention and rollups](retention.md).
-- Self-healing markers, the list of gaps with their causes, the processes and network views, a minimum-to-maximum band, drag selection
+- The programs over time and the comparison of two moments: [Processes view](web-ui-processes-view.md).
+- Self-healing markers, the list of gaps with their causes, the network view, a minimum-to-maximum band, drag selection
   by touch and automatic refresh: not built.
 
 ## Implementation
 
 `Vandox.Backend`: `Components/Pages/HistoryPage` (the address, the controls and the reads) with `HistorySnapshotTable`;
-`Components/Charts/HistoryChart` (draws, reports the width), `HistoryChartInterop` (the calls into `js/charts.js`: `width`,
+`Components/Pages/ProcessSnapshotPanel` (the process part of the moment panel, shared with the processes view; its callback is `BeforeChosen`), `HistoryRangeControls` (the presets and the range fields, shared with the processes view) and `PageLocation`;
+`Components/Charts/HistoryChart` (draws, reports the width; its `Label` is the accessible name of the host, `History chart` by default), `HistoryChartInterop` (the calls into `js/charts.js`: `width`,
 `createHistory`, and the `mark` of the chart it returns) and `HistoryChartEvents` (the two `[JSInvokable]` instance methods `Select` and
 `Pick`); `History/` (`HistoryAddress` with `Parse`, `ToQuery` and `SameChart`, `HistoryView` with the texts and helpers,
-`HistoryChartView`, `HistoryMomentReader`, `ProcessSnapshotView`, `ConnectionSnapshotView`, `GatedHistoryReader`); `PageRunner` of the
+`HistoryChartView`, `HistoryMomentReader` (with `ClosestAsync`, the read of one kind, of one source or of any), `AddressTimes` (the range and the moment of the address, shared with the processes view), `ProcessSnapshotView`, `ConnectionSnapshotView`, `GatedHistoryReader`); `PageRunner` of the
 logs view runs the actions. The reads are `IHistoryReader` of `Vandox.Storage`.

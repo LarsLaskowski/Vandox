@@ -407,6 +407,17 @@ it to pick a moment, which shows the process and the connection snapshot closest
 around it. Everything is in the address, so a view can be bookmarked and shared; a preset stays relative to the time it is opened.
 The page and its limits: [History view](docs/areas/web-ui-history-view.md).
 
+### See which programs use the memory
+
+The web UI shows the programs of the monitored server over a period under *Processes* (`/processes`). All times are **UTC**. Choose a
+range with the presets *1 h* to *1 y* or *From* and *To*; two stacked charts show the 10 programs with the highest average memory and,
+below, the 10 with the highest CPU use, the highest at the bottom, and every other program together as `Other programs`, so the top edge
+is the total of the server. The charts come from the per-program rollups, so they reach back as far as `retention.rollups_1h` keeps them,
+long after the process snapshots themselves are removed. Click in a chart to pick a moment and see the process snapshot closest to it
+(within 10 minutes, while snapshots are kept); *Compare from here* and a second click show which programs grew, shrank, appeared or
+disappeared between the two moments. With more than one source (the agent and an import) the page shows one at a time. Everything is
+in the address, so a view can be bookmarked and shared. The page and its limits: [Processes view](docs/areas/web-ui-processes-view.md).
+
 ### Reconstruct incidents
 
 `vandoxd incidents` rebuilds the outage incidents from everything stored, so run it after each import (it needs no

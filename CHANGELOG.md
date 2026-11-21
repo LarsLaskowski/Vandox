@@ -8,11 +8,18 @@ tag lists the merged pull requests in detail.
 
 ### Added
 
+- **Processes view** (issue #50): the new page *Processes* (`/processes`) shows, for a range (the presets *1 h* to *1 y* or *From* and
+  *To*, in UTC) and one source, two stacked charts, *Memory per program* and *CPU per program*, of the 10 programs with the highest average
+  and the rest as `Other programs`, drawn from the per-program rollups so that they reach back as far as `retention.rollups_1h`. A drag
+  zooms into a period; a click picks a moment and shows the process snapshot of the source closest to it within 10 minutes, and a second
+  click after *Compare from here* compares the programs of the two moments (memory, CPU, change, new and gone). Source, range and
+  moments are in the address. The history chart gains a stacked mode, and the storage benchmark gains `--processes-view`. There is no new
+  option, route or listener.
 - **Per-program rollups of process snapshots** (issue #458): the retention job now folds every process snapshot, once, into 5-minute and
   hourly buckets per source and program (memory as PSS when every snapshot has it, else RSS, and CPU %, each as minimum, average and
   maximum, with the rest as *other programs*), so a program's history outlives `retention.snapshots`; a process snapshot is removed only
   after it was folded, and the buckets follow `retention.rollups_5m` and `retention.rollups_1h`. The database is migrated to schema version 16 and
-  folds the stored snapshots in steps. There is no new option, route or page; the processes view (#50) will draw them. The storage benchmark gains `--programs`.
+  folds the stored snapshots in steps. There is no new option, route or page; the processes view draws them. The storage benchmark gains `--programs`.
 - **History view** (issue #49): the new page *History* (`/history`) draws up to 8 chosen metrics over a range (the presets *1 h* to
   *1 y* or *From* and *To*, in UTC) in one chart, each metric on its own scale with the first two axes drawn, a line per label set, a
   step's minimum, average and maximum in the legend and markers for OOM kills, boots, service restarts and backup runs, and lists

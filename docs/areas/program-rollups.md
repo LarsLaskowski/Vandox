@@ -4,7 +4,7 @@
 
 What remains of the process snapshots after `retention.snapshots`: for each source, the memory and CPU of each program in 5-minute and
 hourly buckets, folded by the retention job, and the store reads that return the top programs of a source per step and the sources that
-have them. The processes view (#50) and anyone reading a program's history over months rely on it. The snapshots themselves, with their
+have them. The [Processes view](web-ui-processes-view.md) and anyone reading a program's history over months rely on it. The snapshots themselves, with their
 programs, `total` and `complete`, are in [Agent system metrics](agent-system-metrics.md), *Processes*. Rollups of the metric values are in
 [Retention and rollups](retention.md); the tables are in [Storage](storage.md); the read's place among the others is
 [Storage reading](storage-reading.md). There is no option: the buckets follow `retention.rollups_5m` and `retention.rollups_1h`.
@@ -22,7 +22,7 @@ programs, `total` and `complete`, are in [Agent system metrics](agent-system-met
 - **A PSS snapshot** lists at least one program and every listed program carries `pss_bytes`. Its PSS counts toward the PSS columns and
   the bucket's `pss_snapshots`; any other snapshot (an import of the legacy monitoring log, an agent without `CAP_SYS_PTRACE`) counts
   toward RSS only. A bucket that holds both kinds merges in either order and keeps correct RSS columns and totals.
-- **An incomplete snapshot** does not list every program: the sum of the programs' `count` differs from `total`, or `total` is absent
+- **An incomplete snapshot** does not list every program (the rule is `ProcessSnapshot.ListsEveryProgram`, which the fold and the processes view share): the sum of the programs' `count` differs from `total`, or `total` is absent
   and `complete` is not true, or the snapshot lists no program. A regular agent snapshot (top 25 processes) lists every program when the
   counts add up to `total`. The total row counts these snapshots in `incomplete`.
 - **A program missing from a snapshot of its source is 0 in it.** The average of a program over a bucket is its sum over the bucket's
@@ -111,12 +111,12 @@ rollups*); the figures below are those of the DS918+, the development host measu
 - The retention periods, the removal walk and the log lines: [Retention and rollups](retention.md).
 - The tables, the index and the migration step: [Storage](storage.md).
 - The meaning of a snapshot's fields: [Agent system metrics](agent-system-metrics.md), *Processes*.
-- The processes view that will draw the result: not built yet (#50).
+- The charts and the comparison that read the result: [Processes view](web-ui-processes-view.md); it takes the top 10 programs per chart, never the snapshots, and one source at a time.
 
 ## Implementation
 
 `Vandox.Storage`: `ProgramRollupFolder` (the fold, with `ProgramBucketTotals`, `ProgramSourceTotals`, `ProgramRollupTier`), `ProgramRollupQueries` (the
 reads, with `ProgramStepGrid`, `ProgramStepTotals`), `IProgramRollupReader` (`ProgramRollupsAsync`, `ProgramSourcesAsync`), implemented by `SqliteStore`
 with the types `ProgramRollupQuery`, `ProgramRollupResult`, `ProgramRollupLine`, `ProgramRollupPoint`, `ProgramMeasure`, `ProgramMemoryKey`,
-`ProgramSourceQuery`, `ProgramSourceList` and `ProgramSource`. The limits are in `StorageLimits`. The measurement is `--programs` of
+`ProgramSourceQuery`, `ProgramSourceList` and `ProgramSource`. `ProcessSnapshot.ListsEveryProgram` (`Vandox.Core`) holds the rule of an incomplete snapshot. The limits are in `StorageLimits`. The measurement is `--programs` of
 `tools/Vandox.StorageBenchmark`.
