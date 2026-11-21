@@ -355,6 +355,25 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
+    /// Combines the results of the metric fold and the program fold of one step.
+    /// </summary>
+    /// <param name="metrics">The result of the metric fold</param>
+    /// <param name="programs">The result of the program fold</param>
+    /// <returns>The combined result, with more to fold when either has more</returns>
+    private static RollupStepResult Combine(RollupStepResult metrics, RollupStepResult programs)
+    {
+        return new RollupStepResult
+               {
+                   Values = metrics.Values,
+                   Buckets = metrics.Buckets,
+                   Snapshots = programs.Snapshots,
+                   SkippedSnapshots = programs.SkippedSnapshots,
+                   ProgramBuckets = programs.ProgramBuckets,
+                   More = metrics.More || programs.More
+               };
+    }
+
+    /// <summary>
     /// Verifies WAL mode.
     /// </summary>
     /// <param name="connection">The writer connection</param>
@@ -1075,7 +1094,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         ArgumentNullException.ThrowIfNull(policy);
 
-        return RunRetentionAsync(RollupContext, true, (session, token) => RollupFolder.Fold(session, policy, now, token), cancellationToken);
+        return RunRetentionAsync(RollupContext, true, (session, token) => Combine(RollupFolder.Fold(session, policy, now, token), ProgramRollupFolder.Fold(session, policy, now, token)), cancellationToken);
     }
 
     /// <inheritdoc/>

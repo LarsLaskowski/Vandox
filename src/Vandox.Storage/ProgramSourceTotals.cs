@@ -5,9 +5,41 @@ namespace Vandox.Storage;
 /// </summary>
 internal sealed class ProgramSourceTotals
 {
-    #region Methods
+    #region Properties
 
-#pragma warning disable RH2003, S2325 // Skeleton: removed with the implementation
+    /// <summary>
+    /// Gets the number of snapshots.
+    /// </summary>
+    internal long Snapshots { get; private set; }
+
+    /// <summary>
+    /// Gets the number of snapshots that carry proportional memory.
+    /// </summary>
+    internal long PssSnapshots { get; private set; }
+
+    /// <summary>
+    /// Gets the number of snapshots that do not list every program.
+    /// </summary>
+    internal long Incomplete { get; private set; }
+
+    /// <summary>
+    /// Gets the sum of the resident memory of all programs.
+    /// </summary>
+    internal double RssSum { get; private set; }
+
+    /// <summary>
+    /// Gets the sum of the proportional memory of all programs of the snapshots that carry it.
+    /// </summary>
+    internal double PssSum { get; private set; }
+
+    /// <summary>
+    /// Gets the sum of the CPU percentages of all programs.
+    /// </summary>
+    internal double CpuSum { get; private set; }
+
+    #endregion // Properties
+
+    #region Methods
 
     /// <summary>
     /// Includes one snapshot.
@@ -18,10 +50,31 @@ internal sealed class ProgramSourceTotals
     /// <param name="incomplete">Whether the snapshot's programs do not account for all of its processes</param>
     internal void Include(double rss, double? pss, double cpu, bool incomplete)
     {
-        throw new NotImplementedException();
+        Snapshots++;
+        RssSum = Clamp(RssSum + rss);
+        CpuSum = Clamp(CpuSum + cpu);
+
+        if (pss is { } value)
+        {
+            PssSnapshots++;
+            PssSum = Clamp(PssSum + value);
+        }
+
+        if (incomplete)
+        {
+            Incomplete++;
+        }
     }
 
-#pragma warning restore RH2003, S2325
+    /// <summary>
+    /// Limits a sum to the range of a double.
+    /// </summary>
+    /// <param name="sum">The sum, which may be infinite</param>
+    /// <returns>The sum within the largest finite values</returns>
+    private static double Clamp(double sum)
+    {
+        return Math.Clamp(sum, -double.MaxValue, double.MaxValue);
+    }
 
     #endregion // Methods
 }
