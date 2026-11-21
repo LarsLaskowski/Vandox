@@ -27,5 +27,10 @@ public sealed class SnapshotQuery
     /// </summary>
     public SnapshotSide Side { get; init; }
 
+    /// <summary>
+    /// Gets the source to read from, <c>null</c> for any source.
+    /// </summary>
+    public string? Source { get; init; }
+
     #endregion // Properties
 }

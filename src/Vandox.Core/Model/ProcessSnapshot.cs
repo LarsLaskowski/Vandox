@@ -51,6 +51,21 @@ public sealed class ProcessSnapshot : IPayload
 
     #endregion // Properties
 
+    #region Methods
+
+    /// <summary>
+    /// Determines whether the snapshot lists every program: it names a program, and its program counts add up to the total, or without a total the list is complete.
+    /// </summary>
+    /// <returns><c>true</c> when the list names every program of the server</returns>
+#pragma warning disable RH2003, S2325 // Skeleton: removed with the implementation
+    public bool ListsEveryProgram()
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S2325 // Skeleton: removed with the implementation
+
+    #endregion // Methods
+
     #region IPayload
 
     /// <inheritdoc />

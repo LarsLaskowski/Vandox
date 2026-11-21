@@ -3,7 +3,7 @@ namespace Vandox.Storage;
 /// <summary>
 /// The ladder of steps of a query: 5, 10, 15 and 30 minutes, 1, 2, 3, 6 and 12 hours, 1 day, then whole days.
 /// </summary>
-internal static class SeriesLadder
+public static class SeriesLadder
 {
     #region Fields
 
@@ -23,6 +23,23 @@ internal static class SeriesLadder
     #endregion // Fields
 
     #region Methods
+
+    /// <summary>
+    /// Chooses the smallest step for which at most the target steps overlap the range between two times; a step under an hour needs the 5-minute rollups to reach the range.
+    /// </summary>
+    /// <param name="start">The start of the range</param>
+    /// <param name="end">The end of the range</param>
+    /// <param name="now">The current time</param>
+    /// <param name="target">The target number of steps, 1 to <see cref="TimeSeriesService.MaxTarget" /></param>
+    /// <param name="policy">The retention policy</param>
+    /// <returns>The step</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The target is below 1 or above the maximum</exception>
+#pragma warning disable RH2003 // Skeleton: removed with the implementation
+    public static TimeSpan Choose(DateTimeOffset start, DateTimeOffset end, DateTimeOffset now, int target, RetentionPolicy policy)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Chooses the smallest step for which at most the target steps overlap the range; a step under an hour needs the 5-minute rollups to reach the range.
