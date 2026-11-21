@@ -290,6 +290,58 @@ public class SqliteStoreProgramRollupTests
     }
 
     /// <summary>
+    /// A fold step cancelled while it runs commits nothing, and a later step folds everything.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public async Task SqliteStoreFoldRollupsCancelledStepCommitsNothing()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        using var source = new CancellationTokenSource();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = RetentionSamples.Defaults();
+        var now = Samples.Base.AddHours(1);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddSeconds(10), ProgramSamples.Source, ProgramSamples.Program(Nginx, 1, 100, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddSeconds(20), ProgramSamples.Source, ProgramSamples.Program(Nginx, 1, 200, 2)));
+
+        store.RetentionStepStarted = () =>
+                                     {
+                                         source.Cancel();
+
+                                         return Task.CompletedTask;
+                                     };
+
+        // Act
+        var cancelled = false;
+
+        try
+        {
+            _ = await store.FoldRollupsAsync(policy, now, source.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            cancelled = true;
+        }
+
+        store.RetentionStepStarted = null;
+
+        var tables = await RetentionSamples.CountAsync(directory.Path, "SELECT (SELECT count(*) FROM program_rollups_5m) + (SELECT count(*) FROM program_rollups_1h) + (SELECT count(*) FROM program_rollup_totals_5m) + (SELECT count(*) FROM program_rollup_totals_1h)", TestContext.CancellationToken);
+        var watermark = await RetentionSamples.CountAsync(directory.Path, ProgramSamples.Watermark, TestContext.CancellationToken);
+        var next = await store.FoldRollupsAsync(policy, now, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(cancelled, "the cancelled step throws an operation cancelled exception");
+        Assert.AreEqual(0L, tables, "no rollup row is committed by the cancelled step");
+        Assert.AreEqual(0L, watermark, "the position is not advanced by the cancelled step");
+        Assert.AreEqual(2, next.Snapshots, "the next step folds both snapshots");
+    }
+
+    /// <summary>
     /// A bucket already past the period of its tier is not created, while the other tier and newer buckets are.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

@@ -29,6 +29,10 @@ public partial class SqliteStoreRetentionTests
 
     private const string KeptTables = "metric_rollups_5m:source,name,labels,bucket,min_value,max_value,sum_value,count,last_value,last_at,last_record_id;"
                                       + "metric_rollups_1h:source,name,labels,bucket,min_value,max_value,sum_value,count,last_value,last_at,last_record_id;"
+                                      + "program_rollups_5m:source,bucket,program,seen,rss_min,rss_max,rss_sum,pss_min,pss_max,pss_sum,cpu_min,cpu_max,cpu_sum;"
+                                      + "program_rollups_1h:source,bucket,program,seen,rss_min,rss_max,rss_sum,pss_min,pss_max,pss_sum,cpu_min,cpu_max,cpu_sum;"
+                                      + "program_rollup_totals_5m:source,bucket,snapshots,pss_snapshots,incomplete,named,rss_sum,pss_sum,cpu_sum;"
+                                      + "program_rollup_totals_1h:source,bucket,snapshots,pss_snapshots,incomplete,named,rss_sum,pss_sum,cpu_sum;"
                                       + "log_templates:id,source,program,template,first_seen,last_seen,count;log_template_hours:template_id,hour,count;log_source_hours:source,hour,count;"
                                       + "gaps:id,agent_id,kind,cause,state,first_seq,last_seq,from_seq,to_seq,from_at,to_at,detected_at,changed_at;"
                                       + "records:id,kind,origin,source,agent_id,seq,captured_at,received_at,boot_id,clock_offset_ns,data,live";
