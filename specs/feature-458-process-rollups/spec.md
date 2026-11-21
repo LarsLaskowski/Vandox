@@ -84,17 +84,15 @@ number of stored snapshots.
 
 ## Out of scope
 
-- Connection snapshots (Q1, pending): a `connection_snapshot` names a `command` per PID, not a program, so it cannot be folded per
+- Rollups of connection snapshots (Q1, the Product Manager's answer): a `connection_snapshot` names a `command` per PID, not a
   program; the network view (#51) decides what history of connections it needs.
 - Per-process history, the swap of processes, and charts or pages: the processes view is #50.
 - A median or percentile per program (record 0208, *Consequences*).
 
 ## Open questions
 
-- Q1: Does #458 also roll up connection snapshots, although they carry no program? Open — escalated to the Product Manager. The
-  issue says #50 needs connection history; #50's draft spec puts connections per program out of scope (#51). The options: (a) process
-  snapshots only, connections left to #51; (b) also fold the socket count per `command` of the connection snapshots' `processes`;
-  (c) also fold the socket counts per protocol and state. Recommendation: (a).
+- Q1: Does #458 also roll up connection snapshots, although they carry no program? Answered: by the Product Manager, (a) process
+  snapshots only; connection history is left to #51, which decides what it needs (*Out of scope*).
 - Q2: What tells a reader a step is PSS? Answered: from the code (`internal/procstats`), one memory key per run, PSS only when every process
   has one; a step is PSS when all its folded snapshots are (E1).
 - Q3: What is an incomplete snapshot for per-program values? Answered: from the code (`internal/procstats/procstats.go`: `complete` is false
