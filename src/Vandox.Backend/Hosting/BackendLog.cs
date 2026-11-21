@@ -607,5 +607,13 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 77, Level = LogLevel.Information, Message = "retention removal program rollups {FiveMinuteRows} {HourlyRows}")]
     internal static partial void RetentionProgramRollupsRemoved(this ILogger logger, int fiveMinuteRows, int hourlyRows);
 
+    /// <summary>
+    /// Logs that reading the processes view failed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The exception of the read</param>
+    [LoggerMessage(EventId = 78, Level = LogLevel.Error, Message = "processes view: reading failed")]
+    internal static partial void ProcessesReadFailed(this ILogger logger, Exception exception);
+
     #endregion // Methods
 }
