@@ -1,6 +1,6 @@
 # 0223: Process snapshots are folded into per-program buckets beside a source total, by record ID
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-21
 - **Area:** Storage
 - **Source:** Issue #458
