@@ -86,6 +86,10 @@ time and no comparison. Process snapshots are removed after `retention.snapshots
   is marked `new` or `gone`, the left-out counts read `and <n> more programs.`, and the panel says `One of the two snapshots does not
   list every program, so no program is marked new or gone.` A program the two snapshots name differently (the two legacy import
   formats) shows as two programs.
+- E12: The panels show the snapshots of the source the charts show (the address's `source`, else the default of S7), read again
+  when a range change moves the default. Without `source` the panel says `Loading…` until the charts chose one, `No source has
+  process data in this range, so no snapshot is shown.` when none is listed (E1), `The source could not be read, so no snapshot is
+  shown.` when the chart read failed (E9); a range in the future shows no panel (E8).
 
 ## Non-functional requirements
 
@@ -107,11 +111,11 @@ time and no comparison. Process snapshots are removed after `retention.snapshots
 - AC3: The step, the step text and the legend follow S3, a missing program reading 0 and its minimum 0 (S3).
 - AC4: Range presets, *From*/*To* and a drag selection set the range in the address; `source`, `at` and `compare` follow S4, with the
   history view's address rules and errors (S4, E8).
-- AC5: A click sets the moment; the panel *Top processes* shows the source's closest process snapshot within 10 minutes, its texts,
-  *Snapshot before this moment* and the link to the history view (S5, E6).
+- AC5: A click sets the moment; the panel *Top processes* shows the closest process snapshot within 10 minutes of the charts'
+  source, its texts, *Snapshot before this moment* and the link to the history view, or a text of E12 (S5, E6, E12).
 - AC6: Two points give the comparison per program with memory and CPU at each, the change, `new` and `gone` (none, with the note, when
-  a snapshot does not list every program), the memory key, the order, the cap and the left-out counts, and `compare` in the address
-  (S4, S6, E6, E11).
+  a snapshot does not list every program), the memory key, the order, the cap and the left-out counts, and `compare` in the address,
+  of the charts' source (S4, S6, E6, E11, E12).
 - AC7: The page shows one source at a time, by the stated list, default and cap (S7).
 - AC8: A step without a folded snapshot breaks every band, and the notes of E1, E3, E4 and E5 appear exactly when the read calls for
   them, also for a range beyond `retention.snapshots` (E1, E2, E3, E4, E5, E7, S8).
@@ -159,3 +163,10 @@ time and no comparison. Process snapshots are removed after `retention.snapshots
 - 5 (source names, label cap): accepted. E10 limits free text to program, user and command names and caps labels at 64 characters.
 - 6 (recorded gaps): accepted. E2 and AC8 speak of a step without a folded snapshot; a shorter recorded gap breaks nothing.
 - 7 (cap hides new programs): accepted. The closing line counts the `new` and `gone` rows left out.
+
+## Amendments
+
+| Criterion | Change | Reason | Step | Decided by |
+| --------- | ------ | ------ | ---- | ---------- |
+| AC5 | E12 added: the charts' source, the texts when none is chosen | Plan challenge M1: no defined panel source | 2b | Lead |
+| AC6 | E12 added: the charts' source | Plan challenge M1 | 2b | Lead |

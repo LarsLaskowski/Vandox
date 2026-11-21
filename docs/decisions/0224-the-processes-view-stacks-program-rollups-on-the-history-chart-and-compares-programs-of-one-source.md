@@ -30,11 +30,15 @@ takes the closest snapshot of any source, while the processes view shows one sou
    a chart of one source, and the comparison could mix two sources.
 6. **Comparison of processes** instead of programs — a snapshot lists only the top 25 processes, so a missing process is not known
    to be gone.
+7. **A click that writes the shown source into the address** — the panel's source would be explicit, but an address with `at` and
+   no `source` (a bookmark, a typed address) and a failed chart read would still need a rule, and the first click would pin the source
+   so the default stops following the source with the latest bucket.
 
 ## Decision
 
 The processes view draws both charts with the history chart in a stacked mode from `IProgramRollupReader`, never from snapshots, and
-reads the moment's and the comparison's snapshots through the history view's stamp read narrowed to the shown source. The comparison
+reads the moment's and the comparison's snapshots through the history view's stamp read narrowed to the source the charts show,
+read again when that source changes. The comparison
 is by program, and it marks no program `new` or `gone` when either snapshot does not list every program by #458's definition, which
 moves from the fold into `ProcessSnapshot.ListsEveryProgram` so both use one rule. The rules are in the
 [Processes view](../areas/web-ui-processes-view.md).
