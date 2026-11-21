@@ -205,35 +205,6 @@ The processes view (#50); connection history (#51).
   rows for absent and empty `programs`, a null entry, a null name; counts summed in `long`.
 - 3 (NUL in names) — resolved: a `\u0000` name in the hostile-names test, ranked with its values.
 - 4 (cancellation path) — resolved: `ReaderQuery` named (fact 14); the test cancels while a statement runs.
-
-## Security notes
-
-**Delta review of the 458 plan revision (b557072 to fb32ad3): all four findings are resolved, and the revision adds nothing new on the security side. One non-blocking finding remains: a stale fact entry.**
-
-I read the revised `plan.md` in full, plus the diffs of `spec.md`, `tasks.md` and `log.md` since my round.
-
-**My findings**
-1. **Read clamp (was blocking) — resolved.**
-   - *Read* now clamps every sum: in SQL around each `sum()` with `MIN(MAX(…))`, and in C# with `TimeSeriesQueries.ClampSum` at each addition. No subtraction runs in SQL. *Other programs* is computed in C# and kept within 0 and `double.MaxValue`.
-   - This closes what I measured last round: `sum()` of `double.MaxValue` values gives Infinity, `MIN(MAX(…))` brings it back to `MaxValue`, and Inf − Inf no longer occurs.
-   - Values reaching the read are finite and non-negative (`Check.Rate`), so nothing inside SQL can produce NaN.
-   - E5 and AC6 are extended to the read, the spec has an *Amendments* row, and `SqliteStoreProgramRollupsClampsOverflowingSums` asserts that every returned value is finite.
-2. **Fold exception boundary — resolved.**
-   - Any exception while decoding a row, a result that is not a `ProcessSnapshot`, or a failed `Validate()` now skips the row and counts it.
-   - A validated snapshot folds without throwing: absent `programs` reads as empty, and counts are summed in `long`.
-   - Only SQLite errors and cancellation leave the fold.
-   - The test rows for absent and empty `programs`, a `null` entry, a `null` name and counts summing past 2^32 are in the plan.
-   - Last round I measured that `{"programs":[null]}` decodes to a program with an empty name, which `Validate` refuses, so that row is skipped as the plan says.
-3. **NUL in a name — resolved.** The hostile-names test now includes `\u0000`, "ranked with its values". On disk it is a text escape: `plan.md` lines 38 and 206 hold `\u0000`, `\u0001` and `U+202E`, and a byte grep for raw control characters or U+202E counts 0.
-4. **Cancellation path — resolved.** Fact 14 holds: the reader lease calls `ReaderQuery.Attach(connection, cancellationToken)` at `src/Vandox.Storage/SqliteStore.cs:282`. `SqliteStoreProgramRollupsHonorsCancellation` now cancels while a statement runs.
-
-**The rest of the revision**
-These changes came from the Devil's Advocate: NULL-safe PSS upserts, the epoch step grid, flags set on an empty result, the cost of the partial index, and the worst-case benchmark step. None of them touches areas 9 or 10. The removal rule and the watermark are unchanged. AC3 still says a process snapshot is removed only once folded, so trimming E7 loses nothing. The tier stays `standard`, and *Security areas touched* is still complete.
-
-**Finding**
-- `[NON-BLOCKING]` **Fact 11 is still marked unverified, but it has been measured.**
-  - **Where:** plan.md, *Verified facts*, row 11: "Which exception `JsonDocument.Parse` throws on invalid UTF-8 inside a string | to verify: …"
-  - **Evidence:** last round I measured it. `JsonDocument.Parse` followed by `PayloadRegistry.Deserialize` throws `System.Text.Json.JsonException` (inner `InvalidOperationException`) for the bytes FF, C3, ED A0 80 and C0 AF. The probe is `/tmp/claude-0/-home-user-Vandox/99f9eb5f-bb52-56b8-9cea-0907a7c903c4/scratchpad/probe/Program.cs`, run with `timeout 600 dotnet run`. Since the fold now skips a row on any decoding exception, the row no longer carries the design either way.
-  - **Smallest fix, verbatim:** replace row 11 with
-    `| 11 | Invalid UTF-8 inside a string makes decoding throw `JsonException` (inner `InvalidOperationException`) | Security's measurement, plan review (`JsonDocument.Parse` + `PayloadRegistry.Deserialize`, bytes FF, C3, ED A0 80, C0 AF) | confirmed |`
-  - **Recommendation:** fix now, so the Tester does not measure it again.
+- Delta review (approved; all four resolved), non-blocking note on fact 11 (`fix now`) — taken: row 11 now carries
+  Security's measurement verbatim (`JsonException`, inner `InvalidOperationException`, bytes FF, C3, ED A0 80, C0 AF),
+  status confirmed; the Tester does not measure it again.
