@@ -8,6 +8,11 @@ tag lists the merged pull requests in detail.
 
 ### Added
 
+- **Per-program rollups of process snapshots** (issue #458): the retention job now folds every process snapshot, once, into 5-minute and
+  hourly buckets per source and program (memory as PSS when every snapshot has it, else RSS, and CPU %, each as minimum, average and
+  maximum, with the rest as *other programs*), so a program's history outlives `retention.snapshots`; a process snapshot is removed only
+  after it was folded, and the buckets follow `retention.rollups_5m` and `retention.rollups_1h`. The database is migrated to schema version 16 and
+  folds the stored snapshots in steps. There is no new option, route or page; the processes view (#50) will draw them. The storage benchmark gains `--programs`.
 - **History view** (issue #49): the new page *History* (`/history`) draws up to 8 chosen metrics over a range (the presets *1 h* to
   *1 y* or *From* and *To*, in UTC) in one chart, each metric on its own scale with the first two axes drawn, a line per label set, a
   step's minimum, average and maximum in the legend and markers for OOM kills, boots, service restarts and backup runs, and lists

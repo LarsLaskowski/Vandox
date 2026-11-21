@@ -283,6 +283,42 @@ rollup steps with 313.3 ms (`cpu_percent` 161.2 ms in one call, the other seven 
 engine with 37.3 ms; no boot read is made (0 calls). The statement alone for the steps of one `cpu_percent` label set took 16.8 ms (730
 rows), and one reader lease 1.13 ms. The remaining parallel reads, reader caches or pooling were not needed.
 
+## Program rollups
+
+Criteria (issue #458, AC7): a fold step stays within the work of one ingest batch (N2); the disk growth of a day of snapshots is measured
+and stated (N4); a one-year read of the top programs returns within the views' 10-second deadline (N3)
+([Program rollups](areas/program-rollups.md)). Measured with the `--programs` scenario of the storage benchmark. Only a run on the reference
+host counts against a criterion.
+
+### Procedure
+
+Publish the tool as for the retention steps and run it on the reference host, on the volume that holds the database (the SSD volume):
+
+```bash
+dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --programs
+```
+
+`--programs` takes no other option. It measures, each in a fresh database under a fixed clock (2026-12-01 12:00 UTC):
+
+- **N2**: five batches of 10,000 metric points and 500 process snapshots of 80 programs each; it times the fold steps against the median
+  batch (each step folds the metric values and up to 500 snapshots or 2 MiB of snapshot data, whichever comes first).
+- **N4**: a day of one snapshot a minute (1,440 snapshots of 80 programs); `page_count` before and after the fold, with the page size, and
+  the time and steps of the fold.
+- **N3**: a year of 8,760 hourly snapshots, folded; the median of five one-year reads at a 6-hour step, memory, *n* = 10. It then drops
+  the program tables and the watermark, rebuilds them as schema step 16 does and prints the time of that step.
+- **Worst case**: one fold step of 10,000 metric points and snapshots of 4,096 programs with 1,024-byte names, and one snapshot of about
+  16 MiB, reported beside the typical figures.
+
+### Results
+
+| Host | Date | Volume | Median batch | Median fold step | N4: a day (1,440 snapshots) | Year folded | One-year read, median of 5 | Schema step 16 | Worst case | Verdict |
+| ---- | ---- | ------ | -----------: | ---------------: | --------------------------- | ----------- | -------------------------: | -------------: | ---------- | ------- |
+| development host (sandbox, 4 logical CPUs, Ubuntu 24.04, .NET 11), not the reference host | 2026-11-21 | local disk | 517 ms | 125 ms (275 snapshots per step, limited by the 2 MiB budget) | `page_count` 2,996 to 3,699 at 4,096-byte pages (+703 pages, +2,812 KiB); fold 376 ms in 6 steps | 11,382 ms in 32 steps | 382 ms (458, 372, 382, 365, 382 ms) | 21 ms (a version 15 database reverted by hand: the creation of the tables and the index build only) | 10,000 metrics and one 4,096-program snapshot: 35 ms in 1 step; one snapshot of about 16 MiB: 33 ms in 1 step | order of magnitude only |
+| DS918+ (reference host) | **to be recorded: Product Manager's run of the step-7 manual test** | SSD volume | to be recorded | to be recorded | to be recorded | to be recorded | to be recorded | to be recorded | to be recorded | to be recorded (N2: fold step at or below the median batch; N3: read under 10 s) |
+
+The development-host row shows the order of magnitude: the fold step (125 ms) is at about a quarter of that run's median batch (517 ms),
+and the read is far below the deadline. The DS918+ row decides AC7.
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):
