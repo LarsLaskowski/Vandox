@@ -14,6 +14,12 @@ public class SqliteStoreProgramRollupTests
 
     private const string Nginx = "nginx";
 
+    private const string InvalidPrefix = "store: invalid query: ";
+
+    private const string RangeText = "store: invalid query: from and to must be within the storable range";
+
+    private const int ProgramHours = 1500;
+
     #endregion // Constants
 
     #region Properties
@@ -677,6 +683,726 @@ public class SqliteStoreProgramRollupTests
     }
 
     /// <summary>
+    /// The read returns the n programs with the highest average of the measure over the range, in that order, each with its average, minimum and maximum per step; a tie is broken by program name, a step without snapshots is
+    /// a gap, and the sum of all other programs is returned per step.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsReturnsTopProgramsByMeasure()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var five = TimeSpan.FromMinutes(5);
+        var to = Samples.Base.AddMinutes(10);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1),
+                                                                  ProgramSamples.Source,
+                                                                  ProgramSamples.Program("a", 1, 100, 1),
+                                                                  ProgramSamples.Program("b", 1, 500, 0.5),
+                                                                  ProgramSamples.Program("c", 1, 200, 3),
+                                                                  ProgramSamples.Program("d", 1, 50, 2)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(2),
+                                                                  ProgramSamples.Source,
+                                                                  ProgramSamples.Program("a", 1, 300, 2),
+                                                                  ProgramSamples.Program("b", 1, 500, 0.5),
+                                                                  ProgramSamples.Program("c", 1, 200, 3),
+                                                                  ProgramSamples.Program("d", 1, 50, 2)));
+        await FoldAsync(store);
+
+        // Act
+        var memory = await store.ProgramRollupsAsync(Query(Samples.Base, to, five, ProgramMeasure.Memory, 3), TestContext.CancellationToken);
+        var cpu = await store.ProgramRollupsAsync(Query(Samples.Base, to, five, ProgramMeasure.Cpu, 2), TestContext.CancellationToken);
+        var all = await store.ProgramRollupsAsync(Query(Samples.Base, to, five, ProgramMeasure.Memory, 10), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual([Samples.Base, Samples.Base.AddMinutes(5)], memory.Times, "the steps of the range");
+        Assert.AreSequenceEqual(["b", "a", "c"], Names(memory), "memory: the highest average first, the tie of a and c by name");
+        Assert.AreEqual(ProgramMemoryKey.Rss, memory.MemoryKey, "snapshots without PSS read as RSS");
+        Assert.AreSequenceEqual(["500/500/500", "gap"], Points(memory, "b"), "b in both snapshots");
+        Assert.AreSequenceEqual(["200/100/300", "gap"], Points(memory, "a"), "a averages 100 and 300");
+        Assert.AreSequenceEqual(["200/200/200", "gap"], Points(memory, "c"), "c");
+        Assert.AreSequenceEqual([50.0, null], memory.Others, "the programs left out add up to d, and a step without snapshots has none");
+        Assert.AreSequenceEqual(["c", "d"], Names(cpu), "CPU: ranked by the average CPU %");
+        Assert.IsNull(cpu.MemoryKey, "a CPU read names no memory key");
+        Assert.AreSequenceEqual(["3/3/3", "gap"], Points(cpu, "c"), "c in CPU");
+        Assert.AreSequenceEqual(["2/2/2", "gap"], Points(cpu, "d"), "d in CPU");
+        Assert.AreSequenceEqual([2.0, null], cpu.Others, "a and b make the other programs of the CPU read");
+        Assert.AreSequenceEqual(["b", "a", "c", "d"], Names(all), "a count above the programs returns every program");
+        Assert.AreSequenceEqual([0.0, null], all.Others, "nothing is left over when every program is named");
+    }
+
+    /// <summary>
+    /// A program a snapshot of its step does not name counts as 0 in its minimum and average, so the averages of all programs add up to the average total.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public async Task SqliteStoreProgramRollupsCountsMissingProgramAsZero()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1), ProgramSamples.Program("b", 1, 50, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(2), ProgramSamples.Source, ProgramSamples.Program("a", 1, 300, 1)));
+        await FoldAsync(store);
+
+        // Act
+        var fiveMinutes = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(5), TimeSpan.FromMinutes(5), ProgramMeasure.Memory, 2), TestContext.CancellationToken);
+        var hourly = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddHours(1), TimeSpan.FromHours(1), ProgramMeasure.Memory, 2), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["a", "b"], Names(fiveMinutes), "both programs are named");
+        Assert.AreSequenceEqual(["200/100/300"], Points(fiveMinutes, "a"), "a is in both snapshots");
+        Assert.AreSequenceEqual(["25/0/50"], Points(fiveMinutes, "b"), "b is missing from one snapshot: its minimum is 0 and its average adds that 0");
+        Assert.AreSequenceEqual([0.0], fiveMinutes.Others, "the averages of the programs add up to the total of 225");
+        Assert.AreSequenceEqual(["200/100/300"], Points(hourly, "a"), "the hourly tier gives the same for a");
+        Assert.AreSequenceEqual(["25/0/50"], Points(hourly, "b"), "and for b");
+        Assert.AreSequenceEqual([0.0], hourly.Others, "and the same other programs");
+    }
+
+    /// <summary>
+    /// Memory is PSS when every snapshot of the range is a PSS snapshot, else RSS for the whole range, which the result names.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsReadsRssWhenRangeMixesPssAndRss()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var five = TimeSpan.FromMinutes(5);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1, 90), ProgramSamples.Program("b", 1, 200, 1, 10)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(2), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1, 50), ProgramSamples.Program("b", 1, 200, 1, 10)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(7), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1), ProgramSamples.Program("b", 1, 200, 1)));
+        await FoldAsync(store);
+
+        // Act
+        var pss = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(5), five, ProgramMeasure.Memory, 2), TestContext.CancellationToken);
+        var mixed = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(10), five, ProgramMeasure.Memory, 2), TestContext.CancellationToken);
+        var cpu = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(5), five, ProgramMeasure.Cpu, 2), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(ProgramMemoryKey.Pss, pss.MemoryKey, "a range of PSS snapshots only reads PSS");
+        Assert.AreSequenceEqual(["a", "b"], Names(pss), "ranked by PSS, so a before b");
+        Assert.AreSequenceEqual(["70/50/90"], Points(pss, "a"), "the PSS of a over its two PSS snapshots");
+        Assert.AreSequenceEqual(["10/10/10"], Points(pss, "b"), "the PSS of b");
+        Assert.AreEqual(ProgramMemoryKey.Rss, mixed.MemoryKey, "one RSS snapshot in the range makes the whole range RSS");
+        Assert.AreSequenceEqual(["b", "a"], Names(mixed), "ranked by RSS, so b before a");
+        Assert.AreSequenceEqual(["200/200/200", "200/200/200"], Points(mixed, "b"), "b in RSS in both steps");
+        Assert.AreSequenceEqual(["100/100/100", "100/100/100"], Points(mixed, "a"), "a in RSS in both steps, also in the step of PSS snapshots");
+        Assert.IsNull(cpu.MemoryKey, "CPU names no memory key");
+    }
+
+    /// <summary>
+    /// The result holds, per step, the average of the programs outside the top n and the number of folded snapshots that did not list every program.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsReturnsOthersAndIncompletePerStep()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1), ProgramSamples.Program("b", 1, 60, 1), ProgramSamples.Program("c", 1, 40, 1)),
+                                          ProgramSamples.Snapshot(RecordOrigin.Backend, Samples.Base.AddMinutes(6), ProgramSamples.Source, true, 5, [ProgramSamples.Program("a", 1, 100, 1), ProgramSamples.Program("b", 1, 60, 1)]),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(7), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1), ProgramSamples.Program("b", 1, 20, 1)));
+        await FoldAsync(store);
+
+        // Act
+        var result = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(15), TimeSpan.FromMinutes(5), ProgramMeasure.Memory, 1), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["a"], Names(result), "only the top program is named");
+        Assert.AreSequenceEqual(["100/100/100", "100/100/100", "gap"], Points(result, "a"), "the top program per step, the last step has no snapshot");
+        Assert.AreSequenceEqual([100.0, 40.0, null], result.Others, "b and c in the first step, the average of b over two snapshots in the second");
+        Assert.AreSequenceEqual([0, 1, 0], result.Incomplete, "the snapshot whose counts differ from its total is the incomplete one of the second step");
+    }
+
+    /// <summary>
+    /// A step without a folded snapshot is a gap in every line and in the other programs, while a program a step's snapshots do not name reads 0 there.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsMarksStepsWithoutSnapshotsAsGaps()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1), ProgramSamples.Program("b", 1, 10, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(11), ProgramSamples.Source, ProgramSamples.Program("a", 1, 300, 1)));
+        await FoldAsync(store);
+
+        // Act
+        var result = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(15), TimeSpan.FromMinutes(5), ProgramMeasure.Memory, 2), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["a", "b"], Names(result), "both programs are named");
+        Assert.AreSequenceEqual(["100/100/100", "gap", "300/300/300"], Points(result, "a"), "the empty middle step is a gap");
+        Assert.AreSequenceEqual(["10/10/10", "gap", "0/0/0"], Points(result, "b"), "a step with snapshots that do not name the program reads 0, not a gap");
+        Assert.AreSequenceEqual([0.0, null, 0.0], result.Others, "the other programs are a gap in the middle step");
+        Assert.AreSequenceEqual([0, 0, 0], result.Incomplete, "no snapshot is incomplete");
+    }
+
+    /// <summary>
+    /// A step reads the tier of its resolution: a 30-minute step the 5-minute buckets, which a range starting before their period gives as gaps and then values with the starts-before flag set, a range wholly before it
+    /// as no lines with the flag set; an hourly step reads the hourly buckets, which still hold that range.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsReadsTheTierOfTheStep()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = new RetentionPolicy
+                     {
+                         Raw = RetentionSamples.Days(1),
+                         FiveMinuteRollups = RetentionSamples.Days(1),
+                         HourlyRollups = RetentionSamples.Days(365),
+                         Logs = RetentionSamples.Days(1),
+                         Snapshots = RetentionSamples.Days(1),
+                         Events = RetentionSamples.Days(365)
+                     };
+        var now = Samples.Base.AddDays(10);
+        var half = TimeSpan.FromMinutes(30);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(now.AddDays(-3).AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program(Nginx, 1, 100, 1)),
+                                          ProgramSamples.Snapshot(now.AddHours(-1).AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program(Nginx, 1, 300, 3)));
+        await RetentionSamples.FoldAllAsync(store, policy, now, TestContext.CancellationToken);
+
+        // Act
+        var across = await store.ProgramRollupsAsync(Query(now.AddHours(-26), now, half, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var before = await store.ProgramRollupsAsync(Query(now.AddDays(-4), now.AddDays(-2), half, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var hourly = await store.ProgramRollupsAsync(Query(now.AddDays(-3), now.AddDays(-2), TimeSpan.FromHours(1), ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+
+        // Assert
+        var index = across.Times.ToList().IndexOf(now.AddHours(-1));
+        var points = Points(across, Nginx);
+
+        Assert.HasCount(52, across.Times, "26 hours in steps of 30 minutes");
+        Assert.AreEqual(50, index, "the step that holds the folded snapshot");
+        Assert.AreEqual("300/300/300", points[index], "the 5-minute bucket still holds the snapshot");
+        Assert.HasCount(1, points.Where(point => point != "gap").ToList(), "the steps before the 5-minute buckets are gaps");
+        Assert.IsTrue(across.StartsBeforeBuckets, "the range starts before the oldest 5-minute bucket");
+        Assert.IsEmpty(before.Programs, "a range wholly before the 5-minute buckets has no lines");
+        Assert.IsTrue(before.StartsBeforeBuckets, "and starts before them");
+        Assert.AreEqual("100/100/100", Points(hourly, Nginx)[0], "the hourly bucket still holds the old snapshot");
+        Assert.IsFalse(hourly.StartsBeforeBuckets, "the range does not start before the oldest hourly bucket");
+    }
+
+    /// <summary>
+    /// The result says up to when the source's snapshots are folded through the earliest capture time of its snapshots not yet folded, and whether the range starts before the oldest bucket of the tier.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsReturnsEarliestUnfoldedAndStartsBefore()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var five = TimeSpan.FromMinutes(5);
+        var hour = TimeSpan.FromHours(1);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddSeconds(5), "other", ProgramSamples.Program(Nginx, 1, 100, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program(Nginx, 1, 100, 1)));
+
+        var beforeFold = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(10), five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+
+        await FoldAsync(store);
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(10), "other", ProgramSamples.Program(Nginx, 1, 100, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(30), ProgramSamples.Source, ProgramSamples.Program(Nginx, 1, 100, 1)));
+
+        // Act
+        var pending = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(10), five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+
+        await FoldAsync(store);
+
+        var folded = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(10), five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var earlier = await store.ProgramRollupsAsync(Query(Samples.Base.AddMinutes(-10), Samples.Base.AddMinutes(10), five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var later = await store.ProgramRollupsAsync(Query(Samples.Base.AddMinutes(5), Samples.Base.AddMinutes(10), five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var hourlyEarlier = await store.ProgramRollupsAsync(Query(Samples.Base.AddHours(-1), Samples.Base.AddHours(1), hour, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var hourlyAt = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddHours(1), hour, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(Samples.Base.AddMinutes(1), beforeFold.EarliestUnfolded, "before the fold: the earliest snapshot of the source, not that of the other source");
+        Assert.AreEqual(Samples.Base.AddMinutes(30), pending.EarliestUnfolded, "a snapshot stored after the fold is the earliest not yet folded");
+        Assert.IsNull(folded.EarliestUnfolded, "after the fold nothing is left");
+        Assert.IsTrue(earlier.StartsBeforeBuckets, "the range starts before the oldest 5-minute bucket");
+        Assert.IsFalse(folded.StartsBeforeBuckets, "the range starts at the oldest 5-minute bucket");
+        Assert.IsFalse(later.StartsBeforeBuckets, "the range starts after it");
+        Assert.IsTrue(hourlyEarlier.StartsBeforeBuckets, "the same for the hourly tier");
+        Assert.IsFalse(hourlyAt.StartsBeforeBuckets, "an hourly range starting at the oldest hourly bucket does not start before it");
+    }
+
+    /// <summary>
+    /// An unknown source, an empty range and a range without a bucket return an empty result without an error.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsReturnsEmptyResult()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var five = TimeSpan.FromMinutes(5);
+
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program(Nginx, 1, 100, 1)));
+        await FoldAsync(store);
+
+        // Act
+        var unknown = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(10), five, ProgramMeasure.Memory, 5, "nobody"), TestContext.CancellationToken);
+        var empty = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base, five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var reversed = await store.ProgramRollupsAsync(Query(Samples.Base.AddMinutes(10), Samples.Base, five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var none = await store.ProgramRollupsAsync(Query(Samples.Base.AddHours(5), Samples.Base.AddHours(6), five, ProgramMeasure.Cpu, 5), TestContext.CancellationToken);
+
+        // Assert
+        AssertEmpty(unknown, "an unknown source");
+        AssertEmpty(empty, "an empty range");
+        AssertEmpty(reversed, "a range that ends before it starts");
+        AssertEmpty(none, "a range without a bucket");
+        Assert.IsNull(none.EarliestUnfolded, "nothing is waiting to be folded");
+        Assert.IsFalse(none.StartsBeforeBuckets, "the range starts after the oldest bucket");
+    }
+
+    /// <summary>
+    /// The steps lie on the grid of multiples of the step since the Unix epoch: the first one is the step that holds the start of the range, and it holds all of its bucket.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsAlignsStepsToTheEpoch()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var five = TimeSpan.FromMinutes(5);
+        var twoDays = TimeSpan.FromDays(2);
+        var twoDayStart = DateTimeOffset.UnixEpoch.AddDays((long)(Samples.Base - DateTimeOffset.UnixEpoch).TotalDays / 2 * 2);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, ProgramSamples.Program("a", 1, 999, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(6), ProgramSamples.Source, ProgramSamples.Program("a", 1, 100, 1)));
+        await FoldAsync(store);
+
+        // Act
+        var minutes = await store.ProgramRollupsAsync(Query(Samples.Base.AddMinutes(7), Samples.Base.AddMinutes(20), five, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var halfDays = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddHours(1), TimeSpan.FromHours(12), ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+        var days = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddHours(1), twoDays, ProgramMeasure.Memory, 5), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual([Samples.Base.AddMinutes(5), Samples.Base.AddMinutes(10), Samples.Base.AddMinutes(15)], minutes.Times, "the first step is the 5-minute step that holds the start of the range");
+        Assert.AreSequenceEqual(["100/100/100", "gap", "gap"], Points(minutes, "a"), "the first step holds its whole bucket, and the step before the range is not read");
+        Assert.AreSequenceEqual([Samples.Base.AddHours(-10)], halfDays.Times, "12-hour steps start at midnight and noon UTC");
+        Assert.AreSequenceEqual(["549.5/100/999"], Points(halfDays, "a"), "the half day holds the hourly bucket of both snapshots");
+        Assert.AreSequenceEqual([twoDayStart], days.Times, "steps of two days are multiples of two days since the epoch");
+    }
+
+    /// <summary>
+    /// A query with a count outside 1 to 50, a step that is not one of the query's steps, more than 2,000 steps counted on the epoch grid, a bound outside the storable range or an unknown measure is refused with the exact text;
+    /// the largest valid ranges are not.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsRejectsInvalidQuery()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var five = TimeSpan.FromMinutes(5);
+        var from = Samples.Base;
+        var to = Samples.Base.AddHours(1);
+        var countText = InvalidPrefix + "count must be 1 to 50";
+        var stepText = InvalidPrefix + "step must be one of the query's steps";
+        var stepsText = InvalidPrefix + "the range holds more than 2000 steps";
+        var rangeText = InvalidPrefix + "from and to must be within the storable range";
+        var refused = new List<(ProgramRollupQuery Query, string Text, string Why)>
+                      {
+                          (Query(from, to, five, ProgramMeasure.Memory, 0), countText, "count 0"),
+                          (Query(from, to, five, ProgramMeasure.Memory, 51), countText, "count 51"),
+                          (Query(from, to, five, ProgramMeasure.Memory, -1), countText, "a negative count"),
+                          (Query(from, to, TimeSpan.FromMinutes(7), ProgramMeasure.Memory, 5), stepText, "a step of 7 minutes"),
+                          (Query(from, to, TimeSpan.Zero, ProgramMeasure.Memory, 5), stepText, "a step of zero"),
+                          (Query(from, to, TimeSpan.FromHours(4), ProgramMeasure.Memory, 5), stepText, "a step of 4 hours"),
+                          (Query(from, to, TimeSpan.FromHours(36), ProgramMeasure.Memory, 5), stepText, "a step that is not whole days"),
+                          (Query(from, from.AddDays(365), five, ProgramMeasure.Memory, 5), stepsText, "a year at 5 minutes"),
+                          (Query(from.AddMinutes(1), from.AddMinutes(1) + (2000 * five), five, ProgramMeasure.Memory, 5), stepsText, "2,000 steps that overlap 2,001 steps of the epoch grid"),
+                          (Query(DateTimeOffset.MinValue, to, five, ProgramMeasure.Memory, 5), rangeText, "a start outside the storable range"),
+                          (Query(from, DateTimeOffset.MaxValue, five, ProgramMeasure.Memory, 5), rangeText, "an end outside the storable range"),
+                          (Query(from, to, five, (ProgramMeasure)42, 5), InvalidPrefix + "unknown measure", "an unknown measure")
+                      };
+        var accepted = new List<(ProgramRollupQuery Query, string Why)>
+                       {
+                           (Query(from, from + (2000 * five), five, ProgramMeasure.Memory, 50), "2,000 steps on the epoch grid and a count of 50"),
+                           (Query(from, from.AddDays(6), TimeSpan.FromDays(3), ProgramMeasure.Cpu, 1), "whole days"),
+                           (Query(from, to, TimeSpan.FromHours(12), ProgramMeasure.Memory, 1), "12 hours")
+                       };
+
+        // Act
+        var refusals = new List<string>();
+
+        foreach (var (query, text, why) in refused)
+        {
+            refusals.Add(await RefusalAsync(store, query, text, why));
+        }
+
+        var results = new List<ProgramRollupResult>();
+
+        foreach (var (query, _) in accepted)
+        {
+            results.Add(await store.ProgramRollupsAsync(query, TestContext.CancellationToken));
+        }
+
+        // Assert
+        Assert.AreSequenceEqual(refused.Select(entry => entry.Text).ToList(), refusals, "each invalid query is refused with its exact text");
+        Assert.HasCount(accepted.Count, results, "every valid query returns a result");
+    }
+
+    /// <summary>
+    /// A token cancelled while the read's statement runs ends the read in an operation cancelled exception through the reader's interrupt.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task SqliteStoreProgramRollupsHonorsCancellation()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        using var source = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var start = RetentionSamples.Ns(Samples.Base);
+        var buckets = $"WITH RECURSIVE c(x) AS (SELECT 0 UNION ALL SELECT x + 1 FROM c WHERE x < {ProgramHours - 1}) ";
+
+        await RetentionSamples.ExecuteAsync(directory.Path, buckets + $"INSERT INTO program_rollup_totals_1h SELECT 'processes', {start} + x * 3600000000000, 1, 0, 0, 1, 100.0, 0.0, 1.0 FROM c", TestContext.CancellationToken);
+        await RetentionSamples.ExecuteAsync(directory.Path, buckets + $"INSERT INTO program_rollups_1h SELECT 'processes', {start} + x * 3600000000000, 'a', 1, 100.0, 100.0, 100.0, NULL, NULL, 0.0, 1.0, 1.0, 1.0 FROM c", TestContext.CancellationToken);
+
+        await using var lease = await store.LeaseReaderAsync(source.Token);
+
+        lease.Connection.CreateAggregate("sum",
+                                         0d,
+                                         (double total, double value) =>
+                                         {
+                                             source.Cancel();
+
+                                             return total + value;
+                                         },
+                                         total => total);
+
+        var query = Query(Samples.Base, Samples.Base.AddHours(ProgramHours), TimeSpan.FromHours(1), ProgramMeasure.Memory, 5);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<OperationCanceledException>(() => ProgramRollupQueries.ReadAsync(lease.Connection, query, source.Token), "the cancelled token ends the read");
+
+        // Assert
+        Assert.IsTrue(source.IsCancellationRequested, "the token was cancelled while the statement ran");
+        Assert.IsNotNull(exception, "the read ends in a cancellation, not in a result or a store error");
+    }
+
+    /// <summary>
+    /// Sums of forged CPU values that overflow a double are clamped in the read: every average, minimum, maximum and other-programs value is finite.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task SqliteStoreProgramRollupsClampsOverflowingSums()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        int[] minutes = [1, 6, 11];
+        var snapshots = minutes.Select(minute => ProgramSamples.Snapshot(Samples.Base.AddMinutes(minute), ProgramSamples.Source, ProgramSamples.Program("a", 1, ulong.MaxValue, 1e308), ProgramSamples.Program("b", 1, ulong.MaxValue, 1e308))).ToArray();
+
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, snapshots);
+        await FoldAsync(store);
+
+        // Act
+        var cpuOne = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(15), TimeSpan.FromMinutes(15), ProgramMeasure.Cpu, 1), TestContext.CancellationToken);
+        var cpuTwo = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(15), TimeSpan.FromMinutes(15), ProgramMeasure.Cpu, 2), TestContext.CancellationToken);
+        var memory = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(15), TimeSpan.FromMinutes(15), ProgramMeasure.Memory, 1), TestContext.CancellationToken);
+
+        // Assert
+        AssertFinite(cpuOne, "CPU with one program named");
+        AssertFinite(cpuTwo, "CPU with both programs named");
+        AssertFinite(memory, "memory");
+        Assert.HasCount(1, cpuOne.Programs, "one program is named");
+
+        var point = cpuOne.Programs[0].Points[0]!.Value;
+
+        Assert.IsGreaterThan(0.0, point.Average, "the clamped average is positive");
+        Assert.AreEqual(1e308, point.Minimum, "the minimum is the value as folded");
+        Assert.AreEqual(1e308, point.Maximum, "the maximum is the value as folded");
+        Assert.IsGreaterThanOrEqualTo(0.0, cpuOne.Others[0]!.Value, "the other programs are never negative");
+    }
+
+    /// <summary>
+    /// Hostile program names of up to 1,024 bytes come back as received, each ranked with its own values: quotes, a percent sign, SQL text, a NUL and other control characters, a right-to-left override and an emoji.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task SqliteStoreProgramRollupsReturnsHostileProgramNamesAsStored()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        string[] names = ["\u0000", "\u0001", "‮", "\U0001F600", "q\"u'o\\te", "100%_", "x'); DROP TABLE records; --", new string('a', 1024)];
+        var programs = names.Select((name, index) => ProgramSamples.Program(name, 1, (ulong)((names.Length - index) * 1000), 1)).ToArray();
+
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), ProgramSamples.Source, programs));
+        await FoldAsync(store);
+
+        // Act
+        var result = await store.ProgramRollupsAsync(Query(Samples.Base, Samples.Base.AddMinutes(5), TimeSpan.FromMinutes(5), ProgramMeasure.Memory, 8), TestContext.CancellationToken);
+        var kept = await RetentionSamples.CountAsync(directory.Path, "SELECT count(*) FROM sqlite_master WHERE name = 'records'", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(names, Names(result), "every name comes back as received, ranked by its memory");
+
+        for (var index = 0; index < names.Length; index++)
+        {
+            var value = ((names.Length - index) * 1000).ToString(CultureInfo.InvariantCulture);
+
+            Assert.AreSequenceEqual([$"{value}/{value}/{value}"], Points(result, names[index]), $"the values of the name at rank {index}");
+        }
+
+        Assert.AreSequenceEqual([0.0], result.Others, "no program is left out");
+        Assert.AreEqual(1L, kept, "the SQL text in a name is not run");
+    }
+
+    /// <summary>
+    /// The source list returns each source with per-program buckets in the range, by name, with the start of its latest bucket of either tier within the range; a bucket after the range is left out.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SqliteStoreProgramSourcesListsLatestBucketInRange()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), "web", ProgramSamples.Program(Nginx, 1, 100, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddHours(2).AddMinutes(7), "web", ProgramSamples.Program(Nginx, 1, 100, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddHours(5), "web", ProgramSamples.Program(Nginx, 1, 100, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddMinutes(30).AddSeconds(10), "db", ProgramSamples.Program("mysql", 1, 100, 1)),
+                                          ProgramSamples.Snapshot(Samples.Base.AddHours(5).AddMinutes(1), "late", ProgramSamples.Program("cron", 1, 100, 1)));
+        await FoldAsync(store);
+
+        // Act
+        var list = await store.ProgramSourcesAsync(new ProgramSourceQuery
+                                                   {
+                                                       From = Samples.Base,
+                                                       To = Samples.Base.AddHours(3)
+                                                   },
+                                                   TestContext.CancellationToken);
+        var empty = await store.ProgramSourcesAsync(new ProgramSourceQuery
+                                                    {
+                                                        From = Samples.Base.AddDays(2),
+                                                        To = Samples.Base.AddDays(3)
+                                                    },
+                                                    TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["db", "web"], list.Sources.Select(source => source.Source).ToList(), "the sources with a bucket in the range, by name");
+        Assert.AreSequenceEqual([Samples.Base.AddMinutes(30), Samples.Base.AddHours(2).AddMinutes(5)], list.Sources.Select(source => source.LatestBucket).ToList(), "the latest bucket of each source within the range, the 5-minute one of the later tier start");
+        Assert.IsFalse(list.More, "the list is complete");
+        Assert.IsEmpty(empty.Sources, "a range without a bucket lists no source");
+        Assert.IsFalse(empty.More, "and has no more");
+    }
+
+    /// <summary>
+    /// The source list holds at most 256 sources and says when there are more.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SqliteStoreProgramSourcesCapsAtTheLimit()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = new ProgramSourceQuery
+                    {
+                        From = Samples.Base,
+                        To = Samples.Base.AddHours(1)
+                    };
+
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, [.. Enumerable.Range(0, StorageLimits.MaxProgramSources).Select(SourceSnapshot)]);
+        await FoldAsync(store);
+
+        var exact = await store.ProgramSourcesAsync(query, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, SourceSnapshot(StorageLimits.MaxProgramSources));
+        await FoldAsync(store);
+
+        // Act
+        var capped = await store.ProgramSourcesAsync(query, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(StorageLimits.MaxProgramSources, exact.Sources, "256 sources fit");
+        Assert.IsFalse(exact.More, "and are not more than the list holds");
+        Assert.HasCount(StorageLimits.MaxProgramSources, capped.Sources, "257 sources are cut to 256");
+        Assert.IsTrue(capped.More, "the list says there are more");
+        Assert.AreEqual("s255", capped.Sources[^1].Source, "the first 256 by name are kept");
+    }
+
+    /// <summary>
+    /// A source query with a bound outside the storable range is refused with the exact text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SqliteStoreProgramSourcesRejectsRangeOutsideStorableRange()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        // Act
+        var start = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.ProgramSourcesAsync(new ProgramSourceQuery
+                                                                                                           {
+                                                                                                               From = DateTimeOffset.MinValue,
+                                                                                                               To = Samples.Base
+                                                                                                           },
+                                                                                                           TestContext.CancellationToken),
+                                                                           "a start outside the range");
+        var end = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.ProgramSourcesAsync(new ProgramSourceQuery
+                                                                                                         {
+                                                                                                             From = Samples.Base,
+                                                                                                             To = DateTimeOffset.MaxValue
+                                                                                                         },
+                                                                                                         TestContext.CancellationToken),
+                                                                         "an end outside the range");
+
+        // Assert
+        Assert.AreEqual(RangeText, start.Message, "the text for the start");
+        Assert.AreEqual(RangeText, end.Message, "the text for the end");
+    }
+
+    /// <summary>
+    /// Creates a query of the test source.
+    /// </summary>
+    /// <param name="from">The start of the range</param>
+    /// <param name="to">The end of the range</param>
+    /// <param name="step">The step</param>
+    /// <param name="measure">The measure</param>
+    /// <param name="count">The number of programs</param>
+    /// <param name="source">The source</param>
+    /// <returns>The query</returns>
+    private static ProgramRollupQuery Query(DateTimeOffset from, DateTimeOffset to, TimeSpan step, ProgramMeasure measure, int count, string source = ProgramSamples.Source)
+    {
+        return new ProgramRollupQuery
+               {
+                   Source = source,
+                   From = from,
+                   To = to,
+                   Step = step,
+                   Measure = measure,
+                   Count = count
+               };
+    }
+
+    /// <summary>
+    /// Gets the names of the lines of a result, in order.
+    /// </summary>
+    /// <param name="result">The result</param>
+    /// <returns>The names</returns>
+    private static List<string> Names(ProgramRollupResult result)
+    {
+        return [.. result.Programs.Select(line => line.Program)];
+    }
+
+    /// <summary>
+    /// Describes the points of a program as average, minimum and maximum joined with slashes, a gap as <c>gap</c>.
+    /// </summary>
+    /// <param name="result">The result</param>
+    /// <param name="program">The program</param>
+    /// <returns>The points as text</returns>
+    private static List<string> Points(ProgramRollupResult result, string program)
+    {
+        var line = result.Programs.Single(candidate => candidate.Program == program);
+
+        return [.. line.Points.Select(Describe)];
+    }
+
+    /// <summary>
+    /// Describes one point.
+    /// </summary>
+    /// <param name="point">The point, <c>null</c> for a gap</param>
+    /// <returns>The text</returns>
+    private static string Describe(ProgramRollupPoint? point)
+    {
+        return point is { } value ? string.Create(CultureInfo.InvariantCulture, $"{value.Average}/{value.Minimum}/{value.Maximum}") : "gap";
+    }
+
+    /// <summary>
+    /// Creates the snapshot of the source with the given number, in the first bucket.
+    /// </summary>
+    /// <param name="number">The number</param>
+    /// <returns>The record</returns>
+    private static DataRecord SourceSnapshot(int number)
+    {
+        return ProgramSamples.Snapshot(Samples.Base.AddMinutes(1), string.Create(CultureInfo.InvariantCulture, $"s{number:D3}"), ProgramSamples.Program(Nginx, 1, 100, 1));
+    }
+
+    /// <summary>
+    /// Checks that a result has no lines, steps or counts.
+    /// </summary>
+    /// <param name="result">The result</param>
+    /// <param name="why">The case</param>
+    private static void AssertEmpty(ProgramRollupResult result, string why)
+    {
+        Assert.IsEmpty(result.Programs, $"{why}: no lines");
+        Assert.IsEmpty(result.Times, $"{why}: no steps");
+        Assert.IsEmpty(result.Others, $"{why}: no other programs");
+        Assert.IsEmpty(result.Incomplete, $"{why}: no incomplete counts");
+    }
+
+    /// <summary>
+    /// Checks that every value of a result is a finite number.
+    /// </summary>
+    /// <param name="result">The result</param>
+    /// <param name="why">The case</param>
+    private static void AssertFinite(ProgramRollupResult result, string why)
+    {
+        var values = result.Programs.SelectMany(line => line.Points).Where(point => point is not null).SelectMany(point => new[] { point!.Value.Average, point.Value.Minimum, point.Value.Maximum }).Concat(result.Others.Where(other => other is not null).Select(other => other!.Value)).ToList();
+
+        Assert.IsNotEmpty(values, $"{why}: the result holds values");
+        Assert.IsTrue(values.All(double.IsFinite), $"{why}: every value is finite");
+    }
+
+    /// <summary>
     /// Creates the program of a number: its name is the number in three digits.
     /// </summary>
     /// <param name="number">The number</param>
@@ -718,6 +1444,33 @@ public class SqliteStoreProgramRollupTests
         var rows = await ProgramSamples.RowsAsync(directory, "SELECT length(CAST(data AS BLOB)) FROM records WHERE kind = 'process_snapshot' ORDER BY id", TestContext.CancellationToken);
 
         return [.. rows.Select(row => long.Parse(row, CultureInfo.InvariantCulture))];
+    }
+
+    /// <summary>
+    /// Runs a refused read and returns the message of its exception.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="query">The query</param>
+    /// <param name="expected">The expected message</param>
+    /// <param name="why">The case</param>
+    /// <returns>A task that returns the message</returns>
+    private async Task<string> RefusalAsync(SqliteStore store, ProgramRollupQuery query, string expected, string why)
+    {
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.ProgramRollupsAsync(query, TestContext.CancellationToken), why);
+
+        Assert.AreEqual(expected, exception.Message, why);
+
+        return exception.Message;
+    }
+
+    /// <summary>
+    /// Folds every stored snapshot with the default periods.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <returns>A task that completes when everything is folded</returns>
+    private async Task FoldAsync(SqliteStore store)
+    {
+        await RetentionSamples.FoldAllAsync(store, RetentionSamples.Defaults(), Samples.Base.AddDays(1), TestContext.CancellationToken);
     }
 
     #endregion // Methods
