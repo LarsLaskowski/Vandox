@@ -429,6 +429,8 @@ build reports>` / `#pragma warning restore <the same ids>` with the comment `// 
 implementation` — no other id; where every member of a new file raises RH2003 or S2325, one pair around the type
 does. The Dev lists each pragma in its report and removes it in mode `implement`, the Reviewer blocks one that is
 still there, and no skeleton pragma may remain when the *Analyzer gate* runs in step 7.
+A member that must not throw (`Dispose`, a finalizer: CA1065 rejects the throw) has an empty body as its skeleton; the Dev
+reports it as a deviation and the new tests for it must still fail on the empty body.
 New skeleton files follow the C# layout in *Writing code* (no final newline); run *Format* on them before *Build*.
 
 File names of C# types: the file is named after its type, and for a generic type Reihitsu `RH4001` expects the
