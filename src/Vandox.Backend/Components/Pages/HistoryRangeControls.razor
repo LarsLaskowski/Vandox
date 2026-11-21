@@ -1,0 +1,16 @@
+<div class="history-presets" role="group" aria-label="Range">
+    @foreach (var preset in Presets)
+    {
+        <button type="button" class="@PresetClass(preset)" @onclick="() => PresetChosen.InvokeAsync(preset)">@HistoryView.PresetLabel(preset)</button>
+    }
+</div>
+
+<form class="filters history-range" @onsubmit:preventDefault>
+    <label>From (UTC)
+        <input type="datetime-local" step="1" name="from" value="@From" @onchange="args => FromChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty)" />
+    </label>
+    <label>To (UTC)
+        <input type="datetime-local" step="1" name="to" value="@To" @onchange="args => ToChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty)" />
+    </label>
+    <button type="submit" @onclick="ApplyPressed" @onclick:preventDefault>Apply</button>
+</form>

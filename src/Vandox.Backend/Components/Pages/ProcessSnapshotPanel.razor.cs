@@ -27,7 +27,7 @@ public sealed partial class ProcessSnapshotPanel : ComponentBase
     /// Gets or sets the callback that receives the moment of the snapshot before the shown one when its button is pressed.
     /// </summary>
     [Parameter]
-    public EventCallback<DateTimeOffset> OnBefore { get; set; }
+    public EventCallback<DateTimeOffset> BeforeChosen { get; set; }
 
     #endregion // Properties
 }

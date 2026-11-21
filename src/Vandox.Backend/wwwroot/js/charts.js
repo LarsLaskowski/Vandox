@@ -217,8 +217,9 @@ export function createStacked(element, title, labels, columns, bridges) {
 
 // ---- History chart ----------------------------------------------------------------------------------------------
 // createHistory draws up to eight scales (y0 .. y7), two drawn axes (the second one only from wideChart CSS pixels),
-// the marks of the events and the moment. setup comes from HistoryChartInterop (times in Unix seconds), events is the
-// DotNetObjectReference whose instance methods Select(start, end) and Pick(at, tolerance) report a drag and a click.
+// the marks of the events and the moment; with setup.stacked it draws filled bands on the one scale y0 from 0 instead.
+// setup comes from HistoryChartInterop (times in Unix seconds), events is the DotNetObjectReference whose instance
+// methods Select(start, end) and Pick(at, tolerance) report a drag and a click.
 // Nothing here writes HTML: labels reach uPlot as strings, which it writes as text.
 
 const wideChart = 480;
@@ -269,17 +270,36 @@ function legendValue(line) {
     };
 }
 
-function historySeries(setup, colors) {
+// The legend value of a stacked line: the plotted values are cumulative sums, so the line's own value comes from the
+// raw columns (index 0 holds the times).
+function stackedLegendValue(line, raw) {
+    const own = legendValue(line);
+
+    return function (plot, value, seriesIndex, point) {
+        const column = raw[seriesIndex];
+        const unstacked = point === null || point === undefined || !column ? null : column[point];
+
+        return own(plot, unstacked, seriesIndex, point);
+    };
+}
+
+function historySeries(setup, colors, raw) {
     const series = [{}];
+    const stacked = setup.stacked === true;
 
     setup.lines.forEach(function (line) {
+        const color = colors.series[line.color % colors.series.length];
         const item = {
             label: line.label,
-            scale: scaleName(line.scale),
-            stroke: colors.series[line.color % colors.series.length],
+            scale: stacked ? "y0" : scaleName(line.scale),
+            stroke: color,
             width: 2,
-            value: legendValue(line)
+            value: stacked ? stackedLegendValue(line, raw) : legendValue(line)
         };
+
+        if (stacked) {
+            item.fill = withAlpha(color, fillAlpha);
+        }
 
         if (line.dashed) {
             item.dash = [dashLength, dashLength / 2];
@@ -291,14 +311,61 @@ function historySeries(setup, colors) {
     return series;
 }
 
-function historyScales() {
+function historyScales(stacked) {
     const scales = { x: { time: true } };
 
     for (let index = 0; index < maxScales; index++) {
         scales["y" + index] = { auto: true };
     }
 
+    if (stacked) {
+        scales.y0 = {
+            auto: true,
+            range: function (plot, min, max) {
+                return [0, max > 0 ? max * 1.05 : 1];
+            }
+        };
+    }
+
     return scales;
+}
+
+// The cumulative sums of the lines for a stacked history chart and the bands between each line and the one below. At a
+// step where any line is null (a gap) every cumulative value is null, so no band is drawn across it.
+function stackGaps(columns) {
+    const steps = columns[0].length;
+    const sums = [];
+
+    for (let index = 1; index < columns.length; index++) {
+        sums.push(new Array(steps));
+    }
+
+    for (let point = 0; point < steps; point++) {
+        let total = 0;
+        let gap = false;
+
+        for (let index = 1; index < columns.length; index++) {
+            const value = columns[index][point];
+
+            if (value === null || value === undefined) {
+                gap = true;
+                break;
+            }
+        }
+
+        for (let index = 1; index < columns.length; index++) {
+            total += gap ? 0 : columns[index][point];
+            sums[index - 1][point] = gap ? null : total;
+        }
+    }
+
+    const bands = [];
+
+    for (let index = 1; index < columns.length - 1; index++) {
+        bands.push({ series: [index + 1, index] });
+    }
+
+    return { data: [columns[0]].concat(sums), bands: bands };
 }
 
 function drawLine(ctx, line) {
@@ -369,6 +436,8 @@ export function createHistory(element, setup, columns, events) {
     const bridges = setup.lines.map(function (line) {
         return line.bridges;
     });
+    const stacked = setup.stacked === true;
+    const stackedData = stacked ? stackGaps(columns) : null;
     let reference = events;
     let moment = setup.moment === null || setup.moment === undefined ? null : setup.moment;
     let plot = null;
@@ -397,15 +466,15 @@ export function createHistory(element, setup, columns, events) {
 
         wide = chartWidth >= wideChart;
 
-        if (wide && setup.axes.length > 1) {
+        if (wide && setup.axes.length > 1 && !stacked) {
             axes.push(historyAxis(colors, "y1", setup.axes[1], 1));
         }
 
-        plot = new uPlot({
+        const options = {
             width: chartWidth,
             height: plotHeight,
-            scales: historyScales(),
-            series: historySeries(setup, colors),
+            scales: historyScales(stacked),
+            series: historySeries(setup, colors, columns),
             axes: axes,
             cursor: { drag: { x: true, y: false, dist: dragPixels, setScale: false } },
             hooks: {
@@ -414,7 +483,13 @@ export function createHistory(element, setup, columns, events) {
                     drawMarks(u, setup, colors, moment);
                 }]
             }
-        }, bridge(columns, bridges), element);
+        };
+
+        if (stacked) {
+            options.bands = stackedData.bands;
+        }
+
+        plot = new uPlot(options, stacked ? stackedData.data : bridge(columns, bridges), element);
 
         listen(plot.over);
     }
