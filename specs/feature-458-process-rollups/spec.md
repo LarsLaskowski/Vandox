@@ -1,7 +1,7 @@
 # Spec: Rollups of process snapshots per program
 
 Source: Issue #458
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -15,9 +15,9 @@ snapshots.
 
 - S1: Given process snapshots stored by the agent or an import, when the retention job runs its fold (at start-up and every 5 minutes),
   then each snapshot is folded exactly once into the 5-minute and the hourly bucket of its source, per program: RSS, PSS (from PSS
-  snapshots only, E1), CPU % and the number of processes, as minimum, sum, maximum and last value, and the bucket counts the snapshots
-  of the source folded into it, its PSS snapshots and those that do not list every program.
-- S2: Given a bucket, then a program's value in a snapshot that does not name it is 0: its minimum, sum and last value count that 0, so
+  snapshots only, E1) and CPU %, as minimum, sum and maximum, and the bucket counts the snapshots of the source folded into it, its
+  PSS snapshots and those that do not list every program.
+- S2: Given a bucket, then a program's value in a snapshot that does not name it is 0: its minimum and sum count that 0, so
   the averages of all programs of a bucket add up to the average total of the source. An average weighs each snapshot equally, not by
   the time it stands for (regular, pressure and OOM snapshots alike), as the metric rollups do.
 - S3: Given a process snapshot past `retention.snapshots`, when the removal pass reaches it, then it is removed only after it was
@@ -80,7 +80,7 @@ snapshots.
 
 - AC1: The fold folds every decodable process snapshot of every origin exactly once into the buckets and values of S1; an
   undecodable snapshot is skipped and counted (S1, E1, E2, E8, E9, N1).
-- AC2: A program missing from a snapshot of its source counts as 0 in its minimum, sum and last value, so the averages of a bucket's
+- AC2: A program missing from a snapshot of its source counts as 0 in its minimum and sum, so the averages of a bucket's
   programs add up to the source's average total; programs beyond E3's cut and E4's cap fold into *other programs* without loss of the
   total (S2, E3, E4).
 - AC3: A process snapshot is removed only once folded, an undecodable one too; connection snapshots keep their removal; the buckets
