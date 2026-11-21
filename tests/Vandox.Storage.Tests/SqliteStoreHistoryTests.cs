@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using System.Text.RegularExpressions;
 
 using Microsoft.Data.Sqlite;
@@ -438,6 +439,147 @@ public partial class SqliteStoreHistoryTests
     }
 
     /// <summary>
+    /// With a source set, each side reads the closest snapshot of that source only, and a source with no snapshot reads nothing; without one, any source counts as before.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SnapshotStampOfASourceSkipsOtherSources()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          SourceSnapshot("alpha", -5),
+                                          SourceSnapshot("beta", -2),
+                                          SourceSnapshot("beta", 1),
+                                          SourceSnapshot("alpha", 3));
+
+        var alphaBefore = await IdAtAsync(directory.Path, RecordKind.ProcessSnapshot, -5);
+        var alphaAfter = await IdAtAsync(directory.Path, RecordKind.ProcessSnapshot, 3);
+        var betaBefore = await IdAtAsync(directory.Path, RecordKind.ProcessSnapshot, -2);
+        var betaAfter = await IdAtAsync(directory.Path, RecordKind.ProcessSnapshot, 1);
+
+        // Act
+        var alphaBeforeStamp = await store.SnapshotStampAsync(SourceQuery("alpha", SnapshotSide.AtOrBefore), TestContext.CancellationToken);
+        var alphaAfterStamp = await store.SnapshotStampAsync(SourceQuery("alpha", SnapshotSide.After), TestContext.CancellationToken);
+        var betaBeforeStamp = await store.SnapshotStampAsync(SourceQuery("beta", SnapshotSide.AtOrBefore), TestContext.CancellationToken);
+        var betaAfterStamp = await store.SnapshotStampAsync(SourceQuery("beta", SnapshotSide.After), TestContext.CancellationToken);
+        var unknownBefore = await store.SnapshotStampAsync(SourceQuery("gamma", SnapshotSide.AtOrBefore), TestContext.CancellationToken);
+        var unknownAfter = await store.SnapshotStampAsync(SourceQuery("gamma", SnapshotSide.After), TestContext.CancellationToken);
+        var anyBefore = await store.SnapshotStampAsync(SourceQuery(null, SnapshotSide.AtOrBefore), TestContext.CancellationToken);
+        var anyAfter = await store.SnapshotStampAsync(SourceQuery(null, SnapshotSide.After), TestContext.CancellationToken);
+
+        // Assert
+        AssertStamp(alphaBeforeStamp, alphaBefore, RecordKind.ProcessSnapshot, _moment.AddMinutes(-5), "alpha before the moment, not the closer row of beta");
+        AssertStamp(alphaAfterStamp, alphaAfter, RecordKind.ProcessSnapshot, _moment.AddMinutes(3), "alpha after the moment, not the closer row of beta");
+        AssertStamp(betaBeforeStamp, betaBefore, RecordKind.ProcessSnapshot, _moment.AddMinutes(-2), "beta before the moment");
+        AssertStamp(betaAfterStamp, betaAfter, RecordKind.ProcessSnapshot, _moment.AddMinutes(1), "beta after the moment, not the later row of alpha");
+        Assert.IsNull(unknownBefore, "a source without a snapshot has none before the moment");
+        Assert.IsNull(unknownAfter, "a source without a snapshot has none after the moment");
+        AssertStamp(anyBefore, betaBefore, RecordKind.ProcessSnapshot, _moment.AddMinutes(-2), "without a source the closest row of any source is read");
+        AssertStamp(anyAfter, betaAfter, RecordKind.ProcessSnapshot, _moment.AddMinutes(1), "without a source the closest row of any source is read after the moment");
+    }
+
+    /// <summary>
+    /// The two statements that read the stamp of one source search by the kind, source and time index and scan no table.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SnapshotStampOfASourceSeeksTheKindSourceTimeIndex()
+    {
+        // Arrange
+        var statements = SourceStampStatements();
+
+        // Act
+        var plans = await ExplainAsync(statements);
+
+        // Assert
+        Assert.HasCount(2, statements, "one statement per side reads the stamp of a source");
+
+        foreach (var (name, _) in statements)
+        {
+            var details = plans[name];
+
+            Assert.DoesNotContain(detail => ScanPattern().IsMatch(detail), details, $"{name} scans a table: {string.Join(" | ", details)}");
+            Assert.Contains(detail => KindSourceTimePattern().IsMatch(detail), details, $"{name} searches records_kind_source_time by kind and source: {string.Join(" | ", details)}");
+        }
+    }
+
+    /// <summary>
+    /// An empty source is refused with its own text, on either side.
+    /// </summary>
+    /// <param name="side">The side</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [DataRow(SnapshotSide.AtOrBefore)]
+    [DataRow(SnapshotSide.After)]
+    public async Task SnapshotStampRefusesAnEmptySource(SnapshotSide side)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        var query = SourceQuery(string.Empty, side);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.SnapshotStampAsync(query, TestContext.CancellationToken), "the empty source is refused");
+
+        // Assert
+        Assert.AreEqual("store: invalid query: source must not be empty", exception.Message, "the text of the refusal");
+    }
+
+    /// <summary>
+    /// Creates a process snapshot record of a source captured some minutes from the moment.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="minutes">Minutes from <see cref="_moment"/></param>
+    /// <returns>The record</returns>
+    private static DataRecord SourceSnapshot(string source, int minutes)
+    {
+        var record = Snapshot(RecordKind.ProcessSnapshot, minutes);
+
+        record.Source = source;
+
+        return record;
+    }
+
+    /// <summary>
+    /// Creates a process snapshot query of a source with a window of ten minutes around the moment.
+    /// </summary>
+    /// <param name="source">The source, <c>null</c> for any</param>
+    /// <param name="side">The side</param>
+    /// <returns>The query</returns>
+    private static SnapshotQuery SourceQuery(string? source, SnapshotSide side)
+    {
+        return new SnapshotQuery
+               {
+                   Kind = RecordKind.ProcessSnapshot,
+                   At = _moment,
+                   Window = TimeSpan.FromMinutes(10),
+                   Side = side,
+                   Source = source
+               };
+    }
+
+    /// <summary>
+    /// Finds the stamp statements of <see cref="HistoryQueries"/> that filter by a source.
+    /// </summary>
+    /// <returns>The names and texts</returns>
+    private static List<(string Name, string Sql)> SourceStampStatements()
+    {
+        return typeof(HistoryQueries).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                                     .Where(field => field is { IsLiteral: true } && field.FieldType == typeof(string))
+                                     .Select(field => (field.Name, Sql: (string)field.GetRawConstantValue()!))
+                                     .Where(statement => statement.Sql.Contains("FROM records", StringComparison.Ordinal) && statement.Sql.Contains("source = $source", StringComparison.Ordinal))
+                                     .ToList();
+    }
+
+    /// <summary>
     /// Creates a snapshot record of a kind captured some minutes from the moment.
     /// </summary>
     /// <param name="kind">The kind</param>
@@ -513,6 +655,13 @@ public partial class SqliteStoreHistoryTests
     /// <returns>The pattern</returns>
     [GeneratedRegex(@"^SEARCH records USING (COVERING )?INDEX records_kind_time ")]
     private static partial Regex KindTimePattern();
+
+    /// <summary>
+    /// Creates the pattern of a search of the kind, source and time index by the kind and the source.
+    /// </summary>
+    /// <returns>The pattern</returns>
+    [GeneratedRegex(@"^SEARCH records USING (COVERING )?INDEX records_kind_source_time \(kind=\? AND source=\?")]
+    private static partial Regex KindSourceTimePattern();
 
     /// <summary>
     /// Creates the pattern of a search of the records by their ID.
