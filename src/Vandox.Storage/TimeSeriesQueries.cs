@@ -653,6 +653,16 @@ internal static class TimeSeriesQueries
     }
 
     /// <summary>
+    /// Clamps a sum to the finite range, as the fold does.
+    /// </summary>
+    /// <param name="sum">The sum</param>
+    /// <returns>The clamped sum</returns>
+    internal static double ClampSum(double sum)
+    {
+        return Math.Min(Math.Max(sum, -double.MaxValue), double.MaxValue);
+    }
+
+    /// <summary>
     /// Checks the series and the range of a line read.
     /// </summary>
     /// <param name="source">The source</param>
@@ -789,16 +799,6 @@ internal static class TimeSeriesQueries
         }
 
         return points;
-    }
-
-    /// <summary>
-    /// Clamps a sum to the finite range, as the fold does.
-    /// </summary>
-    /// <param name="sum">The sum</param>
-    /// <returns>The clamped sum</returns>
-    private static double ClampSum(double sum)
-    {
-        return Math.Min(Math.Max(sum, -double.MaxValue), double.MaxValue);
     }
 
     /// <summary>
