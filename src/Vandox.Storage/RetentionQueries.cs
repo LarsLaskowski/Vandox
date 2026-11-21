@@ -14,6 +14,11 @@ internal static class RetentionQueries
     internal const string RollupWatermarkKey = "rollup_after_id";
 
     /// <summary>
+    /// The <c>meta</c> key of the highest process snapshot record ID the program fold has read.
+    /// </summary>
+    internal const string ProgramRollupWatermarkKey = "program_rollup_after_id";
+
+    /// <summary>
     /// The <c>meta</c> key of the raw horizon below which sample times are pruned.
     /// </summary>
     internal const string SampleFloorKey = "sample_time_floor";

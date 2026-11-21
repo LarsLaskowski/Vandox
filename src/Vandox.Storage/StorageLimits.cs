@@ -15,7 +15,7 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 15;
+    public const int SchemaVersion = 16;
 
     /// <summary>
     /// The largest size of the serialized data of one incident in UTF-8 bytes.
@@ -163,6 +163,21 @@ public static class StorageLimits
     public const int MaxNotesRead = 64;
 
     /// <summary>
+    /// The largest number of programs a per-program rollup read returns.
+    /// </summary>
+    public const int MaxProgramRollupCount = 50;
+
+    /// <summary>
+    /// The largest number of steps a per-program rollup read spans.
+    /// </summary>
+    public const int MaxProgramRollupSteps = 2000;
+
+    /// <summary>
+    /// The largest number of sources the program source list returns.
+    /// </summary>
+    public const int MaxProgramSources = 256;
+
+    /// <summary>
     /// The most metric values one fold step reads.
     /// </summary>
     internal const int RollupStepRows = 10000;
@@ -181,6 +196,26 @@ public static class StorageLimits
     /// The UTF-8 bytes of labels after which one fold step stops reading.
     /// </summary>
     internal const int RollupStepLabelBytes = 2097152;
+
+    /// <summary>
+    /// The most process snapshots one fold step reads.
+    /// </summary>
+    internal const int ProgramRollupStepRows = 500;
+
+    /// <summary>
+    /// The UTF-8 bytes of snapshot data after which one fold step stops reading.
+    /// </summary>
+    internal const int ProgramRollupStepBytes = 2097152;
+
+    /// <summary>
+    /// The most programs one bucket names; the values of further programs stay in the total.
+    /// </summary>
+    internal const int MaxNamedPrograms = 500;
+
+    /// <summary>
+    /// The most programs one snapshot contributes per ranking key.
+    /// </summary>
+    internal const int ProgramCutPerKey = 50;
 
     #endregion // Constants
 }

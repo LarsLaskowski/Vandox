@@ -18,6 +18,21 @@ public sealed class RollupStepResult
     public int Buckets { get; init; }
 
     /// <summary>
+    /// Gets the number of process snapshots folded.
+    /// </summary>
+    public int Snapshots { get; init; }
+
+    /// <summary>
+    /// Gets the number of process snapshots skipped because they could not be decoded or validated.
+    /// </summary>
+    public int SkippedSnapshots { get; init; }
+
+    /// <summary>
+    /// Gets the number of program buckets written.
+    /// </summary>
+    public int ProgramBuckets { get; init; }
+
+    /// <summary>
     /// Gets whether more values wait to be folded.
     /// </summary>
     public bool More { get; init; }

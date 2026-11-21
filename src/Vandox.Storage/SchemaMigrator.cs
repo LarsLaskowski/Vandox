@@ -337,7 +337,79 @@ internal static class SchemaMigrator
                                                               c => c.CommandText = "CREATE INDEX records_removable ON records(kind, captured_at) WHERE origin <> 'import'",
                                                               c => c.CommandText = "CREATE INDEX gaps_to_at ON gaps(to_at)"
                                                           ]),
-                                                      new(15, [c => c.CommandText = ServiceStateIndexStatement])
+                                                      new(15, [c => c.CommandText = ServiceStateIndexStatement]),
+                                                      new(16,
+                                                          [
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE program_rollups_5m (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     program TEXT NOT NULL,
+                                                                                     seen INTEGER NOT NULL CHECK (seen >= 1),
+                                                                                     rss_min REAL NOT NULL,
+                                                                                     rss_max REAL NOT NULL,
+                                                                                     rss_sum REAL NOT NULL,
+                                                                                     pss_min REAL,
+                                                                                     pss_max REAL,
+                                                                                     pss_sum REAL NOT NULL DEFAULT 0,
+                                                                                     cpu_min REAL NOT NULL,
+                                                                                     cpu_max REAL NOT NULL,
+                                                                                     cpu_sum REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket, program)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX program_rollups_5m_bucket ON program_rollups_5m(bucket)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE program_rollup_totals_5m (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     snapshots INTEGER NOT NULL CHECK (snapshots >= 1),
+                                                                                     pss_snapshots INTEGER NOT NULL,
+                                                                                     incomplete INTEGER NOT NULL,
+                                                                                     named INTEGER NOT NULL,
+                                                                                     rss_sum REAL NOT NULL,
+                                                                                     pss_sum REAL NOT NULL,
+                                                                                     cpu_sum REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX program_rollup_totals_5m_bucket ON program_rollup_totals_5m(bucket)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE program_rollups_1h (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     program TEXT NOT NULL,
+                                                                                     seen INTEGER NOT NULL CHECK (seen >= 1),
+                                                                                     rss_min REAL NOT NULL,
+                                                                                     rss_max REAL NOT NULL,
+                                                                                     rss_sum REAL NOT NULL,
+                                                                                     pss_min REAL,
+                                                                                     pss_max REAL,
+                                                                                     pss_sum REAL NOT NULL DEFAULT 0,
+                                                                                     cpu_min REAL NOT NULL,
+                                                                                     cpu_max REAL NOT NULL,
+                                                                                     cpu_sum REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket, program)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX program_rollups_1h_bucket ON program_rollups_1h(bucket)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE program_rollup_totals_1h (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     snapshots INTEGER NOT NULL CHECK (snapshots >= 1),
+                                                                                     pss_snapshots INTEGER NOT NULL,
+                                                                                     incomplete INTEGER NOT NULL,
+                                                                                     named INTEGER NOT NULL,
+                                                                                     rss_sum REAL NOT NULL,
+                                                                                     pss_sum REAL NOT NULL,
+                                                                                     cpu_sum REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX program_rollup_totals_1h_bucket ON program_rollup_totals_1h(bucket)",
+                                                              c => c.CommandText = "CREATE INDEX records_process_fold ON records(id) WHERE kind = 'process_snapshot'"
+                                                          ])
                                                   ];
 
     #endregion // Fields
