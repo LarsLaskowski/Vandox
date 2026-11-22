@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-11-22 16:04 | 8 Verbatim | Orchestrator | verbatim: [BLOCKING, verbatim] .squad/project.md:13 |
 | 2026-11-22 16:08 | 7 Gate stamp | Orchestrator | PASS on 1ded7083d5af52bee97897fe6dcd89825731d5b1 (tier standard, verbatim): Format check pass; decision-check.py pass; scope-check.py pass |
 | 2026-11-22 16:08 | 8 Review | Reviewer | VERDICT: APPROVE on 1ded7083d5af52bee97897fe6dcd89825731d5b1. Both round-1 findings resolved; gates pass on this head. (opus/medium · 26,661 tokens · 3 tool uses · 18 s · 6 in · 1,904 out · 42,254 cache read · 25,763 cache write · 87,685 weighted) |
+| 2026-11-22 16:09 | 9 PR approval | Lead | RESULT: APPROVED. Note and plan match; AC1 and AC4 checked; no other decision open. (opus/medium · 32,413 tokens · 4 tool uses · 20 s · 8 in · 1,605 out · 86,340 cache read · 19,101 cache write · 72,452 weighted) |
