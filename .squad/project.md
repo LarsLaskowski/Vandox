@@ -1,19 +1,17 @@
 # Project
 
-What the squad needs to know beyond the stack; read by the Lead, the Devil's Advocate, Security, the Tester and the
-Reviewer. Agent: Go (`cmd/vandox-agent`, `internal/`); backend: .NET with Blazor (`src/Vandox.*`); records 0073, 0197.
+What the squad needs to know beyond the stack, read by five members on every launch. Agent: Go (`cmd/vandox-agent`, `internal/`); backend: .NET with Blazor (`src/Vandox.*`); records 0073, 0197.
 Not template-managed; a product PR updates an entry the change makes untrue (`.squad/routing.md`, *Scope of a product
 PR*).
 
-Every entry points: it names files or endpoints and links the area document (`docs/areas/README.md`) or record that
-states the rules; values, limits and sequences stand only there. `config-check.py` warns past `PROJECT_MAX_WORDS`
-words.
+Every entry points: it names files, types or endpoints and links the area document (`docs/areas/README.md`) or record
+that states the rules; values, limits, sequences and what a type does stand only there (a test double: its XML
+documentation). `config-check.py` warns past `PROJECT_MAX_WORDS` words.
 
 ## Security areas
 
-A change that touches one of these lists it under *Security areas touched* in its plan, so Security reviews the
-plan (`.squad/routing.md`, *Tiers*, which also says when a change is tier `security`). One line per area: what is
-protected, where, and the area documents that state its rules.
+A plan lists each area it touches under *Security areas touched*, so Security reviews it (`.squad/routing.md`,
+*Tiers*, which also says when a change is tier `security`). One entry per area: what is protected, where, and the documents that state its rules.
 
 1. **Ingest authentication** — only the agent holding its bound token stores data, within memory and disk bounds; a
    resent record is stored once. `POST /v1/batches`, `src/Vandox.Backend/Ingest/`, `src/Vandox.Backend/Hosting/`,
@@ -24,7 +22,7 @@ protected, where, and the area documents that state its rules.
    [network-and-security-model](../docs/areas/network-and-security-model.md),
    [backend-host](../docs/areas/backend-host.md), [agent-installation](../docs/areas/agent-installation.md).
 3. **Web UI login** — only a signed-in user reads data or writes a note (hash, sessions, CSRF, throttling, trusted
-   proxy). `src/Vandox.Backend/Security/`, `Components/Account/Login.razor`, every page under `Components/Pages/` (among them `HistoryPage`, `/history`, and `ProcessesPage`, `/processes`),
+   proxy). `src/Vandox.Backend/Security/`, `Components/Account/Login.razor`, every page under `Components/Pages/`,
    `POST /incidents/<number>/notes`, `GET /report/markdown`, `TrustedProxyList` —
    [web-login](../docs/areas/web-login.md), [web-ui](../docs/areas/web-ui.md) and its `web-ui-*.md` views.
 4. **Command signing for remote actions** (planned) — only signed, confirmed commands from a fixed list run —
@@ -46,33 +44,33 @@ protected, where, and the area documents that state its rules.
    [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
    [agent-sending](../docs/areas/agent-sending.md), [agent-installation](../docs/areas/agent-installation.md).
 9. **File writes and paths derived from external input** — writes stay in the configured directories, follow no link,
-   use restrictive modes; the spool is bounded. Retention deletes in `vandox.db` only through the bounded steps of `RetentionRemover`. `vandox.db` (`src/Vandox.Storage/`), `src/Vandox.Import/`,
-   `src/Vandox.Core/IO/`, `spool.directory` (`internal/spool`, `internal/agentstate`), `deploy/agent/install.sh` and
-   `uninstall.sh` — [storage](../docs/areas/storage.md), [retention](../docs/areas/retention.md), [log-import](../docs/areas/log-import.md),
+   use restrictive modes; the spool is bounded, and retention deletes only through the bounded steps of `RetentionRemover`. `vandox.db` (`src/Vandox.Storage/`, `RetentionRemover`),
+   `src/Vandox.Import/`, `src/Vandox.Core/IO/`, `spool.directory` (`internal/spool`, `internal/agentstate`),
+   `deploy/agent/install.sh` and `uninstall.sh` — [storage](../docs/areas/storage.md),
+   [retention](../docs/areas/retention.md), [log-import](../docs/areas/log-import.md),
    [agent-spool](../docs/areas/agent-spool.md), [agent](../docs/areas/agent.md) (*Agent state*),
    [agent-installation](../docs/areas/agent-installation.md).
 10. **Parsing of external input** — hostile input yields an error or a skipped record, never a crash, unbounded
     allocation or hang. `internal/` (every reader of external input); `src/Vandox.Core/` (`Wire`, `Configuration`,
     `LogParsing`, `Signatures`, `Templates`, `Incidents`, `Reports`), `src/Vandox.Import/`, the log search of
-    `src/Vandox.Storage/`, `/logs`, `/report` and `/history` addresses (`HistoryAddress`: metrics, range and moment), the `/processes` address (`ProcessesAddress`: source, range, moment and second point) and the numbers the history chart sends through `HistoryChartEvents` (`Select`, `Pick`), `vandoxd` flags, `install.sh` inputs; later Telegram
-    commands — [wire-format](../docs/areas/wire-format.md),
-    [wire-format-records](../docs/areas/wire-format-records.md),
-    [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
-    [configuration-options](../docs/areas/configuration-options.md), the `agent*.md` and `log-*.md` documents,
+    `src/Vandox.Storage/`, the addresses of `/logs`, `/report`, `/history` (`HistoryAddress`) and `/processes`
+    (`ProcessesAddress`), `HistoryChartEvents`, `vandoxd` flags, `install.sh` inputs; later Telegram commands —
+    the `wire-format*.md`, `configuration-*.md`, `agent*.md`, `log-*.md` and `web-ui-*.md` documents,
     [incidents](../docs/areas/incidents.md), [forensics-report](../docs/areas/forensics-report.md),
-    [storage-reading](../docs/areas/storage-reading.md), the `web-ui-*.md` views,
-    [ingest-endpoint](../docs/areas/ingest-endpoint.md).
+    [storage-reading](../docs/areas/storage-reading.md), [ingest-endpoint](../docs/areas/ingest-endpoint.md).
 11. **Outbound calls** — each call has a timeout and reaches only its destination, encrypted to a verified peer.
-    `internal/sender` (the token goes only to the IP literal in `backend.url`; no name is looked up: the `backend.url` rule in
-    `internal/config/agent.go`, `validate_backend_url` in `deploy/agent/install.sh`), `internal/sdnotify`, `internal/sdbus`, `internal/mariadb`, `deploy/agent/vandox-agent.service`,
-    the download in `install.sh`, the health check in `src/Vandox.Backend/Cli/`; Telegram, external checks, AI service planned —
-    [agent-sending](../docs/areas/agent-sending.md),
+    `internal/sender` with the `backend.url` checks (`internal/config/agent.go`, `validate_backend_url` in
+    `install.sh`), `internal/sdnotify`, `internal/sdbus`, `internal/mariadb`, `deploy/agent/vandox-agent.service`,
+    the download in `install.sh`, the health check in `src/Vandox.Backend/Cli/`; Telegram, external checks, AI
+    service planned — [agent-sending](../docs/areas/agent-sending.md),
+    [configuration-options](../docs/areas/configuration-options.md),
     [network-and-security-model](../docs/areas/network-and-security-model.md),
     [backend-host](../docs/areas/backend-host.md), [agent-installation](../docs/areas/agent-installation.md),
     [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
 12. **Logging and display of external data** — external text cannot inject into logs, pages, reports or Telegram.
-    `src/Vandox.Backend/Logging/`, the components and security headers of `src/Vandox.Backend/` (among them `HistoryPage` and `HistoryChart`: chart labels through `LogText.Escape`, event and snapshot texts through `ExternalText`, the log line `history view: reading failed` without an address value) and `ProcessesPage` (program labels through `LogText.Escape`, snapshot texts through `ExternalText`, the log line `processes view: reading failed` without an address value), `vandoxd` output, the
-    agent's logger (`internal/agent`) — [web-ui](../docs/areas/web-ui.md) and its `web-ui-*.md` views,
+    `src/Vandox.Backend/Logging/`, the components and security headers of `src/Vandox.Backend/` (among them
+    `HistoryPage`, `HistoryChart` and `ProcessesPage`), `vandoxd` output, the agent's logger (`internal/agent`) —
+    [web-ui](../docs/areas/web-ui.md) (*External text*) and its `web-ui-*.md` views,
     [forensics-report](../docs/areas/forensics-report.md), [listener-changes](../docs/areas/listener-changes.md),
     [incidents](../docs/areas/incidents.md), [log-templates](../docs/areas/log-templates.md),
     [log-signatures](../docs/areas/log-signatures.md), [backend-host](../docs/areas/backend-host.md),
@@ -169,8 +167,8 @@ tailnet) touches:
 
 ## Test doubles
 
-Hand-written and reused (no mocking library); rules in `docs/UNIT_TESTS.md` (*Test doubles*). Implemented unless
-marked planned.
+Hand-written and reused (no mocking library); rules in `docs/UNIT_TESTS.md` (*Test doubles*), what each double does in
+its own documentation comment. Implemented unless marked planned.
 
 | Surface | Double (where) | Stands in for |
 | ------- | -------------- | ------------- |
@@ -183,13 +181,13 @@ marked planned.
 | agent state | a real store in `t.TempDir()` (`internal/agentstate`) | `agent-state.json` |
 | MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
-| time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock` (Backend tests), `DisposeFailingClock` (Backend tests: timers that fail on asynchronous disposal), `RefreshProbe` (Backend tests: the overview refresh delegate), `CountingClock` (Storage tests) | the clock |
-| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader` (Backend tests: records calls, scripted results, can hold or fail a call; `FakeHistoryReader` records the call sequence and chooses stamps as the store does), `FakeProgramRollupReader` (Backend tests: scripted rollup results and source lists, records calls, can hold or fail a call), `ListLogger` (Backend tests) | store, readers |
+| time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock`, `DisposeFailingClock`, `RefreshProbe` (Backend tests), `CountingClock` (Storage tests) | the clock |
+| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader`, `FakeProgramRollupReader`, `ListLogger` (Backend tests) | store, readers |
 | retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
-| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests): counts calls of the real store; `ProbeTimeSeriesReader` (Backend tests): held calls; `ScriptedTimeSeriesReader` (Backend tests): scripted lines and kernel events behind a real `TimeSeriesService`, records calls, can hold or fail | `ITimeSeriesReader` |
+| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests); `ProbeTimeSeriesReader`, `ScriptedTimeSeriesReader` (Backend tests) | `ITimeSeriesReader` |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
 | files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
-| Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness` (`HistoryPageHarness`: history page over `ScriptedTimeSeriesReader`, `FakeHistoryReader`, a fake clock, a recording navigation manager and a script runtime that answers the chart width) and `ProcessesPageHarness` (processes page over `FakeProgramRollupReader`, `FakeHistoryReader`, a fake clock, a recording navigation manager and a script runtime that answers the widths of both charts), `HistoryChartFixture`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
+| Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `HistoryChartFixture`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
 | web login (C#) | `BackendFixture`, `LoginTestClient`, `ScriptedPasswordVerifier`, `Fixed*` and `Unset*` providers (Backend tests) | service, browser |
 | ingest (C#) | `IngestRig`, `IngestCall`, `RecordingRecordWriter`, `CountingBodyStream`, `StartingResponseBody` (Backend tests) | request, writer |
 | Telegram Bot API | planned: a fake client | the Bot API |
