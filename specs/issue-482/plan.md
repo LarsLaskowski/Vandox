@@ -39,8 +39,9 @@ leave the file as plain deletions, no area document changes.
   of the base file is still in `.squad/project.md` with its files, types and endpoints named; every link target of the
   base file is still there; a code span the base file had is gone only if fact 5 or 6 names where it now stands.
 - AC3: (#484) no security area is narrowed: each entry's protected property and scope cover at least what the base
-  entry covered (no file, directory, type, route or address dropped from an entry; `RetentionRemover` and the spool's
-  bound stay in entry 9).
+  entry covered (no file, directory, type, route or address dropped from an entry, unless a broader scope in the same entry still
+  covers it, as entry 3's "every page under `Components/Pages/`" covers `HistoryPage` and `ProcessesPage`;
+  `RetentionRemover`-only deletes and the spool's bound stay in entry 9).
 - AC4: (#482) `.squad/stack.md` holds the cloud-session note below the paragraph that starts "*Test* and *Test with
   coverage* build and run", with the content *Approach* lists; the *Test with coverage* row of *Commands* is unchanged.
 

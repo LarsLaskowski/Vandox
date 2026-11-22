@@ -44,7 +44,7 @@ A plan lists each area it touches under *Security areas touched*, so Security re
    [configuration-and-secrets](../docs/areas/configuration-and-secrets.md),
    [agent-sending](../docs/areas/agent-sending.md), [agent-installation](../docs/areas/agent-installation.md).
 9. **File writes and paths derived from external input** — writes stay in the configured directories, follow no link,
-   use restrictive modes; the spool and retention's deletes are bounded. `vandox.db` (`src/Vandox.Storage/`, `RetentionRemover`),
+   use restrictive modes; the spool is bounded, and retention deletes only through the bounded steps of `RetentionRemover`. `vandox.db` (`src/Vandox.Storage/`, `RetentionRemover`),
    `src/Vandox.Import/`, `src/Vandox.Core/IO/`, `spool.directory` (`internal/spool`, `internal/agentstate`),
    `deploy/agent/install.sh` and `uninstall.sh` — [storage](../docs/areas/storage.md),
    [retention](../docs/areas/retention.md), [log-import](../docs/areas/log-import.md),
