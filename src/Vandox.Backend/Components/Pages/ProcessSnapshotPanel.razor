@@ -1,0 +1,26 @@
+@if (Process is { } process)
+{
+    <h3>Process snapshot of @LogsView.ShowSeconds(process.CapturedAt) UTC (<ExternalText Runs="process.Source" />)</h3>
+
+    @if (Before is { } before)
+    {
+        <p><button type="button" @onclick="() => BeforeChosen.InvokeAsync(before)">Snapshot before this moment (@LogsView.ShowSeconds(before) UTC)</button></p>
+    }
+
+    @if (process.Note.Length > 0)
+    {
+        <p class="note">@process.Note</p>
+    }
+
+    <HistorySnapshotTable Table="process.Programs" />
+    <HistorySnapshotTable Table="process.Processes" />
+
+    @if (process.ListedOfTotal.Length > 0)
+    {
+        <p class="note">@process.ListedOfTotal</p>
+    }
+}
+else
+{
+    <p>@HistoryView.NoProcessSnapshotText</p>
+}

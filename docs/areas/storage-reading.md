@@ -149,7 +149,7 @@ no current data and is not returned.
 
 ### History reads
 
-The three reads of the history view ([History view](web-ui-history-view.md)); each is one reader lease and one or a few seeks of an
+The three reads of the history view ([History view](web-ui-history-view.md)), the snapshot reads also those of the processes view ([Processes view](web-ui-processes-view.md)); each is one reader lease and one or a few seeks of an
 existing index, never a scan.
 
 - **Stored metrics** (a limit of 1 to 256, refused otherwise with `store: invalid query: limit must be 1 to 256`): every source and name
@@ -157,14 +157,17 @@ existing index, never a scan.
   their UTF-8 form (as SQLite orders text), the first *limit* of them; the result says whether a further metric exists. It is a skip
   scan: the first source with its first name, then the next name of that source, then the first name of the next source, one index seek per entry within a source and three for an entry that starts the next source (`metrics(source, name, captured_at)`, the primary key of the hourly rollups), at most *limit* + 1 entries per table. Its cost
   grows with the entries read, not with the stored rows.
-- **Snapshot stamp** (a kind, a moment, a window and a side): the ID and capture time, nothing else, of the snapshot of the kind closest to
+- **Snapshot stamp** (a kind, optionally a source, a moment, a window and a side): the ID and capture time, nothing else, of the snapshot of the kind closest to
   the moment on one side. *At or before* takes capture times from the moment minus the window up to the moment, the latest first;
   *after* from after the moment up to the moment plus the window, the earliest first; among records of one capture time the lower ID wins.
   It returns nothing when no snapshot lies in the window. The kind must be `process_snapshot` or `connection_snapshot`
   (`store: invalid query: kind must be a snapshot kind`), the window above 0 and at most one day (`store: invalid query: window must be
   positive and at most one day`) and the moment within the storable range (`store: invalid query: at must be within the storable range`).
   The read seeks `records(kind, captured_at)`; the *at or before* side adds a temporary tree for the ID term of its order, which holds
-  only the two columns read.
+  only the two columns read. With a **source** the read takes only the snapshots of that source, as the same two reads with the condition
+  `source = $source`, and seeks `records(kind, source, captured_at)`; without one it takes the snapshots of any source, as before. An
+  empty source is refused (`store: invalid query: source must not be empty`). The processes view reads the snapshot of the source its
+  charts show this way, and the stamp of the other side with the same source, so *Snapshot before this moment* stays within the source.
 - **Snapshot record**: the record of a stamp, by ID and kind (the kind rule above), read and decoded like a record of the record
   reads, so one payload is decoded. It returns nothing when retention removed the record after the stamp was read.
 - The view reads the stamps of both sides and decodes only the record of the closer one, so no read decodes a snapshot it does not show.
@@ -180,6 +183,7 @@ existing index, never a scan.
 - [0218](../decisions/0218-the-overview-reads-latest-values-through-its-own-bounded-store-reads.md) — why the overview has its own bounded reads over the existing indexes.
 - [0223](../decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md) — why the per-program rollups have their own read.
 - [0222](../decisions/0222-the-history-view-reads-the-moments-snapshots-and-the-metric-list-through-its-own-bounded-reads.md) — why the history view has its own metric list and snapshot reads.
+- [0224](../decisions/0224-the-processes-view-stacks-program-rollups-on-the-history-chart-and-compares-programs-of-one-source.md) — why the snapshot stamp read can be narrowed to one source.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the listener history reads the narrow derived
   tables.

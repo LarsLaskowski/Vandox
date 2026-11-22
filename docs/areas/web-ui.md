@@ -6,7 +6,8 @@ The pages `vandoxd` serves on its web listener as a whole: render mode and live 
 static assets, charts, the display of external text, the shared bound on the views' store reads, and the security headers of the web
 listener together with what the UI framework needs from them. The user relies on it to look at the monitored server in a browser in the
 home network; the views ([Overview page](web-ui-overview.md), [Logs view](web-ui-logs-view.md),
-[Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md), [History view](web-ui-history-view.md)) build on it.
+[Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md), [History view](web-ui-history-view.md),
+[Processes view](web-ui-processes-view.md)) build on it.
 
 ## Behavior
 
@@ -32,9 +33,9 @@ home network; the views ([Overview page](web-ui-overview.md), [Logs view](web-ui
   since every entry would only lead back to it.
 - The login page shows the form as a card centered below the header: the heading *Sign in*, one line that asks for the password of the
   web UI, the message of a failed attempt, the password field (focused when the page loads) and the *Sign in* button in the brand color.
-- The navigation lists the existing pages; the entry of the current page is marked. Today it has five entries, *Overview* (`/`, [Overview page](web-ui-overview.md)),
-  *History* (`history`, [History view](web-ui-history-view.md)), *Logs* (`logs`), *Incidents* (`incidents`) and *Report* (`report`);
-  each view adds its own. *History* is marked on `/history` (with or without a query), *Logs* on `/logs` and on
+- The navigation lists the existing pages; the entry of the current page is marked. Today it has six entries, *Overview* (`/`, [Overview page](web-ui-overview.md)),
+  *History* (`history`, [History view](web-ui-history-view.md)), *Processes* (`processes`, [Processes view](web-ui-processes-view.md)), *Logs* (`logs`), *Incidents* (`incidents`) and *Report* (`report`);
+  each view adds its own. *History* is marked on `/history` and *Processes* on `/processes` (each with or without a query), *Logs* on `/logs` and on
   `/logs/templates`, *Incidents* on `/incidents` and on `/incidents/<number>`, *Report* on `/report` (with or without a query),
   *Overview* only on `/`.
 - The layout works from desktop width down to phone width (360 CSS pixels) without horizontal scrolling of the page: on narrow screens
@@ -58,7 +59,7 @@ home network; the views ([Overview page](web-ui-overview.md), [Logs view](web-ui
 - Every file the browser loads comes from the application itself; the UI references no other origin, no CDN and no web font. There is
   no Node build: style sheets and scripts are written as served.
 - Files: the framework script `_framework/blazor.web.js`, `app.css`, `js/app.js` (theme and reconnect controls), `js/charts.js` (chart
-  module, loaded only by a page that shows a chart; its exports include `width` and `createHistory` of the history view), `lib/uplot/` (uPlot 1.6.32: `uPlot.esm.js`, `uPlot.min.css` and its `LICENSE`) and
+  module, loaded only by a page that shows a chart; its exports include `width` and `createHistory` of the history view and the processes view), `lib/uplot/` (uPlot 1.6.32: `uPlot.esm.js`, `uPlot.min.css` and its `LICENSE`) and
   `brand/` (byte-identical copies of `vandox-favicon.svg`, `vandox-logo-horizontal.svg` and `vandox-logo-horizontal-dark.svg` from
   `docs/assets/`, the single source).
 - The same files are served from a build and from the published image. Static files are served only on the web listener.
@@ -92,6 +93,12 @@ home network; the views ([Overview page](web-ui-overview.md), [Logs view](web-ui
   maximum of a step. It reports the drag selection (from 5 CSS pixels) and the click of the user to the page through the two instance
   methods `Select` and `Pick` of a reference that it disposes with the chart; no static method is invoked from the browser. The page
   validates what arrives; the chart writes no HTML and rebuilds itself on a theme change like the other charts ([History view](web-ui-history-view.md)).
+- The history chart also has a **stacked mode** (the [Processes view](web-ui-processes-view.md)): every line is on one scale from 0, the lines are
+  drawn as filled bands, each between the cumulative sum of a line and that of the one below, in line order, and the legend shows each
+  line's own value, with its minimum and maximum where the line has them. Unlike the stacked chart above, it accepts a gap: at a step where
+  any line has no value every band breaks and is never drawn across, and the chart still reports the drag selection and the click like
+  the history chart. A stacked view whose line is not on the first scale is refused as a programming error. The incidents chart keeps
+  its refusal of a gap, which it relies on.
 
 ### External text
 
@@ -112,14 +119,14 @@ IDs) is shown only through one display that writes it as text, never as markup, 
 
 ### Store reads of the views
 
-- **At most two store calls of the overview page, the logs view, the incidents view, the report page and the history view run at once across the whole service**, whatever the
+- **At most two store calls of the overview page, the logs view, the incidents view, the report page, the history view and the processes view run at once across the whole service**, whatever the
   number of pages and users open; a further call waits for a slot within its own deadline. The store has four reader connections, so two
   stay free for `/healthz` and every other reader.
 - The time-series query ([Time-series queries](time-series-query.md)) shares this gate: each of its store reads takes one slot for that
   call, as the views' calls do.
 - The slot is held per store call (a read of many snapshots takes it once per snapshot). Saving a note does not use it. The overview page
   takes one slot for each of the five calls of a refresh, in turn ([Overview page](web-ui-overview.md)); the history view takes one for
-  each call of its metric list, its chart and its moment ([History view](web-ui-history-view.md), *Calls and deadline*).
+  each call of its metric list, its chart and its moment ([History view](web-ui-history-view.md), *Calls and deadline*), and the processes view for each call of its charts and its panel ([Processes view](web-ui-processes-view.md), *Calls and deadline*).
 - A store call that a view's deadline or the leaving of its page cancels is interrupted in the store
   ([Storage](storage.md), *Database file and connections*).
 
@@ -201,10 +208,11 @@ The ingest listener serves none of this: every UI path, static file and the live
 - [0219](../decisions/0219-the-overview-refreshes-on-a-timer-that-skips-overlaps-and-pauses-while-disconnected.md) — why the overview refreshes on a timer and pauses while the connection is lost.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view shares the gate of the logs view.
 - [0221](../decisions/0221-the-history-view-draws-every-metric-on-its-own-scale-with-two-axes-and-step-extremes-in-the-legend.md) — why the history chart has a scale per metric, two drawn axes and the step's extremes in its legend.
+- [0224](../decisions/0224-the-processes-view-stacks-program-rollups-on-the-history-chart-and-compares-programs-of-one-source.md) — why the history chart has a stacked mode that accepts a gap, beside the incidents chart that refuses one.
 
 ## Not here
 
-- The views: [Overview page](web-ui-overview.md), [Logs view](web-ui-logs-view.md), [Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md), [History view](web-ui-history-view.md).
+- The views: [Overview page](web-ui-overview.md), [Logs view](web-ui-logs-view.md), [Incidents view](web-ui-incidents-view.md), [Report page](web-ui-report-page.md), [History view](web-ui-history-view.md), [Processes view](web-ui-processes-view.md).
 - Listeners, port routing, `/healthz`, the container and exposure: [Backend host](backend-host.md).
 - Who may reach the web UI: [Network and security model](network-and-security-model.md).
 - Logo files and color tokens: [BRANDING.md](../BRANDING.md).
@@ -215,10 +223,10 @@ The ingest listener serves none of this: every UI path, static file and the live
 
 `Vandox.Backend`: a Blazor Web App in the Interactive Server render mode over SignalR (`Components/App.razor`,
 `Components/Layout/MainLayout.razor`); every page below `Components/Pages` carries `[Authorize]` (`Pages/_Imports.razor`).
-Charts: `Components/Charts` (`TimeSeriesChart`, `ChartData`, and for the history view `HistoryChart`, `HistoryChartInterop`, `HistoryChartEvents`; a stacked chart is `ChartData` with `stacked: true`, drawn by `createStacked`
+Charts: `Components/Charts` (`TimeSeriesChart`, `ChartData`, and for the history view and the processes view `HistoryChart`, `HistoryChartInterop`, `HistoryChartEvents` (the stacked mode is `setup.stacked` of `createHistory`); a stacked chart is `ChartData` with `stacked: true`, drawn by `createStacked`
 in `js/charts.js`, which sets the bridged cells to `undefined`; `ChartSeries.Bridged`, `ChartData.ToBridges`). External text: `Components/Logs/ExternalText` with the runs of `Logs/LogText` (`LogText.Runs`, `LogText.Escape`,
 `LogText.MaxShortChars`) and `Logs/TextRun`. The read gate: `Logs/WebReaderGate`, taken by `GatedLogExplorer`, `GatedIncidentBrowser`,
-`GatedRecordReader`, `GatedIncidentStore`, `GatedListenerHistoryReader`, `GatedTimeSeriesReader` (`TimeSeries/`), `GatedHistoryReader` (`History/`) and `GatedOverviewReader` (`Overview/`; with `CircuitConnection`, the connection state of a circuit, which the overview page uses to pause its refresh). Headers: `Hosting/SecurityHeadersMiddleware`;
+`GatedRecordReader`, `GatedIncidentStore`, `GatedListenerHistoryReader`, `GatedTimeSeriesReader` (`TimeSeries/`), `GatedHistoryReader` (`History/`), `GatedProgramRollupReader` (`Processes/`) and `GatedOverviewReader` (`Overview/`; with `CircuitConnection`, the connection state of a circuit, which the overview page uses to pause its refresh). Headers: `Hosting/SecurityHeadersMiddleware`;
 `Hosting/ServeCommand`; `wwwroot/`; `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework script
 independently of the sources, as the image build restores before copying them (record 0098). The source scan is `WebSourceScanner` in
 `WebUiContentTests` (tests); in component code (`.razor`, `.cs` under `Components/`) it forbids `MarkupString`, `AddMarkupContent` and

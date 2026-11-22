@@ -1,0 +1,146 @@
+@page "/processes"
+
+<PageTitle>Processes</PageTitle>
+
+<h1>Processes</h1>
+
+<HistoryRangeControls Preset="_address.Preset" Unbounded="_address.From is null && _address.To is null" @bind-From="_from" @bind-To="_to" PresetChosen="ApplyPreset" ApplyPressed="Apply" />
+
+@if (_error.Length > 0)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else
+{
+    @if (Options.Count > 0)
+    {
+        <form class="filters history-metrics" @onsubmit:preventDefault>
+            <label>Source
+                <select name="source" value="@ShownSource" @onchange="OnSourceChanged">
+                    @foreach (var source in Options)
+                    {
+                        <option value="@source">@source</option>
+                    }
+                </select>
+            </label>
+        </form>
+    }
+
+    @if (_controlError.Length > 0)
+    {
+        <p class="error" role="alert">@_controlError</p>
+    }
+
+    @if (RendererInfo.IsInteractive == false)
+    {
+        <p>@HistoryView.LoadingText</p>
+    }
+    else if (_future)
+    {
+        <p class="note">@HistoryView.FutureRangeText</p>
+    }
+    else
+    {
+        @if (_failure.Length > 0)
+        {
+            <p class="error" role="alert">@_failure</p>
+        }
+
+        @if (_charts is not null)
+        {
+            @foreach (var note in _charts.Notes)
+            {
+                <p class="note">@note</p>
+            }
+        }
+
+        @if (_charts?.Memory is not null || _charts is null)
+        {
+            @foreach (var chart in ChartHosts)
+            {
+                <h2>@chart.Label</h2>
+
+                @if (chart.Note.Length > 0)
+                {
+                    <p class="note">@chart.Note</p>
+                }
+
+                <HistoryChart @attributes="ChartParameters(chart.Label, chart.View)" />
+            }
+        }
+
+        @if (_address.At is { } at)
+        {
+            <section class="history-moment" aria-label="@(_address.Compare is null ? "Moment" : "Comparison")">
+                <h2>@(_address.Compare is null ? "Top processes" : "Comparison")</h2>
+
+                @if (_address.Compare is null)
+                {
+                    <p>Moment @LogsView.ShowSeconds(at) UTC</p>
+                    <p><a href="@HistoryHref(at)">History of this moment</a></p>
+
+                    @if (ShownSource.Length > 0)
+                    {
+                        @if (_armed)
+                        {
+                            <p class="note">@ArmedText</p>
+                            <p><button type="button" @onclick="CancelCompare">Cancel</button></p>
+                        }
+                        else
+                        {
+                            <p><button type="button" @onclick="ArmCompare">Compare from here</button></p>
+                        }
+                    }
+                }
+
+                @if (_momentFailure.Length > 0)
+                {
+                    <p class="error" role="alert">@_momentFailure</p>
+                }
+                else if (SourceText.Length > 0)
+                {
+                    <p>@SourceText</p>
+                }
+                else if (_address.Compare is null)
+                {
+                    @if (_moment is null)
+                    {
+                        <p>@HistoryView.LoadingText</p>
+                    }
+                    else
+                    {
+                        <ProcessSnapshotPanel Process="_moment.Process" Before="_moment.ProcessBefore" BeforeChosen="SnapshotBefore" />
+                    }
+                }
+                else if (_comparison is null)
+                {
+                    <p>@HistoryView.LoadingText</p>
+                }
+                else
+                {
+                    @if (_comparison.Heading.Length > 0)
+                    {
+                        <h3>@_comparison.Heading</h3>
+                    }
+
+                    @if (_comparison.Text.Length > 0)
+                    {
+                        <p>@_comparison.Text</p>
+                    }
+
+                    @if (_comparison.Note.Length > 0)
+                    {
+                        <p class="note">@_comparison.Note</p>
+                    }
+
+                    <HistorySnapshotTable Table="_comparison.Table" />
+
+                    @if (_comparison.Closing.Length > 0)
+                    {
+                        <p class="note">@_comparison.Closing</p>
+                    }
+                }
+            </section>
+        }
+    }
+}

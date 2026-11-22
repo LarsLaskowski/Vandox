@@ -59,5 +59,24 @@ public class RoutesTests
         Assert.IsEmpty(type.GetCustomAttributes<AllowAnonymousAttribute>(true), "the history page does not allow anonymous access");
     }
 
+    /// <summary>
+    /// The processes page is routable at <c>/processes</c> and requires authorization.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public void RoutesProcessesPageRequiresAuthorization()
+    {
+        // Arrange
+        var type = typeof(ProcessesPage);
+
+        // Act
+        var templates = type.GetCustomAttributes<RouteAttribute>(false).Select(route => route.Template).ToArray();
+
+        // Assert
+        Assert.Contains("/processes", templates, "the processes page is routed at /processes");
+        Assert.IsNotEmpty(type.GetCustomAttributes<AuthorizeAttribute>(true), "the processes page requires authorization");
+        Assert.IsEmpty(type.GetCustomAttributes<AllowAnonymousAttribute>(true), "the processes page does not allow anonymous access");
+    }
+
     #endregion // Methods
 }

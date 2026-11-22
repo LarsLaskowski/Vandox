@@ -26,6 +26,11 @@ internal sealed class HistoryChartFixture : IAsyncDisposable
     private readonly HistoryChartView? _view;
 
     /// <summary>
+    /// The label of the host, or null for the default.
+    /// </summary>
+    private readonly string? _label;
+
+    /// <summary>
     /// Whether the renderer is disposed.
     /// </summary>
     private bool _rendererDisposed;
@@ -38,9 +43,11 @@ internal sealed class HistoryChartFixture : IAsyncDisposable
     /// Initializes a new instance of the <see cref="HistoryChartFixture"/> class.
     /// </summary>
     /// <param name="view">The view the component starts with</param>
-    internal HistoryChartFixture(HistoryChartView? view)
+    /// <param name="label">The label of the host, or null for the default</param>
+    internal HistoryChartFixture(HistoryChartView? view, string? label = null)
     {
         _view = view;
+        _label = label;
         Runtime = new RecordingJsRuntime();
 
         Runtime.Answer("module", "width", 640.0);
@@ -139,13 +146,20 @@ internal sealed class HistoryChartFixture : IAsyncDisposable
     /// <returns>The parameters</returns>
     private Dictionary<string, object?> Parameters(HistoryChartView? view)
     {
-        return new Dictionary<string, object?>
-               {
-                   [nameof(HistoryChart.View)] = view,
-                   [nameof(HistoryChart.OnWidth)] = EventCallback.Factory.Create<double>(this, (Func<double, Task>)(width => Record(Widths, width))),
-                   [nameof(HistoryChart.OnSelect)] = EventCallback.Factory.Create<HistoryRange>(this, (Func<HistoryRange, Task>)(range => Record(Ranges, range))),
-                   [nameof(HistoryChart.OnPick)] = EventCallback.Factory.Create<HistoryPick>(this, (Func<HistoryPick, Task>)(pick => Record(Picks, pick)))
-               };
+        var parameters = new Dictionary<string, object?>
+                         {
+                             [nameof(HistoryChart.View)] = view,
+                             [nameof(HistoryChart.OnWidth)] = EventCallback.Factory.Create<double>(this, (Func<double, Task>)(width => Record(Widths, width))),
+                             [nameof(HistoryChart.OnSelect)] = EventCallback.Factory.Create<HistoryRange>(this, (Func<HistoryRange, Task>)(range => Record(Ranges, range))),
+                             [nameof(HistoryChart.OnPick)] = EventCallback.Factory.Create<HistoryPick>(this, (Func<HistoryPick, Task>)(pick => Record(Picks, pick)))
+                         };
+
+        if (_label is not null)
+        {
+            parameters[nameof(HistoryChart.Label)] = _label;
+        }
+
+        return parameters;
     }
 
     #endregion // Methods

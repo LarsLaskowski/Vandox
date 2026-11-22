@@ -59,6 +59,16 @@ internal static class HistoryQueries
     internal const string StampAfter = "SELECT id, captured_at FROM records WHERE kind = $kind AND captured_at > $at AND captured_at <= $to ORDER BY captured_at, id LIMIT 1";
 
     /// <summary>
+    /// The stamp read of the side at or before the moment, for one source.
+    /// </summary>
+    internal const string StampOfSourceAtOrBefore = "SELECT id, captured_at FROM records WHERE kind = $kind AND source = $source AND captured_at <= $at AND captured_at >= $from ORDER BY captured_at DESC, id LIMIT 1";
+
+    /// <summary>
+    /// The stamp read of the side after the moment, for one source.
+    /// </summary>
+    internal const string StampOfSourceAfter = "SELECT id, captured_at FROM records WHERE kind = $kind AND source = $source AND captured_at > $at AND captured_at <= $to ORDER BY captured_at, id LIMIT 1";
+
+    /// <summary>
     /// The first name of a source of <c>metrics</c>.
     /// </summary>
     internal const string MetricsFirstName = "SELECT min(name) FROM metrics WHERE source = $source";
@@ -112,6 +122,7 @@ internal static class HistoryQueries
         ValidateKind(query.Kind);
         RecordQueries.Require(query.Window > TimeSpan.Zero && query.Window <= TimeSpan.FromDays(1), "window must be positive and at most one day");
         RecordQueries.Require(StorageTime.InStorableRange(query.At), "at must be within the storable range");
+        RecordQueries.Require(query.Source is null || query.Source.Length > 0, "source must not be empty");
     }
 
     /// <summary>
@@ -183,8 +194,21 @@ internal static class HistoryQueries
 
         parameters[before ? "$from" : "$to"] = before ? at - window : at + window;
 
+        if (query.Source is not null)
+        {
+            parameters["$source"] = query.Source;
+        }
+
+        var statement = (before, query.Source is null) switch
+                        {
+                            (true, true) => StampAtOrBefore,
+                            (false, true) => StampAfter,
+                            (true, false) => StampOfSourceAtOrBefore,
+                            _ => StampOfSourceAfter
+                        };
+
         var rows = await ReaderQuery.ReadAsync(connection,
-                                               before ? StampAtOrBefore : StampAfter,
+                                               statement,
                                                parameters,
                                                reader => new SnapshotStamp
                                                          {

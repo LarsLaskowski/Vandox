@@ -20,18 +20,13 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
 
     private const string PagePath = "history";
 
-    private const string ApplyText = "Apply";
+    private const string HistoryViewName = "history view";
 
     private const string AddText = "Add";
 
     #endregion // Constants
 
     #region Fields
-
-    /// <summary>
-    /// The presets in the order of the buttons.
-    /// </summary>
-    private static readonly HistoryPreset[] _presets = [HistoryPreset.OneHour, HistoryPreset.OneDay, HistoryPreset.SevenDays, HistoryPreset.ThirtyDays, HistoryPreset.OneYear];
 
     /// <summary>
     /// The runs of the chart reads and of the metric list read.
@@ -158,11 +153,6 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     #region Properties
 
     /// <summary>
-    /// Gets the presets in the order of the buttons.
-    /// </summary>
-    private static IReadOnlyList<HistoryPreset> Presets => _presets;
-
-    /// <summary>
     /// Gets or sets the time-series service.
     /// </summary>
     [Inject]
@@ -206,36 +196,6 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     #endregion // Properties
 
     #region Methods
-
-    /// <summary>
-    /// Runs a read; a refusal of the store is a failure of the view, not a text for the user.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result</typeparam>
-    /// <param name="read">The read</param>
-    /// <returns>A task that returns the result</returns>
-    private static async Task<TResult> ReadingAsync<TResult>(Func<Task<TResult>> read)
-    {
-        try
-        {
-            return await read().ConfigureAwait(true);
-        }
-        catch (InvalidQueryException exception)
-        {
-            throw new InvalidOperationException("history view: a read was refused", exception);
-        }
-    }
-
-    /// <summary>
-    /// Gives the class of the button of a preset.
-    /// </summary>
-    /// <param name="preset">The preset</param>
-    /// <returns>The class, <see langword="null"/> for none</returns>
-    private string? PresetClass(HistoryPreset preset)
-    {
-        var current = _address.Preset ?? (_address.From is null && _address.To is null ? HistoryPreset.OneDay : (HistoryPreset?)null);
-
-        return current == preset ? "active" : null;
-    }
 
     /// <summary>
     /// Reads the address of the location and starts the reads it calls for.
@@ -289,7 +249,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
                                     {
                                         _listFailure = string.Empty;
 
-                                        var list = await ReadingAsync(() => Reader.StoredMetricsAsync(StorageLimits.MaxStoredMetrics, token)).ConfigureAwait(true);
+                                        var list = await StoreReads.ReadingAsync(HistoryViewName, () => Reader.StoredMetricsAsync(StorageLimits.MaxStoredMetrics, token)).ConfigureAwait(true);
 
                                         token.ThrowIfCancellationRequested();
 
@@ -361,7 +321,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
                                          _failure = string.Empty;
                                          StateHasChanged();
 
-                                         var result = await ReadingAsync(() => TimeSeries.QueryAsync(query, token)).ConfigureAwait(true);
+                                         var result = await StoreReads.ReadingAsync(HistoryViewName, () => TimeSeries.QueryAsync(query, token)).ConfigureAwait(true);
 
                                          token.ThrowIfCancellationRequested();
 
@@ -415,7 +375,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
                                           _moment = null;
                                           StateHasChanged();
 
-                                          var moment = await ReadingAsync(() => new HistoryMomentReader(Reader).ReadAsync(at, token)).ConfigureAwait(true);
+                                          var moment = await StoreReads.ReadingAsync(HistoryViewName, () => new HistoryMomentReader(Reader).ReadAsync(at, token)).ConfigureAwait(true);
 
                                           token.ThrowIfCancellationRequested();
 
@@ -457,25 +417,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     /// <param name="replace">Whether the current entry of the history is replaced</param>
     private void Go(HistoryAddress address, bool replace)
     {
-        string href;
-
-        try
-        {
-            href = HistoryView.HistoryHref(address);
-        }
-        catch (InvalidOperationException exception)
-        {
-            _controlError = exception.Message;
-
-            return;
-        }
-
-        _controlError = string.Empty;
-        Navigation.NavigateTo(href,
-                              new NavigationOptions
-                              {
-                                  ReplaceHistoryEntry = replace
-                              });
+        _controlError = PageLocation.Go(Navigation, () => HistoryView.HistoryHref(address), replace);
     }
 
     /// <summary>
@@ -511,7 +453,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     /// </summary>
     private void Apply()
     {
-        var parsed = HistoryAddress.Parse($"?from={Uri.EscapeDataString(_from)}&to={Uri.EscapeDataString(_to)}");
+        var parsed = HistoryRangeControls.ParseFields(_from, _to);
 
         if (parsed.Error.Length > 0)
         {
@@ -649,10 +591,7 @@ public sealed partial class HistoryPage : ComponentBase, IDisposable
     /// <returns><c>true</c> when the location is the page of the history view</returns>
     private bool IsThisPage(string location)
     {
-        var relative = Navigation.ToBaseRelativePath(location);
-        var end = relative.IndexOfAny(['?', '#']);
-
-        return string.Equals(end < 0 ? relative : relative[..end], PagePath, StringComparison.Ordinal);
+        return PageLocation.IsPage(Navigation, location, PagePath);
     }
 
     /// <summary>

@@ -84,6 +84,12 @@ public sealed partial class HistoryChart : IAsyncDisposable
     public EventCallback<HistoryPick> OnPick { get; set; }
 
     /// <summary>
+    /// Gets or sets the accessible name of the chart.
+    /// </summary>
+    [Parameter]
+    public string Label { get; set; } = "History chart";
+
+    /// <summary>
     /// Gets or sets the JavaScript runtime.
     /// </summary>
     [Inject]

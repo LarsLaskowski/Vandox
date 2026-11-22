@@ -46,7 +46,10 @@ internal static class ProgramBenchmark
 
     #region Fields
 
-    private static readonly DateTimeOffset _now = new(2026, 12, 1, 12, 0, 0, TimeSpan.Zero);
+    /// <summary>
+    /// The time of the fixed clock of the measurements.
+    /// </summary>
+    internal static readonly DateTimeOffset Now = new(2026, 12, 1, 12, 0, 0, TimeSpan.Zero);
 
     #endregion // Fields
 
@@ -87,7 +90,7 @@ internal static class ProgramBenchmark
     /// <param name="work">The working folder</param>
     /// <param name="name">The name of the folder</param>
     /// <returns>The path</returns>
-    private static string Folder(string work, string name)
+    internal static string Folder(string work, string name)
     {
         var path = Path.Combine(work, name);
 
@@ -100,7 +103,7 @@ internal static class ProgramBenchmark
     /// Creates the default retention policy.
     /// </summary>
     /// <returns>The policy</returns>
-    private static RetentionPolicy CreatePolicy()
+    internal static RetentionPolicy CreatePolicy()
     {
         return new RetentionPolicy
                {
@@ -120,9 +123,61 @@ internal static class ProgramBenchmark
     /// </summary>
     /// <param name="times">The times in milliseconds</param>
     /// <returns>The median, 0 for none</returns>
-    private static double Median(List<double> times)
+    internal static double Median(List<double> times)
     {
         return times.Count == 0 ? 0 : times.Order().ElementAt(times.Count / 2);
+    }
+
+    /// <summary>
+    /// Times every fold step until nothing is left.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that returns the time of each step in milliseconds</returns>
+    internal static async Task<List<double>> TimeStepsAsync(SqliteStore store, CancellationToken cancellationToken)
+    {
+        var times = new List<double>();
+        var policy = CreatePolicy();
+
+        for (var step = 0; step < MaxSteps; step++)
+        {
+            var watch = Stopwatch.StartNew();
+            var result = await store.FoldRollupsAsync(policy, Now, cancellationToken).ConfigureAwait(false);
+
+            watch.Stop();
+
+            if (result.Values > 0 || result.Snapshots > 0 || result.SkippedSnapshots > 0)
+            {
+                times.Add(watch.Elapsed.TotalMilliseconds);
+                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"fold step {times.Count}: {watch.Elapsed.TotalMilliseconds:F0} ms, {result.Values} values, {result.Snapshots} snapshots ({result.SkippedSnapshots} skipped), {result.ProgramBuckets} program buckets"));
+            }
+
+            if (result.More == false)
+            {
+                break;
+            }
+        }
+
+        return times;
+    }
+
+    /// <summary>
+    /// Stores snapshots in chunks.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="count">The number of snapshots</param>
+    /// <param name="first">The capture time of the first snapshot</param>
+    /// <param name="interval">The time between two snapshots</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that completes when everything is stored</returns>
+    internal static async Task WriteSnapshotsAsync(SqliteStore store, int count, DateTimeOffset first, TimeSpan interval, CancellationToken cancellationToken)
+    {
+        for (var start = 0; start < count; start += WriteChunk)
+        {
+            var size = Math.Min(WriteChunk, count - start);
+
+            await store.WriteBatchAsync(SnapshotBatch(size, first + (start * interval), interval, ProgramsPerSnapshot), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -146,8 +201,8 @@ internal static class ProgramBenchmark
             {
                 var watch = Stopwatch.StartNew();
 
-                await store.WriteBatchAsync(MetricBatch(MetricsPerBatch, ref seq, _now.AddHours(-3).AddSeconds(batch * MetricsPerBatch)), cancellationToken).ConfigureAwait(false);
-                await store.WriteBatchAsync(SnapshotBatch(SnapshotsPerBatch, _now.AddHours(-3).AddMinutes(batch * SnapshotsPerBatch), TimeSpan.FromMinutes(1), ProgramsPerSnapshot), cancellationToken).ConfigureAwait(false);
+                await store.WriteBatchAsync(MetricBatch(MetricsPerBatch, ref seq, Now.AddHours(-3).AddSeconds(batch * MetricsPerBatch)), cancellationToken).ConfigureAwait(false);
+                await store.WriteBatchAsync(SnapshotBatch(SnapshotsPerBatch, Now.AddHours(-3).AddMinutes(batch * SnapshotsPerBatch), TimeSpan.FromMinutes(1), ProgramsPerSnapshot), cancellationToken).ConfigureAwait(false);
                 watch.Stop();
                 batchTimes.Add(watch.Elapsed.TotalMilliseconds);
                 Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"batch {batch + 1}: {watch.Elapsed.TotalMilliseconds:F0} ms (metric points and snapshots)"));
@@ -157,39 +212,6 @@ internal static class ProgramBenchmark
 
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"N2: median batch {Median(batchTimes):F0} ms, median fold step {Median(foldTimes):F0} ms ({foldTimes.Count} steps)"));
         }
-    }
-
-    /// <summary>
-    /// Times every fold step until nothing is left.
-    /// </summary>
-    /// <param name="store">The store</param>
-    /// <param name="cancellationToken">Interrupts the measurement</param>
-    /// <returns>A task that returns the time of each step in milliseconds</returns>
-    private static async Task<List<double>> TimeStepsAsync(SqliteStore store, CancellationToken cancellationToken)
-    {
-        var times = new List<double>();
-        var policy = CreatePolicy();
-
-        for (var step = 0; step < MaxSteps; step++)
-        {
-            var watch = Stopwatch.StartNew();
-            var result = await store.FoldRollupsAsync(policy, _now, cancellationToken).ConfigureAwait(false);
-
-            watch.Stop();
-
-            if (result.Values > 0 || result.Snapshots > 0 || result.SkippedSnapshots > 0)
-            {
-                times.Add(watch.Elapsed.TotalMilliseconds);
-                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"fold step {times.Count}: {watch.Elapsed.TotalMilliseconds:F0} ms, {result.Values} values, {result.Snapshots} snapshots ({result.SkippedSnapshots} skipped), {result.ProgramBuckets} program buckets"));
-            }
-
-            if (result.More == false)
-            {
-                break;
-            }
-        }
-
-        return times;
     }
 
     /// <summary>
@@ -204,7 +226,7 @@ internal static class ProgramBenchmark
 
         await using (store.ConfigureAwait(false))
         {
-            await WriteSnapshotsAsync(store, DaySnapshots, _now.AddDays(-1), TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
+            await WriteSnapshotsAsync(store, DaySnapshots, Now.AddDays(-1), TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
 
             var before = await PagesAsync(directory, cancellationToken).ConfigureAwait(false);
             var watch = Stopwatch.StartNew();
@@ -279,7 +301,7 @@ internal static class ProgramBenchmark
 
         await using (store.ConfigureAwait(false))
         {
-            await WriteSnapshotsAsync(store, YearSnapshots, _now.AddDays(-365), TimeSpan.FromHours(1), cancellationToken).ConfigureAwait(false);
+            await WriteSnapshotsAsync(store, YearSnapshots, Now.AddDays(-365), TimeSpan.FromHours(1), cancellationToken).ConfigureAwait(false);
 
             var watch = Stopwatch.StartNew();
             var steps = await TimeStepsAsync(store, cancellationToken).ConfigureAwait(false);
@@ -291,8 +313,8 @@ internal static class ProgramBenchmark
             var query = new ProgramRollupQuery
                         {
                             Source = Source,
-                            From = _now.AddDays(-365),
-                            To = _now,
+                            From = Now.AddDays(-365),
+                            To = Now,
                             Step = TimeSpan.FromHours(6),
                             Measure = ProgramMeasure.Memory,
                             Count = ReadCount
@@ -374,8 +396,8 @@ internal static class ProgramBenchmark
         {
             var seq = 1UL;
 
-            await store.WriteBatchAsync(MetricBatch(MetricsPerBatch, ref seq, _now.AddHours(-3)), cancellationToken).ConfigureAwait(false);
-            await store.WriteBatchAsync(Batch([Record(_now.AddHours(-2), WorstSnapshot(0))]), cancellationToken).ConfigureAwait(false);
+            await store.WriteBatchAsync(MetricBatch(MetricsPerBatch, ref seq, Now.AddHours(-3)), cancellationToken).ConfigureAwait(false);
+            await store.WriteBatchAsync(Batch([Record(Now.AddHours(-2), WorstSnapshot(0))]), cancellationToken).ConfigureAwait(false);
 
             var typical = await TimeStepsAsync(store, cancellationToken).ConfigureAwait(false);
 
@@ -383,32 +405,13 @@ internal static class ProgramBenchmark
 
             var huge = HugeSnapshot();
 
-            await store.WriteBatchAsync(Batch([Record(_now.AddHours(-1), huge)]), cancellationToken).ConfigureAwait(false);
+            await store.WriteBatchAsync(Batch([Record(Now.AddHours(-1), huge)]), cancellationToken).ConfigureAwait(false);
 
             var watch = Stopwatch.StartNew();
             var steps = await TimeStepsAsync(store, cancellationToken).ConfigureAwait(false);
 
             watch.Stop();
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"worst case: one snapshot of {HugeProcesses} processes with {HugeCommandBytes}-byte command lines (about 16 MiB) folded in {watch.Elapsed.TotalMilliseconds:F0} ms ({steps.Count} steps)"));
-        }
-    }
-
-    /// <summary>
-    /// Stores snapshots in chunks.
-    /// </summary>
-    /// <param name="store">The store</param>
-    /// <param name="count">The number of snapshots</param>
-    /// <param name="first">The capture time of the first snapshot</param>
-    /// <param name="interval">The time between two snapshots</param>
-    /// <param name="cancellationToken">Interrupts the measurement</param>
-    /// <returns>A task that completes when everything is stored</returns>
-    private static async Task WriteSnapshotsAsync(SqliteStore store, int count, DateTimeOffset first, TimeSpan interval, CancellationToken cancellationToken)
-    {
-        for (var start = 0; start < count; start += WriteChunk)
-        {
-            var size = Math.Min(WriteChunk, count - start);
-
-            await store.WriteBatchAsync(SnapshotBatch(size, first + (start * interval), interval, ProgramsPerSnapshot), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -449,7 +452,7 @@ internal static class ProgramBenchmark
                    AgentId = AgentId,
                    BootId = BootId,
                    ClockOffsetNs = 0,
-                   ReceivedAt = _now,
+                   ReceivedAt = Now,
                    Records = records
                };
     }
@@ -483,7 +486,7 @@ internal static class ProgramBenchmark
     {
         return new RecordBatch
                {
-                   ReceivedAt = _now,
+                   ReceivedAt = Now,
                    Records = records
                };
     }

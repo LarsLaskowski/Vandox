@@ -125,17 +125,15 @@ internal static class ProgramRollupFolder
         var rss = 0D;
         var pss = 0D;
         var cpu = 0D;
-        var counts = 0L;
 
         foreach (var program in programs)
         {
             rss = Clamp(rss + program.RssBytes);
             pss = Clamp(pss + (program.PssBytes ?? 0));
             cpu = Clamp(cpu + program.CpuPercent);
-            counts += program.Count;
         }
 
-        var incomplete = programs.Count == 0 || (snapshot.Total is { } total ? counts != total : snapshot.Complete == false);
+        var incomplete = snapshot.ListsEveryProgram() == false;
         var named = Named(programs, pssSnapshot);
 
         foreach (var tier in tiers)

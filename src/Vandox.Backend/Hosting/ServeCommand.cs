@@ -16,6 +16,7 @@ using Vandox.Backend.Ingest;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Overview;
+using Vandox.Backend.Processes;
 using Vandox.Backend.Reports;
 using Vandox.Backend.Retention;
 using Vandox.Backend.Security;
@@ -251,6 +252,8 @@ internal static class ServeCommand
         builder.Services.AddSingleton<ILogExplorer>(provider => new GatedLogExplorer(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton<IIncidentBrowser>(provider => new GatedIncidentBrowser(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton<IHistoryReader>(provider => new GatedHistoryReader(store, provider.GetRequiredService<WebReaderGate>()));
+        builder.Services.AddSingleton(provider => new ProcessesChartReader(new GatedProgramRollupReader(store, provider.GetRequiredService<WebReaderGate>()), RetentionService.CreatePolicy(config), provider.GetRequiredService<TimeProvider>()));
+        builder.Services.AddSingleton(provider => new ProcessesMomentReader(provider.GetRequiredService<IHistoryReader>()));
         builder.Services.AddSingleton<IOverviewReader>(provider => new GatedOverviewReader(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddScoped<CircuitConnection>();
         builder.Services.AddScoped<CircuitHandler>(provider => provider.GetRequiredService<CircuitConnection>());

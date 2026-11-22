@@ -4,22 +4,7 @@
 
 <h1>History</h1>
 
-<div class="history-presets" role="group" aria-label="Range">
-    @foreach (var preset in Presets)
-    {
-        <button type="button" class="@PresetClass(preset)" @onclick="() => ApplyPreset(preset)">@HistoryView.PresetLabel(preset)</button>
-    }
-</div>
-
-<form class="filters history-range" @onsubmit:preventDefault>
-    <label>From (UTC)
-        <input type="datetime-local" step="1" name="from" value="@_from" @onchange="args => _from = args.Value?.ToString() ?? string.Empty" />
-    </label>
-    <label>To (UTC)
-        <input type="datetime-local" step="1" name="to" value="@_to" @onchange="args => _to = args.Value?.ToString() ?? string.Empty" />
-    </label>
-    <button type="submit" @onclick="Apply" @onclick:preventDefault>@ApplyText</button>
-</form>
+<HistoryRangeControls Preset="_address.Preset" Unbounded="_address.From is null && _address.To is null" @bind-From="_from" @bind-To="_to" PresetChosen="ApplyPreset" ApplyPressed="Apply" />
 
 @if (_error.Length > 0)
 {
@@ -146,32 +131,7 @@ else
                 }
                 else
                 {
-                    @if (_moment.Process is { } process)
-                    {
-                        <h3>Process snapshot of @LogsView.ShowSeconds(process.CapturedAt) UTC (<ExternalText Runs="process.Source" />)</h3>
-
-                        @if (_moment.ProcessBefore is { } before)
-                        {
-                            <p><button type="button" @onclick="() => SnapshotBefore(before)">Snapshot before this moment (@LogsView.ShowSeconds(before) UTC)</button></p>
-                        }
-
-                        @if (process.Note.Length > 0)
-                        {
-                            <p class="note">@process.Note</p>
-                        }
-
-                        <HistorySnapshotTable Table="process.Programs" />
-                        <HistorySnapshotTable Table="process.Processes" />
-
-                        @if (process.ListedOfTotal.Length > 0)
-                        {
-                            <p class="note">@process.ListedOfTotal</p>
-                        }
-                    }
-                    else
-                    {
-                        <p>@HistoryView.NoProcessSnapshotText</p>
-                    }
+                    <ProcessSnapshotPanel Process="_moment.Process" Before="_moment.ProcessBefore" BeforeChosen="SnapshotBefore" />
 
                     @if (_moment.Connection is { } connection)
                     {

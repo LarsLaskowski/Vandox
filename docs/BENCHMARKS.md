@@ -324,6 +324,52 @@ fold after an upgrade of an agent's snapshots, taken every minute, resembles the
 one-year read (1,270 ms) is far within the 10-second deadline. The published tool was the self-contained build, because the NAS has no .NET 11 runtime
 (*Retention steps*). The first batch (3,923 ms) wrote into a fresh file and the first fold step (1,215 ms) held the first 10,000 metric values.
 
+## Processes view
+
+Criterion (issue #50, AC10 and N4): the charts of a 30-day and of a 1-year range, over a database of one source with a year of hourly and 30
+days of one-minute snapshots of 80 programs, folded, draw within the views' 10-second deadline ([Processes view](areas/web-ui-processes-view.md),
+*Limits and errors*). The reads of the page are the source list, the memory read and the CPU read of the top 10 programs; the moment read
+and the comparison of two points are measured beside them. Measured with the `--processes-view` scenario of the storage benchmark. The tool prints whether every
+median of five is under 10,000 ms. Only a run on the reference host counts against the criterion.
+
+### Procedure
+
+The DS918+ has no .NET 11 runtime installed, so the tool is published self-contained there, as for the retention steps, and run on the
+volume that holds the database (the SSD volume):
+
+```bash
+dotnet publish tools/Vandox.StorageBenchmark -c Release -r linux-x64 --self-contained -p:DebugType=none -o publish-sc
+publish-sc/Vandox.StorageBenchmark <existing folder on the data volume> --processes-view
+```
+
+On a host with the .NET 11 runtime the tool runs as `dotnet publish/Vandox.StorageBenchmark.dll <existing folder> --processes-view`.
+`--processes-view` takes no other option. Under a fixed clock (2026-12-01 12:00 UTC) and the default periods it writes, into a fresh
+database, 8,760 hourly snapshots (the last year) and 43,200 one-minute snapshots (the last 30 days) of 80 programs of one source, folds
+them, and prints the times of both. For a range of 30 days and one of 365 days ending at the clock, at the step the page chooses for a
+chart 1,000 pixels wide (1 hour and 12 hours), it times, each as the median of five: the source list, the memory read, the CPU read and
+the whole chart read of the page (`ProcessesChartReader`: the source list and both reads); then the moment read (10 days back) and the
+comparison of two points (10 and 200 days back). It prints the verdict on the criterion. The database is deleted at the end.
+
+### Results
+
+| Host | Date | Volume | Data set stored, folded | Range | Step | Source list | Memory read | CPU read | Whole chart read | Moment read | Comparison of two points | Verdict |
+| ---- | ---- | ------ | ----------------------- | ----- | ---- | ----------: | ----------: | -------: | ---------------: | ----------: | -----------------------: | ------- |
+| development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-21 | local disk | stored in 8.5 s, folded in 27.8 s (189 steps) | 30 days | 1 hour | 3 ms | 47 ms | 50 ms | 104 ms | 2 ms | 4 ms | order of magnitude only |
+| development host (as above) | 2026-11-21 | local disk | (same database) | 1 year | 12 hours | 7 ms | 374 ms | 378 ms | 779 ms | | | order of magnitude only |
+| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained, branch head f913f8d) | 2026-11-22 | SSD volume | stored in 26,428 ms, folded in 104,798 ms (189 steps) | 30 days | 1 hour | 10 ms | 154 ms | 156 ms | 330 ms | 6 ms | 13 ms | **AC10 met** |
+| DS918+ (as above) | 2026-11-22 | SSD volume | (same database) | 1 year | 12 hours | 23 ms | 1,263 ms | 1,293 ms | 2,550 ms | | | **AC10 met** |
+
+The moment read and the comparison do not depend on the range of the chart; they are listed once, in the 30-day row of each host. The
+whole chart read is the source list and both reads of the top programs, and its figures are their sum within the measuring error (30 days:
+3 + 47 + 50 ms against 104 ms; 1 year: 7 + 374 + 378 ms against 779 ms; DS918+, 30 days: 10 + 154 + 156 ms against 330 ms; 1 year:
+23 + 1,263 + 1,293 ms against 2,550 ms). On the development host every median is far below the deadline.
+
+**Outcome on the DS918+ (Product Manager, 2026-11-22): met.** The self-contained build of the branch head `f913f8d` (the NAS has no .NET 11
+runtime) wrote the 8,760 hourly and 43,200 one-minute snapshots in 26,428 ms and folded them in 104,798 ms (189 steps: the 32 steps that fold
+the hourly snapshots took 1,497 to 3,038 ms each with 550 program buckets, the one-minute snapshots 281 to 396 ms each with 60 to 61
+buckets). All ten medians of five are far under the 10,000 ms of the criterion; the largest is the whole chart read of the 1-year range,
+2,550 ms. The moment read (10 days back) took 6 ms and the comparison of two points (10 and 200 days back) 13 ms (first reads 66 and 130 ms).
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):

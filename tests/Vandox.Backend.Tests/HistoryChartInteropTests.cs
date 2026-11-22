@@ -354,6 +354,106 @@ public partial class HistoryChartInteropTests
     }
 
     /// <summary>
+    /// The setup says whether the view is stacked, as <c>stacked</c>, and a stacked view keeps its lines and extremes.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task HistoryChartInteropSendsTheStackedFlag()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var host = new ElementReference("host-1");
+
+        await using var interop = new HistoryChartInterop(runtime);
+
+        // Act
+        await interop.RenderAsync(host, StackedView(true), Events(), TestContext.CancellationToken);
+        await interop.RenderAsync(host, StackedView(false), Events(), TestContext.CancellationToken);
+
+        // Assert
+        var draws = runtime.Calls.Where(call => call.Identifier == "createHistory").ToArray();
+        var stacked = JsonSerializer.SerializeToElement(draws[0].Arguments[1], JsonSerializerOptions.Web);
+        var plain = JsonSerializer.SerializeToElement(draws[1].Arguments[1], JsonSerializerOptions.Web);
+
+        Assert.HasCount(2, draws, "two draws");
+        Assert.IsTrue(stacked.GetProperty("stacked").GetBoolean(), "a stacked view is sent as stacked");
+        Assert.IsFalse(plain.GetProperty("stacked").GetBoolean(), "a view that is not stacked is sent as not stacked");
+        Assert.AreEqual(2, stacked.GetProperty("lines").GetArrayLength(), "the lines of the stacked view");
+        Assert.AreEqual(JsonValueKind.Number, stacked.GetProperty("lines")[0].GetProperty("minimums")[0].ValueKind, "the extremes of the stacked view");
+    }
+
+    /// <summary>
+    /// A stacked view whose lines are not all on scale 0 is refused before any call into the browser; the message names the line and never its label.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public async Task HistoryChartInteropRefusesAStackedViewWithALineOnAnotherScale()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var view = new HistoryChartView
+                   {
+                       Times = [_start, _start.AddMinutes(1)],
+                       Lines = [
+                                   new HistoryLine
+                                   {
+                                       Label = "system fine",
+                                       Values = [1.0, 2.0]
+                                   },
+                                   new HistoryLine
+                                   {
+                                       Label = "SECRET-LABEL",
+                                       Scale = 1,
+                                       Values = [1.0, 2.0]
+                                   }
+                               ],
+                       Axes = ["system fine"],
+                       Stacked = true
+                   };
+
+        await using var interop = new HistoryChartInterop(runtime);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<ArgumentException>(() => interop.RenderAsync(new ElementReference("host-1"), view, Events(), TestContext.CancellationToken));
+
+        // Assert
+        Assert.IsEmpty(runtime.Calls, "nothing was called in the browser");
+        Assert.DoesNotContain("SECRET-LABEL", exception.Message, "the message never holds a label");
+        Assert.IsTrue(LineOne().IsMatch(exception.Message), "the message names the line index 1: " + exception.Message);
+    }
+
+    /// <summary>
+    /// Creates a valid view of two lines on scale 0 with extremes, stacked or not.
+    /// </summary>
+    /// <param name="stacked">Whether the view is stacked</param>
+    /// <returns>The view</returns>
+    private static HistoryChartView StackedView(bool stacked)
+    {
+        return new HistoryChartView
+               {
+                   Times = [_start, _start.AddMinutes(10)],
+                   Lines = [
+                               new HistoryLine
+                               {
+                                   Label = "nginx",
+                                   Values = [2.0, 3.0],
+                                   Minimums = [1.0, 2.0],
+                                   Maximums = [3.0, 4.0]
+                               },
+                               new HistoryLine
+                               {
+                                   Label = "Other programs",
+                                   Values = [1.0, null]
+                               }
+                           ],
+                   Axes = ["Memory (PSS), MiB"],
+                   Stacked = stacked
+               };
+    }
+
+    /// <summary>
     /// Creates the reference that receives the callbacks.
     /// </summary>
     /// <returns>The reference</returns>

@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Vandox.Core\Vandox.Core.csproj" />
     <ProjectReference Include="..\..\src\Vandox.Storage\Vandox.Storage.csproj" />
+    <ProjectReference Include="..\..\src\Vandox.Backend\Vandox.Backend.csproj" />
   </ItemGroup>
 
 </Project>

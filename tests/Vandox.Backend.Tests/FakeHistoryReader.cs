@@ -178,13 +178,13 @@ internal sealed class FakeHistoryReader : IHistoryReader, IDisposable
     }
 
     /// <summary>
-    /// Chooses the stamp a store gives for a query: the closest on the side inside the window, the lower ID on equal times.
+    /// Chooses the stamp a store gives for a query: the closest on the side inside the window, the lower ID on equal times; a query with a source only sees the stamps whose record has that source.
     /// </summary>
     /// <param name="query">The query</param>
     /// <returns>The stamp, or <c>null</c></returns>
     private SnapshotStamp? Choose(SnapshotQuery query)
     {
-        var ofKind = Stamps.Where(stamp => stamp.Kind == query.Kind);
+        var ofKind = Stamps.Where(stamp => stamp.Kind == query.Kind && IsOfSource(stamp, query.Source));
 
         if (query.Side == SnapshotSide.AtOrBefore)
         {
@@ -198,6 +198,17 @@ internal sealed class FakeHistoryReader : IHistoryReader, IDisposable
                      .OrderBy(stamp => stamp.CapturedAt)
                      .ThenBy(stamp => stamp.Id)
                      .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Tells whether a stamp belongs to a source, as the stored record of the stamp says.
+    /// </summary>
+    /// <param name="stamp">The stamp</param>
+    /// <param name="source">The source, or <c>null</c> for any source</param>
+    /// <returns><c>true</c> when the source is not asked for or the record of the stamp has it</returns>
+    private bool IsOfSource(SnapshotStamp stamp, string? source)
+    {
+        return source is null || (Records.TryGetValue(stamp.Id, out var record) && string.Equals(record.Record.Source, source, StringComparison.Ordinal));
     }
 
     #endregion // Methods

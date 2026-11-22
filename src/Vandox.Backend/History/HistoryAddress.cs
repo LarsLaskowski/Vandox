@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
-
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Primitives;
 
@@ -13,38 +10,24 @@ namespace Vandox.Backend.History;
 /// <summary>
 /// The address of the history view: the metrics, the range and the moment.
 /// </summary>
-public sealed partial class HistoryAddress
+public sealed class HistoryAddress
 {
     #region Constants
 
-    /// <summary>
-    /// The most bytes of the source and of the name of a metric.
-    /// </summary>
-    private const int MaxPartBytes = 128;
-
     private const string MetricName = "metric";
-
-    private const string RangeName = "range";
-
-    private const string FromName = "from";
-
-    private const string ToName = "to";
-
-    private const string AtName = "at";
-
-    private const string RepeatedFormat = "The address gives the parameter {0} more than once.";
-
-    private const string InvalidFormat = "The address has an invalid value for the parameter {0}.";
 
     private const string TooManyMetrics = "The address names more than 8 metrics.";
 
-    private const string BothKinds = "The address gives both a preset range and a start or end time.";
-
-    private const string NeedsBoth = "The address needs both a start and an end time.";
-
-    private const string Reversed = "The address has a start time that is not before its end time.";
-
     #endregion // Constants
+
+    #region Fields
+
+    /// <summary>
+    /// The range and the moment.
+    /// </summary>
+    private AddressTimes _times = new();
+
+    #endregion // Fields
 
     #region Properties
 
@@ -56,22 +39,38 @@ public sealed partial class HistoryAddress
     /// <summary>
     /// Gets or sets the preset range.
     /// </summary>
-    public HistoryPreset? Preset { get; set; }
+    public HistoryPreset? Preset
+    {
+        get => _times.Preset;
+        set => _times.Preset = value;
+    }
 
     /// <summary>
     /// Gets or sets the start of a fixed range.
     /// </summary>
-    public DateTimeOffset? From { get; set; }
+    public DateTimeOffset? From
+    {
+        get => _times.From;
+        set => _times.From = value;
+    }
 
     /// <summary>
     /// Gets or sets the end of a fixed range.
     /// </summary>
-    public DateTimeOffset? To { get; set; }
+    public DateTimeOffset? To
+    {
+        get => _times.To;
+        set => _times.To = value;
+    }
 
     /// <summary>
     /// Gets or sets the moment.
     /// </summary>
-    public DateTimeOffset? At { get; set; }
+    public DateTimeOffset? At
+    {
+        get => _times.At;
+        set => _times.At = value;
+    }
 
     /// <summary>
     /// Gets or sets the text of the first error; empty when the address is valid.
@@ -108,10 +107,7 @@ public sealed partial class HistoryAddress
         return new HistoryAddress
                {
                    Metrics = [.. Metrics],
-                   Preset = Preset,
-                   From = From,
-                   To = To,
-                   At = At,
+                   _times = _times.Copy(),
                    Error = Error
                };
     }
@@ -123,12 +119,7 @@ public sealed partial class HistoryAddress
     /// <returns>The range</returns>
     public HistoryRange Range(DateTimeOffset now)
     {
-        if (From is not null && To is not null)
-        {
-            return new HistoryRange(From.Value, To.Value);
-        }
-
-        return new HistoryRange(now - HistoryView.PresetSpan(Preset ?? HistoryPreset.OneDay), now);
+        return _times.Range(now);
     }
 
     /// <summary>
@@ -152,21 +143,7 @@ public sealed partial class HistoryAddress
             parts.Add($"{MetricName}={Uri.EscapeDataString(metric.Source)},{Uri.EscapeDataString(metric.Name)}");
         }
 
-        if (Preset is not null)
-        {
-            parts.Add($"{RangeName}={HistoryView.PresetValue(Preset.Value)}");
-        }
-
-        if (From is not null && To is not null)
-        {
-            parts.Add($"{FromName}={LogsAddress.FormatTime(From.Value)}");
-            parts.Add($"{ToName}={LogsAddress.FormatTime(To.Value)}");
-        }
-
-        if (At is not null)
-        {
-            parts.Add($"{AtName}={LogsAddress.FormatTime(At.Value)}");
-        }
+        _times.AppendTo(parts);
 
         return parts.Count == 0 ? string.Empty : "?" + string.Join('&', parts);
     }
@@ -180,9 +157,7 @@ public sealed partial class HistoryAddress
     {
         ArgumentNullException.ThrowIfNull(other);
 
-        return Preset == other.Preset
-               && From == other.From
-               && To == other.To
+        return _times.SameRange(other._times)
                && Metrics.Count == other.Metrics.Count
                && Metrics.Zip(other.Metrics).All(pair => IsSame(pair.First, pair.Second));
     }
@@ -194,7 +169,7 @@ public sealed partial class HistoryAddress
     /// <returns><c>true</c> when the metric is valid</returns>
     internal static bool IsValidMetric(SeriesKey metric)
     {
-        return IsValidPart(metric.Source) && IsValidPart(metric.Name);
+        return AddressTimes.IsValidName(metric.Source) && AddressTimes.IsValidName(metric.Name);
     }
 
     /// <summary>
@@ -209,48 +184,6 @@ public sealed partial class HistoryAddress
     }
 
     /// <summary>
-    /// Tells whether a part of a metric is valid.
-    /// </summary>
-    /// <param name="part">The source or the name</param>
-    /// <returns><c>true</c> when the part is valid</returns>
-    private static bool IsValidPart(string? part)
-    {
-        return part is { Length: >= 1 and <= MaxPartBytes } && PartPattern().IsMatch(part);
-    }
-
-    /// <summary>
-    /// Builds the error of an invalid value.
-    /// </summary>
-    /// <param name="name">The name of the parameter</param>
-    /// <returns>The text</returns>
-    private static string Invalid(string name)
-    {
-        return HistoryView.Fill(InvalidFormat, name);
-    }
-
-    /// <summary>
-    /// Reads a preset value.
-    /// </summary>
-    /// <param name="value">The value</param>
-    /// <param name="preset">The preset</param>
-    /// <returns><c>true</c> when the value names a preset</returns>
-    private static bool TryReadPreset(string value, out HistoryPreset preset)
-    {
-        var found = Enum.GetValues<HistoryPreset>().Cast<HistoryPreset?>().FirstOrDefault(candidate => string.Equals(HistoryView.PresetValue(candidate!.Value), value, StringComparison.Ordinal));
-
-        preset = found.GetValueOrDefault();
-
-        return found is not null;
-    }
-
-    /// <summary>
-    /// The pattern of the source and of the name of a metric: the name pattern of the wire format, ending in <c>\z</c> so that a trailing line feed is refused.
-    /// </summary>
-    /// <returns>The pattern</returns>
-    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]*\z", RegexOptions.CultureInvariant)]
-    private static partial Regex PartPattern();
-
-    /// <summary>
     /// Checks every value of the address again.
     /// </summary>
     /// <returns>The first error, or an empty text</returns>
@@ -263,7 +196,7 @@ public sealed partial class HistoryAddress
 
         if (Metrics.Any(metric => IsValidMetric(metric) == false))
         {
-            return Invalid(MetricName);
+            return AddressTimes.Invalid(MetricName);
         }
 
         if (Metrics.Count > HistoryView.MaxMetrics)
@@ -271,36 +204,7 @@ public sealed partial class HistoryAddress
             return TooManyMetrics;
         }
 
-        if ((From is not null && StorableTime.Contains(From.Value) == false) || (To is not null && StorableTime.Contains(To.Value) == false))
-        {
-            return Invalid(From is not null && StorableTime.Contains(From.Value) == false ? FromName : ToName);
-        }
-
-        if (At is not null && StorableTime.Contains(At.Value) == false)
-        {
-            return Invalid(AtName);
-        }
-
-        return ValidateRange();
-    }
-
-    /// <summary>
-    /// Checks how the preset, the start and the end go together.
-    /// </summary>
-    /// <returns>The error, or an empty text</returns>
-    private string ValidateRange()
-    {
-        if (Preset is not null && (From is not null || To is not null))
-        {
-            return BothKinds;
-        }
-
-        if ((From is null) != (To is null))
-        {
-            return NeedsBoth;
-        }
-
-        return From >= To ? Reversed : string.Empty;
+        return _times.Validate();
     }
 
     /// <summary>
@@ -312,63 +216,7 @@ public sealed partial class HistoryAddress
     {
         var error = ReadMetrics(values);
 
-        foreach (var name in new[] { RangeName, FromName, ToName, AtName })
-        {
-            if (error.Length > 0)
-            {
-                return error;
-            }
-
-            if (values.TryGetValue(name, out var found))
-            {
-                error = found.Count > 1 ? HistoryView.Fill(RepeatedFormat, name) : ReadValue(name, found[0] ?? string.Empty);
-            }
-        }
-
-        return error.Length > 0 ? error : ValidateRange();
-    }
-
-    /// <summary>
-    /// Reads one single-valued parameter.
-    /// </summary>
-    /// <param name="name">The name of the parameter</param>
-    /// <param name="value">The value; empty is no value</param>
-    /// <returns>The error, or an empty text</returns>
-    private string ReadValue(string name, string value)
-    {
-        if (value.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        var valid = false;
-
-        if (name == RangeName)
-        {
-            valid = TryReadPreset(value, out var preset);
-            Preset = valid ? preset : null;
-        }
-        else if (LogsAddress.TryReadTime(value, out var time))
-        {
-            valid = true;
-
-            switch (name)
-            {
-                case FromName:
-                    From = time;
-                    break;
-
-                case ToName:
-                    To = time;
-                    break;
-
-                default:
-                    At = time;
-                    break;
-            }
-        }
-
-        return valid ? string.Empty : Invalid(name);
+        return error.Length > 0 ? error : _times.ReadParameters(values);
     }
 
     /// <summary>
@@ -397,7 +245,7 @@ public sealed partial class HistoryAddress
 
             if (metric is null || IsValidMetric(metric) == false)
             {
-                return Invalid(MetricName);
+                return AddressTimes.Invalid(MetricName);
             }
 
             if (metrics.Any(known => IsSame(known, metric)) == false)

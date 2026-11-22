@@ -8,10 +8,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 
+using Vandox.Backend.History;
 using Vandox.Backend.Hosting;
 using Vandox.Backend.Incidents;
 using Vandox.Backend.Ingest;
 using Vandox.Backend.Logs;
+using Vandox.Backend.Processes;
 using Vandox.Backend.Retention;
 using Vandox.Backend.Security;
 using Vandox.Backend.TimeSeries;
@@ -1042,6 +1044,13 @@ public class ServeTests
         var series = services.GetService<TimeSeriesService>();
         var seriesInScope = scope.ServiceProvider.GetService<TimeSeriesService>();
         var seriesReaders = series is null ? [] : FieldValues(series).OfType<ITimeSeriesReader>().ToArray();
+        var charts = services.GetService<ProcessesChartReader>();
+        var chartsInScope = scope.ServiceProvider.GetService<ProcessesChartReader>();
+        var rollupReaders = charts is null ? [] : FieldValues(charts).OfType<IProgramRollupReader>().ToArray();
+        var moments = services.GetService<ProcessesMomentReader>();
+        var momentsInScope = scope.ServiceProvider.GetService<ProcessesMomentReader>();
+        var historyReader = services.GetService<IHistoryReader>();
+        var momentHistoryReaders = moments is null ? [] : FieldValues(moments).OfType<HistoryMomentReader>().SelectMany(FieldValues).OfType<IHistoryReader>().ToArray();
 
         await stop.CancelAsync();
         await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
@@ -1067,6 +1076,18 @@ public class ServeTests
         Assert.IsInstanceOfType<GatedTimeSeriesReader>(seriesReaders[0], "the reader of the time-series service is gated");
         Assert.AreSame(gate, FieldValues(seriesReaders[0]).OfType<WebReaderGate>().Single(), "the time-series reader uses the same gate");
         Assert.AreSame<object>(store, FieldValues(seriesReaders[0]).OfType<ITimeSeriesReader>().Single(), "the time-series reader wraps the store");
+        Assert.IsNotNull(charts, "the processes chart reader is registered");
+        Assert.AreSame(charts, chartsInScope, "the processes chart reader is the same for every scope");
+        Assert.HasCount(1, rollupReaders, "the processes chart reader holds one rollup reader");
+        Assert.IsInstanceOfType<GatedProgramRollupReader>(rollupReaders[0], "the rollup reader is gated");
+        Assert.AreSame(gate, FieldValues(rollupReaders[0]).OfType<WebReaderGate>().Single(), "the rollup reader uses the same gate");
+        Assert.AreSame<object>(store, FieldValues(rollupReaders[0]).OfType<IProgramRollupReader>().Single(), "the rollup reader wraps the store");
+        Assert.IsNotNull(moments, "the processes moment reader is registered");
+        Assert.AreSame(moments, momentsInScope, "the processes moment reader is the same for every scope");
+        Assert.IsInstanceOfType<GatedHistoryReader>(historyReader, "the registered history reader is gated");
+        Assert.AreSame(gate, FieldValues(historyReader).OfType<WebReaderGate>().Single(), "the history reader uses the same gate");
+        Assert.HasCount(1, momentHistoryReaders, "the processes moment reader holds one history reader");
+        Assert.AreSame(historyReader, momentHistoryReaders[0], "the processes moment reader reads through the registered gated history reader");
     }
 
     /// <summary>

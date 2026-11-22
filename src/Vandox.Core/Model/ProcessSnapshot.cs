@@ -51,6 +51,28 @@ public sealed class ProcessSnapshot : IPayload
 
     #endregion // Properties
 
+    #region Methods
+
+    /// <summary>
+    /// Determines whether the snapshot lists every program: it names a program, and its program counts add up to the total, or without a total the list is complete.
+    /// </summary>
+    /// <returns><c>true</c> when the list names every program of the server</returns>
+    public bool ListsEveryProgram()
+    {
+        var programs = Programs ?? [];
+
+        if (programs.Count == 0)
+        {
+            return false;
+        }
+
+        var counts = programs.Sum(program => (long)program.Count);
+
+        return Total is { } total ? counts == total : Complete;
+    }
+
+    #endregion // Methods
+
     #region IPayload
 
     /// <inheritdoc />
