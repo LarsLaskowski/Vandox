@@ -330,6 +330,19 @@ function historyScales(stacked) {
     return scales;
 }
 
+// True when any line of the stacked columns (every column after the first, the x values) is null at the step.
+function hasGap(columns, point) {
+    for (let index = 1; index < columns.length; index++) {
+        const value = columns[index][point];
+
+        if (value === null || value === undefined) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // The cumulative sums of the lines for a stacked history chart and the bands between each line and the one below. At a
 // step where any line is null (a gap) every cumulative value is null, so no band is drawn across it.
 function stackGaps(columns) {
@@ -341,17 +354,8 @@ function stackGaps(columns) {
     }
 
     for (let point = 0; point < steps; point++) {
+        const gap = hasGap(columns, point);
         let total = 0;
-        let gap = false;
-
-        for (let index = 1; index < columns.length; index++) {
-            const value = columns[index][point];
-
-            if (value === null || value === undefined) {
-                gap = true;
-                break;
-            }
-        }
 
         for (let index = 1; index < columns.length; index++) {
             total += gap ? 0 : columns[index][point];
