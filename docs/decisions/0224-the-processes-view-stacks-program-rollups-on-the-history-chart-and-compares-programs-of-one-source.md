@@ -1,6 +1,6 @@
 # 0224: The processes view stacks program rollups on the history chart and compares programs of one source
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-21
 - **Area:** Processes view
 - **Source:** Issue #50
