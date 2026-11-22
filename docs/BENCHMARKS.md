@@ -356,14 +356,19 @@ comparison of two points (10 and 200 days back). It prints the verdict on the cr
 | ---- | ---- | ------ | ----------------------- | ----- | ---- | ----------: | ----------: | -------: | ---------------: | ----------: | -----------------------: | ------- |
 | development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-21 | local disk | stored in 8.5 s, folded in 27.8 s (189 steps) | 30 days | 1 hour | 3 ms | 47 ms | 50 ms | 104 ms | 2 ms | 4 ms | order of magnitude only |
 | development host (as above) | 2026-11-21 | local disk | (same database) | 1 year | 12 hours | 7 ms | 374 ms | 378 ms | 779 ms | | | order of magnitude only |
-| DS918+ (reference host) | **to be filled in by the manual test (Product Manager)** | SSD volume | | 30 days | 1 hour | | | | | | | |
-| DS918+ (reference host) | **to be filled in by the manual test (Product Manager)** | SSD volume | | 1 year | 12 hours | | | | | | | |
+| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained, branch head f913f8d) | 2026-11-22 | SSD volume | stored in 26,428 ms, folded in 104,798 ms (189 steps) | 30 days | 1 hour | 10 ms | 154 ms | 156 ms | 330 ms | 6 ms | 13 ms | **AC10 met** |
+| DS918+ (as above) | 2026-11-22 | SSD volume | (same database) | 1 year | 12 hours | 23 ms | 1,263 ms | 1,293 ms | 2,550 ms | | | **AC10 met** |
 
 The moment read and the comparison do not depend on the range of the chart; they are listed once, in the 30-day row of each host. The
 whole chart read is the source list and both reads of the top programs, and its figures are their sum within the measuring error (30 days:
-3 + 47 + 50 ms against 104 ms; 1 year: 7 + 374 + 378 ms against 779 ms). On the development host every median is far below the deadline;
-the verdict of the reference host is the Product Manager's, from the line the tool prints (`all <n> medians are under 10000 ms: criterion
-met`, or the names of the medians that reach it).
+3 + 47 + 50 ms against 104 ms; 1 year: 7 + 374 + 378 ms against 779 ms; DS918+, 30 days: 10 + 154 + 156 ms against 330 ms; 1 year:
+23 + 1,263 + 1,293 ms against 2,550 ms). On the development host every median is far below the deadline.
+
+**Outcome on the DS918+ (Product Manager, 2026-11-22): met.** The self-contained build of the branch head `f913f8d` (the NAS has no .NET 11
+runtime) wrote the 8,760 hourly and 43,200 one-minute snapshots in 26,428 ms and folded them in 104,798 ms (189 steps: the 32 steps that fold
+the hourly snapshots took 1,497 to 3,038 ms each with 550 program buckets, the one-minute snapshots 281 to 396 ms each with 60 to 61
+buckets). All ten medians of five are far under the 10,000 ms of the criterion; the largest is the whole chart read of the 1-year range,
+2,550 ms. The moment read (10 days back) took 6 ms and the comparison of two points (10 and 200 days back) 13 ms (first reads 66 and 130 ms).
 
 ## Log templates
 

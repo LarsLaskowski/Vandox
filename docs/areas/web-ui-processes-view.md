@@ -177,7 +177,9 @@ for the combination of that source, `at` and `compare` and again when any of the
   circuits is not bounded ([Web UI](web-ui.md), *Limits and errors*).
 - **Time.** On the development host (4 logical CPUs) over one source with a year of hourly and 30 days of one-minute snapshots of 80
   programs, the whole chart read took 104 ms for a 30-day range and 779 ms for a 1-year range, a moment 2 ms and a comparison 4 ms, each the
-  median of five; the figure of the reference host is in [Benchmarks](../BENCHMARKS.md), *Processes view*.
+  median of five. On the reference host (Synology DS918+, SSD volume, self-contained build) the whole chart read took 330 ms for a 30-day
+  range and 2,550 ms for a 1-year range, a moment 6 ms and a comparison 13 ms; every median is under the 10-second deadline
+  ([Benchmarks](../BENCHMARKS.md), *Processes view*).
 - A browser script cannot call anything but the two instance methods of the chart's reference (selection and click); both drop a value
   that is not finite or outside the storable range, as in the history view. A drag, a click and the stacking cannot be tested without a
   browser; the script is read in review and tried by hand.
