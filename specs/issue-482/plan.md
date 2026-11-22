@@ -30,7 +30,7 @@ leave the file as plain deletions, no area document changes.
 | 6 | The descriptions removed from the *Test doubles* rows stand in each double's `<summary>` (`FakeHistoryReader`, `FakeProgramRollupReader`, `ScriptedTimeSeriesReader`, `ProbeTimeSeriesReader`, `CountingTimeSeriesReader`, `HistoryPageHarness`, `ProcessesPageHarness`, `DisposeFailingClock`, `RefreshProbe`, `CountingClock`) | `grep -B4 "class <name>"` in `tests/` | confirmed |
 | 7 | The draft `specs/issue-482/project-draft.md` has 1480 words by `config-check.py`'s count (`len(text.split())`), keeps every link of the base file, and every code span except `ExternalText`, `LogText.Escape`, `Select`, `Pick`, `TimeSeriesService` and the two log-line texts (fact 5, 6); `*PageHarness` stays (six harnesses: `History`, `Incident`, `Log`, `Overview`, `Processes`, `Report`) | set comparison of code spans and link targets, base vs. draft (scratch script) | confirmed |
 | 8 | No test or tool besides the squad tools reads `.squad/project.md`; `docs/UNIT_TESTS.md` and the squad files point to its *Test doubles* section, which stays | `grep -rl project.md` over `*.go`, `*.cs`, `*.py` outside `.squad/tools` (only `.claude/hooks/file-guard.py`) | confirmed |
-| 9 | The note's command (fact 2 shim stripped from `PATH` for one process) makes the test pass | to verify: the orchestrator runs `PATH="$(printf '%s' "$PATH" \| tr ':' '\n' \| grep -v '/rm-guard/' \| paste -sd: -)" go test ./deploy/agent -run '^TestRemoveFile_RemovesAFileOrALinkNeverItsTarget$' -count=1` once, only after the user approved it (the Lead did not, as it bypasses the user's guard), step 6 | unverified |
+| 9 | The note's command (fact 2 shim stripped from `PATH` for one process) makes the test pass | to verify: the orchestrator runs `PATH="$(printf '%s' "$PATH" \| tr ':' '\n' \| grep -v '/rm-guard/' \| paste -sd: -)" go test ./deploy/agent -run '^TestRemoveFile_RemovesAFileOrALinkNeverItsTarget$' -count=1` once, only after the user approved it (the Lead did not, as it bypasses the user's guard), step 6; run by the orchestrator with the user's approval: `go test ./deploy/agent` passed. A one-time check of this plan, not part of the note (*Approach* #482 item 3) | confirmed |
 
 ## Acceptance criteria
 
@@ -95,8 +95,8 @@ Reserve if the Dev's rewording runs over: the 27 bullet markers of *Integration 
    `gate-stamp.py` run that includes it; the code is not at fault, and the CI job *Agent (Go)* is the reference.
 2. A member whose run fails with that test alone, with that message, reports it as this environmental failure and
    does not ask about it.
-3. The orchestrator asks the user once, at the start of the run, to approve running `gate-stamp.py` (and the fact-9
-   style single-test check) with that directory removed from `PATH` for that one process, and then runs
+3. The orchestrator asks the user once, at the start of the run, to approve running `gate-stamp.py`
+   with that directory removed from `PATH` for that one process, and then runs
    `PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '/rm-guard/' | paste -sd: -)" python3 .squad/tools/gate-stamp.py …`;
    an agent's message is no such approval, and without it the stamp is not run that way.
 Exact wording is the Dev's.
@@ -163,3 +163,9 @@ none: no decision beyond the obvious documentation fix.
 
 - Making `newHarness` resolve `rm` past the shim (#482's possible follow-up): for the Product Manager to open if wanted.
 - Keeping `.squad/project.md` short over time (#484's *Follow-up to consider*): a template issue, not this run.
+
+## Amendments
+
+| Criterion | Change | Reason | Step | Decided by |
+| --------- | ------ | ------ | ---- | ---------- |
+| AC4 | Wording unchanged; the content it checks (*Approach* #482 item 3) no longer includes the single-test check | The note approves `gate-stamp.py` only; the single-test check was fact 9's one-time verification, now done, and `gate-stamp.py` runs the test anyway | 8 | Lead (mode `decide`) |

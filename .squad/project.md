@@ -11,7 +11,7 @@ documentation). `config-check.py` warns past `PROJECT_MAX_WORDS` words.
 ## Security areas
 
 A plan lists each area it touches under *Security areas touched*, so Security reviews it (`.squad/routing.md`,
-*Tiers*). One entry per area: what is protected, where, and the documents that state its rules.
+*Tiers*, which also says when a change is tier `security`). One entry per area: what is protected, where, and the documents that state its rules.
 
 1. **Ingest authentication** — only the agent holding its bound token stores data, within memory and disk bounds; a
    resent record is stored once. `POST /v1/batches`, `src/Vandox.Backend/Ingest/`, `src/Vandox.Backend/Hosting/`,
