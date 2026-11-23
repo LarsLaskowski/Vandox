@@ -12,11 +12,13 @@ taken over or opened by an intruder). Today the web UI shows one connection snap
 ([Time-series queries](../../docs/areas/time-series-query.md), *Gaps*), so nothing shows connections over time, and new listeners
 appear only in the forensics report ([Listener changes](../../docs/areas/listener-changes.md)). Connection snapshots are removed
 after `retention.snapshots` (30 days by default) and have no rollups: #458 rolled up process snapshots only and left connection
-snapshots to this issue ([Retention and rollups](../../docs/areas/retention.md)). How far back the view reaches is Q1.
+snapshots to this issue ([Retention and rollups](../../docs/areas/retention.md)). The charts and the remote-address table are drawn
+from rollups of connection snapshots, which a backend feature builds first (Q1: the *connection rollups*, issue to be created); this
+view depends on it.
 
 ## Scenarios
 
-- S1: Given connection snapshots of a source, when the signed-in user chooses *Network* in the navigation (between *Processes* and
+- S1: Given connection rollups of a source, when the signed-in user chooses *Network* in the navigation (between *Processes* and
   *Logs*), then `/network` shows for the last 24 hours the stacked chart *Connections per state*: one band per TCP state (`tcp` and
   `tcp6` together) and one band `UDP` (`udp` and `udp6`), so the top edge is every socket the snapshots counted.
 - S2: Below it the stacked chart *Connections per program* shows the 10 programs (the owner's `command`, summed over its processes)
@@ -42,19 +44,20 @@ snapshots to this issue ([Retention and rollups](../../docs/areas/retention.md))
   the page can be bookmarked and used with back and forward; presets, *From (UTC)* and *To (UTC)* with *Apply* and a drag write a new
   entry, a click replaces it. The source choice lists the sources with connection data in the range (the agent's `connections`, an
   import's `legacy-monitor`), at most 256; the default is the source with the latest data, the first listed on a tie.
-- S8: Given a range that reaches back beyond `retention.snapshots` (*1 y*), then the charts and the table show what Q1 decides is kept;
-  the panel *Listeners* needs the snapshots themselves and shows E6 where none is kept.
+- S8: Given a range that reaches back beyond `retention.snapshots` (*1 y*), then the charts and the table show the whole range as far
+  as the connection rollups are kept (`retention.rollups_1h`); the panel *Listeners* needs the snapshots themselves and shows E6 where
+  none is kept.
 
 ## Errors and edge cases
 
 - E1: No connection data of the source in the range: the charts, the table and their notes are left out and the page says `No
   connection data is stored in this range.`
-- E2: A step without a snapshot of the source (agent offline, collector failing) is a gap: every band breaks there.
+- E2: A step without a folded snapshot of the source (agent offline, collector failing) is a gap: every band breaks there.
 - E3: A range starting before the oldest stored connection data of the source: `This range starts before the oldest stored connection
   data of this source.`
 - E4: A snapshot in the range with `aggregates_incomplete`: `Some snapshots in this range may not cover every socket.`
-- E5: Data of the source from before the end of the range not yet in the charts (if Q1 brings rollups): the processes view's `Values
-  after <time> UTC are not complete yet and may still change.`
+- E5: Snapshots of the source from before the end of the range not folded yet: the processes view's `Values after <time> UTC are not
+  complete yet and may still change.`
 - E6: No connection snapshot for the panel: `No connection snapshot was stored within 10 minutes of this moment.` (with `at`) or `No
   connection snapshot of this source is stored in this range.`
 - E7: No comparison snapshot: `No connection snapshot of this source is stored from 24 hours before, so no listener is marked new.`
@@ -82,9 +85,9 @@ snapshots to this issue ([Retention and rollups](../../docs/areas/retention.md))
 - N3: Memory per circuit and store work per action are bounded by stated caps (11 lines of at most 1,000 steps per chart, 20 remote
   addresses shown, 256 sources, 200 listener rows, two decoded snapshots for the panel), not by the number of snapshots in the range;
   the area document states the caps and the memory derived from them.
-- N4: The charts and the table of a 30-day range, and of a 1-year range as far as Q1 keeps data, over one source with a year of data
-  at the agent's 60-second interval, finish within the 10-second deadline on the reference host (the measurement is the plan's).
-- N5: No new configuration option.
+- N4: The charts and the table of a 30-day and of a 1-year range, over one source with a year of hourly and 30 days of 5-minute
+  connection rollups folded from the agent's 60-second snapshots, finish within the 10-second deadline on the reference host (the measurement is the plan's).
+- N5: No new configuration option; the charts and the table never read a snapshot, only the connection rollups.
 
 ## Acceptance criteria
 
@@ -98,7 +101,7 @@ snapshots to this issue ([Retention and rollups](../../docs/areas/retention.md))
 - AC6: New listeners since the previous day are highlighted: a listener the comparison snapshot lacks is marked `new` and listed first,
   with the line of S6, by the agent's key and port rules (S6, E7, E8, E9).
 - AC7: The address, controls and source choice follow S7 with the processes view's rules and errors (S7, E11).
-- AC8: A step without a snapshot breaks every band, and the notes of E1, E3, E4 and E5 appear exactly when the read calls for them (E1,
+- AC8: A step without a folded snapshot breaks every band, and the notes of E1, E3, E4 and E5 appear exactly when the read calls for them (E1,
   E2, E3, E4, E5).
 - AC9: Reads go through the gate under the 10-second deadline with the texts and log line of E12; every external text is displayed as
   the web UI's external text (N1, N2, N3, E12, E13).
@@ -115,11 +118,10 @@ snapshots to this issue ([Retention and rollups](../../docs/areas/retention.md))
 
 ## Open questions
 
-- Q1: How far back do the charts and *Top remote addresses* reach? Open — for the Product Manager. (A) A backend feature first, as #458
-  was for #50: rollups of connection snapshots (states, programs, remote addresses per 5-minute and hourly bucket), then this view over
-  them for any period they keep (`retention.rollups_1h`, 1,095 days); (B) this view alone, reading the snapshots themselves, so only
-  `retention.snapshots` (30 days) back, and at most one snapshot per step (a sample at each step, not its average) to stay within the
-  deadline; (C) the rollups built inside this feature. Recommendation: A.
+- Q1: How far back do the charts and *Top remote addresses* reach? Answered: (Product Manager, 2026-11-23) option A, "Rollups first":
+  a separate backend feature first rolls up connection snapshots (states, programs, remote addresses per 5-minute and hourly bucket,
+  beside the program rollups of #458); this view then reads those rollups and reaches back up to `retention.rollups_1h`. The plan of
+  this feature starts once that feature is merged, and S1 to S4 are aligned with what it builds.
 - Q2: What does "new since the previous day" compare? Answered: (Lead) the shown inventory with the source's latest inventory at least
   24 hours older (S6), so a listener opened while the agent was stopped is new too; a listener that opened and closed in between is the
   report's (*Out of scope*).
@@ -132,5 +134,5 @@ snapshots to this issue ([Retention and rollups](../../docs/areas/retention.md))
   panel *Listeners* with the new-listener marking, notes, calls, deadline, caps and memory per circuit.
 - `docs/areas/web-ui.md`: the navigation entry, the list of views, the gate's list of views.
 - `docs/areas/listener-changes.md`: the network view as a second place that shows new listeners, by inventory comparison, in *Scope* and
-  *Not here*; `docs/areas/storage-reading.md`: the reads of the panel (latest snapshot of a source at or before a time); with Q1 (A or
-  C) the area document of the connection rollups.
+  *Not here*; `docs/areas/storage-reading.md`: the reads of the panel (latest snapshot of a source at or before a time); the area
+  document of the connection rollups (written by the rollup feature) names this view as its reader in *Not here*.
