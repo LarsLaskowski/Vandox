@@ -1,6 +1,6 @@
 # 0225: Connection snapshots are folded into per-state, per-program and per-address buckets, and ended buckets keep their top addresses
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-23
 - **Area:** Storage
 - **Source:** Issue #486
@@ -50,7 +50,8 @@ are in [Connection rollups](../areas/connection-rollups.md).
   only the addresses the buckets kept.
 - The fold step does a third part; its bound is measured against an ingest batch (`docs/BENCHMARKS.md`, *Connection rollups*).
 - During a catch-up (an upgrade, a pass after downtime) ended buckets stay untrimmed until the backlog is folded.
-- Under full address churn a source keeps about 8 million 5-minute and 3.4 million hourly rows at the default periods; forged sources or
+- Under full address churn a source keeps about 8 million 5-minute and 3.4 million hourly rows at the default periods, roughly 1.1 GB
+  with their index; forged sources or
   backdated snapshots keep rows for the rollup periods, bounded by `ingest.min_free` as for program rollups.
 - If a read of N2 misses 10 seconds on the reference host, an hourly bucket keeps 50 addresses instead of 100.
 - Revisit if a view needs a minimum per address, distinct sockets per program or local endpoints: none is stored.

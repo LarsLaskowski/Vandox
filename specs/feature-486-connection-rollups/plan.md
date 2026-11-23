@@ -141,7 +141,8 @@ one untrimmed hour of 1,500 addresses and its trim step timed (N7); and schema s
 regular snapshots stored, as `--programs` times step 16. The Dev states in `docs/BENCHMARKS.md` and the area document the yearly disk
 cost at the default periods from the measured bytes per row: per source under full churn about 288 × (50 + 13 + 15) rows a day, 8.2
 million rows in 365 days of `rollups_5m`, and 24 × (100 + 13 + 15), 1.1 million a year or 3.4 million in 1,095 days of `rollups_1h`
-(about 52 bytes a row in fact 10's probe: some 600 MB per source, an estimate the measured row size replaces).
+(measured at about 53 bytes a row in the tables and 97 with the index on `bucket`: some 600 MB of tables and 1.1 GB with the index per
+source).
 
 ## Options considered
 
