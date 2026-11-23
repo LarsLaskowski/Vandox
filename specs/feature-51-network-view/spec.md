@@ -21,25 +21,29 @@ view depends on it.
 - S1: Given connection rollups of a source, when the signed-in user chooses *Network* in the navigation (between *Processes* and
   *Logs*), then `/network` shows for the last 24 hours the stacked chart *Connections per state*: one band per TCP state (`tcp` and
   `tcp6` together) and one band `UDP` (`udp` and `udp6`), so the top edge is every socket the snapshots counted.
-- S2: Below it the stacked chart *Connections per program* shows the 10 programs (the owner's `command`, summed over its processes)
-  holding the most sockets on average over the range, the highest at the bottom, and `Other programs` on top. The page notes `A
-  socket held by several programs counts for each; sockets without an owner (such as TIME_WAIT) are not in this chart.`
+- S2: Below it the stacked chart *Sockets held per program* shows the 10 programs (the processes' `command`) with the highest average
+  over the range, the highest at the bottom, and `Other programs` on top. A program's value is the sum over its processes of the
+  sockets each process holds, as the snapshot's `processes` list counts them: a socket counts once **per holding process**, also
+  within one program. The page notes `Each process counts every socket it holds, so a socket shared by several processes (a server's
+  master and its workers) counts once for each, and the stack can exceed the sockets per state; sockets without an owner (such as
+  TIME_WAIT) are not in this chart.`
 - S3: Both charts follow the processes view's step, step text, legend (`<minimum> / <average> / <maximum>` of the step, `--` at a gap),
   colors, drag selection and click ([Processes view](../../docs/areas/web-ui-processes-view.md), *Charts*).
 - S4: Below the charts the table *Top remote addresses* lists for the range the 20 remote addresses with the most connections on average
   (address, average connections, highest count in one snapshot), by average descending, then address; more rows end with `and <n> more
   addresses`. It notes `Most snapshots keep only their 25 most frequent remote addresses; an address outside them counts 0 there.`
   Addresses only: regular snapshots carry no remote ports ([Agent connections](../../docs/areas/agent-connections.md)).
-- S5: Below it the panel *Listeners* shows the listener inventory of the source's latest connection snapshot at or before the end of
-  the range, headed `Listeners of <time> UTC (<source>)`; with a moment `at` (a click in a chart), the source's snapshot closest to the
+- S5: Below it the panel *Listeners* shows the listener inventory of the source's latest connection snapshot captured in the range
+  (`from` up to its end; an older one is never shown, E6), headed `Listeners of <time> UTC (<source>)`; with a moment `at` (a click in a chart), the source's snapshot closest to the
   moment within 10 minutes, with the history view's choice of snapshot. One row per listener in the snapshot's order (ports below
   1024 first): protocol, address and port, PID and command (or `no owner`), socket UID and user, with the listener texts of
   [Listener changes](../../docs/areas/listener-changes.md), *Report section*. At most 200 rows, then `and <n> more listeners`.
-- S6: The panel marks a listener `new` when the **comparison snapshot**, the source's latest connection snapshot at or before 24 hours
-  before the shown one, lacks its key, with the agent's rules: protocol, local address and port; an unconnected UDP socket on a port
+- S6: The panel marks a listener `new` when the **comparison snapshot**, the source's latest connection snapshot captured from 48 up to 24
+  hours before the shown one (an older one is never used, E7), lacks its key, with the agent's rules: protocol, local address and port; an unconnected UDP socket on a port
   from 32768 to 60999 is never new; only ports 1 to 1023 are compared when either inventory holds only those
   ([Listener changes](../../docs/areas/listener-changes.md), *Comparison across agent starts*). New listeners stand first, in snapshot
-  order; above the table: `<n> new listeners since <time> UTC.` or `No new listener since <time> UTC.`, the comparison's time.
+  order; above the table: `<n> new listeners since <time> UTC.` or `No new listener since <time> UTC.`, the comparison's time. Both
+  snapshots are picked by capture time, so after the agent's clock stepped another snapshot may be picked; the line names its time.
 - S7: The address holds `source`, `range`, `from`, `to` and `at` with the processes view's rules, order and errors (no `compare`), so
   the page can be bookmarked and used with back and forward; presets, *From (UTC)* and *To (UTC)* with *Apply* and a drag write a new
   entry, a click replaces it. The source choice lists the sources with connection data in the range (the agent's `connections`, an
@@ -60,11 +64,12 @@ view depends on it.
   complete yet and may still change.`
 - E6: No connection snapshot for the panel: `No connection snapshot was stored within 10 minutes of this moment.` (with `at`) or `No
   connection snapshot of this source is stored in this range.`
-- E7: No comparison snapshot: `No connection snapshot of this source is stored from 24 hours before, so no listener is marked new.`
+- E7: No comparison snapshot in its window: `No connection snapshot of this source is stored from 24 to 48 hours before, so no
+  listener is marked new.`
 - E8: Inventories that cannot be compared, by the outcomes of [Listener changes](../../docs/areas/listener-changes.md): `No listener is
   marked new: the inventories are not comparable.` (a skipped line, different tables) or `No listener is marked new: ports 1 to 1023
   are not complete.`; for a comparison of the privileged ports only, the line of S6 ends `(ports 1 to 1023 only)`.
-- E9: A snapshot of an import or of a 1.0 agent (no `inventory`): its listeners are shown and nothing is marked, with `Listeners of
+- E9: The shown or the comparison snapshot is one of an import or of a 1.0 agent (no `inventory`): the shown snapshot's listeners are shown and nothing is marked, with `Listeners of
   imported or older snapshots are not compared.`
 - E10: A shown snapshot whose list holds only the privileged ports (`inventory` `privileged`): `This snapshot lists only the listeners
   on ports 1 to 1023.`
@@ -92,11 +97,12 @@ view depends on it.
 ## Acceptance criteria
 
 - AC1: `/network` shows *Connections per state* with one band per TCP state and `UDP` (S1, S8).
-- AC2: The page shows *Connections per program* of the top 10 programs plus `Other programs`, with its note (S2, S8).
+- AC2: The page shows *Sockets held per program* of the top 10 programs plus `Other programs`, by the measure of S2, with its note
+  (S2, S8).
 - AC3: Step, step text, legend, colors, drag and click follow the processes view (S3).
 - AC4: *Top remote addresses* lists the 20 addresses with the highest average count in the range, with the highest count, the order, the
   left-out line and the note (S4, E13).
-- AC5: The panel *Listeners* shows the inventory of the latest snapshot at or before the end of the range, or closest to `at` within 10
+- AC5: The panel *Listeners* shows the inventory of the latest snapshot in the range, or closest to `at` within 10
   minutes, with its rows, cap and texts, or E6 (S5, E6, E10).
 - AC6: New listeners since the previous day are highlighted: a listener the comparison snapshot lacks is marked `new` and listed first,
   with the line of S6, by the agent's key and port rules (S6, E7, E8, E9).
@@ -130,9 +136,26 @@ view depends on it.
 
 ## Area documents
 
-- `docs/areas/web-ui-network-view.md` (new): the page `/network`, its address, controls, the two charts, the remote-address table, the
+- `docs/areas/web-ui-network-view.md` (new): the page `/network`, its address, controls, the charts *Connections per state* and *Sockets held per program*, the remote-address table, the
   panel *Listeners* with the new-listener marking, notes, calls, deadline, caps and memory per circuit.
 - `docs/areas/web-ui.md`: the navigation entry, the list of views, the gate's list of views.
 - `docs/areas/listener-changes.md`: the network view as a second place that shows new listeners, by inventory comparison, in *Scope* and
   *Not here*; `docs/areas/storage-reading.md`: the reads of the panel (latest snapshot of a source at or before a time); the area
   document of the connection rollups (written by the rollup feature) names this view as its reader in *Not here*.
+
+## Challenge
+
+- M1 (per-program measure counts a socket once per holding process): accepted. Checked in `internal/connstats/owners.go`
+  (`perPID[pid]++` for every holder) and `processList`: a regular snapshot has no per-socket owner set, so distinct sockets per program
+  cannot be derived. S2 keeps the measure the snapshot supports and names it exactly (sum over the program's processes, once per holding
+  process, also within a program), the chart is renamed *Sockets held per program*, the note says the stack can exceed the sockets per
+  state; AC2 checks the measure; the rollup issue states it.
+- 2 (panel snapshot without lower bound): accepted. S5 shows only a snapshot captured in the range, else E6; AC5 follows.
+- 3 (comparison window unbounded, by capture time): accepted. S6 takes the latest snapshot from 48 up to 24 hours before the shown one,
+  else E7, and says capture time decides and a stepped clock can pick another snapshot. Planning note: that window is one day, which the
+  snapshot stamp read allows (*at or before* 24 hours before, window one day); the panel's latest snapshot in a range longer than a day
+  needs a read beyond that bound, which the plan names.
+- 4 (E9 for either snapshot): accepted. E9 applies when the shown or the comparison snapshot lacks `inventory`.
+- 5 (rollup issue must carry S1 to S4's needs): accepted. The rollup issue lists min, average and max per step per state and per
+  program, per address the average and the highest count with an address outside a snapshot's top 25 counted 0, and the incomplete
+  count; before this plan is written S1 to S4 are checked against the rollups' area document once that feature is merged (Q1).
