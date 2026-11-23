@@ -1,7 +1,7 @@
 # Spec: Rollups of connection snapshots
 
 Source: Issue #486
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -10,15 +10,13 @@ view (#51) has to show sockets per state, per program and the top remote address
 
 ## Scenarios
 
-- S1: Given an agent that sends a connection snapshot a minute, when the retention job's fold runs, then every snapshot is folded once
-  into the 5-minute and the hourly bucket of its source that hold its capture time, and a snapshot past `retention.snapshots` is removed
-  only after it was folded; one that follows `retention.events` (the newest mark of its agent, a listener finding) is kept as today.
+- S1: Given connection snapshots, when the retention job's fold runs, then each is folded once into the 5-minute and the hourly bucket
+  of its source, and one past `retention.snapshots` is removed only once folded; one that follows `retention.events` is kept as today.
 - S2: Given a folded bucket, then per TCP state (`tcp` and `tcp6` added together) and for `UDP` (`udp` and `udp6`, any state) it holds the
-  minimum, average and maximum socket count over the bucket's snapshots, a state a snapshot does not list counting 0, so the averages of
-  all states add up to the average of every counted socket.
+  minimum, average and maximum socket count, a state a snapshot does not list counting 0, so the averages of all states add up to
+  the average of every counted socket.
 - S3: Given a snapshot whose `processes` name a program (the `command`) for several processes, then the program counts the sum of their
-  `count`s in that snapshot — a socket held by several processes counts once per holder, also within one program — and the bucket holds
-  its minimum, average and maximum, a snapshot that does not name it counting 0.
+  `count`s (a socket counts once per holding process) and the bucket holds its minimum, average and maximum, 0 where not named.
 - S4: Given a snapshot's `remotes`, then each address counts its `count` in that snapshot and 0 in a snapshot that does not list it; the
   bucket holds its average over every folded snapshot of the bucket and the highest count in one snapshot. An IPv4-mapped `::ffff:`
   address stays apart from its IPv4 address.
@@ -29,10 +27,10 @@ view (#51) has to show sockets per state, per program and the top remote address
 - S7: Given a source, a range and a step, when the remote-address read runs, then it returns the 20 addresses with the highest average over
   the range, each with its highest count in one snapshot, and the number of further addresses the range's buckets hold.
 - S8: Given either read, then it also returns the gaps (steps without a folded snapshot), the earliest capture time of the source's
-  connection snapshots not yet folded, whether the range starts before the oldest bucket of the tier read, and the incomplete counts.
+  unfolded connection snapshots and whether the range starts before the oldest bucket of the tier read.
 - S9: Given a range, when the source list is read, then it returns the sources with a connection bucket of either tier in the range, at
   most 256, with a flag when more exist.
-- S10: Given an import of the legacy monitoring log (source `legacy-monitor`), then its connection snapshots are folded like an agent's.
+- S10: Imported (`legacy-monitor`) connection snapshots are folded like an agent's.
 
 ## Errors and edge cases
 
@@ -47,19 +45,19 @@ view (#51) has to show sockets per state, per program and the top remote address
   snapshots that lost at least one address to the cap). Remaining bias: an address cut from a snapshot reads lower there, unflagged
   and not in *further addresses*; above one snapshot a minute (pressure, extra runs) the hourly cap can be reached, an address met
   after it reads lower there, and sub-hour and 6-hour reads can differ, flagged by the capped count (*further addresses* a lower bound).
-- E4: A hostile `command` (up to 1,024 bytes, control characters, right-to-left override) is stored and returned as received, never
-  interpreted; a caller escapes it. An address is stored in the text form of the decoded snapshot.
-- E5: Counts near 2^32 in thousands of entries: every sum (fold, merge, read) is clamped to plus or minus `double.MaxValue`, so no fold
-  step fails and no read returns Infinity or NaN.
+- E14: A bucket that ended at least 10 minutes before a fold step and holds more than 50 (5-minute) or 100 (hourly) addresses is
+  trimmed to its 50 or 100 with the highest sum (ties by address text, ordinal), and the bucket counts the addresses trimmed. A kept
+  address keeps its exact sum and highest count; a trimmed one reads 0 in that bucket and is not in *further addresses*. A late
+  snapshot merged into a trimmed bucket can add addresses, and the bucket is trimmed again.
+- E4: A hostile `command` (up to 1,024 bytes, any text) is stored and returned as received; a caller escapes it. An address is stored in the text form of the decoded snapshot.
+- E5: Forged huge counts: every sum (fold, merge, read) is clamped to plus or minus `double.MaxValue`; no step fails, no read returns Infinity or NaN.
 - E6: A snapshot lists one state, program or address twice: the entries are added up within that snapshot.
-- E7: A snapshot whose data does not decode (NULL, invalid JSON or UTF-8, refused by the wire validation) is skipped and counted in the
-  fold's log line; the watermark passes it and removal takes it with its period.
-- E8: A late snapshot (backfill, import) whose bucket exists is merged into it, whether or not the bucket's snapshots are still stored; a
-  bucket past its tier's period is not created.
-- E9: An empty snapshot, or one without `processes`, is folded with 0 for what it lacks.
+- E7: A snapshot that does not decode or validate is skipped and counted in the log line; the watermark passes it.
+- E8: A late snapshot (backfill, import) is merged into its existing bucket; a bucket past its tier's period is not created.
+- E9: An empty snapshot, or one without `processes`, folds 0 for what it lacks.
 - E10: An imported snapshot has `complete` false but no `aggregates_incomplete` when an `lsof` line was left out (unread, unmapped, too
-  long), when its section reached the cap of 4,096 `lsof` lines, or when the input ended inside its section (so the last snapshot of
-  every imported file); it does not count as incomplete, so an imported low count can be a cut snapshot without a flag. Its `processes` count socket lines per process, as the legacy parser defines them.
+  long), at the cap of 4,096 `lsof` lines, or when the input ended inside its section (the last snapshot of every imported file); it
+  does not count as incomplete. Its `processes` count socket lines per process (the legacy parser's rule).
 - E11: A database of an earlier version folds its stored connection snapshots first, in steps, before any connection snapshot is removed.
 - E12: A failing or busy fold step rolls back whole with the metric and program fold; the job logs it and the next tick retries.
 - E13: A read with an unknown source, an empty range or no bucket returns the empty result; a step not among the query's steps, a range
@@ -70,12 +68,12 @@ view (#51) has to show sockets per state, per program and the top remote address
 - N1: A fold step (metric, program and connection parts in one transaction) stays within the work of one ingest batch of 10,000 records
   on the reference host; the connection part is bounded by a number of snapshots and a budget of stored data bytes per step.
 - N2: A one-year read of states and programs, and of remote addresses, at a 6-hour step returns within the views' 10-second deadline on
-  the reference host.
+  the reference host, with the address mix of N7.
 - N3: The disk growth of a day of one snapshot a minute is measured and stated.
 - N7: The benchmark of N2 and N3 measures at the address cap: every snapshot's 25 remotes are addresses no earlier snapshot named, so
-  each hourly bucket reaches 1,500 addresses; a run with stable peers would show the best case only.
+  each hourly bucket reaches 1,500 addresses before it is trimmed.
 - N4: No new option: the buckets follow `retention.rollups_5m` and `retention.rollups_1h`; every origin is folded.
-- N5: The fold and removal log lines carry counts only, never a command, an address or a user.
+- N5: The fold and removal log lines carry counts only (the fold's with the trimmed addresses), never a command, an address or a user.
 - N6: A read holds at most its lines (states, 10 programs, *other programs*, 20 addresses) of at most 2,000 steps in memory; a fold step
   holds at most one step's data.
 
@@ -90,7 +88,8 @@ view (#51) has to show sockets per state, per program and the top remote address
   (S3, E1, E2, E6, E9).
 - AC4: A bucket holds per remote address the sum with the snapshot count and the highest count, an unlisted address counting 0, mapped
   addresses kept apart, with the cut of 25 per snapshot, the cap of 500 (5-minute) and 1,500 (hourly) per bucket in the stated order, the
-  count of capped snapshots, and the count of incomplete snapshots (S4, S5, E3, E6, E10).
+  count of capped snapshots, the trim of an ended bucket to 50 or 100 addresses with its count, and the count of incomplete snapshots
+  (S4, S5, E3, E6, E10, E14).
 - AC5: The states-and-programs read returns per step the states and the top 10 programs by average over the range with *other programs*,
   each with minimum, average and maximum, plus gaps, the earliest unfolded time, the before-oldest-bucket flag and the incomplete counts
   (S6, S8, E13, N6).
@@ -120,16 +119,16 @@ view (#51) has to show sockets per state, per program and the top remote address
   500 and an hourly one 1,500, which the regular cadence cannot exceed, with a capped-snapshot count (Challenge 1).
 - What is the program cut with one measure? Answered: the Lead takes record 0223's 50 per measure, here the count alone; the cap of 500 per bucket stays.
 - Is a state missing from a snapshot 0? Answered: yes, from the issue's requirement that the stack's top edge is every counted socket.
-- Do the issue's claims about today hold? Answered: yes ([Agent connections](../../docs/areas/agent-connections.md), *Owners* and
-  *Regular and full snapshots*; `internal/connstats` writes no metric line).
+- Can a one-year address read over hourly buckets of 1,500 addresses meet N2? Answered: no, from a probe of the planned table (13.1
+  million rows, the top 20 alone 5.4 to 6.2 s in SQLite on the development host, about three times that on the reference host); the
+  Lead adds the trim of ended buckets (E14), which bounds a year to 876,000 address rows.
+- Do the issue's claims about today hold? Answered: yes ([Agent connections](../../docs/areas/agent-connections.md); `internal/connstats`).
 
 ## Area documents
 
-- `docs/areas/connection-rollups.md` (new, beside *Program rollups*): the buckets per state, program and address, the zero rule, the cuts
-  and caps, the capped-snapshot count, the incomplete count with the three causes of an imported snapshot not counted (E10), the fold step and its skip rule, both reads and the source list with their limits and errors, the
-  measured disk and time; linked from the index in `docs/areas/README.md`.
-- `docs/areas/retention.md`: the third watermark, removal of connection snapshots only below it, the removal of the connection buckets
-  per tier in the walk, the fold step's bound and the new log lines with their counts.
+- `docs/areas/connection-rollups.md` (new, indexed in `docs/areas/README.md`): the buckets, cuts, caps, trim and counts (E10 included),
+  the fold step, both reads and the source list with limits and errors, the measured disk and time.
+- `docs/areas/retention.md`: the third watermark, the removal of connection snapshots and buckets, the fold step and the log lines.
 - `docs/areas/storage.md` (the tables and the migration step) and `docs/areas/storage-reading.md` (the reads' place among the others).
 - `docs/areas/agent-connections.md`, *Not here*: a pointer to the rollups.
 
@@ -143,6 +142,6 @@ view (#51) has to show sockets per state, per program and the top remote address
 2. minor, no order within a snapshot for the address cap. Accepted: record ID, then count descending, ties by address text ordinal
    (E3), so the busiest addresses of a snapshot are met first.
 3. minor, E10 names one cause only. Accepted: E10 lists the left-out line, the 4,096-line cap and the end of input inside the section;
-   the area document states the same (*Area documents*, `connection-rollups.md`, the incomplete count).
+   the area document states the same.
 4. minor, the benchmark's address mix. Accepted: N7 has every snapshot name 25 addresses no earlier snapshot named, so the day's growth
    and the one-year read are measured with hourly buckets at the cap; AC9 names it.

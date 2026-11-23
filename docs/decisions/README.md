@@ -261,4 +261,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0222 | The history view reads the moment's snapshots and the metric list through its own bounded reads | Accepted | 2026-11-16 |
 | 0223 | Process snapshots are folded into per-program buckets beside a source total, by record ID | Accepted | 2026-11-21 |
 | 0224 | The processes view stacks program rollups on the history chart and compares programs of one source | Accepted | 2026-11-21 |
+| 0225 | Connection snapshots are folded into per-state, per-program and per-address buckets, and ended buckets keep their top addresses | Proposed | 2026-11-23 |
 <!-- project:end index -->
