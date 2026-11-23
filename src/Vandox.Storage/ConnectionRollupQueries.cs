@@ -218,26 +218,24 @@ internal static class ConnectionRollupQueries
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
         var totals = new ConnectionStepTotals(grid);
-        var any = false;
 
         foreach (var row in rows)
         {
             var position = grid.PositionOf(row.Index);
 
-            if (position < 0)
-            {
-                continue;
-            }
-
-            any = true;
             totals.Snapshots[position] = row.Snapshots;
             totals.Incomplete[position] = row.Incomplete;
             totals.Capped[position] = row.Capped;
             totals.ProcessSums[position] = row.ProcessSum;
         }
 
-        return any ? totals : null;
+        return totals;
     }
 
     /// <summary>
@@ -368,7 +366,7 @@ internal static class ConnectionRollupQueries
     {
         var position = totals.Grid.PositionOf(row.Index);
 
-        if (position < 0 || totals.Snapshots[position] == 0)
+        if (totals.Snapshots[position] == 0)
         {
             return;
         }

@@ -101,7 +101,7 @@ internal static class RollupSteps
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        return rows.Count > 0 ? rows[0] : null;
+        return rows[0];
     }
 
     /// <summary>

@@ -98,10 +98,10 @@ internal sealed class ConnectionBucket
     /// Gets the ordinals of the snapshots that named an address.
     /// </summary>
     /// <param name="address">The address</param>
-    /// <returns>The ordinals, empty when no snapshot named the address</returns>
+    /// <returns>The ordinals</returns>
     internal IReadOnlyList<int> SnapshotsOf(string address)
     {
-        return _snapshots.TryGetValue(address, out var ordinals) ? ordinals : [];
+        return _snapshots[address];
     }
 
     #endregion // Methods
