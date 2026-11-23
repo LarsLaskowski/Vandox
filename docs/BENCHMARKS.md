@@ -324,6 +324,81 @@ fold after an upgrade of an agent's snapshots, taken every minute, resembles the
 one-year read (1,270 ms) is far within the 10-second deadline. The published tool was the self-contained build, because the NAS has no .NET 11 runtime
 (*Retention steps*). The first batch (3,923 ms) wrote into a fresh file and the first fold step (1,215 ms) held the first 10,000 metric values.
 
+## Connection rollups
+
+Criteria (issue #486, AC9): a fold step stays within the work of one ingest batch (N1); the disk growth of a day of one snapshot a minute
+is measured and stated (N3); a read of states and programs, and a read of remote addresses, over one year at a 6-hour step and over 1,095
+days (the default `retention.rollups_1h`) at a 1-day step return within the views' 10-second deadline, with every snapshot naming 25 addresses
+no earlier snapshot named (N2, N7) ([Connection rollups](areas/connection-rollups.md)). Measured with the `--connections` scenario of the
+storage benchmark. Only a run on the reference host counts against a criterion. **The run on the DS918+ is pending: the Product Manager
+runs it, and every figure below is from the development host.**
+
+### Procedure
+
+Publish the tool self-contained as for the retention steps and run it on the reference host, on the volume that holds the database (the SSD
+volume):
+
+```bash
+dotnet publish tools/Vandox.StorageBenchmark -c Release -r linux-x64 --self-contained -p:DebugType=none -o publish-sc
+publish-sc/Vandox.StorageBenchmark <existing folder on the data volume> --connections
+```
+
+On a host with the .NET 11 runtime the tool runs as `dotnet publish/Vandox.StorageBenchmark.dll <existing folder> --connections`.
+`--connections` takes no other option. It measures, each in a fresh database under a fixed clock (2026-12-01 12:00 UTC) and the default
+periods:
+
+- **N1**: five batches of 10,000 metric points, 500 process snapshots of 80 programs and 500 regular connection snapshots (13 states, 40
+  processes of 15 programs, 25 remote addresses no earlier snapshot named, and the 30 listeners of a Plesk host); it times the fold steps
+  against the median batch, and the steps that only trim. A regular snapshot is the cut the agent makes (25 remote addresses); the
+  connection part alone is reported beside the whole step.
+- **Worst case**: one fold step of 10,000 metric points and 8 full snapshots (4,096 remote addresses and 4,096 connections each, 30
+  listeners), up to the 2 MiB budget, reported beside the typical figures.
+- **N3**: a day of one snapshot a minute (1,440 regular snapshots, 25 new addresses each); `page_count` before and after the fold and the
+  trim, with the page size, the number of rollup rows left and the time and steps of the pass.
+- **N2**: 1,095 days of hourly buckets at the trimmed size (26,280 buckets of 100 addresses, 13 states and 15 programs, 3,363,840 rows),
+  written directly into the tables by SQL (not folded; the time of the write is reported); the median of five reads of states and
+  programs and of addresses over the last year at a 6-hour step, and over all 1,095 days at a 1-day step.
+- **N7**: one hour of 1,500 addresses folded before it ends, and the pass that trims it.
+- **Schema step 17**: a year of 8,760 hourly regular snapshots stored, the database taken back to version 16 by hand, and the time of the
+  open that applies step 17.
+
+### Results
+
+| Host | Date | Volume | N1: median batch | N1: median fold step | Trim-only steps | Worst-case step | N3: a day (1,440 snapshots) | Schema step 17 | Verdict |
+| ---- | ---- | ------ | ---------------: | -------------------: | --------------- | --------------- | --------------------------- | -------------: | ------- |
+| development host (sandbox, 4 logical CPUs, Ubuntu 24.04, .NET 11), not the reference host | 2026-11-23 | local disk (`/tmp`) | 666 ms | 320 ms (steps of 128 to 542 ms); the connection part alone: 131, 133, 146, 215 and 86 ms for 2,500 regular snapshots | 22 steps, 209 ms in all (9.5 ms each), 95,800 addresses trimmed; 14 steps of the connection part alone, 6.8 ms each | 8 full snapshots: 3 folding steps (slowest 72 ms), 149 ms in all | +1,843 pages of 4,096 bytes (+7,372 KiB), 25,214 rollup rows after the trim; fold and trim 806 ms | 12 ms (8,760 stored hourly snapshots, the tables, the indexes and `records_connection_fold`) | order of magnitude only |
+| DS918+ (reference host) | pending | SSD volume | pending | pending | pending | pending | pending | pending | pending the Product Manager's run |
+
+| Host | Date | Volume | Read | Range, step | States and programs, median of 5 | Addresses, median of 5 | Trim of an untrimmed hour (N7) | Verdict |
+| ---- | ---- | ------ | ---- | ----------- | -------------------------------: | ---------------------: | -----------------------------: | ------- |
+| development host (as above) | 2026-11-23 | local disk (`/tmp`) | 1,095 days written by SQL in 8.9 s | 1 year, 6 hours | 377 ms | 688 ms | 5 ms (1,500 addresses) | order of magnitude only |
+| development host (as above) | 2026-11-23 | local disk (`/tmp`) | (same database) | 1,095 days, 1 day | 1,155 ms | 2,069 ms | | order of magnitude only |
+| DS918+ (reference host) | pending | SSD volume | | 1 year, 6 hours | pending | pending | pending | pending the Product Manager's run |
+| DS918+ (reference host) | pending | SSD volume | | 1,095 days, 1 day | pending (extrapolated about 3.8 s) | pending (extrapolated about 6.8 s) | | pending the Product Manager's run |
+
+On the development host the fold step (median 320 ms) is about half of the median batch (666 ms), and the slowest step (542 ms) stays below
+it, which is the order of magnitude N1 asks for; a step of full snapshots (up to the 2 MiB budget) took at most 72 ms. The reads of both
+kinds over 1,095 days at the trimmed size took 1.2 s and 2.1 s, far below the 10-second deadline. The extrapolation to the DS918+ multiplies
+the development-host median by 3.3, the factor of the program read between the two hosts (*Program rollups*: the one-year read took 382 ms
+on the development host and 1,270 ms on the DS918+; *Processes view*: 779 against 2,550 ms): about 3.8 s for the states and programs and about 6.8 s for the addresses over 1,095 days
+at a 1-day step. **An extrapolation is not a measurement**: the criterion is met only when the Product Manager's run on the DS918+ SSD
+volume returns every median of five below 10 s. A read above 10 s takes the fallback of record 0225: an hourly bucket keeps 50 addresses
+instead of 100 (`KeptAddressesHourly`, the literal of the `_1h` partial index of schema step 17 and the area document change together),
+which halves the address rows and, by the row count, the time of the address read.
+
+The data written directly by SQL in the read scenario has the size the trim leaves (100 addresses per hour), not the size the fold
+writes; the day of N3 and the trim of N7 exercise the fold and the trim itself. The file of a day grows by the untrimmed buckets (the
+fold writes a bucket whole and the trim cuts it once the fold has caught up), and freed pages are reused.
+
+**The yearly disk cost at the default periods**, per source under full address churn, estimated from the row size: 365 days of
+`rollups_5m` are 8.2 million rows (365 × 288 × (50 addresses + 13 states + 15 programs)), 1,095 days of `rollups_1h` 3.4 million
+(1,095 × 24 × (100 + 13 + 15)), together 11.6 million rows. The row size was measured on the development host on a copy of the tables
+filled with 8,760 hourly buckets of 100 addresses, 13 states and 15 programs (1,121,280 rows) and with 2,880 5-minute buckets of 50
+addresses (224,640 rows), page size 4,096 bytes, from SQLite's `dbstat`: the table takes 53.7 and 52.2 bytes a row and, with the index on
+`bucket` that the removal walk uses, 99.0 and 96.1 bytes a row. That is roughly 600 MB for the tables and roughly 1.1 GB with their index
+for one source; a source with few distinct addresses needs far less, and the totals tables are small. The estimate assumes addresses
+of about 10 bytes as text and program names of about 8 bytes; longer names cost more. It is not a measured year.
+
 ## Processes view
 
 Criterion (issue #50, AC10 and N4): the charts of a 30-day and of a 1-year range, over a database of one source with a year of hourly and 30

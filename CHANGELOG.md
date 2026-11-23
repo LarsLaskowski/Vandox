@@ -8,6 +8,14 @@ tag lists the merged pull requests in detail.
 
 ### Added
 
+- **Rollups of connection snapshots** (issue #486): the retention job now folds every connection snapshot, once, into 5-minute and
+  hourly buckets per source: the sockets per TCP state and `UDP`, per program and per remote address (each as minimum, average and
+  maximum or highest count), so the sockets of a server outlive `retention.snapshots`; a connection snapshot is removed only after it was
+  folded, and the buckets follow `retention.rollups_5m` and `retention.rollups_1h`. Each snapshot is cut to its 50 top programs and 25 top
+  remote addresses, a bucket keeps at most 500 programs and 500 (5-minute) or 1,500 (hourly) addresses, and an ended bucket is trimmed to
+  its 50 or 100 addresses with the highest sum. The database is migrated to schema version 17 and folds the stored snapshots in steps. There
+  is no new option, route or page; the store reads for the states, programs and top addresses are there for the network view (#51). The
+  storage benchmark gains `--connections`.
 - **Processes view** (issue #50): the new page *Processes* (`/processes`) shows, for a range (the presets *1 h* to *1 y* or *From* and
   *To*, in UTC) and one source, two stacked charts, *Memory per program* and *CPU per program*, of the 10 programs with the highest average
   and the rest as `Other programs`, drawn from the per-program rollups so that they reach back as far as `retention.rollups_1h`. A drag
