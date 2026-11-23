@@ -2,7 +2,7 @@
 
 Source: Issue #486 | [spec.md](spec.md)
 Tier: standard — a new fold, schema step, removal stages and store reads that create, change or remove no security control.
-Security areas touched: Ingest authentication (disk bound only: the rollups grow from authenticated, possibly forged snapshots; `BatchWriter` is unchanged)
+Security areas touched: Ingest authentication (disk bound only: the rollups grow from authenticated, possibly forged snapshots; `BatchWriter` is unchanged); File writes and paths derived from external input (the `RetentionRemover` guard and its four new removal stages); Parsing of external input (the fold decodes stored connection snapshots and cuts and caps their entries); Logging and display of external data (events 79 and 80, counts only; commands returned as received)
 Plan size: a schema step, a third fold part with a trim, four removal stages, two reads, two log lines and a benchmark scenario, each with its rules.
 
 ## Problem / root cause
@@ -23,8 +23,9 @@ See [spec.md](spec.md), *Problem*: connection snapshots leave nothing behind onc
 | 8 | Event IDs up to 78 are used; 79 and 80 are free. | `grep -rn "EventId = " src` | confirmed |
 | 9 | `RetentionSamples.RetainAsync` folds before it removes; `SqliteStoreRemoveExpiredRemovesConnectionSnapshotsWithoutProgramFold` removes a connection snapshot without a fold. | `tests/Vandox.Storage.Tests/RetentionSamples.cs:345`, `SqliteStoreRetentionTests.cs:1135` | confirmed |
 | 10 | A year of hourly buckets with 1,500 addresses each is 13.1 million rows (682 MB); the top 20 took 5.4–6.2 s and the distinct count 6.0–6.5 s; at 615 addresses per hour 2.0–2.1 s for the top 20. | Lead's probe on the development host, Python `sqlite3`, the planned key `(source, bucket, kind, name)` `WITHOUT ROWID` (scratch copy, deleted); development host only | confirmed |
-| 11 | After the trim a year is at most 8,760 × 100 address rows, and the one-year reads of both kinds meet 10 s on the reference host. | to verify: `--connections` (N2, N7) on the DS918+ SSD volume, by the Product Manager, after group G3, before step 9 | unverified |
+| 11 | After the trim a year is at most 8,760 × 100 address rows (1,095 days: 2,628,000), and the reads of N2 meet 10 s on the reference host. Extrapolated from fact 10 by row count: one year about 0.33 s top 20 plus 0.42 s distinct count on the development host, 1,095 days about 1.0 + 1.25 s; at the program read's factor of 3.3 (`docs/BENCHMARKS.md`, *Program rollups*: 779 against 2,550 ms) about 2.5 s and 7.4 s on the DS918+. **Fallback** if a read misses 10 s: `KeptAddressesHourly` 50 (rows halved, about 3.7 s for 1,095 days), changing E14, record 0225 and the `_1h` partial index literal of step 17 (unreleased, edited in place) together; the Lead revises, the Product Manager approves the number. | to verify: `--connections` (N2, N7) on the DS918+ SSD volume, by the Product Manager, after group G3, before step 9 | unverified |
 | 12 | Imported connection snapshots carry the source `legacy-monitor` and no `aggregates_incomplete`. | issue #486; `docs/areas/wire-format-records.md` (absent fields read as complete aggregates) | confirmed |
+| 13 | A fold pass repeats steps while `More` is true; the program part's `More` is "byte budget spent or 500 rows read", so a backlog bucket can span steps. | `RetentionService.RollUpAsync` (`RetentionService.cs:97-121`), `ProgramRollupFolder.cs:86` | confirmed |
 
 ## Tests per criterion
 
@@ -37,16 +38,18 @@ fold test class, from the two `connection_snapshot` lines of `testdata/wire/all-
 | AC1 | `SqliteStoreRemoveExpiredKeepsConnectionSnapshotAboveWatermark`, `SqliteStoreRemoveExpiredKeepsListenerFindingsWithTheirSnapshots` (unchanged, still green), `SqliteStoreOpenMigratesToVersionSeventeen` | `SqliteStoreRetentionTests.cs`, `SqliteStoreOpenTests.cs` |
 | AC2 | `SqliteStoreFoldRollupsMergesTcpAndTcp6StatesAndUdpAsUdp`, `SqliteStoreFoldRollupsCountsMissingStateAsZero`, `SqliteStoreFoldRollupsAddsDuplicateEntriesWithinSnapshot` | `SqliteStoreConnectionRollupTests.cs` |
 | AC3 | `SqliteStoreFoldRollupsSumsProcessCountsPerProgram`, `SqliteStoreFoldRollupsCutsProgramsToFiftyPerSnapshot`, `SqliteStoreFoldRollupsCapsProgramsAtFiveHundredPerBucket`, `SqliteStoreFoldRollupsFoldsSnapshotWithoutProcesses` | `SqliteStoreConnectionRollupTests.cs` |
-| AC4 | `SqliteStoreFoldRollupsCutsAddressesToTwentyFivePerSnapshot`, `SqliteStoreFoldRollupsKeepsMappedAddressApart`, `SqliteStoreFoldRollupsCapsAddressesPerTierAndCountsCappedSnapshots`, `SqliteStoreFoldRollupsTrimsEndedBucketToTopAddresses`, `SqliteStoreFoldRollupsLeavesOpenBucketUntrimmed`, `SqliteStoreFoldRollupsTrimsAgainAfterLateMerge`, `SqliteStoreFoldRollupsCountsIncompleteConnectionSnapshots` | `SqliteStoreConnectionRollupTests.cs` |
+| AC4 | `SqliteStoreFoldRollupsCutsAddressesToTwentyFivePerSnapshot`, `SqliteStoreFoldRollupsKeepsMappedAddressApart`, `SqliteStoreFoldRollupsCapsAddressesPerTierAndCountsCappedSnapshots`, `SqliteStoreFoldRollupsTrimsEndedBucketToTopAddresses`, `SqliteStoreFoldRollupsLeavesOpenBucketUntrimmed`, `SqliteStoreFoldRollupsTrimsAgainAfterLateMerge`, `SqliteStoreFoldRollupsTrimsNothingInStepAtBound`, `SqliteStoreFoldRollupsTrimsEndedHourOnlyOnceFoldCaughtUp`, `SqliteStoreFoldRollupsCountsIncompleteConnectionSnapshots` | `SqliteStoreConnectionRollupTests.cs` |
 | AC5 | `SqliteStoreConnectionRollupsReturnsStatesAndTopProgramsPerStep`, `SqliteStoreConnectionRollupsReturnsOthersAsTotalLessNamed`, `SqliteStoreConnectionRollupsReturnsGapsAndCompleteness`, `SqliteStoreConnectionRollupsReadsFiveMinuteTierBelowOneHour`, `SqliteStoreConnectionRollupsRefusesInvalidQuery` (one data row per error text) | `SqliteStoreConnectionRollupTests.cs` |
 | AC6 | `SqliteStoreConnectionAddressesReturnsTopTwentyWithFurtherCount`, `SqliteStoreConnectionAddressesReturnsGapsIncompleteAndCappedPerStep`, `SqliteStoreConnectionAddressesRefusesInvalidQuery`, `SqliteStoreConnectionSourcesReturnsAtMost256WithMore` | `SqliteStoreConnectionRollupTests.cs` |
 | AC7 | `SqliteStoreFoldRollupsStoresHostileCommandAsReceived`, `SqliteStoreFoldRollupsClampsConnectionSums`, `SqliteStoreConnectionRollupsClampsSumsInRead`, `RetentionServiceRollUpLogsConnectionCountsOnly`, `RetentionServiceRemoveLogsConnectionRollupRows` | `SqliteStoreConnectionRollupTests.cs`, `tests/Vandox.Backend.Tests/RetentionServiceTests.cs` |
 | AC8 | `SqliteStoreFoldRollupsRollsBackConnectionPartWithStep`, `SqliteStoreRemoveExpiredRemovesConnectionBucketsPerTier` | `SqliteStoreConnectionRollupTests.cs`, `SqliteStoreRetentionTests.cs` |
-| AC9 | manual: the Product Manager runs `--connections` on the DS918+ SSD volume (fact 11); the Dev enters the figures in `docs/BENCHMARKS.md` | — |
+| AC9 | manual: the Product Manager runs `--connections` on the DS918+ SSD volume (fact 11; a read above 10 s takes the fallback there); the Dev enters the figures in `docs/BENCHMARKS.md` | — |
 
 Cases the tests pin: E2's order (record ID, then name ordinal), E3's order (record ID, then count descending, address ordinal) with a
 snapshot that adds an address once the 5-minute bucket holds 500; E14's ties by address text; a trimmed bucket's late merge adds a
-new address and the next step trims it to 100 again; the read's 0 minimum when `seen` is below `snapshots`.
+new address and the next step trims it to 100 again; the read's 0 minimum when `seen` is below `snapshots`; an ended hour folded across
+two steps (501 snapshots, the first step at its 500-row bound): an address with count 1 in the first snapshot, below the top 100 after
+step one, and a large count in the 501st keeps the sum of both, so the kept rows equal those of the whole hour folded before one trim.
 
 ## Approach
 
@@ -82,7 +85,12 @@ The literals 50 and 100 equal `StorageLimits.KeptAddressesFiveMinutes`/`KeptAddr
 5. **Trim** (after the writes, same step): per tier, read at most `ConnectionTrimBucketsPerStep` (20) totals through the `_trim` index
    whose bucket end (`bucket` + width) lies at or before `now` − 10 minutes; for each, delete the address rows outside the top
    `KeptAddresses` by `sum_value DESC, name` (SQLite's byte order, which is ordinal for UTF-8 text), add the deleted count to `trimmed`,
-   set `addresses` to the kept count. `More` is true when either tier had 20 to trim. The trim runs even when no snapshot was read.
+   set `addresses` to the kept count. `More` is true when either tier had 20 to trim. The trim runs only in a step whose read in
+   step 1 took fewer than 500 rows and did not spend the byte budget (the fold has caught up: every stored snapshot above the watermark
+   is folded, fact 13), also when it read none; a step at its bound trims nothing and returns `More`. So no bucket is trimmed while
+   stored snapshots of it wait in the backlog (E11, the first pass after downtime); a snapshot stored later is a late merge (E14).
+   During a catch-up the ended buckets stay untrimmed until it ends (30 days: about 720 × 1,500 hourly and 8,640 × 125 5-minute rows
+   per source at the regular cadence), then 20 per tier per step are trimmed.
 6. Advance the watermark to the last row read. Result: `ConnectionSnapshots`, `SkippedConnectionSnapshots`, `ConnectionBuckets` (buckets
    written per tier, as programs), `TrimmedAddresses`.
 Memory: one step's decoded snapshots are folded one at a time; a bucket holds at most the snapshot ordinals of its addresses (at most
@@ -123,10 +131,17 @@ is registered in the host: #51 adds its consumer and gate.
 
 **Benchmark** `--connections` (`tools/Vandox.StorageBenchmark/ConnectionBenchmark.cs`, fixed clock 2026-12-01 12:00 UTC like
 `ProgramBenchmark`, reusing its `Folder`, `CreatePolicy`, `Median`, `TimeStepsAsync`): N1 five batches of 10,000 metric points, 500
-process snapshots of 80 programs and 500 regular connection snapshots (13 states, 40 processes of 15 programs, 25 remotes all new),
-fold steps timed against the median batch; N3 a day of 1,440 such snapshots, `page_count` before and after fold and trim; N2 a year of
-hourly buckets at the trimmed size (100 addresses, 13 states, 15 programs) written directly into the tables by SQL, stated as such,
-then the median of five reads of each kind at a 6-hour step; plus one untrimmed hour of 1,500 addresses and its trim step timed (N7).
+process snapshots of 80 programs and 500 regular connection snapshots (13 states, 40 processes of 15 programs, 25 remotes all new, and
+the listener inventory of a Plesk host, 30 `listeners` shaped as those of `testdata/wire/all-kinds.jsonl`), fold steps timed against the
+median batch; a worst-case step of 10,000 metric points and full snapshots (4,096 remotes and 4,096 `connections` each, listeners as above)
+up to the 2 MiB budget, reported beside the typical figures; N3 a day of 1,440 regular snapshots, `page_count` before and after fold and
+trim; N2 1,095 days of hourly buckets at the trimmed size (100 addresses, 13 states, 15 programs) written directly into the tables by SQL,
+stated as such, then the median of five reads of each kind over the last year at a 6-hour step and over all 1,095 days at a 1-day step;
+one untrimmed hour of 1,500 addresses and its trim step timed (N7); and schema step 17 timed on that database with a year of hourly
+regular snapshots stored, as `--programs` times step 16. The Dev states in `docs/BENCHMARKS.md` and the area document the yearly disk
+cost at the default periods from the measured bytes per row: per source under full churn about 288 × (50 + 13 + 15) rows a day, 8.2
+million rows in 365 days of `rollups_5m`, and 24 × (100 + 13 + 15), 1.1 million a year or 3.4 million in 1,095 days of `rollups_1h`
+(about 52 bytes a row in fact 10's probe: some 600 MB per source, an estimate the measured row size replaces).
 
 ## Options considered
 
@@ -139,6 +154,9 @@ then the median of five reads of each kind at a 6-hour step; plus one untrimmed 
 4. **Reusing `ProgramSourceQuery`/`ProgramSourceList`/`ProgramRollupPoint`** (chosen) against connection copies: same shape, no duplicate
    types; the names stay those of the first consumer.
 5. **Counting distinct sockets per program** — rejected by the issue (the agent's per-holder measure is kept).
+6. **Trim only once the fold has caught up** (chosen, Challenge 1) against trimming per source only buckets ending before that source's
+   earliest unfolded capture: per-source progress during a catch-up, but a scan of every unfolded snapshot per step (`records_connection_fold`
+   is keyed by ID, not source and capture time) for a backlog that ends within the same pass; record 0225.
 
 ## Affected projects and types
 
@@ -245,7 +263,7 @@ references the tool; it is outside the coverage report, as `ProgramBenchmark`).
 
 ## Areas
 
-- `docs/areas/connection-rollups.md` (new, +1,900 words): name *Connection rollups*, scope "What remains of connection snapshots per
+- `docs/areas/connection-rollups.md` (new, +2,000 words): name *Connection rollups*, scope "What remains of connection snapshots per
   state, program and remote address: the 5-minute and hourly buckets per source, the cuts, caps and trim, the fold, the reads and the
   source list, the measured disk growth"; *Not here*: periods and walk (retention), tables (storage), fields (agent connections, wire).
 - `docs/areas/retention.md (+260 words)`: the third watermark and part of the fold step, the guard in *Periods* and *Rollups* (replaces
@@ -262,7 +280,9 @@ Dev, once the code is green:
 - `docs/ARCHITECTURE.md`: the retention job sentence (line 120) adds connection snapshots per state, program and address; schema version
   17 with its step (lines 451, 454); `IConnectionRollupReader` in the store interface list (line 493); record 0225 in *Records* (line 516);
 - `docs/BENCHMARKS.md`: section *Connection rollups* (criteria N1–N3, N7, procedure `--connections`, results table filled from the
-  Product Manager's run) and the usage line of the tool;
+  Product Manager's run: typical and worst-case step, day, both reads at one year and 1,095 days, trim step, schema step 17, the yearly
+  disk cost at the default periods) and the usage line of the tool;
+- `docs/areas/connection-rollups.md` also states the disk bound of *Security considerations* and the yearly disk cost;
 - `CHANGELOG.md`, *Unreleased*, *Added*: **Rollups of connection snapshots** (issue #486), schema version 17, `--connections`;
 - record 0225: status `Accepted` with the area link once the area document exists (Lead, step 9).
 
@@ -278,12 +298,35 @@ nothing live or backfilled. Retention still frees space inside the file only (re
 - [x] Exceptions: a decode failure is swallowed into the skip count (as the program fold); a SQLite failure reaches only the job's
   error line (`retention step failed`, the store's text) and the read's `store: reading connection rollups: <message>`; validation
   errors are `store: invalid query: <text>` with the three texts above.
-- Disk: per day at most about 288 × 50 + 24 × 100 address rows once trimmed, plus up to 1,500 rows per open hour; `ingest.min_free`
-  stays the bound of last resort against forged churn.
+- Disk: per source and per day of capture time at most about 288 x 50 + 24 x 100 address rows once trimmed, plus up to 1,500 rows per open hour; the source is the agent's choice and a bucket at or below 50 (100) addresses is never trimmed, so forged sources or backdated snapshots leave rows kept for `retention.rollups_5m` and `retention.rollups_1h`, beyond `retention.snapshots`; `ingest.min_free` stays the bound of last resort against forged churn, as for program rollups.
+  `docs/areas/connection-rollups.md` says the same (Dev, *Documentation updates*).
 
 ## Decision records
 
 - `docs/decisions/0225-connection-snapshots-are-folded-into-per-state-program-and-address-buckets-ended-buckets-trimmed.md` (Proposed)
+
+## Challenge
+
+1. MAJOR, the trim's wall-clock test cuts buckets that span bounded steps during a catch-up. Accepted: the trim runs only in a step whose
+   connection read stayed below its row and byte bound (Approach step 5, fact 13), so every stored snapshot of a bucket is folded before
+   it is trimmed; a snapshot stored after that is E14's late merge. Pinned by `SqliteStoreFoldRollupsTrimsEndedHourOnlyOnceFoldCaughtUp`
+   and `SqliteStoreFoldRollupsTrimsNothingInStepAtBound`. Changed: Approach, Tests per criterion, Options 6, spec E14 and E11, record 0225.
+2. minor, no fallback for fact 11. Accepted: fact 11 holds the extrapolation (about 2.5 s for a year and 7.4 s for 1,095 days on the
+   DS918+) and the fallback `KeptAddressesHourly` 50 with what it changes and who approves it; task 10 names it. Unlike the objection
+   says, step 17 changes one literal (the `_1h` partial index), edited in place because it is unreleased.
+3. minor, the benchmark snapshots understate cost. Accepted: listeners in every regular snapshot, a worst-case step of full snapshots up to
+   the 2 MiB budget, and schema step 17 timed (Approach, *Benchmark*; `docs/BENCHMARKS.md`).
+4. minor, the yearly disk cost. Accepted: estimated in *Benchmark* and stated from the measured row size in `docs/BENCHMARKS.md` and the
+   area document (*Documentation updates*).
+
+## Security review
+
+1. BLOCKING, *Security areas touched* incomplete. Resolved: line 5 is the proposed line verbatim.
+2. Disk bound per source and capture day only. Resolved: the *Disk* bullet is the proposed text verbatim, and the area document says the
+   same (*Documentation updates*).
+3. The default `rollups_1h` is 1,095 days. Resolved: N2 adds a read of all 1,095 days at a 1-day step, held to the same 10-second
+   deadline; the benchmark writes 1,095 days and times it, `docs/BENCHMARKS.md` states its median, fact 11 extrapolates it (about 7.4 s on
+   the DS918+) and its fallback covers it.
 
 ## Out of scope / follow-ups
 

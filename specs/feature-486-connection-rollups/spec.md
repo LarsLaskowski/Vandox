@@ -45,8 +45,9 @@ view (#51) has to show sockets per state, per program and the top remote address
   snapshots that lost at least one address to the cap). Remaining bias: an address cut from a snapshot reads lower there, unflagged
   and not in *further addresses*; above one snapshot a minute (pressure, extra runs) the hourly cap can be reached, an address met
   after it reads lower there, and sub-hour and 6-hour reads can differ, flagged by the capped count (*further addresses* a lower bound).
-- E14: A bucket that ended at least 10 minutes before a fold step and holds more than 50 (5-minute) or 100 (hourly) addresses is
-  trimmed to its 50 or 100 with the highest sum (ties by address text, ordinal), and the bucket counts the addresses trimmed. A kept
+- E14: A bucket that ended at least 10 minutes before a fold step that has folded every stored connection snapshot (not one cut short by
+  its step bound) and holds more than 50 (5-minute) or 100 (hourly) addresses is trimmed to its 50 or 100 with the highest sum (ties by
+  address text, ordinal), and the bucket counts the addresses trimmed; while a backlog is folded no bucket is trimmed. A kept
   address keeps its exact sum and highest count; a trimmed one reads 0 in that bucket and is not in *further addresses*. A late
   snapshot merged into a trimmed bucket can add addresses, and the bucket is trimmed again.
 - E4: A hostile `command` (up to 1,024 bytes, any text) is stored and returned as received; a caller escapes it. An address is stored in the text form of the decoded snapshot.
@@ -58,7 +59,8 @@ view (#51) has to show sockets per state, per program and the top remote address
 - E10: An imported snapshot has `complete` false but no `aggregates_incomplete` when an `lsof` line was left out (unread, unmapped, too
   long), at the cap of 4,096 `lsof` lines, or when the input ended inside its section (the last snapshot of every imported file); it
   does not count as incomplete. Its `processes` count socket lines per process (the legacy parser's rule).
-- E11: A database of an earlier version folds its stored connection snapshots first, in steps, before any connection snapshot is removed.
+- E11: A database of an earlier version folds its stored connection snapshots first, in steps, before any connection snapshot is removed
+  and before any bucket is trimmed (E14).
 - E12: A failing or busy fold step rolls back whole with the metric and program fold; the job logs it and the next tick retries.
 - E13: A read with an unknown source, an empty range or no bucket returns the empty result; a step not among the query's steps, a range
   of more than 2,000 steps or a bound outside the storable range is the store's invalid-query error before any read.
@@ -67,8 +69,8 @@ view (#51) has to show sockets per state, per program and the top remote address
 
 - N1: A fold step (metric, program and connection parts in one transaction) stays within the work of one ingest batch of 10,000 records
   on the reference host; the connection part is bounded by a number of snapshots and a budget of stored data bytes per step.
-- N2: A one-year read of states and programs, and of remote addresses, at a 6-hour step returns within the views' 10-second deadline on
-  the reference host, with the address mix of N7.
+- N2: A one-year read of states and programs, and of remote addresses, at a 6-hour step, and both reads over 1,095 days (the default
+  `retention.rollups_1h`) at a 1-day step return within the views' 10-second deadline on the reference host, with the address mix of N7.
 - N3: The disk growth of a day of one snapshot a minute is measured and stated.
 - N7: The benchmark of N2 and N3 measures at the address cap: every snapshot's 25 remotes are addresses no earlier snapshot named, so
   each hourly bucket reaches 1,500 addresses before it is trimmed.
@@ -99,8 +101,9 @@ view (#51) has to show sockets per state, per program and the top remote address
   hold counts only (E4, E5, N5).
 - AC8: A failing or busy fold step rolls back whole and is retried; buckets past `retention.rollups_5m` and `retention.rollups_1h` are
   removed with their tier (E12, N4).
-- AC9: The storage benchmark measures on the reference host a fold step against an ingest batch, the disk growth of a day and a one-year
-  read of both reads with new addresses in every snapshot, and the results are stated in `docs/BENCHMARKS.md` (N1, N2, N3, N7).
+- AC9: The storage benchmark measures on the reference host a fold step against an ingest batch, the disk growth of a day and the
+  one-year and 1,095-day reads of both kinds with new addresses in every snapshot, and the results are stated in `docs/BENCHMARKS.md` (N1,
+  N2, N3, N7).
 
 ## Out of scope
 
@@ -119,10 +122,9 @@ view (#51) has to show sockets per state, per program and the top remote address
   500 and an hourly one 1,500, which the regular cadence cannot exceed, with a capped-snapshot count (Challenge 1).
 - What is the program cut with one measure? Answered: the Lead takes record 0223's 50 per measure, here the count alone; the cap of 500 per bucket stays.
 - Is a state missing from a snapshot 0? Answered: yes, from the issue's requirement that the stack's top edge is every counted socket.
-- Can a one-year address read over hourly buckets of 1,500 addresses meet N2? Answered: no, from a probe of the planned table (13.1
-  million rows, the top 20 alone 5.4 to 6.2 s in SQLite on the development host, about three times that on the reference host); the
-  Lead adds the trim of ended buckets (E14), which bounds a year to 876,000 address rows.
-- Do the issue's claims about today hold? Answered: yes ([Agent connections](../../docs/areas/agent-connections.md); `internal/connstats`).
+- Can a one-year address read over hourly buckets of 1,500 addresses meet N2? Answered: no (record 0225, *Context*); the Lead adds the
+  trim of ended buckets (E14).
+- Do the issue's claims about today hold? Answered: yes ([Agent connections](../../docs/areas/agent-connections.md)).
 
 ## Area documents
 
