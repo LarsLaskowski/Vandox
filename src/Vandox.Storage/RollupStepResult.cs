@@ -33,6 +33,26 @@ public sealed class RollupStepResult
     public int ProgramBuckets { get; init; }
 
     /// <summary>
+    /// Gets the number of connection snapshots folded.
+    /// </summary>
+    public int ConnectionSnapshots { get; init; }
+
+    /// <summary>
+    /// Gets the number of connection snapshots skipped because they could not be decoded or validated.
+    /// </summary>
+    public int SkippedConnectionSnapshots { get; init; }
+
+    /// <summary>
+    /// Gets the number of connection buckets written.
+    /// </summary>
+    public int ConnectionBuckets { get; init; }
+
+    /// <summary>
+    /// Gets the number of address rows the trim removed.
+    /// </summary>
+    public int TrimmedAddresses { get; init; }
+
+    /// <summary>
     /// Gets whether more values wait to be folded.
     /// </summary>
     public bool More { get; init; }

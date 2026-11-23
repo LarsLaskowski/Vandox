@@ -355,12 +355,13 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
-    /// Combines the results of the metric fold and the program fold of one step.
+    /// Combines the results of the metric fold, the program fold and the connection fold of one step.
     /// </summary>
     /// <param name="metrics">The result of the metric fold</param>
     /// <param name="programs">The result of the program fold</param>
-    /// <returns>The combined result, with more to fold when either has more</returns>
-    private static RollupStepResult Combine(RollupStepResult metrics, RollupStepResult programs)
+    /// <param name="connections">The result of the connection fold</param>
+    /// <returns>The combined result, with more to fold when any has more</returns>
+    private static RollupStepResult Combine(RollupStepResult metrics, RollupStepResult programs, RollupStepResult connections)
     {
         return new RollupStepResult
                {
@@ -369,7 +370,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                    Snapshots = programs.Snapshots,
                    SkippedSnapshots = programs.SkippedSnapshots,
                    ProgramBuckets = programs.ProgramBuckets,
-                   More = metrics.More || programs.More
+                   ConnectionSnapshots = connections.ConnectionSnapshots,
+                   SkippedConnectionSnapshots = connections.SkippedConnectionSnapshots,
+                   ConnectionBuckets = connections.ConnectionBuckets,
+                   TrimmedAddresses = connections.TrimmedAddresses,
+                   More = metrics.More || programs.More || connections.More
                };
     }
 
@@ -1094,7 +1099,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         ArgumentNullException.ThrowIfNull(policy);
 
-        return RunRetentionAsync(RollupContext, true, (session, token) => Combine(RollupFolder.Fold(session, policy, now, token), ProgramRollupFolder.Fold(session, policy, now, token)), cancellationToken);
+        return RunRetentionAsync(RollupContext, true, (session, token) => Combine(RollupFolder.Fold(session, policy, now, token), ProgramRollupFolder.Fold(session, policy, now, token), ConnectionRollupFolder.Fold(session, policy, now, token)), cancellationToken);
     }
 
     /// <inheritdoc/>

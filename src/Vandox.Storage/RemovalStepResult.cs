@@ -53,6 +53,16 @@ public sealed class RemovalStepResult
     public int ProgramHourlyRows { get; init; }
 
     /// <summary>
+    /// Gets the number of 5-minute connection rows and totals removed.
+    /// </summary>
+    public int ConnectionFiveMinuteRows { get; init; }
+
+    /// <summary>
+    /// Gets the number of hourly connection rows and totals removed.
+    /// </summary>
+    public int ConnectionHourlyRows { get; init; }
+
+    /// <summary>
     /// Gets the number of template hours removed.
     /// </summary>
     public int TemplateHours { get; init; }

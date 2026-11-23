@@ -27,6 +27,14 @@ internal sealed class RetentionRemover
 
     private const string ProgramHourlyTotals = "program_rollup_totals_1h";
 
+    private const string ConnectionFiveMinuteRows = "connection_rollups_5m";
+
+    private const string ConnectionFiveMinuteTotals = "connection_rollup_totals_5m";
+
+    private const string ConnectionHourlyRows = "connection_rollups_1h";
+
+    private const string ConnectionHourlyTotals = "connection_rollup_totals_1h";
+
     private const string TemplateHours = "template_hours";
 
     private const string Incidents = "incidents";
@@ -68,6 +76,10 @@ internal sealed class RetentionRemover
                                                    ProgramFiveMinuteTotals,
                                                    ProgramHourlyRows,
                                                    ProgramHourlyTotals,
+                                                   ConnectionFiveMinuteRows,
+                                                   ConnectionFiveMinuteTotals,
+                                                   ConnectionHourlyRows,
+                                                   ConnectionHourlyTotals,
                                                    TemplateHours,
                                                    Incidents,
                                                    Holds
@@ -226,6 +238,8 @@ internal sealed class RetentionRemover
                    HourlyValues = Count(HourlyBuckets),
                    ProgramFiveMinuteRows = Count(ProgramFiveMinuteRows) + Count(ProgramFiveMinuteTotals),
                    ProgramHourlyRows = Count(ProgramHourlyRows) + Count(ProgramHourlyTotals),
+                   ConnectionFiveMinuteRows = Count(ConnectionFiveMinuteRows) + Count(ConnectionFiveMinuteTotals),
+                   ConnectionHourlyRows = Count(ConnectionHourlyRows) + Count(ConnectionHourlyTotals),
                    TemplateHours = Count(TemplateHours),
                    RemovedIncidents = Count(Incidents),
                    Holds = Count(Holds),
@@ -258,8 +272,8 @@ internal sealed class RetentionRemover
                    RecordKind.ProcessSnapshot or RecordKind.ConnectionSnapshot or RecordKind.MariaDbStatus => _policy.Snapshots,
                    RecordKind.KernelEvent or RecordKind.ServiceState or RecordKind.BackupRun => _policy.Events,
                    GapRecords or GapRows => GapPeriod(),
-                   FiveMinuteBuckets or ProgramFiveMinuteRows or ProgramFiveMinuteTotals => _policy.FiveMinuteRollups,
-                   HourlyBuckets or ProgramHourlyRows or ProgramHourlyTotals or TemplateHours => _policy.HourlyRollups,
+                   FiveMinuteBuckets or ProgramFiveMinuteRows or ProgramFiveMinuteTotals or ConnectionFiveMinuteRows or ConnectionFiveMinuteTotals => _policy.FiveMinuteRollups,
+                   HourlyBuckets or ProgramHourlyRows or ProgramHourlyTotals or ConnectionHourlyRows or ConnectionHourlyTotals or TemplateHours => _policy.HourlyRollups,
                    _ => _policy.Incidents
                };
     }
@@ -302,6 +316,10 @@ internal sealed class RetentionRemover
                    ProgramFiveMinuteTotals => Walk(limit => ReadProgramTotals(RetentionQueries.WalkProgramTotalFiveMinutes, horizon, limit), row => RemoveProgramTotal(RetentionQueries.DeleteProgramTotalFiveMinutes, row)),
                    ProgramHourlyRows => Walk(limit => ReadProgramRows(RetentionQueries.WalkProgramHourly, horizon, limit), row => RemoveProgramRow(RetentionQueries.DeleteProgramHourly, row)),
                    ProgramHourlyTotals => Walk(limit => ReadProgramTotals(RetentionQueries.WalkProgramTotalHourly, horizon, limit), row => RemoveProgramTotal(RetentionQueries.DeleteProgramTotalHourly, row)),
+                   ConnectionFiveMinuteRows => Walk(limit => ReadConnectionRows(ConnectionRollupSql.WalkRowsFiveMinutes, horizon, limit), row => RemoveConnectionRow(ConnectionRollupSql.DeleteRowFiveMinutes, row)),
+                   ConnectionFiveMinuteTotals => Walk(limit => ReadProgramTotals(ConnectionRollupSql.WalkTotalsFiveMinutes, horizon, limit), row => RemoveProgramTotal(ConnectionRollupSql.DeleteTotalFiveMinutes, row)),
+                   ConnectionHourlyRows => Walk(limit => ReadConnectionRows(ConnectionRollupSql.WalkRowsHourly, horizon, limit), row => RemoveConnectionRow(ConnectionRollupSql.DeleteRowHourly, row)),
+                   ConnectionHourlyTotals => Walk(limit => ReadProgramTotals(ConnectionRollupSql.WalkTotalsHourly, horizon, limit), row => RemoveProgramTotal(ConnectionRollupSql.DeleteTotalHourly, row)),
                    TemplateHours => Walk(limit => ReadTemplateHours(position, horizon, limit), row => RemoveTemplateHour(row, position)),
                    Incidents => Walk(limit => ReadIncidents(position, horizon, limit), row => RemoveIncident(row, position)),
                    Holds => Walk(limit => ReadHolds(position, horizon, limit), row => RemoveHold(row, position)),
@@ -729,6 +747,38 @@ internal sealed class RetentionRemover
     private bool RemoveProgramRow(string sql, RetentionProgramRow row)
     {
         return _session.Statement(sql).Set(SourceParameter, row.Source).Set(BucketParameter, row.Bucket).Set("$program", row.Program).Execute() > 0;
+    }
+
+    /// <summary>
+    /// Reads a page of the oldest connection rows of a tier below the horizon.
+    /// </summary>
+    /// <param name="sql">The walk statement of the tier</param>
+    /// <param name="horizon">The bucket start before which a bucket has expired</param>
+    /// <param name="limit">The page size</param>
+    /// <returns>The connection rows</returns>
+    private List<RetentionConnectionRow> ReadConnectionRows(string sql, long horizon, int limit)
+    {
+        var rows = new List<RetentionConnectionRow>();
+
+        using var reader = _session.Statement(sql).Set(UpperParameter, horizon).Set(LimitParameter, (long)limit).Query();
+
+        while (reader.Read())
+        {
+            rows.Add(new RetentionConnectionRow(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetString(3)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Removes a connection row.
+    /// </summary>
+    /// <param name="sql">The delete statement of the tier</param>
+    /// <param name="row">The connection row</param>
+    /// <returns><c>true</c> when the row was removed</returns>
+    private bool RemoveConnectionRow(string sql, RetentionConnectionRow row)
+    {
+        return _session.Statement(sql).Set(SourceParameter, row.Source).Set(BucketParameter, row.Bucket).Set("$kind", row.Kind).Set("$name", row.Name).Execute() > 0;
     }
 
     /// <summary>
