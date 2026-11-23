@@ -62,7 +62,20 @@ internal static class ConnectionBenchmark
 
     #region Fields
 
-    private static readonly string[] _tcpStates = ["ESTABLISHED", "TIME_WAIT", "CLOSE_WAIT", "SYN_SENT", "SYN_RECV", "FIN_WAIT1"];
+    private static readonly string[] _tcpStates = [
+                                                      "ESTABLISHED",
+                                                      "SYN_SENT",
+                                                      "SYN_RECV",
+                                                      "FIN_WAIT1",
+                                                      "FIN_WAIT2",
+                                                      "TIME_WAIT",
+                                                      "CLOSE",
+                                                      "CLOSE_WAIT",
+                                                      "LAST_ACK",
+                                                      "LISTEN",
+                                                      "CLOSING",
+                                                      "NEW_SYN_RECV"
+                                                  ];
 
     #endregion // Fields
 
