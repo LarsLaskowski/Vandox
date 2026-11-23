@@ -19,7 +19,7 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
 ## Where tests live
 
 - .NET: one test project per production project under `tests/` (`src/Vandox.Core` → `tests/Vandox.Core.Tests`),
-  one test class per class under test (`Foo.cs` → `FooTests.cs`) in the namespace `<Project>.Tests`. Internal
+  one test class per class under test (`Foo.cs` → `FooTests.cs`, split by concern as *Naming* says) in the namespace `<Project>.Tests`. Internal
   members are tested through `InternalsVisibleTo`. Shared helpers (`TempDirectory`, fakes, builders) are
   `internal` classes of the test project.
   Every test project has a `MSTestSettings.cs` with `[assembly: DoNotParallelize]`, since heap, allocation and

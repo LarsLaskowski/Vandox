@@ -5,8 +5,7 @@ Not template-managed; a product PR updates an entry the change makes untrue (`.s
 PR*).
 
 Every entry points: it names files, types or endpoints and links the area document (`docs/areas/README.md`) or record
-that states the rules; values, limits, sequences and what a type does stand only there (a test double: its XML
-documentation). `config-check.py` warns about an entry of more than `PROJECT_ENTRY_MAX_PROSE` prose words (code spans and links do not count) and about a change that adds more than `PROJECT_MAX_GROWTH` words to this file (`.squad/tools/squad_settings.py`).
+that states the rules; values, limits, sequences and what a type does stand only there. `config-check.py` warns about an entry of more than `PROJECT_ENTRY_MAX_PROSE` prose words (code spans and links do not count) and about a change that adds more than `PROJECT_MAX_GROWTH` words to this file (`.squad/tools/squad_settings.py`).
 
 ## Security areas
 
