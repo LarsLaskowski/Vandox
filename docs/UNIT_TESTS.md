@@ -11,7 +11,7 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
 ## Test stack
 
 - Go (agent): the standard `testing` package (plus `net/http/httptest` for handlers). No assertion or mocking
-  library — hand-written fakes behind small interfaces, listed in `.squad/project.md` (*Test doubles*).
+  library — hand-written fakes behind small interfaces, listed under *Test doubles*.
 - .NET (backend): MSTest 4 (`[TestClass]`, `[TestMethod]`, `[DataRow]`) with the `MSTest` assertions, coverlet for
   coverage (`coverlet.runsettings`) and `Microsoft.Extensions.TimeProvider.Testing` for the clock. No mocking
   library either: hand-written fakes behind small interfaces (*Test doubles*).
@@ -30,8 +30,30 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
 
 ## Test doubles
 
-The reusable fakes and stubs are listed in `.squad/project.md` (*Test doubles*); reuse them before writing a new
-one, and add a new one there.
+Hand-written and reused (no mocking library); what each double does is in its own documentation comment.
+Implemented unless marked planned. Reuse them before writing a new one, and add a new one to the table.
+
+| Surface | Double (where) | Stands in for |
+| ------- | -------------- | ------------- |
+| `/proc`, `/sys` | `io/fs.FS` over `testdata/` or `fstest.MapFS`, blocking and erroring wrappers (collector tests) | kernel files |
+| `statfs`, `adjtimex` | scripted functions in `Sources` (`internal/sysstats`) | system calls |
+| notification socket | `unixgram` socket in `t.TempDir()`, recording `notifier` (`internal/sdnotify`, `internal/agent`) | `NOTIFY_SOCKET` |
+| scheduler | scripted and hanging collectors, recording sink (`internal/scheduler`) | collectors, spool |
+| systemd D-Bus | `fakeSystemd` (`internal/svcstats`); replaying bus server (`internal/sdbus`) | the system bus |
+| journald | `internal/journal/journaltest` writer, `testdata/journal/`, `world` harness (`internal/logship`) | journal and log files |
+| agent state | a real store in `t.TempDir()` (`internal/agentstate`) | `agent-state.json` |
+| MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
+| ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
+| time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock`, `DisposeFailingClock`, `RefreshProbe` (Backend tests), `CountingClock` (Storage tests) | the clock |
+| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader`, `FakeProgramRollupReader`, `ListLogger` (Backend tests) | store, readers |
+| retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
+| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests); `ProbeTimeSeriesReader`, `ScriptedTimeSeriesReader` (Backend tests) | `ITimeSeriesReader` |
+| log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
+| files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
+| Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `HistoryChartFixture`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
+| web login (C#) | `BackendFixture`, `LoginTestClient`, `ScriptedPasswordVerifier`, `Fixed*` and `Unset*` providers (Backend tests) | service, browser |
+| ingest (C#) | `IngestRig`, `IngestCall`, `RecordingRecordWriter`, `CountingBodyStream`, `StartingResponseBody` (Backend tests) | request, writer |
+| Telegram Bot API | planned: a fake client | the Bot API |
 
 - A double of an ASP.NET Core request or response stream behaves as Kestrel does: it refuses synchronous I/O, and a
   response stream starts the response on any flush, not only when a byte is written (`StartingResponseBody` is the
@@ -75,6 +97,8 @@ and `uninstall.sh` and the files they ship (`vandox-agent.service`, `agent.yaml`
 
 - .NET: `<TypeUnderTest><Behavior>` in plain English, e.g. `PingCheckerSharesRunningPingAndTimesOut`; every
   test method has an XML summary that states the behavior in one sentence. Async tests return `Task`.
+  A type whose tests grow large is split by concern into `{TypeUnderTest}{Concern}Tests` (for example
+  `ParserFailureTests`), one file each.
 - Go: `TestFunction_Scenario` or `TestType_Method` with `t.Run` subtests named after the scenario, e.g.
   `t.Run("empty input returns error", …)`.
 

@@ -1,12 +1,12 @@
 # Project
 
-What the squad needs to know beyond the stack, read by five members on every launch. Agent: Go (`cmd/vandox-agent`, `internal/`); backend: .NET with Blazor (`src/Vandox.*`); records 0073, 0197.
+What the squad needs to know beyond the stack, read by the Lead, the Devil's Advocate, Security and the Reviewer; the test doubles are in `docs/UNIT_TESTS.md` (*Test doubles*). Agent: Go (`cmd/vandox-agent`, `internal/`); backend: .NET with Blazor (`src/Vandox.*`); records 0073, 0197.
 Not template-managed; a product PR updates an entry the change makes untrue (`.squad/routing.md`, *Scope of a product
 PR*).
 
 Every entry points: it names files, types or endpoints and links the area document (`docs/areas/README.md`) or record
 that states the rules; values, limits, sequences and what a type does stand only there (a test double: its XML
-documentation). `config-check.py` warns past `PROJECT_MAX_WORDS` words.
+documentation). `config-check.py` warns about an entry of more than `PROJECT_ENTRY_MAX_PROSE` prose words (code spans and links do not count) and about a change that adds more than `PROJECT_MAX_GROWTH` words to this file (`.squad/tools/squad_settings.py`).
 
 ## Security areas
 
@@ -150,11 +150,11 @@ known-variable list, the secrets table in `README.md`
 
 **An external API call or DTO** touches:
 - the client and its types — the external shape must not leak past it
-- that client's fake in *Test doubles*
+- that client's fake in `docs/UNIT_TESTS.md` (*Test doubles*)
 
 **An external source or destination** (`/proc`, `/sys`, D-Bus, journald, the MariaDB socket, Telegram, the
 tailnet) touches:
-- the small interface it is read through, and its fake in *Test doubles*
+- the small interface it is read through, and its fake in `docs/UNIT_TESTS.md` (*Test doubles*)
 - the deadline that keeps it from blocking the agent (0029) and its gap on timeout (0028)
 - the privilege in `deploy/agent/` (0030) or the ACL and port binding (0010, 0017)
 - its *Security areas* entry
@@ -164,30 +164,3 @@ tailnet) touches:
 - the records found by topic: `grep -l -i -E 'dependabot|workflow|dockerfile|compose|golangci|ci\.yml'
   docs/decisions/0*.md`
 - a contradicted record: edited (unreleased) or superseded (released) in the same pull request, or the change dropped
-
-## Test doubles
-
-Hand-written and reused (no mocking library); rules in `docs/UNIT_TESTS.md` (*Test doubles*), what each double does in
-its own documentation comment. Implemented unless marked planned.
-
-| Surface | Double (where) | Stands in for |
-| ------- | -------------- | ------------- |
-| `/proc`, `/sys` | `io/fs.FS` over `testdata/` or `fstest.MapFS`, blocking and erroring wrappers (collector tests) | kernel files |
-| `statfs`, `adjtimex` | scripted functions in `Sources` (`internal/sysstats`) | system calls |
-| notification socket | `unixgram` socket in `t.TempDir()`, recording `notifier` (`internal/sdnotify`, `internal/agent`) | `NOTIFY_SOCKET` |
-| scheduler | scripted and hanging collectors, recording sink (`internal/scheduler`) | collectors, spool |
-| systemd D-Bus | `fakeSystemd` (`internal/svcstats`); replaying bus server (`internal/sdbus`) | the system bus |
-| journald | `internal/journal/journaltest` writer, `testdata/journal/`, `world` harness (`internal/logship`) | journal and log files |
-| agent state | a real store in `t.TempDir()` (`internal/agentstate`) | `agent-state.json` |
-| MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
-| ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
-| time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock`, `DisposeFailingClock`, `RefreshProbe` (Backend tests), `CountingClock` (Storage tests) | the clock |
-| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader`, `FakeProgramRollupReader`, `ListLogger` (Backend tests) | store, readers |
-| retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
-| time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests); `ProbeTimeSeriesReader`, `ScriptedTimeSeriesReader` (Backend tests) | `ITimeSeriesReader` |
-| log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
-| files (C#) | `TempDirectory`, `RepositoryFiles.Path` (each test project) | directories, fixtures |
-| Blazor (C#) | `ComponentTestRenderer`, `RecordingJsRuntime`, `*NavigationManager`, `FakeLogExplorer`, `*PageHarness`, `HistoryChartFixture`, `ReportPieces`, `WebSourceScanner` (Backend tests) | renderer, browser |
-| web login (C#) | `BackendFixture`, `LoginTestClient`, `ScriptedPasswordVerifier`, `Fixed*` and `Unset*` providers (Backend tests) | service, browser |
-| ingest (C#) | `IngestRig`, `IngestCall`, `RecordingRecordWriter`, `CountingBodyStream`, `StartingResponseBody` (Backend tests) | request, writer |
-| Telegram Bot API | planned: a fake client | the Bot API |
