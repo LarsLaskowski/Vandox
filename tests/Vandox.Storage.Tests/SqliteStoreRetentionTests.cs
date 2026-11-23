@@ -1274,6 +1274,56 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
+    /// The per-connection buckets of each tier are removed once past the period of the tier, rows and totals alike, and counted per tier; newer buckets stay.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreRemoveExpiredRemovesConnectionBucketsPerTier()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = new RetentionPolicy
+                     {
+                         Raw = RetentionSamples.Days(1),
+                         FiveMinuteRollups = RetentionSamples.Days(1),
+                         HourlyRollups = RetentionSamples.Days(2),
+                         Logs = RetentionSamples.Days(1),
+                         Snapshots = RetentionSamples.Days(1),
+                         Events = RetentionSamples.Days(3),
+                         KillWindowBefore = TimeSpan.FromHours(1),
+                         KillWindowAfter = TimeSpan.FromMinutes(30)
+                     };
+        var now = Samples.Base.AddDays(3);
+        var old5m = ProgramSamples.FiveMinutes(now.AddDays(-1).AddMinutes(-10));
+        var new5m = ProgramSamples.FiveMinutes(now.AddHours(-1));
+        var old1h = ProgramSamples.Hour(now.AddDays(-2).AddHours(-1));
+        var new1h = ProgramSamples.Hour(now.AddHours(-1));
+
+        await InsertConnectionBucketAsync(directory, "5m", old5m, ["a", "b", "c"]);
+        await InsertConnectionBucketAsync(directory, "5m", new5m, ["a"]);
+        await InsertConnectionBucketAsync(directory, "1h", old1h, ["a", "b"]);
+        await InsertConnectionBucketAsync(directory, "1h", new1h, ["a"]);
+        await RetentionSamples.MarkScannedAsync(store, [], TestContext.CancellationToken);
+
+        // Act
+        var steps = await RetentionSamples.RemovePassAsync(store, policy, now, TestContext.CancellationToken);
+        var rows5m = await RowsAsync(directory, "SELECT bucket FROM connection_rollups_5m");
+        var totals5m = await RowsAsync(directory, "SELECT bucket FROM connection_rollup_totals_5m");
+        var rows1h = await RowsAsync(directory, "SELECT bucket FROM connection_rollups_1h");
+        var totals1h = await RowsAsync(directory, "SELECT bucket FROM connection_rollup_totals_1h");
+
+        // Assert
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new5m)], rows5m, "the 5-minute connection rows older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new5m)], totals5m, "the 5-minute connection totals older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new1h)], rows1h, "the hourly connection rows older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new1h)], totals1h, "the hourly connection totals older than the period go");
+        Assert.AreEqual(4, steps.Sum(step => step.ConnectionFiveMinuteRows), "four 5-minute rows are reported removed: three items and the total");
+        Assert.AreEqual(3, steps.Sum(step => step.ConnectionHourlyRows), "three hourly rows are reported removed: two items and the total");
+    }
+
+    /// <summary>
     /// Imported records stay past every period.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -2038,6 +2088,29 @@ public partial class SqliteStoreRetentionTests
         }
 
         sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO program_rollup_totals_{tier}(source, bucket, snapshots, pss_snapshots, incomplete, named, rss_sum, pss_sum, cpu_sum) VALUES ('processes', {ns}, 1, 0, 0, {programs.Length}, {programs.Length}, 0, {programs.Length})");
+
+        await RetentionSamples.ExecuteAsync(directory.Path, sql.ToString(), TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts the program items of a source and a bucket of a tier of the connection rollups and the total of the bucket.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="tier">The table suffix, <c>5m</c> or <c>1h</c></param>
+    /// <param name="bucket">The bucket start</param>
+    /// <param name="programs">The program names</param>
+    /// <returns>A task that completes when the rows are stored</returns>
+    private async Task InsertConnectionBucketAsync(TempDirectory directory, string tier, DateTimeOffset bucket, string[] programs)
+    {
+        var ns = RetentionSamples.Ns(bucket);
+        var sql = new System.Text.StringBuilder();
+
+        foreach (var program in programs)
+        {
+            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO connection_rollups_{tier}(source, bucket, kind, name, seen, min_value, max_value, sum_value) VALUES ('connections', {ns}, 1, '{program}', 1, 1, 1, 1);");
+        }
+
+        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO connection_rollup_totals_{tier}(source, bucket, snapshots, incomplete, capped, programs, addresses, trimmed, process_sum) VALUES ('connections', {ns}, 1, 0, 0, {programs.Length}, 0, 0, {programs.Length})");
 
         await RetentionSamples.ExecuteAsync(directory.Path, sql.ToString(), TestContext.CancellationToken);
     }
