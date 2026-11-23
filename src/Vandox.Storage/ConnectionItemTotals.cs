@@ -1,18 +1,10 @@
 namespace Vandox.Storage;
 
-// Skeleton: removed with the implementation
-#pragma warning disable S2325, RH2003, S4487
 /// <summary>
 /// The totals of one state, program or address within a connection bucket.
 /// </summary>
 internal sealed class ConnectionItemTotals
 {
-    #region Fields
-
-    private readonly double _value;
-
-    #endregion // Fields
-
     #region Constructors
 
     /// <summary>
@@ -21,7 +13,10 @@ internal sealed class ConnectionItemTotals
     /// <param name="value">The value of the first snapshot that names the item</param>
     internal ConnectionItemTotals(double value)
     {
-        _value = value;
+        Seen = 1;
+        Minimum = value;
+        Maximum = value;
+        Sum = RollupFolder.Clamp(value);
     }
 
     #endregion // Constructors
@@ -31,22 +26,22 @@ internal sealed class ConnectionItemTotals
     /// <summary>
     /// Gets the number of snapshots that name the item.
     /// </summary>
-    internal long Seen => throw new NotImplementedException();
+    internal long Seen { get; private set; }
 
     /// <summary>
     /// Gets the smallest value.
     /// </summary>
-    internal double Minimum => throw new NotImplementedException();
+    internal double Minimum { get; private set; }
 
     /// <summary>
     /// Gets the largest value.
     /// </summary>
-    internal double Maximum => throw new NotImplementedException();
+    internal double Maximum { get; private set; }
 
     /// <summary>
     /// Gets the sum of the values, limited to the range of a double.
     /// </summary>
-    internal double Sum => throw new NotImplementedException();
+    internal double Sum { get; private set; }
 
     #endregion // Properties
 
@@ -58,11 +53,11 @@ internal sealed class ConnectionItemTotals
     /// <param name="value">The value</param>
     internal void Add(double value)
     {
-        throw new NotImplementedException();
+        Seen++;
+        Minimum = Math.Min(Minimum, value);
+        Maximum = Math.Max(Maximum, value);
+        Sum = RollupFolder.Clamp(Sum + value);
     }
 
     #endregion // Methods
 }
-
-// Skeleton: removed with the implementation
-#pragma warning restore S2325, RH2003, S4487

@@ -93,6 +93,7 @@ internal sealed class RetentionRemover
     private readonly long _scanned;
     private readonly long _watermark;
     private readonly long _programWatermark;
+    private readonly long _connectionWatermark;
     private readonly long? _eventsHorizon;
     private readonly Dictionary<string, int> _counts = [with(StringComparer.Ordinal)];
 
@@ -121,6 +122,7 @@ internal sealed class RetentionRemover
         _scanned = session.ReadNumber(RetentionQueries.KillScanKey);
         _watermark = session.ReadNumber(RetentionQueries.RollupWatermarkKey);
         _programWatermark = session.ReadNumber(RetentionQueries.ProgramRollupWatermarkKey);
+        _connectionWatermark = session.ReadNumber(ConnectionRollupSql.WatermarkKey);
         _eventsHorizon = policy.Events is null ? null : StorageTime.ToNanoseconds(now - policy.Events.Value);
     }
 
@@ -563,6 +565,11 @@ internal sealed class RetentionRemover
         if (kind != RecordKind.ConnectionSnapshot)
         {
             return true;
+        }
+
+        if (row.Id > _connectionWatermark)
+        {
+            return false;
         }
 
         if (RetentionSession.Exists(_session.Statement(RetentionQueries.IsNewestMark).Set("$id", row.Id)))

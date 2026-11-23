@@ -1,33 +1,39 @@
 namespace Vandox.Storage;
 
-// Skeleton: removed with the implementation
-#pragma warning disable S2325, RH2003
 /// <summary>
 /// One connection bucket a fold step adds to: the totals of its source and the states, programs and addresses it names.
 /// </summary>
 internal sealed class ConnectionBucket
 {
+    #region Fields
+
+    private readonly Dictionary<(int Kind, string Name), ConnectionItemTotals> _totals = [];
+    private readonly List<(int Kind, string Name, ConnectionItemTotals Totals)> _items = [];
+    private readonly Dictionary<string, List<int>> _snapshots = [with(StringComparer.Ordinal)];
+
+    #endregion // Fields
+
     #region Properties
 
     /// <summary>
     /// Gets the number of snapshots added to the bucket.
     /// </summary>
-    internal long Snapshots => throw new NotImplementedException();
+    internal long Snapshots { get; private set; }
 
     /// <summary>
     /// Gets the number of added snapshots with incomplete aggregates.
     /// </summary>
-    internal long Incomplete => throw new NotImplementedException();
+    internal long Incomplete { get; private set; }
 
     /// <summary>
     /// Gets the sum of the connections of all processes of the added snapshots.
     /// </summary>
-    internal double ProcessSum => throw new NotImplementedException();
+    internal double ProcessSum { get; private set; }
 
     /// <summary>
     /// Gets the states, programs and addresses of the bucket in the order they were first met.
     /// </summary>
-    internal IReadOnlyList<(int Kind, string Name, ConnectionItemTotals Totals)> Items => throw new NotImplementedException();
+    internal IReadOnlyList<(int Kind, string Name, ConnectionItemTotals Totals)> Items => _items;
 
     #endregion // Properties
 
@@ -40,7 +46,13 @@ internal sealed class ConnectionBucket
     /// <param name="incomplete">Whether the aggregates of the snapshot are incomplete</param>
     internal void Include(double processSum, bool incomplete)
     {
-        throw new NotImplementedException();
+        Snapshots++;
+        ProcessSum = RollupFolder.Clamp(ProcessSum + processSum);
+
+        if (incomplete)
+        {
+            Incomplete++;
+        }
     }
 
     /// <summary>
@@ -51,7 +63,16 @@ internal sealed class ConnectionBucket
     /// <param name="value">The value</param>
     internal void Add(int kind, string name, double value)
     {
-        throw new NotImplementedException();
+        if (_totals.TryGetValue((kind, name), out var totals))
+        {
+            totals.Add(value);
+
+            return;
+        }
+
+        totals = new ConnectionItemTotals(value);
+        _totals[(kind, name)] = totals;
+        _items.Add((kind, name, totals));
     }
 
     /// <summary>
@@ -62,7 +83,15 @@ internal sealed class ConnectionBucket
     /// <param name="snapshot">The ordinal of the snapshot within the step</param>
     internal void AddAddress(string address, double value, int snapshot)
     {
-        throw new NotImplementedException();
+        Add(ConnectionRollupFolder.AddressKind, address, value);
+
+        if (_snapshots.TryGetValue(address, out var ordinals) == false)
+        {
+            ordinals = [];
+            _snapshots[address] = ordinals;
+        }
+
+        ordinals.Add(snapshot);
     }
 
     /// <summary>
@@ -72,11 +101,8 @@ internal sealed class ConnectionBucket
     /// <returns>The ordinals, empty when no snapshot named the address</returns>
     internal IReadOnlyList<int> SnapshotsOf(string address)
     {
-        throw new NotImplementedException();
+        return _snapshots.TryGetValue(address, out var ordinals) ? ordinals : [];
     }
 
     #endregion // Methods
 }
-
-// Skeleton: removed with the implementation
-#pragma warning restore S2325, RH2003
