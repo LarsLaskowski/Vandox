@@ -87,7 +87,7 @@ internal static class RollupSteps
     }
 
     /// <summary>
-    /// Reads one nullable integer.
+    /// Reads one nullable integer from a statement that is an aggregate and so returns exactly one row; a missing value arrives as <c>null</c>.
     /// </summary>
     /// <param name="connection">The reader connection</param>
     /// <param name="sql">The statement</param>
