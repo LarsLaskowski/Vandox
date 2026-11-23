@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IProgramRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IProgramRollupReader, IConnectionRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
 {
     #region Constants
 
@@ -1258,6 +1258,34 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IProgramRollupReader
+
+    #region IConnectionRollupReader
+
+    /// <inheritdoc/>
+    public Task<ConnectionRollupResult> ConnectionRollupsAsync(ConnectionRollupQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return ReadAsync(connection => ConnectionRollupQueries.ReadAsync(connection, query, cancellationToken), ConnectionRollupQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ConnectionAddressResult> ConnectionAddressesAsync(ConnectionRollupQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return ReadAsync(connection => ConnectionRollupQueries.ReadAddressesAsync(connection, query, cancellationToken), ConnectionRollupQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ProgramSourceList> ConnectionSourcesAsync(ProgramSourceQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return ReadAsync(connection => ConnectionRollupQueries.ReadSourcesAsync(connection, query, cancellationToken), ConnectionRollupQueries.Context, cancellationToken);
+    }
+
+    #endregion // IConnectionRollupReader
 
     #region ITimeSeriesReader
 
