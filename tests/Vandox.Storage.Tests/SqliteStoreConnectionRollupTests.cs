@@ -979,7 +979,7 @@ public class SqliteStoreConnectionRollupTests
         // Arrange
         using var directory = new TempDirectory();
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
-        string[] names = ["\u0000", "\u0001", "‮", "\U0001F600", "q\"u'o\\te", "100%_", "x'); DROP TABLE records; --", new string('a', 1024)];
+        string[] names = ["\u0000", "\u0001", "\u202E", "\U0001F600", "q\"u'o\\te", "100%_", "x'); DROP TABLE records; --", new string('a', 1024)];
         var processes = names.Select((name, index) => ConnectionSamples.Process(index + 1, name, (uint)(names.Length - index))).ToArray();
 
         await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ConnectionSamples.Snapshot(Samples.Base.AddSeconds(10), ConnectionSamples.Source, processes: processes));
