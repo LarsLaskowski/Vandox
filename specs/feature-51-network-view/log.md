@@ -6,3 +6,4 @@ are quoted in full.
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-11-23 11:36 | 1 Intake | Orchestrator | Issue #51 [Web] Network view, feature (labels type: feature, area: web), open, owner author, dependency #47 closed (PR #468). Branch ccr-202625b9-q92yzu off main c16e016. |
+| 2026-11-23 11:39 | 2a Spec | Lead | RESULT: ESCALATE — How far back should the network view's charts and its Top remote addresses table reach? Options: (A) separate backend feature first rolling up connection snapshots, view reads rollups (up to retention.rollups_1h, 1,095 days); (B) view alone on raw connection snapshots, only retention.snapshots (30 days), one sample per chart step; (C) build the rollups inside this feature. Lead recommends A. (opus/medium · 119,735 tokens · 25 tool uses · 210 s · 46 in · 15,967 out · 1,729,851 cache read · 105,973 cache write · 597,680 weighted) |
