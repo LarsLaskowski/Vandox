@@ -101,6 +101,10 @@ public sealed class RetentionService : BackgroundService
         var snapshots = 0L;
         var skipped = 0L;
         var programBuckets = 0L;
+        var connectionSnapshots = 0L;
+        var connectionSkipped = 0L;
+        var connectionBuckets = 0L;
+        var trimmed = 0L;
         StoreException? failure = null;
 
         try
@@ -116,6 +120,10 @@ public sealed class RetentionService : BackgroundService
                 snapshots += step.Snapshots;
                 skipped += step.SkippedSnapshots;
                 programBuckets += step.ProgramBuckets;
+                connectionSnapshots += step.ConnectionSnapshots;
+                connectionSkipped += step.SkippedConnectionSnapshots;
+                connectionBuckets += step.ConnectionBuckets;
+                trimmed += step.TrimmedAddresses;
                 more = step.More;
             }
             while (more && cancellationToken.IsCancellationRequested == false);
@@ -137,6 +145,11 @@ public sealed class RetentionService : BackgroundService
         if (snapshots > 0 || skipped > 0 || programBuckets > 0)
         {
             _logger.RetentionProgramsRolledUp(snapshots, skipped, programBuckets);
+        }
+
+        if (connectionSnapshots > 0 || connectionSkipped > 0 || connectionBuckets > 0 || trimmed > 0)
+        {
+            _logger.RetentionConnectionsRolledUp(connectionSnapshots, connectionSkipped, connectionBuckets, trimmed);
         }
 
         if (failure is not null)

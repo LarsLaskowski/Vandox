@@ -181,6 +181,89 @@ internal static class ProgramBenchmark
     }
 
     /// <summary>
+    /// Builds a batch of agent metric points one second apart.
+    /// </summary>
+    /// <param name="size">The number of records</param>
+    /// <param name="seq">The next sequence number, advanced by <paramref name="size"/></param>
+    /// <param name="first">The capture time of the first record</param>
+    /// <returns>The batch</returns>
+    internal static RecordBatch MetricBatch(int size, ref ulong seq, DateTimeOffset first)
+    {
+        var records = new DataRecord[size];
+
+        for (var index = 0; index < size; index++)
+        {
+            records[index] = new DataRecord
+                             {
+                                 Origin = RecordOrigin.Agent,
+                                 Source = "host",
+                                 Seq = seq++,
+                                 CapturedAt = first.AddSeconds(index),
+                                 Data = new MetricPoint
+                                        {
+                                            Name = "cpu",
+                                            Value = 1.5,
+                                            Unit = "percent",
+                                            Labels = new Dictionary<string, string>
+                                                     {
+                                                         ["cpu"] = "0"
+                                                     }
+                                        }
+                             };
+        }
+
+        return new RecordBatch
+               {
+                   AgentId = AgentId,
+                   BootId = BootId,
+                   ClockOffsetNs = 0,
+                   ReceivedAt = Now,
+                   Records = records
+               };
+    }
+
+    /// <summary>
+    /// Builds a batch of process snapshots of a source.
+    /// </summary>
+    /// <param name="size">The number of snapshots</param>
+    /// <param name="first">The capture time of the first snapshot</param>
+    /// <param name="interval">The time between two snapshots</param>
+    /// <param name="programs">The number of programs of a snapshot</param>
+    /// <returns>The batch</returns>
+    internal static RecordBatch SnapshotBatch(int size, DateTimeOffset first, TimeSpan interval, int programs)
+    {
+        var records = new DataRecord[size];
+
+        for (var index = 0; index < size; index++)
+        {
+            records[index] = Record(first + (index * interval), TypicalSnapshot(index, programs));
+        }
+
+        return Batch(records);
+    }
+
+    /// <summary>
+    /// Reads the number of pages of the database after a checkpoint that moves the journal into it.
+    /// </summary>
+    /// <param name="directory">The folder of the database</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that returns the page count and the page size</returns>
+    internal static async Task<(long Pages, long PageSize)> PagesAsync(string directory, CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Pooling=False");
+
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            var pages = await ScalarAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA page_count", cancellationToken).ConfigureAwait(false);
+            var size = await ScalarAsync(connection, "PRAGMA page_size", null, cancellationToken).ConfigureAwait(false);
+
+            return (pages, size);
+        }
+    }
+
+    /// <summary>
     /// Times the fold steps of five batches of metric points and snapshots, and prints them beside the time of the batches.
     /// </summary>
     /// <param name="directory">The folder of the database</param>
@@ -237,27 +320,6 @@ internal static class ProgramBenchmark
             var after = await PagesAsync(directory, cancellationToken).ConfigureAwait(false);
 
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"N4: a day of {DaySnapshots} snapshots of {ProgramsPerSnapshot} programs: page_count {before.Pages} before the fold, {after.Pages} after (page size {after.PageSize} bytes, +{(after.Pages - before.Pages) * after.PageSize / 1024.0:F0} KiB); the fold took {watch.Elapsed.TotalMilliseconds:F0} ms in {steps.Count} steps"));
-        }
-    }
-
-    /// <summary>
-    /// Reads the number of pages of the database after a checkpoint that moves the journal into it.
-    /// </summary>
-    /// <param name="directory">The folder of the database</param>
-    /// <param name="cancellationToken">Interrupts the measurement</param>
-    /// <returns>A task that returns the page count and the page size</returns>
-    private static async Task<(long Pages, long PageSize)> PagesAsync(string directory, CancellationToken cancellationToken)
-    {
-        var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Pooling=False");
-
-        await using (connection.ConfigureAwait(false))
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            var pages = await ScalarAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA page_count", cancellationToken).ConfigureAwait(false);
-            var size = await ScalarAsync(connection, "PRAGMA page_size", null, cancellationToken).ConfigureAwait(false);
-
-            return (pages, size);
         }
     }
 
@@ -413,68 +475,6 @@ internal static class ProgramBenchmark
             watch.Stop();
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"worst case: one snapshot of {HugeProcesses} processes with {HugeCommandBytes}-byte command lines (about 16 MiB) folded in {watch.Elapsed.TotalMilliseconds:F0} ms ({steps.Count} steps)"));
         }
-    }
-
-    /// <summary>
-    /// Builds a batch of agent metric points one second apart.
-    /// </summary>
-    /// <param name="size">The number of records</param>
-    /// <param name="seq">The next sequence number, advanced by <paramref name="size"/></param>
-    /// <param name="first">The capture time of the first record</param>
-    /// <returns>The batch</returns>
-    private static RecordBatch MetricBatch(int size, ref ulong seq, DateTimeOffset first)
-    {
-        var records = new DataRecord[size];
-
-        for (var index = 0; index < size; index++)
-        {
-            records[index] = new DataRecord
-                             {
-                                 Origin = RecordOrigin.Agent,
-                                 Source = "host",
-                                 Seq = seq++,
-                                 CapturedAt = first.AddSeconds(index),
-                                 Data = new MetricPoint
-                                        {
-                                            Name = "cpu",
-                                            Value = 1.5,
-                                            Unit = "percent",
-                                            Labels = new Dictionary<string, string>
-                                                     {
-                                                         ["cpu"] = "0"
-                                                     }
-                                        }
-                             };
-        }
-
-        return new RecordBatch
-               {
-                   AgentId = AgentId,
-                   BootId = BootId,
-                   ClockOffsetNs = 0,
-                   ReceivedAt = Now,
-                   Records = records
-               };
-    }
-
-    /// <summary>
-    /// Builds a batch of process snapshots of a source.
-    /// </summary>
-    /// <param name="size">The number of snapshots</param>
-    /// <param name="first">The capture time of the first snapshot</param>
-    /// <param name="interval">The time between two snapshots</param>
-    /// <param name="programs">The number of programs of a snapshot</param>
-    /// <returns>The batch</returns>
-    private static RecordBatch SnapshotBatch(int size, DateTimeOffset first, TimeSpan interval, int programs)
-    {
-        var records = new DataRecord[size];
-
-        for (var index = 0; index < size; index++)
-        {
-            records[index] = Record(first + (index * interval), TypicalSnapshot(index, programs));
-        }
-
-        return Batch(records);
     }
 
     /// <summary>
