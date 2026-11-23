@@ -13,7 +13,14 @@ internal sealed class ConnectionStepTotals
     /// <param name="grid">The steps</param>
     internal ConnectionStepTotals(ProgramStepGrid grid)
     {
+        var count = grid.Count;
+
         Grid = grid;
+        Snapshots = new long[count];
+        Incomplete = new long[count];
+        Capped = new long[count];
+        ProcessSums = new double[count];
+        Named = new double[count];
     }
 
     #endregion // Constructors
@@ -28,27 +35,27 @@ internal sealed class ConnectionStepTotals
     /// <summary>
     /// Gets the number of snapshots per step.
     /// </summary>
-    internal long[] Snapshots { get; } = [];
+    internal long[] Snapshots { get; }
 
     /// <summary>
     /// Gets the number of incomplete snapshots per step.
     /// </summary>
-    internal long[] Incomplete { get; } = [];
+    internal long[] Incomplete { get; }
 
     /// <summary>
     /// Gets the number of snapshots per step whose addresses the bucket cap dropped.
     /// </summary>
-    internal long[] Capped { get; } = [];
+    internal long[] Capped { get; }
 
     /// <summary>
     /// Gets the clamped sums of the connections of all processes per step.
     /// </summary>
-    internal double[] ProcessSums { get; } = [];
+    internal double[] ProcessSums { get; }
 
     /// <summary>
     /// Gets the clamped sums of the named programs per step, which the read of their points fills.
     /// </summary>
-    internal double[] Named { get; } = [];
+    internal double[] Named { get; }
 
     #endregion // Properties
 }
