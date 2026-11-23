@@ -141,7 +141,7 @@ What each step after the first adds, and how data stored before it reads:
   it, in steps, before it removes any of them and before it trims any bucket ([Connection rollups](connection-rollups.md)). The fold
   reads the snapshots above the watermark through `records_connection_fold` by name (`INDEXED BY`). **Write cost:** the index has one
   entry per connection snapshot, added when a snapshot is inserted and removed with it, and a record of any other kind only checks its
-  `kind`. **Build:** the step scans `records` once while the writer is busy: 12 ms on the development host for a database of 8,760
+  `kind`. **Build:** the step scans `records` once while the writer is busy: 11 ms on the development host for a database of 8,760
   hourly connection snapshots (`docs/BENCHMARKS.md`, *Connection rollups*).
 
 ### Migrations

@@ -366,21 +366,21 @@ periods:
 
 | Host | Date | Volume | N1: median batch | N1: median fold step | Trim-only steps | Worst-case step | N3: a day (1,440 snapshots) | Schema step 17 | Verdict |
 | ---- | ---- | ------ | ---------------: | -------------------: | --------------- | --------------- | --------------------------- | -------------: | ------- |
-| development host (sandbox, 4 logical CPUs, Ubuntu 24.04, .NET 11), not the reference host | 2026-11-23 | local disk (`/tmp`) | 666 ms | 320 ms (steps of 128 to 542 ms); the connection part alone: 131, 133, 146, 215 and 86 ms for 2,500 regular snapshots | 22 steps, 209 ms in all (9.5 ms each), 95,800 addresses trimmed; 14 steps of the connection part alone, 6.8 ms each | 8 full snapshots: 3 folding steps (slowest 72 ms), 149 ms in all | +1,843 pages of 4,096 bytes (+7,372 KiB), 25,214 rollup rows after the trim; fold and trim 806 ms | 12 ms (8,760 stored hourly snapshots, the tables, the indexes and `records_connection_fold`) | order of magnitude only |
+| development host (sandbox, 4 logical CPUs, Ubuntu 24.04, .NET 11), not the reference host | 2026-11-23 | local disk (`/tmp`) | 663 ms | 350 ms (10 steps of 19 to 518 ms); the connection part alone: 137, 136, 189, 205 and 85 ms for 2,500 regular snapshots | 22 steps, 158 ms in all (7.2 ms each), 95,800 addresses trimmed; 14 steps of the connection part alone, 6.7 ms each | 8 full snapshots: 3 folding steps (slowest 86 ms), 178 ms in all | +1,884 pages of 4,096 bytes (+7,536 KiB), 27,086 rollup rows after the trim; fold and trim 846 ms in 5 steps | 11 ms (8,760 stored hourly snapshots, the tables, the indexes and `records_connection_fold`) | order of magnitude only |
 | DS918+ (reference host) | pending | SSD volume | pending | pending | pending | pending | pending | pending | pending the Product Manager's run |
 
 | Host | Date | Volume | Read | Range, step | States and programs, median of 5 | Addresses, median of 5 | Trim of an untrimmed hour (N7) | Verdict |
 | ---- | ---- | ------ | ---- | ----------- | -------------------------------: | ---------------------: | -----------------------------: | ------- |
-| development host (as above) | 2026-11-23 | local disk (`/tmp`) | 1,095 days written by SQL in 8.9 s | 1 year, 6 hours | 377 ms | 688 ms | 5 ms (1,500 addresses) | order of magnitude only |
-| development host (as above) | 2026-11-23 | local disk (`/tmp`) | (same database) | 1,095 days, 1 day | 1,155 ms | 2,069 ms | | order of magnitude only |
+| development host (as above) | 2026-11-23 | local disk (`/tmp`) | 1,095 days written by SQL in 8.9 s | 1 year, 6 hours | 385 ms | 642 ms | 6 ms (1,500 addresses) | order of magnitude only |
+| development host (as above) | 2026-11-23 | local disk (`/tmp`) | (same database) | 1,095 days, 1 day | 1,088 ms | 2,087 ms | | order of magnitude only |
 | DS918+ (reference host) | pending | SSD volume | | 1 year, 6 hours | pending | pending | pending | pending the Product Manager's run |
-| DS918+ (reference host) | pending | SSD volume | | 1,095 days, 1 day | pending (extrapolated about 3.8 s) | pending (extrapolated about 6.8 s) | | pending the Product Manager's run |
+| DS918+ (reference host) | pending | SSD volume | | 1,095 days, 1 day | pending (extrapolated about 3.6 s) | pending (extrapolated about 6.9 s) | | pending the Product Manager's run |
 
-On the development host the fold step (median 320 ms) is about half of the median batch (666 ms), and the slowest step (542 ms) stays below
-it, which is the order of magnitude N1 asks for; a step of full snapshots (up to the 2 MiB budget) took at most 72 ms. The reads of both
-kinds over 1,095 days at the trimmed size took 1.2 s and 2.1 s, far below the 10-second deadline. The extrapolation to the DS918+ multiplies
+On the development host the fold step (median 350 ms) is about half of the median batch (663 ms), and the slowest step (518 ms) stays below
+it, which is the order of magnitude N1 asks for; a step of full snapshots (up to the 2 MiB budget) took at most 86 ms. The reads of both
+kinds over 1,095 days at the trimmed size took 1.1 s and 2.1 s, far below the 10-second deadline. The extrapolation to the DS918+ multiplies
 the development-host median by 3.3, the factor of the program read between the two hosts (*Program rollups*: the one-year read took 382 ms
-on the development host and 1,270 ms on the DS918+; *Processes view*: 779 against 2,550 ms): about 3.8 s for the states and programs and about 6.8 s for the addresses over 1,095 days
+on the development host and 1,270 ms on the DS918+; *Processes view*: 779 against 2,550 ms): about 3.6 s for the states and programs and about 6.9 s for the addresses over 1,095 days
 at a 1-day step. **An extrapolation is not a measurement**: the criterion is met only when the Product Manager's run on the DS918+ SSD
 volume returns every median of five below 10 s. A read above 10 s takes the fallback of record 0225: an hourly bucket keeps 50 addresses
 instead of 100 (`KeptAddressesHourly`, the literal of the `_1h` partial index of schema step 17 and the area document change together),
