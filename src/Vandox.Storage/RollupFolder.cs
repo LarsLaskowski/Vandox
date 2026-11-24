@@ -1,4 +1,7 @@
 using System.Text;
+using System.Text.Json;
+
+using Vandox.Core.Model;
 
 namespace Vandox.Storage;
 
@@ -109,6 +112,43 @@ internal static class RollupFolder
         var remainder = nanoseconds % width;
 
         return nanoseconds - (remainder < 0 ? remainder + width : remainder);
+    }
+
+    /// <summary>
+    /// Decodes and validates the stored data of a record.
+    /// </summary>
+    /// <typeparam name="TPayload">The payload type of the kind</typeparam>
+    /// <param name="data">The stored UTF-8 bytes, or <c>null</c> when the column is empty</param>
+    /// <param name="kind">The record kind</param>
+    /// <returns>The payload, or <c>null</c> when the data does not decode into a valid payload of the kind</returns>
+    internal static TPayload? Decode<TPayload>(byte[]? data, string kind)
+        where TPayload : class, IPayload
+    {
+        if (data is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(data);
+
+            return PayloadRegistry.Deserialize(kind, document.RootElement) is TPayload { } payload && payload.Validate() is null ? payload : null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Limits a sum to the range of a double.
+    /// </summary>
+    /// <param name="sum">The sum, which may be infinite</param>
+    /// <returns>The sum within the largest finite values</returns>
+    internal static double Clamp(double sum)
+    {
+        return Math.Clamp(sum, -double.MaxValue, double.MaxValue);
     }
 
     /// <summary>

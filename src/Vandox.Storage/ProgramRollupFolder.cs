@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Vandox.Core.Model;
 
 namespace Vandox.Storage;
@@ -54,7 +52,7 @@ internal static class ProgramRollupFolder
                 rows++;
                 bytes += data?.Length ?? 0;
 
-                if (Decode(data) is { } snapshot)
+                if (RollupFolder.Decode<ProcessSnapshot>(data, RecordKind.ProcessSnapshot) is { } snapshot)
                 {
                     FoldSnapshot(tiers, reader.GetString(1), reader.GetInt64(2), snapshot);
                     folded++;
@@ -88,30 +86,6 @@ internal static class ProgramRollupFolder
     }
 
     /// <summary>
-    /// Decodes and validates the stored data of a process snapshot.
-    /// </summary>
-    /// <param name="data">The stored UTF-8 bytes, or <c>null</c> when the column is empty</param>
-    /// <returns>The snapshot, or <c>null</c> when the data does not decode into a valid process snapshot</returns>
-    private static ProcessSnapshot? Decode(byte[]? data)
-    {
-        if (data is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(data);
-
-            return PayloadRegistry.Deserialize(RecordKind.ProcessSnapshot, document.RootElement) is ProcessSnapshot { } snapshot && snapshot.Validate() is null ? snapshot : null;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Adds a validated snapshot to the buckets of its source in every tier that still keeps them.
     /// </summary>
     /// <param name="tiers">The tiers</param>
@@ -128,9 +102,9 @@ internal static class ProgramRollupFolder
 
         foreach (var program in programs)
         {
-            rss = Clamp(rss + program.RssBytes);
-            pss = Clamp(pss + (program.PssBytes ?? 0));
-            cpu = Clamp(cpu + program.CpuPercent);
+            rss = RollupFolder.Clamp(rss + program.RssBytes);
+            pss = RollupFolder.Clamp(pss + (program.PssBytes ?? 0));
+            cpu = RollupFolder.Clamp(cpu + program.CpuPercent);
         }
 
         var incomplete = snapshot.ListsEveryProgram() == false;
@@ -171,16 +145,6 @@ internal static class ProgramRollupFolder
         var byCpu = ordered.OrderByDescending(program => program.CpuPercent).Take(StorageLimits.ProgramCutPerKey);
 
         return [.. byMemory.Union(byCpu).OrderBy(program => program.Program, StringComparer.Ordinal)];
-    }
-
-    /// <summary>
-    /// Limits a sum to the range of a double.
-    /// </summary>
-    /// <param name="sum">The sum, which may be infinite</param>
-    /// <returns>The sum within the largest finite values</returns>
-    private static double Clamp(double sum)
-    {
-        return Math.Clamp(sum, -double.MaxValue, double.MaxValue);
     }
 
     /// <summary>

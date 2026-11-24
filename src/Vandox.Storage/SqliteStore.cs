@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IProgramRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IProgramRollupReader, IConnectionRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
 {
     #region Constants
 
@@ -355,12 +355,13 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
-    /// Combines the results of the metric fold and the program fold of one step.
+    /// Combines the results of the metric fold, the program fold and the connection fold of one step.
     /// </summary>
     /// <param name="metrics">The result of the metric fold</param>
     /// <param name="programs">The result of the program fold</param>
-    /// <returns>The combined result, with more to fold when either has more</returns>
-    private static RollupStepResult Combine(RollupStepResult metrics, RollupStepResult programs)
+    /// <param name="connections">The result of the connection fold</param>
+    /// <returns>The combined result, with more to fold when any has more</returns>
+    private static RollupStepResult Combine(RollupStepResult metrics, RollupStepResult programs, RollupStepResult connections)
     {
         return new RollupStepResult
                {
@@ -369,7 +370,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                    Snapshots = programs.Snapshots,
                    SkippedSnapshots = programs.SkippedSnapshots,
                    ProgramBuckets = programs.ProgramBuckets,
-                   More = metrics.More || programs.More
+                   ConnectionSnapshots = connections.ConnectionSnapshots,
+                   SkippedConnectionSnapshots = connections.SkippedConnectionSnapshots,
+                   ConnectionBuckets = connections.ConnectionBuckets,
+                   TrimmedAddresses = connections.TrimmedAddresses,
+                   More = metrics.More || programs.More || connections.More
                };
     }
 
@@ -1094,7 +1099,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         ArgumentNullException.ThrowIfNull(policy);
 
-        return RunRetentionAsync(RollupContext, true, (session, token) => Combine(RollupFolder.Fold(session, policy, now, token), ProgramRollupFolder.Fold(session, policy, now, token)), cancellationToken);
+        return RunRetentionAsync(RollupContext, true, (session, token) => Combine(RollupFolder.Fold(session, policy, now, token), ProgramRollupFolder.Fold(session, policy, now, token), ConnectionRollupFolder.Fold(session, policy, now, token)), cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -1253,6 +1258,34 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IProgramRollupReader
+
+    #region IConnectionRollupReader
+
+    /// <inheritdoc/>
+    public Task<ConnectionRollupResult> ConnectionRollupsAsync(ConnectionRollupQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return ReadAsync(connection => ConnectionRollupQueries.ReadAsync(connection, query, cancellationToken), ConnectionRollupQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ConnectionAddressResult> ConnectionAddressesAsync(ConnectionRollupQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return ReadAsync(connection => ConnectionRollupQueries.ReadAddressesAsync(connection, query, cancellationToken), ConnectionRollupQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ProgramSourceList> ConnectionSourcesAsync(ProgramSourceQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return ReadAsync(connection => ConnectionRollupQueries.ReadSourcesAsync(connection, query, cancellationToken), ConnectionRollupQueries.Context, cancellationToken);
+    }
+
+    #endregion // IConnectionRollupReader
 
     #region ITimeSeriesReader
 

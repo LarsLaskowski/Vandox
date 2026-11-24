@@ -88,8 +88,8 @@ Both reads run on a reader connection under the caller's cancellation ([Storage]
 
 ## Disk and time
 
-Measured with `--programs` of the storage benchmark on the development host and on the DS918+ SSD volume (`docs/BENCHMARKS.md`, *Program
-rollups*); the figures below are those of the DS918+, the development host measured about a quarter to two fifths of them:
+Measured with `--programs` of the storage benchmark on the development host and on the reference host SSD volume (`docs/BENCHMARKS.md`, *Program
+rollups*); the figures below are those of the reference host, the development host measured about a quarter to two fifths of them:
 
 - A day of one snapshot a minute (1,440 snapshots of 80 programs) added 703 pages of 4,096 bytes (2,812 KiB) and folded in 1,464 ms in
   6 steps.
@@ -111,6 +111,7 @@ rollups*); the figures below are those of the DS918+, the development host measu
 - The retention periods, the removal walk and the log lines: [Retention and rollups](retention.md).
 - The tables, the index and the migration step: [Storage](storage.md).
 - The meaning of a snapshot's fields: [Agent system metrics](agent-system-metrics.md), *Processes*.
+- The same for connection snapshots (sockets per state, program and remote address): [Connection rollups](connection-rollups.md).
 - The charts that read the result: [Processes view](web-ui-processes-view.md); they take the top 10 programs per chart and one source at a time and never read the snapshots, which only the view's panels *Top processes* and *Comparison* do.
 
 ## Implementation

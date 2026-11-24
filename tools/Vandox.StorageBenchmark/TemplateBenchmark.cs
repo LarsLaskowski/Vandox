@@ -164,7 +164,7 @@ internal static class TemplateBenchmark
             {
                 var verdict = written.TotalMilliseconds < ReferenceCriterionMinutes * 60000 ? "met on this host" : "NOT met on this host";
 
-                Print($"criterion of record 0095 (1,000,000 log lines written with their templates in under {ReferenceCriterionMinutes:F0} minutes): {verdict} ({written.TotalMilliseconds / 60000:F1} minutes); only a run on the reference host (DS918+) counts");
+                Print($"criterion of record 0095 (1,000,000 log lines written with their templates in under {ReferenceCriterionMinutes:F0} minutes): {verdict} ({written.TotalMilliseconds / 60000:F1} minutes); only a run on the reference host counts");
             }
             else
             {

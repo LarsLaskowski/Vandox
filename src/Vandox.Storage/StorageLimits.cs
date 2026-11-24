@@ -15,7 +15,7 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 16;
+    public const int SchemaVersion = 17;
 
     /// <summary>
     /// The largest size of the serialized data of one incident in UTF-8 bytes.
@@ -178,6 +178,16 @@ public static class StorageLimits
     public const int MaxProgramSources = 256;
 
     /// <summary>
+    /// The largest number of programs a connection rollup read returns.
+    /// </summary>
+    public const int MaxConnectionRollupPrograms = 10;
+
+    /// <summary>
+    /// The largest number of addresses a connection rollup read returns.
+    /// </summary>
+    public const int MaxConnectionRollupAddresses = 20;
+
+    /// <summary>
     /// The most metric values one fold step reads.
     /// </summary>
     internal const int RollupStepRows = 10000;
@@ -216,6 +226,61 @@ public static class StorageLimits
     /// The most programs one snapshot contributes per ranking key.
     /// </summary>
     internal const int ProgramCutPerKey = 50;
+
+    /// <summary>
+    /// The most connection snapshots one fold step reads.
+    /// </summary>
+    internal const int ConnectionRollupStepRows = 500;
+
+    /// <summary>
+    /// The UTF-8 bytes of connection snapshot data after which one fold step stops reading.
+    /// </summary>
+    internal const int ConnectionRollupStepBytes = 2097152;
+
+    /// <summary>
+    /// The most programs one connection snapshot contributes.
+    /// </summary>
+    internal const int ConnectionProgramCut = 50;
+
+    /// <summary>
+    /// The most remote addresses one connection snapshot contributes.
+    /// </summary>
+    internal const int ConnectionAddressCut = 25;
+
+    /// <summary>
+    /// The most programs one connection bucket names.
+    /// </summary>
+    internal const int MaxConnectionPrograms = 500;
+
+    /// <summary>
+    /// The most addresses one 5-minute connection bucket names.
+    /// </summary>
+    internal const int MaxAddressesFiveMinutes = 500;
+
+    /// <summary>
+    /// The most addresses one hourly connection bucket names.
+    /// </summary>
+    internal const int MaxAddressesHourly = 1500;
+
+    /// <summary>
+    /// The addresses an ended 5-minute connection bucket keeps after the trim.
+    /// </summary>
+    internal const int KeptAddressesFiveMinutes = 50;
+
+    /// <summary>
+    /// The addresses an ended hourly connection bucket keeps after the trim.
+    /// </summary>
+    internal const int KeptAddressesHourly = 100;
+
+    /// <summary>
+    /// The most buckets per tier one fold step trims.
+    /// </summary>
+    internal const int ConnectionTrimBucketsPerStep = 20;
+
+    /// <summary>
+    /// The nanoseconds a bucket must have ended before the trim touches it.
+    /// </summary>
+    internal const long ConnectionTrimDelayNanoseconds = 600_000_000_000;
 
     #endregion // Constants
 }

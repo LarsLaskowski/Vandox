@@ -409,6 +409,70 @@ internal static class SchemaMigrator
                                                                                    """,
                                                               c => c.CommandText = "CREATE INDEX program_rollup_totals_1h_bucket ON program_rollup_totals_1h(bucket)",
                                                               c => c.CommandText = "CREATE INDEX records_process_fold ON records(id) WHERE kind = 'process_snapshot'"
+                                                          ]),
+                                                      new(17,
+                                                          [
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE connection_rollups_5m (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2)),
+                                                                                     name TEXT NOT NULL,
+                                                                                     seen INTEGER NOT NULL CHECK (seen >= 1),
+                                                                                     min_value REAL NOT NULL,
+                                                                                     max_value REAL NOT NULL,
+                                                                                     sum_value REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket, kind, name)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX connection_rollups_5m_bucket ON connection_rollups_5m(bucket)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE connection_rollup_totals_5m (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     snapshots INTEGER NOT NULL CHECK (snapshots >= 1),
+                                                                                     incomplete INTEGER NOT NULL,
+                                                                                     capped INTEGER NOT NULL,
+                                                                                     programs INTEGER NOT NULL,
+                                                                                     addresses INTEGER NOT NULL,
+                                                                                     trimmed INTEGER NOT NULL,
+                                                                                     process_sum REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX connection_rollup_totals_5m_bucket ON connection_rollup_totals_5m(bucket)",
+                                                              c => c.CommandText = "CREATE INDEX connection_rollup_totals_5m_trim ON connection_rollup_totals_5m(bucket) WHERE addresses > 50",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE connection_rollups_1h (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2)),
+                                                                                     name TEXT NOT NULL,
+                                                                                     seen INTEGER NOT NULL CHECK (seen >= 1),
+                                                                                     min_value REAL NOT NULL,
+                                                                                     max_value REAL NOT NULL,
+                                                                                     sum_value REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket, kind, name)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX connection_rollups_1h_bucket ON connection_rollups_1h(bucket)",
+                                                              c => c.CommandText = """
+                                                                                   CREATE TABLE connection_rollup_totals_1h (
+                                                                                     source TEXT NOT NULL,
+                                                                                     bucket INTEGER NOT NULL,
+                                                                                     snapshots INTEGER NOT NULL CHECK (snapshots >= 1),
+                                                                                     incomplete INTEGER NOT NULL,
+                                                                                     capped INTEGER NOT NULL,
+                                                                                     programs INTEGER NOT NULL,
+                                                                                     addresses INTEGER NOT NULL,
+                                                                                     trimmed INTEGER NOT NULL,
+                                                                                     process_sum REAL NOT NULL,
+                                                                                     PRIMARY KEY (source, bucket)
+                                                                                   ) STRICT, WITHOUT ROWID
+                                                                                   """,
+                                                              c => c.CommandText = "CREATE INDEX connection_rollup_totals_1h_bucket ON connection_rollup_totals_1h(bucket)",
+                                                              c => c.CommandText = "CREATE INDEX connection_rollup_totals_1h_trim ON connection_rollup_totals_1h(bucket) WHERE addresses > 100",
+                                                              c => c.CommandText = "CREATE INDEX records_connection_fold ON records(id) WHERE kind = 'connection_snapshot'"
                                                           ])
                                                   ];
 

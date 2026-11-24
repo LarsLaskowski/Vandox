@@ -160,7 +160,7 @@ writes four bytes with `pwrite`:
 
 | Host | Kernel | none | `CAP_SYS_PTRACE` (`0x80000`, the agent's set) | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (`0x80004`, not granted) |
 | ---- | ------ | ---- | --------------------------------------------- | ----------------------------------------------------------------- |
-| NAS | 4.4.302+ | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+| NAS | 4.4 | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
 | Ubuntu 22.04.5 | 5.15.0-198-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
 | Ubuntu 24.04.5 | 6.8.0-147-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
 | Ubuntu 26.04.1 | 7.0.0-38-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |

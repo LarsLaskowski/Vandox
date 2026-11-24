@@ -638,6 +638,117 @@ public class RetentionServiceTests
     }
 
     /// <summary>
+    /// A fold pass logs the connection snapshots folded and skipped, the connection buckets written and the addresses trimmed, summed over its steps, in a line of its own; a pass that only trimmed logs it too, a pass with no count logs none, and
+    /// a removal pass logs the connection rollup rows removed per tier, also when nothing else was removed.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task RetentionServiceRollUpLogsConnectionCountsOnly()
+    {
+        // Arrange
+        var store = new ScriptedRetentionStore();
+        var capture = new IngestLogCapture();
+        var events = new ListLogger();
+
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                ConnectionSnapshots = 5,
+                                                SkippedConnectionSnapshots = 1,
+                                                ConnectionBuckets = 4,
+                                                TrimmedAddresses = 2,
+                                                More = true
+                                            }));
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                ConnectionSnapshots = 7,
+                                                SkippedConnectionSnapshots = 2,
+                                                ConnectionBuckets = 6,
+                                                TrimmedAddresses = 3,
+                                                More = false
+                                            }));
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                TrimmedAddresses = 4,
+                                                More = false
+                                            }));
+        store.AddFold(() => Task.FromResult(new RollupStepResult
+                                            {
+                                                More = false
+                                            }));
+
+        using var factory = CreateFactory(capture, events);
+        using var service = new RetentionService(store, Policy(), new FakeTimeProvider(_start), factory.CreateLogger("vandoxd"));
+
+        // Act
+        await service.RollUpAsync(TestContext.CancellationToken);
+        await service.RollUpAsync(TestContext.CancellationToken);
+        await service.RollUpAsync(TestContext.CancellationToken);
+
+        var entries = capture.Entries.Where(entry => entry.Text.StartsWith("retention connection rollup", StringComparison.Ordinal)).ToList();
+
+        // Assert
+        Assert.AreSequenceEqual(["retention connection rollup 12 3 10 5", "retention connection rollup 0 0 0 4"], entries.Select(entry => entry.Text).ToList(), "one line per pass with a count, only the template text and the counts, none for the pass without one");
+        AssertValues(entries[0], ("Snapshots", "12"), ("Skipped", "3"), ("Buckets", "10"), ("Trimmed", "5"));
+        AssertValues(entries[1], ("Snapshots", "0"), ("Skipped", "0"), ("Buckets", "0"), ("Trimmed", "4"));
+        Assert.IsTrue(entries.All(entry => entry.Values.Values.All(value => long.TryParse(value, out _))), "every field is a number");
+        Assert.AreEqual(2, events.Entries.Count(entry => entry.Level == LogLevel.Information && entry.EventId.Id == 79), "the connection rollup lines are information events 79");
+    }
+
+    /// <summary>
+    /// A removal pass logs the connection rollup rows removed per tier, summed over its steps, in a line of its own with counts only, also when it removed only hourly rows, and logs none when it removed none.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task RetentionServiceRemoveLogsConnectionRollupRows()
+    {
+        // Arrange
+        var store = new ScriptedRetentionStore();
+        var capture = new IngestLogCapture();
+        var events = new ListLogger();
+
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             ConnectionFiveMinuteRows = 3,
+                             ConnectionHourlyRows = 4,
+                             More = true
+                         });
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             ConnectionFiveMinuteRows = 30,
+                             ConnectionHourlyRows = 40,
+                             More = false
+                         });
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             ConnectionHourlyRows = 9,
+                             More = false
+                         });
+        store.AddRemoval(new RemovalStepResult
+                         {
+                             More = false
+                         });
+
+        using var factory = CreateFactory(capture, events);
+        using var service = new RetentionService(store, Policy(), new FakeTimeProvider(_start), factory.CreateLogger("vandoxd"));
+
+        // Act
+        await service.RemoveAsync(TestContext.CancellationToken);
+        await service.RemoveAsync(TestContext.CancellationToken);
+        await service.RemoveAsync(TestContext.CancellationToken);
+
+        var entries = capture.Entries.Where(entry => entry.Text.StartsWith("retention removal connection rollups", StringComparison.Ordinal)).ToList();
+
+        // Assert
+        Assert.AreSequenceEqual(["retention removal connection rollups 33 44", "retention removal connection rollups 0 9"], entries.Select(entry => entry.Text).ToList(), "the rows of both tiers summed over the steps, a pass with only hourly rows, none for the pass without rows");
+        AssertValues(entries[0], ("FiveMinuteRows", "33"), ("HourlyRows", "44"));
+        AssertValues(entries[1], ("FiveMinuteRows", "0"), ("HourlyRows", "9"));
+        Assert.IsTrue(entries.All(entry => entry.Values.Values.All(value => long.TryParse(value, out _))), "every field is a number");
+        Assert.AreEqual(2, events.Entries.Count(entry => entry.Level == LogLevel.Information && entry.EventId.Id == 80), "the removal lines are information events 80");
+    }
+
+    /// <summary>
     /// Returns the periods of a policy in the order of the keys.
     /// </summary>
     /// <param name="policy">The policy</param>

@@ -29,7 +29,8 @@ needs in [Storage writing](storage-writing.md).
   comparison with a finding), follows `retention.events` instead of `snapshots` ([Listener changes](listener-changes.md)). The rows of
   `connection_marks` and `listener_comparisons` go with their record.
 - The record with the highest ID is never removed, so record IDs keep increasing. A record above the position of the kill scan is not
-  removed yet, and neither is a metric value above the rollup watermark, nor a process snapshot above the program rollup watermark (all below).
+  removed yet, and neither is a metric value above the rollup watermark, nor a process snapshot above the program rollup watermark, nor a
+  connection snapshot above the connection rollup watermark (all below).
 - `agent_streams` and `agent_clock_samples` are never removed.
 
 ## Events and gaps
@@ -81,7 +82,11 @@ needs in [Storage writing](storage-writing.md).
 - The same fold also folds the `process_snapshot` records above a second watermark, `program_rollup_after_id`, into per-program buckets
   of their source; the same period rules apply (`rollups_5m` and `rollups_1h`), no option is added, and a process snapshot is never
   removed before it is folded, one that does not decode included, which the fold skips and passes ([Program rollups](program-rollups.md)).
-  Connection snapshots and `mariadb_status` records are removed by `retention.snapshots` as before.
+- The same fold also folds the `connection_snapshot` records above a third watermark, `connection_rollup_after_id`, into per-state,
+  per-program and per-address buckets of their source, with the same periods and no option, and trims the addresses of ended buckets
+  once it has folded every stored connection snapshot. A connection snapshot is removed only at or below that watermark, one that does
+  not decode included; the newest mark and the listener findings that follow `retention.events` are kept as before
+  ([Connection rollups](connection-rollups.md)). `mariadb_status` records are removed by `retention.snapshots` as before.
 - Readers take buckets of one series in a range, oldest first, with `IRollupReader` ([Storage reading](storage-reading.md)); the time-series query ([Time-series queries](time-series-query.md)) reads steps of them and the earliest value not yet folded.
 
 ## The job
@@ -93,13 +98,16 @@ needs in [Storage writing](storage-writing.md).
   hourly; once caught up, data goes within a day after its period ends.
 - **Steps are bounded.** One fold step reads at most 10,000 metric values and stops after the row that takes the labels it has read
   past 2 MiB (the first row is always taken), and, in the same transaction, at most 500 process snapshots and stops after the row that takes
-  their stored data past 2 MiB (the first row is always taken); it has more to do when either part does. One removal step removes at most 5,000 records of one kind, or as many rows of one
+  their stored data past 2 MiB (the first row is always taken), and at most 500 connection snapshots under the same byte rule, then the
+  trim of at most 20 ended buckets per tier when the connection part has folded everything stored; it has more to do when any part does. One removal step removes at most 5,000 records of one kind, or as many rows of one
   derived table, and examines at most 20,000 index entries and 1,000 windows, in one transaction. A step is meant to stay within the work of one
   ingest batch of 10,000 records; the storage benchmark measures it (`docs/BENCHMARKS.md`, *Retention steps*).
 - A removal pass walks the kinds in this order, each until it is empty: raw metric values, log lines, snapshots, events, gap rows,
-  5-minute rollups, hourly rollups, the program rows and the program totals of the 5-minute tier, the same two of the hourly tier, template
-  hours, incidents, holds. A program row or total is removed when its bucket start lies before `now − retention.rollups_5m` or
-  `now − retention.rollups_1h` of its tier, and a process snapshot only when its record ID is at or below `program_rollup_after_id`. A cursor of kind, capture time and ID carries the pass from step
+  5-minute rollups, hourly rollups, the program rows and the program totals of the 5-minute tier, the same two of the hourly tier, the
+  connection rows and the connection totals of the 5-minute tier, the same two of the hourly tier, template hours, incidents, holds. A
+  program or connection row or total is removed when its bucket start lies before `now − retention.rollups_5m` or
+  `now − retention.rollups_1h` of its tier, a process snapshot only when its record ID is at or below `program_rollup_after_id` and a
+  connection snapshot only when it is at or below `connection_rollup_after_id`. A cursor of kind, capture time and ID carries the pass from step
   to step, so a record that is kept is examined once per pass. Imported records are not in the index the walk uses, and the walk
   steps over a hold in one jump.
 - For each record the step removes, in this order: its full-text entry (`log_fts`), its typed row, its connection mark, its listener
@@ -130,12 +138,16 @@ The job writes these lines of the service log ([Backend host](backend-host.md), 
 | 73 | information | `retention removal derived`: `FiveMinuteValues`, `HourlyValues`, `TemplateHours`, `Incidents`, `Holds` | after a removal pass that removed at least one of these |
 | 76 | information | `retention program rollup`: `Snapshots`, `Skipped`, `Buckets` | after a fold pass that folded or skipped at least one process snapshot or wrote at least one program bucket |
 | 77 | information | `retention removal program rollups`: `FiveMinuteRows`, `HourlyRows` | after a removal pass that removed at least one program row or total |
+| 79 | information | `retention connection rollup`: `Snapshots`, `Skipped`, `Buckets`, `Trimmed` | after a fold pass that folded or skipped at least one connection snapshot, wrote at least one connection bucket or trimmed at least one address row |
+| 80 | information | `retention removal connection rollups`: `FiveMinuteRows`, `HourlyRows` | after a removal pass that removed at least one connection row or total |
 | 71 | warning | `retention step busy`: `Operation` | a step found the database busy |
 | 72 | error | `retention step failed`: `Operation`, `Error` | a step failed |
 
 The counts are the sums of the pass's steps; `Snapshots` and `Skipped` are the process snapshots folded and the undecodable ones skipped,
 `Buckets` the program buckets written (a bucket of a tier counts once per step that writes it), and `FiveMinuteRows` and `HourlyRows` the program rows and totals removed per tier.
-Event 76 and 77 carry no program name. `{Operation}` is `fold`, `scan` or `remove`; `{Error}` is the store's error text (the
+Event 79's `Snapshots` and `Skipped` are the connection snapshots folded and the undecodable ones skipped, `Buckets` the connection
+buckets written (counted as the program buckets are) and `Trimmed` the address rows the trim removed; event 80's counts are the connection
+rows and totals removed per tier. Events 76, 77, 79 and 80 carry no program name, command, address or user. `{Operation}` is `fold`, `scan` or `remove`; `{Error}` is the store's error text (the
 operation and SQLite's message). A pass that changed nothing writes nothing.
 
 ## Limits and errors
@@ -143,7 +155,8 @@ operation and SQLite's message). A pass that changed nothing writes nothing.
 - An invalid period stops the start of `vandoxd`: `retention.<key>: must be a whole number of days from 1d to 9999d, such as 30d, or
   unlimited` ([Configuration options](configuration-options.md)).
 - The records of a kept window and the imported records are not bounded by the periods; the free-space floor is the bound of last
-  resort.
+  resort. The same holds for the rows that forged sources or backdated snapshots leave in the program and connection rollups for their
+  periods ([Connection rollups](connection-rollups.md), *Disk and time*).
 - A resend of a record whose stored copy was removed is acknowledged and not stored again ([Storage writing](storage-writing.md),
   *Deduplication*); its residual is stated there.
 - A record is removed for good: there is no undo and no backup function.
@@ -157,6 +170,7 @@ operation and SQLite's message). A pass that changed nothing writes nothing.
 - [`decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md`](../decisions/0212-retention-frees-space-inside-the-database-file-not-on-the-volume.md) — why the file does not shrink and each log step merges the full-text index.
 - [`decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md`](../decisions/0213-agent-sample-times-follow-the-raw-period-below-a-floor-that-opens-no-time-gap.md) — why sample times are pruned below a floor that opens no time gap.
 - [`decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md`](../decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md) — why process snapshots are folded into per-program buckets and removed only below their own watermark.
+- [`decisions/0225-connection-snapshots-are-folded-into-per-state-program-and-address-buckets-ended-buckets-trimmed.md`](../decisions/0225-connection-snapshots-are-folded-into-per-state-program-and-address-buckets-ended-buckets-trimmed.md) — why connection snapshots are folded into per-state, per-program and per-address buckets, removed only below their own watermark, and why ended buckets are trimmed.
 
 ## Not here
 
@@ -167,6 +181,6 @@ operation and SQLite's message). A pass that changed nothing writes nothing.
 
 ## Implementation
 
-`Vandox.Backend`: `RetentionService` (the job and its log lines), `KillHoldScanner`. `Vandox.Storage`: `RollupFolder`, `ProgramRollupFolder`, `RetentionRemover`,
+`Vandox.Backend`: `RetentionService` (the job and its log lines), `KillHoldScanner`. `Vandox.Storage`: `RollupFolder`, `ProgramRollupFolder`, `ConnectionRollupFolder`, `RetentionRemover`,
 `RetentionQueries`, `SqliteStore` (`IRetentionStore`, `IRollupReader`). The step times are measured with `tools/Vandox.StorageBenchmark`
 (`docs/BENCHMARKS.md`, *Retention steps*).

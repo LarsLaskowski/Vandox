@@ -254,6 +254,7 @@ descriptors takes 57.8 ms ([Benchmarks](../BENCHMARKS.md), *Connection snapshot*
 - The listener findings across agent starts and in the report: [Listener changes](listener-changes.md).
 - `CAP_SYS_PTRACE`, `hidepid` and the unit's confinement: [Agent rights](agent-rights.md).
 - The `connection_snapshot` fields and endpoint mapping: [Wire format records](wire-format-records.md).
+- What remains of the snapshots per state, program and remote address after `retention.snapshots`: [Connection rollups](connection-rollups.md).
 
 ## Implementation
 
