@@ -277,7 +277,7 @@ internal static class HistoryQueries
                                                 Context,
                                                 cancellationToken).ConfigureAwait(false);
 
-        if (times.Count == 0 || times[0] is not { } latest)
+        if (times[0] is not { } latest)
         {
             return null;
         }
@@ -293,7 +293,7 @@ internal static class HistoryQueries
                                               Context,
                                               cancellationToken).ConfigureAwait(false);
 
-        if (ids.Count == 0 || ids[0] is not { } id)
+        if (ids[0] is not { } id)
         {
             return null;
         }
