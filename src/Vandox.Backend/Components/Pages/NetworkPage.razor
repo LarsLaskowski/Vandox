@@ -1,5 +1,133 @@
 @page "/network"
+@using Vandox.Backend.Network
 
 <PageTitle>Network</PageTitle>
 
 <h1>Network</h1>
+
+<HistoryRangeControls Preset="_address.Preset" Unbounded="_address.From is null && _address.To is null" @bind-From="_from" @bind-To="_to" PresetChosen="ApplyPreset" ApplyPressed="Apply" />
+
+@if (_error.Length > 0)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else
+{
+    @if (Options.Count > 0)
+    {
+        <form class="filters history-metrics" @onsubmit:preventDefault>
+            <label>Source
+                <select name="source" value="@ShownSource" @onchange="OnSourceChanged">
+                    @foreach (var source in Options)
+                    {
+                        <option value="@source">@source</option>
+                    }
+                </select>
+            </label>
+        </form>
+    }
+
+    @if (_controlError.Length > 0)
+    {
+        <p class="error" role="alert">@_controlError</p>
+    }
+
+    @if (RendererInfo.IsInteractive == false)
+    {
+        <p>@NetworkView.LoadingText</p>
+    }
+    else if (_future)
+    {
+        <p class="note">@HistoryView.FutureRangeText</p>
+    }
+    else
+    {
+        @if (_failure.Length > 0)
+        {
+            <p class="error" role="alert">@_failure</p>
+        }
+
+        @if (_charts is not null)
+        {
+            @foreach (var note in _charts.Notes)
+            {
+                <p class="note">@note</p>
+            }
+        }
+
+        @if (_charts?.States is not null || _charts is null)
+        {
+            @foreach (var chart in ChartHosts)
+            {
+                <h2>@chart.Label</h2>
+
+                @if (chart.Note.Length > 0)
+                {
+                    <p class="note">@chart.Note</p>
+                }
+
+                <HistoryChart @attributes="ChartParameters(chart.Label, chart.View)" />
+            }
+        }
+
+        @if (_charts?.States is not null && _failure.Length == 0)
+        {
+            <h2>@NetworkView.AddressesTitle</h2>
+
+            @if (_addressFailure.Length > 0)
+            {
+                <p class="error" role="alert">@_addressFailure</p>
+            }
+            else if (_addresses is null)
+            {
+                <p>@NetworkView.LoadingText</p>
+            }
+            else
+            {
+                <HistorySnapshotTable Table="_addresses.Table" />
+
+                @foreach (var note in _addresses.Notes)
+                {
+                    <p class="note">@note</p>
+                }
+            }
+        }
+
+        <section class="history-moment" aria-label="@NetworkView.ListenersTitle">
+            <h2>@NetworkView.ListenersTitle</h2>
+
+            @if (_panelFailure.Length > 0)
+            {
+                <p class="error" role="alert">@_panelFailure</p>
+            }
+            else if (SourceText.Length > 0)
+            {
+                <p>@SourceText</p>
+            }
+            else if (_panel is null)
+            {
+                <p>@NetworkView.LoadingText</p>
+            }
+            else if (_panel.Text.Length > 0)
+            {
+                <p>@_panel.Text</p>
+            }
+            else if (_panel.CapturedAt is { } captured)
+            {
+                <h3>Listeners of @LogsView.ShowSeconds(captured) UTC (<ExternalText Runs="_panel.SourceText" />)</h3>
+
+                @if (_panel.Summary.Length > 0)
+                {
+                    <p>@_panel.Summary</p>
+                }
+
+                @foreach (var note in _panel.PanelNotes)
+                {
+                    <p class="note">@note</p>
+                }
+
+                <HistorySnapshotTable Table="_panel.Table" />
+            }
+        </section>
+    }
+}

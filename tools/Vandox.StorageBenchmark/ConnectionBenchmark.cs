@@ -25,6 +25,27 @@ internal static class ConnectionBenchmark
     /// </summary>
     internal const string Option = "--connections";
 
+    /// <summary>
+    /// The source of the benchmark records.
+    /// </summary>
+    internal const string Source = "connections";
+
+    /// <summary>
+    /// The statement that writes hourly buckets of the trimmed size directly into the item table.
+    /// </summary>
+    internal const string RowsInsert = "INSERT INTO connection_rollups_1h (source, bucket, kind, name, seen, min_value, max_value, sum_value) "
+                                       + "WITH RECURSIVE h(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM h WHERE n < $hours - 1), i(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM i WHERE n < 99) "
+                                       + "SELECT 'connections', $first + h.n * 3600000000000, 2, printf('a%05d.%03d', h.n, i.n), 60, 0, 1 + (i.n % 5), 60 + i.n FROM h, i "
+                                       + "UNION ALL SELECT 'connections', $first + h.n * 3600000000000, 0, printf('state-%02d', i.n), 60, 0, 10, 300 + i.n FROM h, i WHERE i.n < 13 "
+                                       + "UNION ALL SELECT 'connections', $first + h.n * 3600000000000, 1, printf('program-%02d', i.n), 60, 0, 10, 300 + i.n FROM h, i WHERE i.n < 15";
+
+    /// <summary>
+    /// The statement that writes the totals of hourly buckets directly into the totals table.
+    /// </summary>
+    internal const string TotalsInsert = "INSERT INTO connection_rollup_totals_1h (source, bucket, snapshots, incomplete, capped, programs, addresses, trimmed, process_sum) "
+                                         + "WITH RECURSIVE h(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM h WHERE n < $hours - 1) "
+                                         + "SELECT 'connections', $first + h.n * 3600000000000, 60, 0, 0, 15, 100, 0, 2400 FROM h";
+
     private const int Batches = 5;
     private const int MetricsPerBatch = 10000;
     private const int ProcessSnapshotsPerBatch = 500;
@@ -45,18 +66,7 @@ internal static class ConnectionBenchmark
     private const int Days = 1095;
     private const int TrimmedAddresses = 100;
     private const string AgentId = "benchmark";
-    private const string Source = "connections";
     private const string OpenStatement = "PRAGMA journal_mode = WAL";
-
-    private const string RowsInsert = "INSERT INTO connection_rollups_1h (source, bucket, kind, name, seen, min_value, max_value, sum_value) "
-                                      + "WITH RECURSIVE h(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM h WHERE n < $hours - 1), i(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM i WHERE n < 99) "
-                                      + "SELECT 'connections', $first + h.n * 3600000000000, 2, printf('a%05d.%03d', h.n, i.n), 60, 0, 1 + (i.n % 5), 60 + i.n FROM h, i "
-                                      + "UNION ALL SELECT 'connections', $first + h.n * 3600000000000, 0, printf('state-%02d', i.n), 60, 0, 10, 300 + i.n FROM h, i WHERE i.n < 13 "
-                                      + "UNION ALL SELECT 'connections', $first + h.n * 3600000000000, 1, printf('program-%02d', i.n), 60, 0, 10, 300 + i.n FROM h, i WHERE i.n < 15";
-
-    private const string TotalsInsert = "INSERT INTO connection_rollup_totals_1h (source, bucket, snapshots, incomplete, capped, programs, addresses, trimmed, process_sum) "
-                                        + "WITH RECURSIVE h(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM h WHERE n < $hours - 1) "
-                                        + "SELECT 'connections', $first + h.n * 3600000000000, 60, 0, 0, 15, 100, 0, 2400 FROM h";
 
     #endregion // Constants
 
@@ -113,6 +123,97 @@ internal static class ConnectionBenchmark
     }
 
     /// <summary>
+    /// Stores regular connection snapshots in chunks.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="count">The number of snapshots</param>
+    /// <param name="first">The capture time of the first snapshot</param>
+    /// <param name="interval">The time between two snapshots</param>
+    /// <param name="firstIndex">The index of the first snapshot, which decides its addresses</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>A task that completes when everything is stored</returns>
+    internal static async Task WriteRegularAsync(SqliteStore store, int count, DateTimeOffset first, TimeSpan interval, int firstIndex, CancellationToken cancellationToken)
+    {
+        for (var start = 0; start < count; start += WriteChunk)
+        {
+            var size = Math.Min(WriteChunk, count - start);
+
+            await store.WriteBatchAsync(RegularBatch(size, first + (start * interval), interval, firstIndex + start), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Runs statements in one transaction on the database of a directory.
+    /// </summary>
+    /// <param name="directory">The folder of the database</param>
+    /// <param name="statements">The constant statements</param>
+    /// <param name="hours">The value of <c>$hours</c> for statements that use it</param>
+    /// <param name="first">The value of <c>$first</c> for statements that use it</param>
+    /// <param name="cancellationToken">Interrupts the statements</param>
+    /// <returns>A task that completes when the statements are done</returns>
+    internal static async Task ExecuteAsync(string directory, string[] statements, int hours, long first, CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Pooling=False");
+
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            using var journal = connection.CreateCommand();
+
+#pragma warning disable CA2100 // constant statements of this tool
+            journal.CommandText = OpenStatement;
+#pragma warning restore CA2100
+            await journal.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+            var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+            await using (transaction.ConfigureAwait(false))
+            {
+                foreach (var statement in statements)
+                {
+                    using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // constant statements of this tool
+                    command.CommandText = statement;
+#pragma warning restore CA2100
+                    command.Transaction = (SqliteTransaction)transaction;
+                    command.Parameters.AddWithValue("$hours", hours);
+                    command.Parameters.AddWithValue("$first", first);
+                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads one integer of the database of a directory.
+    /// </summary>
+    /// <param name="directory">The folder of the database</param>
+    /// <param name="sql">The constant query</param>
+    /// <param name="cancellationToken">Interrupts the query</param>
+    /// <returns>A task that returns the integer</returns>
+    internal static async Task<long> CountAsync(string directory, string sql, CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Pooling=False");
+
+        await using (connection.ConfigureAwait(false))
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // constant statements of this tool
+            command.CommandText = sql;
+#pragma warning restore CA2100
+
+            return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        }
+    }
+
+    /// <summary>
     /// Times every fold step until nothing is left and prints those that fold something and a summary of the steps that only trim.
     /// </summary>
     /// <param name="store">The store</param>
@@ -160,26 +261,6 @@ internal static class ConnectionBenchmark
         }
 
         return times;
-    }
-
-    /// <summary>
-    /// Stores regular connection snapshots in chunks.
-    /// </summary>
-    /// <param name="store">The store</param>
-    /// <param name="count">The number of snapshots</param>
-    /// <param name="first">The capture time of the first snapshot</param>
-    /// <param name="interval">The time between two snapshots</param>
-    /// <param name="firstIndex">The index of the first snapshot, which decides its addresses</param>
-    /// <param name="cancellationToken">Interrupts the measurement</param>
-    /// <returns>A task that completes when everything is stored</returns>
-    private static async Task WriteRegularAsync(SqliteStore store, int count, DateTimeOffset first, TimeSpan interval, int firstIndex, CancellationToken cancellationToken)
-    {
-        for (var start = 0; start < count; start += WriteChunk)
-        {
-            var size = Math.Min(WriteChunk, count - start);
-
-            await store.WriteBatchAsync(RegularBatch(size, first + (start * interval), interval, firstIndex + start), cancellationToken).ConfigureAwait(false);
-        }
     }
 
     /// <summary>
@@ -416,77 +497,6 @@ internal static class ConnectionBenchmark
         watch.Stop();
         await reopened.DisposeAsync().ConfigureAwait(false);
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"schema step 17 (tables, indexes, records_connection_fold over {YearSnapshots} snapshots) on the year database: open took {watch.Elapsed.TotalMilliseconds:F0} ms"));
-    }
-
-    /// <summary>
-    /// Runs statements in one transaction on the database of a directory.
-    /// </summary>
-    /// <param name="directory">The folder of the database</param>
-    /// <param name="statements">The constant statements</param>
-    /// <param name="hours">The value of <c>$hours</c> for statements that use it</param>
-    /// <param name="first">The value of <c>$first</c> for statements that use it</param>
-    /// <param name="cancellationToken">Interrupts the statements</param>
-    /// <returns>A task that completes when the statements are done</returns>
-    private static async Task ExecuteAsync(string directory, string[] statements, int hours, long first, CancellationToken cancellationToken)
-    {
-        var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Pooling=False");
-
-        await using (connection.ConfigureAwait(false))
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            using var journal = connection.CreateCommand();
-
-#pragma warning disable CA2100 // constant statements of this tool
-            journal.CommandText = OpenStatement;
-#pragma warning restore CA2100
-            await journal.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-            var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-
-            await using (transaction.ConfigureAwait(false))
-            {
-                foreach (var statement in statements)
-                {
-                    using var command = connection.CreateCommand();
-
-#pragma warning disable CA2100 // constant statements of this tool
-                    command.CommandText = statement;
-#pragma warning restore CA2100
-                    command.Transaction = (SqliteTransaction)transaction;
-                    command.Parameters.AddWithValue("$hours", hours);
-                    command.Parameters.AddWithValue("$first", first);
-                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-                }
-
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Reads one integer of the database of a directory.
-    /// </summary>
-    /// <param name="directory">The folder of the database</param>
-    /// <param name="sql">The constant query</param>
-    /// <param name="cancellationToken">Interrupts the query</param>
-    /// <returns>A task that returns the integer</returns>
-    private static async Task<long> CountAsync(string directory, string sql, CancellationToken cancellationToken)
-    {
-        var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Pooling=False");
-
-        await using (connection.ConfigureAwait(false))
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            using var command = connection.CreateCommand();
-
-#pragma warning disable CA2100 // constant statements of this tool
-            command.CommandText = sql;
-#pragma warning restore CA2100
-
-            return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
-        }
     }
 
     /// <summary>
