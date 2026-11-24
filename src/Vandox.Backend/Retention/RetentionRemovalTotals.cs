@@ -24,6 +24,8 @@ internal sealed class RetentionRemovalTotals
     private int _holds;
     private int _programFiveMinuteRows;
     private int _programHourlyRows;
+    private int _connectionFiveMinuteRows;
+    private int _connectionHourlyRows;
 
     #endregion // Fields
 
@@ -47,10 +49,12 @@ internal sealed class RetentionRemovalTotals
         _holds = Sum(_holds, step.Holds);
         _programFiveMinuteRows = Sum(_programFiveMinuteRows, step.ProgramFiveMinuteRows);
         _programHourlyRows = Sum(_programHourlyRows, step.ProgramHourlyRows);
+        _connectionFiveMinuteRows = Sum(_connectionFiveMinuteRows, step.ConnectionFiveMinuteRows);
+        _connectionHourlyRows = Sum(_connectionHourlyRows, step.ConnectionHourlyRows);
     }
 
     /// <summary>
-    /// Logs the line of the records, the line of the derived data and the line of the program rollups, each when one of its counts is not zero.
+    /// Logs the line of the records, the line of the derived data and the lines of the program and connection rollups, each when one of its counts is not zero.
     /// </summary>
     /// <param name="logger">The logger</param>
     internal void Log(ILogger logger)
@@ -68,6 +72,11 @@ internal sealed class RetentionRemovalTotals
         if (_programFiveMinuteRows > 0 || _programHourlyRows > 0)
         {
             logger.RetentionProgramRollupsRemoved(_programFiveMinuteRows, _programHourlyRows);
+        }
+
+        if (_connectionFiveMinuteRows > 0 || _connectionHourlyRows > 0)
+        {
+            logger.RetentionConnectionRollupsRemoved(_connectionFiveMinuteRows, _connectionHourlyRows);
         }
     }
 

@@ -615,5 +615,25 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 78, Level = LogLevel.Error, Message = "processes view: reading failed")]
     internal static partial void ProcessesReadFailed(this ILogger logger, Exception exception);
 
+    /// <summary>
+    /// Logs the connection rollup counts of one fold pass.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="snapshots">The connection snapshots folded</param>
+    /// <param name="skipped">The connection snapshots skipped because they could not be decoded or validated</param>
+    /// <param name="buckets">The connection buckets written</param>
+    /// <param name="trimmed">The address rows the trim removed</param>
+    [LoggerMessage(EventId = 79, Level = LogLevel.Information, Message = "retention connection rollup {Snapshots} {Skipped} {Buckets} {Trimmed}")]
+    internal static partial void RetentionConnectionsRolledUp(this ILogger logger, long snapshots, long skipped, long buckets, long trimmed);
+
+    /// <summary>
+    /// Logs the connection rollup rows one removal run removed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="fiveMinuteRows">The 5-minute rows removed</param>
+    /// <param name="hourlyRows">The hourly rows removed</param>
+    [LoggerMessage(EventId = 80, Level = LogLevel.Information, Message = "retention removal connection rollups {FiveMinuteRows} {HourlyRows}")]
+    internal static partial void RetentionConnectionRollupsRemoved(this ILogger logger, int fiveMinuteRows, int hourlyRows);
+
     #endregion // Methods
 }

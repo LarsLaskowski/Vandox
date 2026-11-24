@@ -491,7 +491,7 @@ public partial class SqliteStoreRetentionTests
             await WriteMarkerAsync(store, now);
         }
 
-        await RetentionSamples.ExecuteAsync(directory.Path, $"{RetentionSamples.UndoStepSixteen}; {RetentionSamples.UndoStepFifteen}; {RetentionSamples.UndoStepFourteen}; UPDATE meta SET value = '13' WHERE key = 'schema_version'", TestContext.CancellationToken);
+        await RetentionSamples.ExecuteAsync(directory.Path, $"{RetentionSamples.UndoStepSeventeen}; {RetentionSamples.UndoStepSixteen}; {RetentionSamples.UndoStepFifteen}; {RetentionSamples.UndoStepFourteen}; UPDATE meta SET value = '13' WHERE key = 'schema_version'", TestContext.CancellationToken);
 
         // Act
         await using var reopened = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
@@ -511,7 +511,7 @@ public partial class SqliteStoreRetentionTests
         var folded = await CountAsync(directory, "SELECT sum(count) FROM metric_rollups_5m WHERE name = 'cpu'");
 
         // Assert
-        Assert.AreSequenceEqual(["16"], version, "schema version after the migration");
+        Assert.AreSequenceEqual(["17"], version, "schema version after the migration");
         Assert.AreEqual(3L, tables, "the rollup and hold tables exist");
         Assert.AreEqual(2L, indexes, "the removal and gap indexes exist");
         Assert.AreEqual(5L, beforeFold, "no value is removed before the fold read it");
@@ -1127,12 +1127,13 @@ public partial class SqliteStoreRetentionTests
     }
 
     /// <summary>
-    /// Connection snapshots and MariaDB status keep their removal without the program fold, while a process snapshot of the same age stays until it is folded.
+    /// A connection snapshot past its period is removed only once the connection fold has read it: a pass before the fold keeps it, the pass after the fold removes it, while MariaDB status keeps its removal without a fold and a
+    /// process snapshot of the same age stays until the program fold has read it.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    [TestCategory("AC3")]
-    public async Task SqliteStoreRemoveExpiredRemovesConnectionSnapshotsWithoutProgramFold()
+    [TestCategory("AC1")]
+    public async Task SqliteStoreRemoveExpiredRemovesMariaDbStatusWithoutFoldAndKeepsUnfoldedSnapshots()
     {
         // Arrange
         using var directory = new TempDirectory();
@@ -1152,9 +1153,74 @@ public partial class SqliteStoreRetentionTests
         var steps = await RetentionSamples.RemovePassAsync(store, policy, now, TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(0L, await CountAsync(directory, "SELECT count(*) FROM records WHERE kind IN ('connection_snapshot', 'mariadb_status')"), "the connection snapshot and the MariaDB status are removed");
+        Assert.AreEqual(0L, await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'mariadb_status'"), "the MariaDB status is removed");
+        Assert.AreEqual(1L, await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'connection_snapshot'"), "the unfolded connection snapshot stays");
         Assert.AreEqual(1L, await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'process_snapshot'"), "the unfolded process snapshot stays");
-        Assert.AreEqual(2, steps.Sum(step => step.Snapshots), "two snapshots are reported removed");
+        Assert.AreEqual(1, steps.Sum(step => step.Snapshots), "one snapshot is reported removed");
+    }
+
+    /// <summary>
+    /// A connection snapshot past its period is removed only once the connection fold has read it: a pass keeps the snapshot above the watermark and removes the folded one, and the pass after the next fold removes it too.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public async Task SqliteStoreRemoveExpiredKeepsConnectionSnapshotAboveWatermark()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = RetentionSamples.Defaults();
+        var now = Samples.Base.AddDays(31);
+
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ConnectionSamples.Snapshot(Samples.Base.AddSeconds(10), ConnectionSamples.Source, [ConnectionSamples.Established(1)]));
+        await RetentionSamples.FoldAllAsync(store, policy, now, TestContext.CancellationToken);
+        await RetentionSamples.WriteAsync(store, TestContext.CancellationToken, ConnectionSamples.Snapshot(Samples.Base.AddSeconds(20), ConnectionSamples.Source, [ConnectionSamples.Established(3)]));
+        await WriteMarkerAsync(store, now);
+        await RetentionSamples.MarkScannedAsync(store, [], TestContext.CancellationToken);
+
+        // Act
+        var before = await RetentionSamples.RemovePassAsync(store, policy, now, TestContext.CancellationToken);
+        var kept = await CountAsync(directory, $"SELECT count(*) FROM records WHERE kind = 'connection_snapshot' AND captured_at = {RetentionSamples.Ns(Samples.Base.AddSeconds(20))}");
+        var folded = await CountAsync(directory, $"SELECT count(*) FROM records WHERE kind = 'connection_snapshot' AND captured_at = {RetentionSamples.Ns(Samples.Base.AddSeconds(10))}");
+        var after = await RetentionSamples.RetainAsync(store, policy, now, [], TestContext.CancellationToken);
+        var left = await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'connection_snapshot'");
+
+        // Assert
+        Assert.AreEqual(1, before.Sum(step => step.Snapshots), "only the folded snapshot is reported removed");
+        Assert.AreEqual(1L, kept, "the snapshot the fold has not read stays");
+        Assert.AreEqual(0L, folded, "the folded snapshot goes");
+        Assert.AreEqual(1, after.Sum(step => step.Snapshots), "the snapshot goes after the next fold");
+        Assert.AreEqual(0L, left, "no connection snapshot is left");
+    }
+
+    /// <summary>
+    /// A stored connection snapshot that does not decode is passed by the fold's position and removed with its period.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    public async Task SqliteStoreRemoveExpiredRemovesSkippedUndecodableConnectionSnapshot()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var now = Samples.Base.AddDays(31);
+        var id = await ConnectionSamples.InsertRawAsync(directory.Path, "forged", Samples.Base.AddSeconds(10), "not json", TestContext.CancellationToken);
+
+        await WriteMarkerAsync(store, now);
+
+        // Act
+        var steps = await RetentionSamples.RetainAsync(store, RetentionSamples.Defaults(), now, [], TestContext.CancellationToken);
+        var left = await CountAsync(directory, "SELECT count(*) FROM records WHERE kind = 'connection_snapshot'");
+        var watermark = await CountAsync(directory, ConnectionSamples.Watermark);
+        var buckets = await CountAsync(directory, ConnectionSamples.AllRowCount);
+
+        // Assert
+        Assert.AreEqual(id, watermark, "the fold's position is past the undecodable snapshot");
+        Assert.AreEqual(1, steps.Sum(step => step.Snapshots), "the snapshot is reported removed");
+        Assert.AreEqual(0L, left, "the snapshot is removed");
+        Assert.AreEqual(0L, buckets, "it left no bucket");
     }
 
     /// <summary>
@@ -1205,6 +1271,56 @@ public partial class SqliteStoreRetentionTests
         Assert.AreSequenceEqual([RetentionSamples.Ns(new1h)], totals1h, "the hourly totals older than the period go");
         Assert.AreEqual(4, steps.Sum(step => step.ProgramFiveMinuteRows), "four 5-minute rows are reported removed: three programs and the total");
         Assert.AreEqual(3, steps.Sum(step => step.ProgramHourlyRows), "three hourly rows are reported removed: two programs and the total");
+    }
+
+    /// <summary>
+    /// The per-connection buckets of each tier are removed once past the period of the tier, rows and totals alike, and counted per tier; newer buckets stay.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public async Task SqliteStoreRemoveExpiredRemovesConnectionBucketsPerTier()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var policy = new RetentionPolicy
+                     {
+                         Raw = RetentionSamples.Days(1),
+                         FiveMinuteRollups = RetentionSamples.Days(1),
+                         HourlyRollups = RetentionSamples.Days(2),
+                         Logs = RetentionSamples.Days(1),
+                         Snapshots = RetentionSamples.Days(1),
+                         Events = RetentionSamples.Days(3),
+                         KillWindowBefore = TimeSpan.FromHours(1),
+                         KillWindowAfter = TimeSpan.FromMinutes(30)
+                     };
+        var now = Samples.Base.AddDays(3);
+        var old5m = ProgramSamples.FiveMinutes(now.AddDays(-1).AddMinutes(-10));
+        var new5m = ProgramSamples.FiveMinutes(now.AddHours(-1));
+        var old1h = ProgramSamples.Hour(now.AddDays(-2).AddHours(-1));
+        var new1h = ProgramSamples.Hour(now.AddHours(-1));
+
+        await InsertConnectionBucketAsync(directory, "5m", old5m, ["a", "b", "c"]);
+        await InsertConnectionBucketAsync(directory, "5m", new5m, ["a"]);
+        await InsertConnectionBucketAsync(directory, "1h", old1h, ["a", "b"]);
+        await InsertConnectionBucketAsync(directory, "1h", new1h, ["a"]);
+        await RetentionSamples.MarkScannedAsync(store, [], TestContext.CancellationToken);
+
+        // Act
+        var steps = await RetentionSamples.RemovePassAsync(store, policy, now, TestContext.CancellationToken);
+        var rows5m = await RowsAsync(directory, "SELECT bucket FROM connection_rollups_5m");
+        var totals5m = await RowsAsync(directory, "SELECT bucket FROM connection_rollup_totals_5m");
+        var rows1h = await RowsAsync(directory, "SELECT bucket FROM connection_rollups_1h");
+        var totals1h = await RowsAsync(directory, "SELECT bucket FROM connection_rollup_totals_1h");
+
+        // Assert
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new5m)], rows5m, "the 5-minute connection rows older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new5m)], totals5m, "the 5-minute connection totals older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new1h)], rows1h, "the hourly connection rows older than the period go");
+        Assert.AreSequenceEqual([RetentionSamples.Ns(new1h)], totals1h, "the hourly connection totals older than the period go");
+        Assert.AreEqual(4, steps.Sum(step => step.ConnectionFiveMinuteRows), "four 5-minute rows are reported removed: three items and the total");
+        Assert.AreEqual(3, steps.Sum(step => step.ConnectionHourlyRows), "three hourly rows are reported removed: two items and the total");
     }
 
     /// <summary>
@@ -1972,6 +2088,29 @@ public partial class SqliteStoreRetentionTests
         }
 
         sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO program_rollup_totals_{tier}(source, bucket, snapshots, pss_snapshots, incomplete, named, rss_sum, pss_sum, cpu_sum) VALUES ('processes', {ns}, 1, 0, 0, {programs.Length}, {programs.Length}, 0, {programs.Length})");
+
+        await RetentionSamples.ExecuteAsync(directory.Path, sql.ToString(), TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts the program items of a source and a bucket of a tier of the connection rollups and the total of the bucket.
+    /// </summary>
+    /// <param name="directory">The store directory</param>
+    /// <param name="tier">The table suffix, <c>5m</c> or <c>1h</c></param>
+    /// <param name="bucket">The bucket start</param>
+    /// <param name="programs">The program names</param>
+    /// <returns>A task that completes when the rows are stored</returns>
+    private async Task InsertConnectionBucketAsync(TempDirectory directory, string tier, DateTimeOffset bucket, string[] programs)
+    {
+        var ns = RetentionSamples.Ns(bucket);
+        var sql = new System.Text.StringBuilder();
+
+        foreach (var program in programs)
+        {
+            sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO connection_rollups_{tier}(source, bucket, kind, name, seen, min_value, max_value, sum_value) VALUES ('connections', {ns}, 1, '{program}', 1, 1, 1, 1);");
+        }
+
+        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO connection_rollup_totals_{tier}(source, bucket, snapshots, incomplete, capped, programs, addresses, trimmed, process_sum) VALUES ('connections', {ns}, 1, 0, 0, {programs.Length}, 0, 0, {programs.Length})");
 
         await RetentionSamples.ExecuteAsync(directory.Path, sql.ToString(), TestContext.CancellationToken);
     }
