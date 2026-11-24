@@ -97,6 +97,20 @@ internal sealed partial class AddressTimes
     }
 
     /// <summary>
+    /// Reads a single-valued name parameter such as the source.
+    /// </summary>
+    /// <param name="values">The query values</param>
+    /// <param name="name">The name of the parameter</param>
+    /// <returns>The error (an empty text for none) and the value, <see langword="null"/> when the parameter is absent or empty</returns>
+    internal static ValueTuple<string, string?> ReadName(Dictionary<string, StringValues> values, string name)
+    {
+        // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+        throw new NotImplementedException();
+#pragma warning restore RH2003
+    }
+
+    /// <summary>
     /// Reads the parameters range, from, to and at, then checks how the range goes together.
     /// </summary>
     /// <param name="values">The query values</param>
