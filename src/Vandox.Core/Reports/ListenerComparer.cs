@@ -56,6 +56,21 @@ public static class ListenerComparer
     #region Methods
 
     /// <summary>
+    /// Compares two connection snapshots and keeps a given number of new listeners.
+    /// </summary>
+    /// <param name="earlier">The earlier snapshot, if any.</param>
+    /// <param name="later">The later snapshot.</param>
+    /// <param name="newListenerLimit">The most new listeners to keep.</param>
+    /// <returns>The comparison.</returns>
+    public static ListenerComparison Compare(ConnectionSnapshot? earlier, ConnectionSnapshot later, int newListenerLimit)
+    {
+        // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+        throw new NotImplementedException();
+#pragma warning restore RH2003
+    }
+
+    /// <summary>
     /// Compares two connection snapshots.
     /// </summary>
     /// <param name="earlier">The earlier snapshot, if any.</param>

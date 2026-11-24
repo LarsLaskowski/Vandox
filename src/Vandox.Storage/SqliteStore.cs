@@ -1429,6 +1429,15 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <inheritdoc/>
+    public Task<SnapshotStamp?> LatestSnapshotStampAsync(LatestSnapshotQuery query, CancellationToken cancellationToken)
+    {
+        // Skeleton: removed with the implementation
+#pragma warning disable RH2003
+        throw new NotImplementedException();
+#pragma warning restore RH2003
+    }
+
+    /// <inheritdoc/>
     public Task<StoredRecord?> SnapshotAsync(SnapshotStamp stamp, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stamp);
