@@ -262,4 +262,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0223 | Process snapshots are folded into per-program buckets beside a source total, by record ID | Accepted | 2026-11-21 |
 | 0224 | The processes view stacks program rollups on the history chart and compares programs of one source | Accepted | 2026-11-21 |
 | 0225 | Connection snapshots are folded into per-state, per-program and per-address buckets, and ended buckets keep their top addresses | Accepted | 2026-11-23 |
+| 0226 | The network view stacks connection rollups and marks listeners new against an inventory a day older | Proposed | 2026-11-24 |
 <!-- project:end index -->
