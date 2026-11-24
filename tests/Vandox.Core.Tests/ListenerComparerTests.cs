@@ -229,6 +229,33 @@ public class ListenerComparerTests
     }
 
     /// <summary>
+    /// A limit above the default keeps every new listener, one below it cuts to the limit in inventory order and counts the rest.
+    /// </summary>
+    /// <param name="limit">The most new listeners to keep</param>
+    /// <param name="kept">The new listeners the comparison keeps</param>
+    /// <param name="omitted">The new listeners it counts as omitted</param>
+    [TestMethod]
+    [TestCategory("AC6")]
+    [DataRow(70, 70, 0)]
+    [DataRow(1000, 70, 0)]
+    [DataRow(5, 5, 65)]
+    public void ListenerComparerCompareWithLimitKeepsEveryNewListener(int limit, int kept, int omitted)
+    {
+        // Arrange
+        var earlier = Snapshot("all");
+        var listeners = Enumerable.Range(0, 70).Select(index => Listen("tcp", $"0.0.0.0:{10 + index}", 100 + index, $"cmd{index}")).ToList();
+        var later = Snapshot("all", [.. listeners]);
+
+        // Act
+        var result = ListenerComparer.Compare(earlier, later, limit);
+
+        // Assert
+        Assert.AreEqual(ListenerOutcome.AllPorts, result.Outcome, "outcome");
+        Assert.AreSequenceEqual(Describe(listeners.Take(kept)), Describe(result.NewListeners), "the kept listeners in inventory order");
+        Assert.AreEqual((long)omitted, result.Omitted, "omitted");
+    }
+
+    /// <summary>
     /// A known endpoint whose lowest socket UID differs is reported as changed with the owner of the later snapshot and the UID and flag of the earlier one, and is not new.
     /// </summary>
     [TestMethod]

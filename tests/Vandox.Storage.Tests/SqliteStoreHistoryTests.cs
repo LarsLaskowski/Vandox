@@ -19,6 +19,7 @@ public partial class SqliteStoreHistoryTests
     private const string LimitText = "store: invalid query: limit must be 1 to 256";
     private const string KindText = "store: invalid query: kind must be a snapshot kind";
     private const string WindowText = "store: invalid query: window must be positive and at most one day";
+    private const string SourceText = "store: invalid query: source must not be empty";
     private const string AtText = "store: invalid query: at must be within the storable range";
 
     #endregion // Constants
@@ -534,6 +535,140 @@ public partial class SqliteStoreHistoryTests
     }
 
     /// <summary>
+    /// The latest stamp of a kind and source is the one with the latest capture time inside the range, the lowest ID on a tie; other sources, other kinds and times outside the range are skipped.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SqliteStoreLatestSnapshotStampReadsTheLatestOfTheSource()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          KindSnapshot(RecordKind.ConnectionSnapshot, "alpha", -5),
+                                          KindSnapshot(RecordKind.ConnectionSnapshot, "alpha", -2),
+                                          KindSnapshot(RecordKind.ConnectionSnapshot, "alpha", -2),
+                                          KindSnapshot(RecordKind.ConnectionSnapshot, "beta", 3),
+                                          KindSnapshot(RecordKind.ProcessSnapshot, "alpha", 4),
+                                          KindSnapshot(RecordKind.ConnectionSnapshot, "alpha", 20));
+
+        var lowerId = await IdAtAsync(directory.Path, RecordKind.ConnectionSnapshot, -2);
+
+        // Act
+        var alpha = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "alpha", -10, 10), TestContext.CancellationToken);
+        var beta = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "beta", -10, 10), TestContext.CancellationToken);
+        var unknown = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "gamma", -10, 10), TestContext.CancellationToken);
+        var wider = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "alpha", -10, 30), TestContext.CancellationToken);
+
+        // Assert
+        AssertStamp(alpha, lowerId, RecordKind.ConnectionSnapshot, _moment.AddMinutes(-2), "the latest of alpha in the range, the lower ID on the tie, not the other kind or source");
+        Assert.IsNotNull(beta, "beta has a snapshot in the range");
+        Assert.AreEqual(_moment.AddMinutes(3), beta.CapturedAt, "the snapshot of beta");
+        Assert.IsNull(unknown, "a source without a snapshot reads nothing");
+        Assert.AreEqual(_moment.AddMinutes(20), wider?.CapturedAt, "a wider range reaches the later snapshot");
+    }
+
+    /// <summary>
+    /// The range includes its start and excludes its end, and an empty or reversed range reads nothing.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SqliteStoreLatestSnapshotStampBoundsAreStartInclusiveEndExclusive()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await RetentionSamples.WriteAsync(store,
+                                          TestContext.CancellationToken,
+                                          KindSnapshot(RecordKind.ConnectionSnapshot, "alpha", -4),
+                                          KindSnapshot(RecordKind.ConnectionSnapshot, "alpha", 4));
+
+        // Act
+        var atStart = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "alpha", -4, -3), TestContext.CancellationToken);
+        var atEnd = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "alpha", -3, 4), TestContext.CancellationToken);
+        var justAfter = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "alpha", -3, 5), TestContext.CancellationToken);
+        var empty = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "alpha", 4, 4), TestContext.CancellationToken);
+        var reversed = await store.LatestSnapshotStampAsync(LatestQuery(RecordKind.ConnectionSnapshot, "alpha", 5, -5), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(_moment.AddMinutes(-4), atStart?.CapturedAt, "a snapshot at the start of the range is inside");
+        Assert.IsNull(atEnd, "a snapshot at the end of the range is outside");
+        Assert.AreEqual(_moment.AddMinutes(4), justAfter?.CapturedAt, "a snapshot just before the end is inside");
+        Assert.IsNull(empty, "an empty range reads nothing");
+        Assert.IsNull(reversed, "a reversed range reads nothing");
+    }
+
+    /// <summary>
+    /// A kind that is no snapshot kind, an empty source or a bound outside the storable range is refused with its own text.
+    /// </summary>
+    /// <param name="kind">The kind</param>
+    /// <param name="source">The source</param>
+    /// <param name="year">The year of the start, or 0 for a stored one</param>
+    /// <param name="endYear">The year of the end, or 0 for a stored one</param>
+    /// <param name="expected">The text of the refusal</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [DataRow("metric", "alpha", 0, 0, KindText)]
+    [DataRow("", "alpha", 0, 0, KindText)]
+    [DataRow("log_line", "alpha", 0, 0, KindText)]
+    [DataRow("connection_snapshot", "", 0, 0, SourceText)]
+    [DataRow("process_snapshot", "", 0, 0, SourceText)]
+    [DataRow("connection_snapshot", "alpha", 1, 0, AtText)]
+    [DataRow("connection_snapshot", "alpha", 0, 9999, AtText)]
+    public async Task SqliteStoreLatestSnapshotStampRefusesInvalidQuery(string kind, string source, int year, int endYear, string expected)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        var query = new LatestSnapshotQuery
+                    {
+                        Kind = kind,
+                        Source = source,
+                        From = year == 0 ? _moment.AddMinutes(-10) : new DateTimeOffset(year, 6, 1, 0, 0, 0, TimeSpan.Zero),
+                        To = endYear == 0 ? _moment.AddMinutes(10) : new DateTimeOffset(endYear, 6, 1, 0, 0, 0, TimeSpan.Zero)
+                    };
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.LatestSnapshotStampAsync(query, TestContext.CancellationToken), "the query is refused");
+
+        // Assert
+        Assert.AreEqual(expected, exception.Message, "the text of the refusal");
+    }
+
+    /// <summary>
+    /// The two statements of the latest stamp read search by the kind, source and time index and scan no table, whatever the range.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SqliteStoreLatestSnapshotStampSeeksTheKindSourceTimeIndex()
+    {
+        // Arrange
+        var statements = LatestStampStatements();
+
+        // Act
+        var plans = await ExplainAsync(statements);
+
+        // Assert
+        Assert.HasCount(2, statements, "two statements, named with Latest, read the latest stamp: the latest time, then the lowest ID at it");
+
+        foreach (var (name, _) in statements)
+        {
+            var details = plans[name];
+
+            Assert.DoesNotContain(detail => ScanPattern().IsMatch(detail), details, $"{name} scans a table: {string.Join(" | ", details)}");
+            Assert.Contains(detail => KindSourceTimePattern().IsMatch(detail), details, $"{name} searches records_kind_source_time by kind and source: {string.Join(" | ", details)}");
+        }
+    }
+
+    /// <summary>
     /// Creates a process snapshot record of a source captured some minutes from the moment.
     /// </summary>
     /// <param name="source">The source</param>
@@ -567,6 +702,54 @@ public partial class SqliteStoreHistoryTests
     }
 
     /// <summary>
+    /// Creates a snapshot record of a kind and source captured some minutes from the moment.
+    /// </summary>
+    /// <param name="kind">The kind</param>
+    /// <param name="source">The source</param>
+    /// <param name="minutes">Minutes from <see cref="_moment"/></param>
+    /// <returns>The record</returns>
+    private static DataRecord KindSnapshot(string kind, string source, int minutes)
+    {
+        var record = Snapshot(kind, minutes);
+
+        record.Source = source;
+
+        return record;
+    }
+
+    /// <summary>
+    /// Creates a latest stamp query of a range given in minutes from the moment.
+    /// </summary>
+    /// <param name="kind">The kind</param>
+    /// <param name="source">The source</param>
+    /// <param name="fromMinutes">The start, minutes from <see cref="_moment"/></param>
+    /// <param name="toMinutes">The end, minutes from <see cref="_moment"/></param>
+    /// <returns>The query</returns>
+    private static LatestSnapshotQuery LatestQuery(string kind, string source, int fromMinutes, int toMinutes)
+    {
+        return new LatestSnapshotQuery
+               {
+                   Kind = kind,
+                   Source = source,
+                   From = _moment.AddMinutes(fromMinutes),
+                   To = _moment.AddMinutes(toMinutes)
+               };
+    }
+
+    /// <summary>
+    /// Finds the statements of <see cref="HistoryQueries"/> that read the latest stamp: constants whose name contains <c>Latest</c> and that read the records.
+    /// </summary>
+    /// <returns>The names and texts</returns>
+    private static List<(string Name, string Sql)> LatestStampStatements()
+    {
+        return typeof(HistoryQueries).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                                     .Where(field => field is { IsLiteral: true } && field.FieldType == typeof(string) && field.Name.Contains("Latest", StringComparison.Ordinal))
+                                     .Select(field => (field.Name, Sql: (string)field.GetRawConstantValue()!))
+                                     .Where(statement => statement.Sql.Contains("FROM records", StringComparison.Ordinal))
+                                     .ToList();
+    }
+
+    /// <summary>
     /// Finds the stamp statements of <see cref="HistoryQueries"/> that filter by a source.
     /// </summary>
     /// <returns>The names and texts</returns>
@@ -575,6 +758,7 @@ public partial class SqliteStoreHistoryTests
         return typeof(HistoryQueries).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
                                      .Where(field => field is { IsLiteral: true } && field.FieldType == typeof(string))
                                      .Select(field => (field.Name, Sql: (string)field.GetRawConstantValue()!))
+                                     .Where(statement => statement.Name.Contains("Latest", StringComparison.Ordinal) == false)
                                      .Where(statement => statement.Sql.Contains("FROM records", StringComparison.Ordinal) && statement.Sql.Contains("source = $source", StringComparison.Ordinal))
                                      .ToList();
     }
