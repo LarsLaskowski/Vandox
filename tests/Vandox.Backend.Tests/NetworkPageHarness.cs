@@ -93,7 +93,8 @@ internal sealed class NetworkPageHarness : IAsyncDisposable
     /// Initializes a new instance of the <see cref="NetworkPageHarness"/> class.
     /// </summary>
     /// <param name="query">The query of the address of the page including the question mark, or an empty text</param>
-    internal NetworkPageHarness(string query)
+    /// <param name="interactive">Whether the renderer is interactive like a circuit, else it prerenders</param>
+    internal NetworkPageHarness(string query, bool interactive = true)
     {
         Rollups = new FakeConnectionRollupReader();
         Reader = new FakeHistoryReader();
@@ -119,7 +120,7 @@ internal sealed class NetworkPageHarness : IAsyncDisposable
                                            .AddSingleton<IJSRuntime>(Runtime)
                                            .BuildServiceProvider();
 
-        Renderer = new ComponentTestRenderer(_services, _services.GetRequiredService<ILoggerFactory>())
+        Renderer = new ComponentTestRenderer(_services, _services.GetRequiredService<ILoggerFactory>(), interactive)
                    {
                        Rendered = Pulse
                    };

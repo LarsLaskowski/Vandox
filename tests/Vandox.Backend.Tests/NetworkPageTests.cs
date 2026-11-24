@@ -316,6 +316,294 @@ public class NetworkPageTests
     }
 
     /// <summary>
+    /// An address with an error shows the text of the error and the controls, draws no chart, shows no panel and calls neither reader nor browser.
+    /// </summary>
+    /// <param name="query">The query of the address</param>
+    /// <param name="text">The text of the error</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    [DataRow("?source=a%20b", "The address has an invalid value for the parameter source.")]
+    [DataRow("?source=a&source=b", "The address gives the parameter source more than once.")]
+    [DataRow("?range=2h", "The address has an invalid value for the parameter range.")]
+    public async Task NetworkPageShowsOnlyTheControlsOnAnAddressError(string query, string text)
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness(query);
+
+        // Act
+        await harness.AddAsync();
+
+        // Assert
+        Assert.Contains(text, harness.Text(), "the error of the address");
+        Assert.HasCount(1, harness.Buttons("7 d"), "the presets are shown");
+        Assert.IsEmpty(harness.WithClass("history-chart"), "no chart");
+        Assert.IsEmpty(harness.Headings(), "no panel");
+        Assert.IsEmpty(harness.Rollups.Calls, "no call of the rollup reader");
+        Assert.IsEmpty(harness.Reader.Calls, "no call of the history reader");
+        Assert.IsEmpty(harness.Runtime.Calls, "no call into the browser");
+    }
+
+    /// <summary>
+    /// A range that begins after now says so and reads nothing, with or without a moment.
+    /// </summary>
+    /// <param name="query">The query of the address</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    [DataRow("?from=2026-10-14T00:00&to=2026-10-15T00:00")]
+    [DataRow("?source=agent&from=2026-10-14T00:00&to=2026-10-15T00:00&at=2026-10-14T01:00")]
+    public async Task NetworkPageReadsNothingForAFutureRange(string query)
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness(query);
+
+        // Act
+        await harness.AddAsync();
+
+        // Assert
+        Assert.Contains(HistoryView.FutureRangeText, harness.Text(), "the text of a future range");
+        Assert.IsEmpty(harness.Rollups.Calls, "no call of the rollup reader");
+        Assert.IsEmpty(harness.Reader.Calls, "no call of the history reader");
+        Assert.IsEmpty(harness.WithClass("history-chart"), "no chart");
+        Assert.IsEmpty(harness.Drawn, "nothing is drawn");
+    }
+
+    /// <summary>
+    /// A page that is not rendered interactively, as while prerendering, says it is loading and reads nothing.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task NetworkPageSaysLoadingWhenNotInteractive()
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness(string.Empty, false);
+
+        // Act
+        await harness.AddAsync();
+
+        // Assert
+        Assert.Contains(NetworkView.LoadingText, harness.Text(), "the loading text");
+        Assert.IsEmpty(harness.Rollups.Calls, "no call of the rollup reader");
+        Assert.IsEmpty(harness.Reader.Calls, "no call of the history reader");
+        Assert.IsEmpty(harness.Drawn, "nothing is drawn");
+    }
+
+    /// <summary>
+    /// A preset and <c>Apply</c> write the new range as a new history entry and keep the source and the moment.
+    /// </summary>
+    /// <param name="control">The control: <c>preset</c> or <c>apply</c></param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    [DataRow("preset")]
+    [DataRow("apply")]
+    public async Task NetworkPagePresetAndApplyWriteANewEntry(string control)
+    {
+        // Arrange
+        var from = new DateTimeOffset(2026, 10, 13, 8, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2026, 10, 13, 10, 30, 15, TimeSpan.Zero);
+        var expected = new NetworkAddress
+                       {
+                           Source = Agent,
+                           At = _momentAt
+                       };
+
+        if (control == "preset")
+        {
+            expected.Preset = HistoryPreset.SevenDays;
+        }
+        else
+        {
+            expected.From = from;
+            expected.To = to;
+        }
+
+        await using var harness = new NetworkPageHarness("?source=agent&at=2026-10-13T11:00");
+
+        await harness.AddAsync();
+        await harness.WaitForDrawsAsync(2);
+
+        // Act
+        if (control == "preset")
+        {
+            await harness.PressAsync("7 d");
+        }
+        else
+        {
+            await harness.EnterAsync(("from", "2026-10-13T08:00"), ("to", "2026-10-13T10:30:15"));
+            await harness.PressAsync("Apply");
+        }
+
+        // Assert
+        Assert.HasCount(1, harness.Navigation.Navigations, "one navigation");
+        Assert.AreEqual(NetworkView.NetworkHref(expected), harness.Navigation.Navigations[0].Uri, "the address has the new range, the source and the moment");
+        Assert.IsFalse(harness.Navigation.Navigations[0].Options.ReplaceHistoryEntry, "a new entry of the history");
+    }
+
+    /// <summary>
+    /// A field that is not valid shows the text of the address and writes no address.
+    /// </summary>
+    /// <param name="from">The text of the start</param>
+    /// <param name="to">The text of the end</param>
+    /// <param name="text">The text that is shown</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    [DataRow("x", "2026-10-13T10:00", "The address has an invalid value for the parameter from.")]
+    [DataRow("2026-10-13T08:00", "", "The address needs both a start and an end time.")]
+    public async Task NetworkPageInvalidFieldShowsTextAndStays(string from, string to, string text)
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness(string.Empty);
+
+        await harness.AddAsync();
+        await harness.WaitForDrawsAsync(2);
+
+        // Act
+        await harness.EnterAsync(("from", from), ("to", to));
+        await harness.PressAsync("Apply");
+
+        // Assert
+        Assert.Contains(text, harness.Text(), "the text of the address");
+        Assert.IsEmpty(harness.Navigation.Navigations, "nothing is navigated to");
+        Assert.IsNotEmpty(harness.WithClass("history-chart"), "the charts are still shown");
+    }
+
+    /// <summary>
+    /// A source the choice lists but the address cannot carry shows the text of the refusal and writes no address; a value that is no listed source, or the shown source, is ignored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task NetworkPageRefusesASourceTheAddressCannotCarry()
+    {
+        // Arrange
+        const string spaced = "a b";
+
+        await using var harness = new NetworkPageHarness("?source=agent");
+
+        harness.Rollups.Sources = ProcessesSamples.SourceList(false, (Agent, NetworkPageHarness.Now.AddMinutes(-5)), (spaced, NetworkPageHarness.Now.AddHours(-3)));
+
+        await harness.AddAsync();
+        await harness.WaitForDrawsAsync(2);
+
+        // Act
+        await harness.EnterAsync(("source", "unknown"));
+        await harness.EnterAsync(("source", Agent));
+
+        var ignored = harness.Navigation.Navigations.Count;
+
+        await harness.ChooseSourceAsync(spaced);
+
+        // Assert
+        Assert.AreEqual(0, ignored, "an unlisted source and the shown source are ignored");
+        Assert.IsEmpty(harness.Navigation.Navigations, "nothing is navigated to");
+        Assert.Contains("The address has an invalid value for the parameter source.", harness.Text(), "the text of the refusal");
+    }
+
+    /// <summary>
+    /// A source without a snapshot in the range shows the text of the missing snapshot in the panel.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task NetworkPageSaysNoSnapshotInTheRange()
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness("?source=agent");
+
+        harness.Reader.Stamps.Clear();
+        harness.Reader.Records.Clear();
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForTextAsync(NetworkView.NoSnapshotInRangeText);
+
+        // Assert
+        Assert.Contains(ListenersHeading, harness.Headings(), "the panel is shown");
+        Assert.DoesNotContain("Listeners of ", harness.Text(), "no snapshot is shown");
+    }
+
+    /// <summary>
+    /// A snapshot without a listener inventory shows the note that its listeners are not compared.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC6")]
+    public async Task NetworkPageShowsThePanelNotes()
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness("?source=agent");
+
+        harness.Reader.Stamps.Clear();
+        harness.Reader.Records.Clear();
+        harness.AddConnections(NetworkSamples.Connections(1, Agent, NetworkPageHarness.Now.AddMinutes(-5), null, NetworkSamples.Tcp(22)));
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForTextAsync(NetworkView.NotComparedText);
+
+        // Assert
+        Assert.Contains("Listeners of ", harness.Text(), "the panel shows the snapshot");
+    }
+
+    /// <summary>
+    /// When the charts fail and the address names no source, the panel says the source could not be read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task NetworkPageSaysTheSourceCouldNotBeRead()
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness(string.Empty);
+
+        harness.Rollups.Failure = new StoreException("store failed");
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForTextAsync(NetworkView.SourceFailedText);
+
+        // Assert
+        Assert.Contains(NetworkView.FailedText, harness.Text(), "the text of the failed charts");
+    }
+
+    /// <summary>
+    /// A change of the location reads the page again for the new address: a range is read, an address with an error shows its text and drops the charts, and a valid
+    /// address after it reads again.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC7")]
+    public async Task NetworkPageFollowsALocationChange()
+    {
+        // Arrange
+        await using var harness = new NetworkPageHarness("?source=agent");
+
+        await harness.AddAsync();
+        await harness.WaitForLoadedAsync();
+
+        var reads = harness.Rollups.Queries.Count;
+
+        // Act
+        await harness.GoToAsync("?source=agent&range=7d");
+        await harness.WaitForAsync(() => harness.Rollups.Queries.Count > reads);
+        await harness.GoToAsync("?range=2h");
+        await harness.WaitForTextAsync("The address has an invalid value for the parameter range.");
+
+        var withError = harness.WithClass("history-chart").Count;
+
+        await harness.GoToAsync("?source=agent&range=24h");
+        await harness.WaitForAsync(() => harness.Rollups.Queries.Count > reads + 1 && harness.WithClass("history-chart").Count == 2);
+
+        // Assert
+        Assert.AreEqual(0, withError, "an address with an error shows no chart");
+        Assert.IsNotEmpty(harness.Rollups.Queries, "the charts were read");
+    }
+
+    /// <summary>
     /// A read of the charts and a read of the panel that run past ten seconds are stopped with the text of the deadline.
     /// </summary>
     /// <param name="chart">Whether the read of the charts is held, else the read of the panel</param>
