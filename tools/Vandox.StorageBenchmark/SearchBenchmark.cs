@@ -140,7 +140,7 @@ internal static class SearchBenchmark
 
         if (lines == 5000000)
         {
-            Print($"slowest case {slowest:F0} ms ({tuning}); criterion of AC-19 (every case under {CriterionMilliseconds:F0} ms): {(slowest < CriterionMilliseconds ? "met" : "NOT met")} on this host; only a run on the reference host (DS918+, SSD volume) counts");
+            Print($"slowest case {slowest:F0} ms ({tuning}); criterion of AC-19 (every case under {CriterionMilliseconds:F0} ms): {(slowest < CriterionMilliseconds ? "met" : "NOT met")} on this host; only a run on the reference host (SSD volume) counts");
         }
         else
         {

@@ -122,7 +122,7 @@ What each step after the first adds, and how data stored before it reads:
   the index lacks). The time-series reads of service records name the same expressions, so they are answered from the index without a
   payload ([Time-series queries](time-series-query.md)); a record's entry is computed when it is stored, and the write of a record of
   another kind only checks its `kind`. The step reads every `service_state` record once while the writer is busy (agents keep their records in the spool): 87,600
-  records among 1.2 million took 243 to 282 ms on the development host and 899 ms on the DS918+ (`docs/BENCHMARKS.md`, *Time-series query*). A `service_state`
+  records among 1.2 million took 243 to 282 ms on the development host and 899 ms on the reference host (`docs/BENCHMARKS.md`, *Time-series query*). A `service_state`
   payload that is not valid JSON would fail the step (`store: migration 15: …`, rolled back, version 14 kept) and its insert;
   the backend only stores payloads it serialized itself.
 - **16** adds the four program rollup tables with their indexes and the partial index `records_process_fold` on `records(id)` where
@@ -161,7 +161,7 @@ vacuums, so the file does not shrink and freed pages are reused; the stream rows
 
 ## Write throughput
 
-The reference host is a Synology DS918+ (Intel Celeron J3455). The criterion: the **median of five batches** of 10,000 records, one
+The reference host is a NAS (Intel Celeron J3455). The criterion: the **median of five batches** of 10,000 records, one
 transaction each, takes under one second, measured with the storage benchmark on the volume that holds the database; the first batch
 (fresh file) is reported next to it. The criterion is a stress value, since an agent sends hundreds of records per minute. The agent
 timeline and the listener marks of [Storage writing](storage-writing.md) add their work to the same transaction. The criterion is met

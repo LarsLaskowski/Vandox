@@ -8,10 +8,10 @@
 
 ## Context
 
-The one-year query of [`BENCHMARKS.md`](../BENCHMARKS.md) (*Time-series query*) must answer in under one second on the DS918+; the
+The one-year query of [`BENCHMARKS.md`](../BENCHMARKS.md) (*Time-series query*) must answer in under one second on the reference host; the
 first build took 2,386 ms there. After the reductions inside the existing schema the development host still needs about 140 to 170 ms of
 its 230 to 300 ms for the restart markers: every `service_state` record of the range (87,600 a year for ten units) is fetched and its
-JSON payload parsed to find the few that changed (record 0215), and about 90 ms of that is SQLite fetching and parsing alone. The DS918+
+JSON payload parsed to find the few that changed (record 0215), and about 90 ms of that is SQLite fetching and parsing alone. The reference host
 is about 3.2 times slower. The payload is the backend's own serialization of the decoded agent record, so it is always valid JSON.
 
 ## Options considered
@@ -45,7 +45,7 @@ The schema and the step are in [Storage](../areas/storage.md).
   development host (`BENCHMARKS.md`).
 - A `service_state` payload that is not valid JSON would make its insert fail, and the upgrade to step 15 (`store: migration 15: malformed JSON`, the step rolled back, version 14 kept); payloads are only written by the backend's serializer (`BatchWriter` through `PayloadJson`), so neither occurs.
 - The one-year query fell from 306 to 468 ms to about 218 ms on the development host (median of
-  three runs: 289, 216, 218 ms); the DS918+ figure is the Product Manager's run.
+  three runs: 289, 216, 218 ms); the reference host figure is the Product Manager's run.
 - `INDEXED BY` makes a service read fail with an error, not run slowly, if the index is missing; step 15 always creates it before a
   read runs.
 - The restart rule (record 0215) is unchanged; if it ever reads another member, the index gains it in a new step, or the read loses
