@@ -248,6 +248,26 @@ public class NetworkListenerReaderTests
     }
 
     /// <summary>
+    /// A shown record that is not a connection snapshot is refused and no comparison snapshot is read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task NetworkListenerReaderRefusesOtherRecords()
+    {
+        // Arrange
+        using var history = new FakeHistoryReader();
+
+        Add(history, HistorySamples.Record(1, "agent", _now.AddHours(-2), new Gap()));
+
+        // Act
+        var thrown = await Assert.ThrowsExactlyAsync<ArgumentException>(() => new NetworkListenerReader(history).ReadAsync("agent", _range, null, TestContext.CancellationToken), "no connection snapshot");
+
+        // Assert
+        Assert.AreEqual("shown", thrown.ParamName, "the parameter");
+        Assert.AreSequenceEqual([LatestStamp, "Snapshot 1"], history.Sequence.ToArray(), "no comparison read");
+    }
+
+    /// <summary>
     /// Adds a record and its stamp to a history reader.
     /// </summary>
     /// <param name="history">The reader</param>

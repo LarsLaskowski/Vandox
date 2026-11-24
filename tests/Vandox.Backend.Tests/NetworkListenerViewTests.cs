@@ -289,6 +289,55 @@ public class NetworkListenerViewTests
     }
 
     /// <summary>
+    /// A record that is not a connection snapshot is refused, naming the shown parameter.
+    /// </summary>
+    [TestMethod]
+    public void NetworkListenerViewBuildRefusesOtherRecords()
+    {
+        // Arrange
+        var other = HistorySamples.Record(2, "agent", _shown, new Gap());
+
+        // Act
+        var thrown = Assert.ThrowsExactly<ArgumentException>(() => NetworkListenerView.Build(other, null), "no connection snapshot");
+
+        // Assert
+        Assert.AreEqual("shown", thrown.ParamName, "the parameter");
+    }
+
+    /// <summary>
+    /// A snapshot without a listener list gives an empty table, and a listener without an endpoint an empty endpoint cell.
+    /// </summary>
+    [TestMethod]
+    public void NetworkListenerViewBuildToleratesMissingListenersAndEndpoint()
+    {
+        // Arrange
+        var without = HistorySamples.Record(2,
+                                            "agent",
+                                            _shown,
+                                            new ConnectionSnapshot
+                                            {
+                                                Complete = true,
+                                                Inventory = "all",
+                                                Listeners = null
+                                            });
+        var noEndpoint = Shown("all",
+                               new Listener
+                               {
+                                   Proto = "tcp",
+                                   Local = null
+                               });
+
+        // Act
+        var empty = NetworkListenerView.Build(without, null);
+        var row = NetworkListenerView.Build(noEndpoint, null).Table.Rows[0];
+
+        // Assert
+        Assert.IsEmpty(empty.Table.Rows, "no rows");
+        Assert.AreEqual(string.Empty, empty.Table.More, "no more line");
+        Assert.AreEqual("|tcp||no owner|unknown", NetworkSamples.Cells(row), "the endpoint cell is empty");
+    }
+
+    /// <summary>
     /// Creates the shown snapshot of the agent.
     /// </summary>
     /// <param name="inventory">The inventory state</param>

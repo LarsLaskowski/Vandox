@@ -68,5 +68,20 @@ public class StackedLineTests
         Assert.AreEqual(new string('a', 64) + "[cut: 36 more characters]", capped.Label, "the label is capped at 64 characters");
     }
 
+    /// <summary>
+    /// Without points and without others every value is null and there is no minimum or maximum.
+    /// </summary>
+    [TestMethod]
+    public void StackedLineBuildWithoutOthersHasOnlyNullValues()
+    {
+        // Act
+        var line = StackedLine.Build("Other programs", 0, null, [false, true], 1.0, null);
+
+        // Assert
+        Assert.AreSequenceEqual([null, null], line.Values.ToArray(), "every value is null");
+        Assert.IsEmpty(line.Minimums, "no minimum");
+        Assert.IsEmpty(line.Maximums, "no maximum");
+    }
+
     #endregion // Methods
 }

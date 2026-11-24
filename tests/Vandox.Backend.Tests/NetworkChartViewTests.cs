@@ -453,6 +453,35 @@ public class NetworkChartViewTests
     }
 
     /// <summary>
+    /// Steps past the other-programs list are gaps: every line is null there.
+    /// </summary>
+    [TestMethod]
+    public void NetworkChartViewStepsPastOthersAreGaps()
+    {
+        // Arrange
+        var result = new ConnectionRollupResult
+                     {
+                         Times = ProcessesSamples.Times(HistorySamples.Base, _step, 3),
+                         Programs = [
+                                        new ConnectionRollupLine
+                                        {
+                                            Name = "nginx",
+                                            Points = [NetworkSamples.Point(4), NetworkSamples.Point(5), NetworkSamples.Point(6)]
+                                        }
+                                    ],
+                         Others = [1, 1],
+                         Incomplete = [0, 0, 0]
+                     };
+
+        // Act
+        var view = NetworkChartView.ProgramChart(result);
+
+        // Assert
+        Assert.AreSequenceEqual([4.0, 5.0, null], view.Lines[0].Values.ToArray(), "the program line has no value past the others");
+        Assert.AreSequenceEqual([1.0, 1.0, null], view.Lines[1].Values.ToArray(), "the other programs have no value past their list");
+    }
+
+    /// <summary>
     /// Gives the notes of a result with the range, the step and a source list that is not cut.
     /// </summary>
     /// <param name="result">The result</param>
