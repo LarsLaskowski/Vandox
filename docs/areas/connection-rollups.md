@@ -123,8 +123,8 @@ Every read runs on a reader connection under the caller's cancellation ([Storage
 
 ## Disk and time
 
-Measured with `--connections` of the storage benchmark on the development host (`docs/BENCHMARKS.md`, *Connection rollups*). The run on
-the DS918+ SSD volume, the reference host, is pending: the Product Manager runs it, and no figure below is a reference-host figure.
+Measured with `--connections` of the storage benchmark on the development host and on the SSD volume of the reference host
+(`docs/BENCHMARKS.md`, *Connection rollups*); the figures below are the reference host's.
 
 - **Disk bound.** Per source and per day of capture time at most about 288 × 50 + 24 × 100 address rows stay once trimmed, plus up to
   1,500 address rows per open hour. The source is the agent's choice, and a bucket at or below 50 (5-minute) or 100 (hourly) addresses
@@ -133,7 +133,7 @@ the DS918+ SSD volume, the reference host, is pending: the Product Manager runs 
   program rollups ([Retention and rollups](retention.md), *Limits and errors*).
 - **A day** of one regular snapshot a minute (1,440 snapshots, 13 states, 40 processes of 15 programs, 25 remote addresses no earlier
   snapshot named) added 1,884 pages of 4,096 bytes (7,536 KiB) to the file and left 27,086 rollup rows after the trim; the fold and the
-  trim took 846 ms in 5 steps. The file grows by the untrimmed buckets, which are written whole before the trim cuts them, and the freed pages are
+  trim took 4,290 ms: 5 folding steps and 14 steps that only trimmed. The file grows by the untrimmed buckets, which are written whole before the trim cuts them, and the freed pages are
   reused.
 - **The yearly cost at the default periods**, per source under full address churn (every snapshot naming 25 new addresses): 365 days
   of `rollups_5m` are 365 × 288 × (50 + 13 + 15) = 8.2 million rows, 1,095 days of `rollups_1h` are 1,095 × 24 × (100 + 13 + 15) = 3.4
@@ -141,19 +141,16 @@ the DS918+ SSD volume, the reference host, is pending: the Product Manager runs 
   index on `bucket` (a copy of the tables filled with 8,760 hourly buckets of 100 addresses, 13 states and 15 programs: 53.7 and 99.0
   bytes; 5-minute buckets of 50 addresses: 52.2 and 96.1), so the tables alone take roughly 600 MB and with their index roughly 1.1
   GB per source. A source with few distinct addresses keeps far fewer rows. These are estimates from the measured row size, not a
-  measured year.
+  measured year. The row size was measured on the development host.
 - A fold step beside 10,000 metric values, 500 process snapshots of 80 programs and 500 regular connection snapshots took a median of
-  350 ms (10 steps of 19 to 518 ms), the median ingest batch of the same run 663 ms. The 22 steps that only trimmed took 158 ms in all
-  (7.2 ms each) and trimmed 95,800 addresses. The connection part alone took 137, 136, 189, 205 and 85 ms for 2,500 regular
-  snapshots, and 6.7 ms for each of 14 trim-only steps. A step of full snapshots (8 snapshots of 4,096 remote addresses and 4,096
-  connections, 30 listeners, up to the 2 MiB budget) folded in 3 steps, the slowest 86 ms, 178 ms in all.
+  1,203 ms (10 steps of 95 to 2,826 ms), the median ingest batch of the same run 1,942 ms. The 22 steps that only trimmed took 722 ms
+  in all (32.8 ms each) and trimmed 95,800 addresses. A step of full snapshots (8 snapshots of 4,096 remote addresses and 4,096
+  connections, 30 listeners, up to the 2 MiB budget) folded in 3 steps, the slowest 332 ms, 651 ms in all.
 - 1,095 days of hourly buckets at the trimmed size (26,280 buckets of 100 addresses, 13 states and 15 programs, 3,363,840 rows, written
-  directly by SQL, not folded): a read over the last year at a 6-hour step took a median of 385 ms for states and programs and 642 ms for
-  the addresses; a read over all 1,095 days at a 1-day step 1,088 ms and 2,087 ms (medians of 5), within the views' 10-second
-  deadline. Extrapolated by the factor 3.3 that the program read showed between the development host and the DS918+, the 1,095-day
-  address read would take about 6.9 s there: an extrapolation, to be replaced by the Product Manager's run. A read above 10 s on the
-  DS918+ takes the fallback: an hourly bucket keeps 50 addresses (record 0225).
-- Trimming an untrimmed hour of 1,500 addresses took 6 ms. Schema step 17 took 11 ms on a database with 8,760 stored hourly connection
+  directly by SQL, not folded): a read over the last year at a 6-hour step took a median of 1,525 ms for states and programs and 2,697 ms for
+  the addresses; a read over all 1,095 days at a 1-day step 4,251 ms and 8,022 ms (medians of 5), within the views' 10-second
+  deadline. The fallback of record 0225 (an hourly bucket keeps 50 addresses) is not taken.
+- Trimming an untrimmed hour of 1,500 addresses took 19 ms. Schema step 17 took 47 ms on a database with 8,760 stored hourly connection
   snapshots.
 
 ## Related decisions
