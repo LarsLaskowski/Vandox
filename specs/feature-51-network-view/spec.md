@@ -79,7 +79,7 @@ record 0225), which no page reads yet.
   parameter, never its value; only the controls and the text are shown and nothing is read.
 - E12: A read past 10 seconds: `Reading the connections took longer than 10 seconds and was stopped. Narrow the range.`; a store error
   or refused read: `The connections could not be read. The service log has the details.`, logged without an address value, source,
-  command, user or remote address. A failed panel read shows the same texts in the panel.
+  command, user or remote address. A failed table or panel read shows them in its place, the charts kept.
 - E14: A step whose snapshots lost an address to a bucket's cap: `Some periods in this range held more remote addresses than the
   rollups keep, so an address can read lower there and the count of further addresses is a lower bound.`
 - E15: The panel shows the snapshots of the source the charts show (the address's `source`, else the default of S7) and is read again
@@ -98,9 +98,9 @@ record 0225), which no page reads yet.
 - N3: Memory per circuit and store work per action are bounded by stated caps (at most 13 state lines and 11 program lines of at most 1,000 steps,
   20 remote addresses shown, 256 sources, 200 listener rows, two decoded snapshots for the panel), not by the number of snapshots in the range;
   the area document states the caps and the memory derived from them.
-- N4: The chart action (sources, states and programs, addresses) of a 30-day and of a 1-year range, over one source with 1,095 days
-  of hourly buckets at the trimmed size and 30 days of 5-minute buckets, finishes within the 10-second deadline on the reference host
-  (the measurement is the plan's; #486 measured the two rollup reads of a year at a 6-hour step at 1,525 and 2,697 ms there).
+- N4: The chart action (sources, states and programs) and the separate address action (*Top remote addresses*) of a 30-day, a 1-year
+  and a 1,095-day range, over one source with 1,095 days of hourly buckets at the trimmed size and 30 days of 5-minute buckets, each
+  finish within the 10-second deadline on the reference host (measured by the plan; #486: 4,251 and 8,022 ms for 1,095 days).
 - N5: No new configuration option; the charts and the table never read a snapshot, only the connection rollups.
 
 ## Acceptance criteria
@@ -166,3 +166,4 @@ record 0225), which no page reads yet.
 - 5 (rollup issue must carry S1 to S4's needs): accepted. The rollup issue lists min, average and max per step per state and per
   program, per address the average and the highest count with an address outside a snapshot's top 25 counted 0, and the incomplete
   count; before this plan is written S1 to S4 are checked against the rollups' area document once that feature is merged (Q1).
+- Plan challenge 1 (1,095 days past one deadline): accepted; the table reads in its own action (N4, E12).

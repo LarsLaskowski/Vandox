@@ -30,16 +30,22 @@ order ([Storage reading](../areas/storage-reading.md), *History reads*).
    range (a year of minute snapshots).
 5. **The latest snapshot of a range by its own read**: the latest capture time of the kind and source in the range by one descending
    index seek, then the lowest record ID at that time — two seeks whatever the range.
+6. **Charts and remote-address table in one action** — one deadline for the page's rollup reads; but over all 1,095 days of hourly
+   buckets the two reads took 4,251 and 8,022 ms on the reference host ([Connection rollups](../areas/connection-rollups.md), *Disk and
+   time*), past one 10-second deadline, and a timeout of the table would also lose the charts.
+7. **The remote-address table in its own action** after the charts, at their step, under its own deadline — each read fits on its own;
+   the table appears after the charts.
 
 ## Decision
 
 The charts and the remote-address table read only the connection rollups (record 0225) on the history chart's stacked mode, as the
-processes view does (record 0224). The panel *Listeners* shows the source's latest connection snapshot in the range (option 5) or the
+processes view does (record 0224); the table reads in its own action after the charts (option 7). The panel *Listeners* shows the source's latest connection snapshot in the range (option 5) or the
 one closest to the moment, and marks a listener new when the source's latest snapshot captured 24 to 48 hours before it lacks the key,
 by `ListenerComparer` with no cap on the new listeners (option 2). The rules are in the [Network view](../areas/web-ui-network-view.md).
 
 ## Consequences
 
+- Over the longest range the table appears seconds after the charts, and a table timeout leaves the charts shown.
 - A panel read decodes at most two snapshots; its store work does not grow with the range.
 - A listener that opened and closed between the two inventories, and a changed socket UID, are not marked; the report keeps them.
 - Without a snapshot 24 to 48 hours older (agent stopped then, retention removed it) nothing is marked, and the page says so.
