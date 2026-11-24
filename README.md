@@ -418,6 +418,19 @@ long after the process snapshots themselves are removed. Click in a chart to pic
 disappeared between the two moments. With more than one source (the agent and an import) the page shows one at a time. Everything is
 in the address, so a view can be bookmarked and shared. The page and its limits: [Processes view](docs/areas/web-ui-processes-view.md).
 
+### See the connections
+
+The web UI shows the connections of the monitored server over a period under *Network* (`/network`). All times are **UTC**. Choose a
+range with the presets *1 h* to *1 y* or *From* and *To*; two stacked charts show the sockets per TCP state (and `UDP`) and the sockets
+held by the 10 programs that hold the most, every other program together as `Other programs`. A program counts every socket each of its
+processes holds, so a socket shared by a server's master and its workers counts once for each. Below them the table *Top remote
+addresses* lists the 20 addresses with the highest average number of connections in the range. The charts and the table come from the
+rollups of the connection snapshots, so they reach back as far as `retention.rollups_1h` keeps them. The panel *Listeners* shows the
+listeners of the latest connection snapshot in the range (or, after a click in a chart, the one closest to that moment, within 10 minutes,
+while snapshots are kept) and marks a listener `new` when the snapshot of the same source 24 to 48 hours older lacks it, so a port that
+an update or an intruder opened stands out. With more than one source (the agent and an import) the page shows one at a time.
+Everything is in the address, so a view can be bookmarked and shared. The page and its limits: [Network view](docs/areas/web-ui-network-view.md).
+
 ### Reconstruct incidents
 
 `vandoxd incidents` rebuilds the outage incidents from everything stored, so run it after each import (it needs no

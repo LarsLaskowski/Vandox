@@ -209,7 +209,8 @@ display, at most 256 characters in at most 16 runs.
 - The logs the link opens: [Logs view](web-ui-logs-view.md); how snapshots are recorded: [Agent system metrics](agent-system-metrics.md),
   [Agent connections](agent-connections.md); how long they are kept: [Retention and rollups](retention.md).
 - The programs over time and the comparison of two moments: [Processes view](web-ui-processes-view.md).
-- Self-healing markers, the list of gaps with their causes, the network view, a minimum-to-maximum band, drag selection
+- Connections over time, the remote addresses and the listeners of a period: [Network view](web-ui-network-view.md).
+- Self-healing markers, the list of gaps with their causes, a minimum-to-maximum band, drag selection
   by touch and automatic refresh: not built.
 
 ## Implementation

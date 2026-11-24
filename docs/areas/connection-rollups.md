@@ -118,8 +118,8 @@ Every read runs on a reader connection under the caller's cancellation ([Storage
   store's invalid-query error `store: invalid query: <text>` before any read: `step must be one of the query's steps`, `from and to must
   be within the storable range` and `the range holds more than 2000 steps` (steps of the epoch grid that overlap the range; a year at a
   5-minute step is one such range), in that order. The source list refuses only a bound outside the storable range. A failing
-  statement is `store: reading connection rollups` with SQLite's message; a cancelled call ends as cancelled. No consumer reads these
-  yet; the network view (#51) adds it with its read gate.
+  statement is `store: reading connection rollups` with SQLite's message; a cancelled call ends as cancelled. The [Network view](web-ui-network-view.md) reads these results through a gated reader (`GatedConnectionRollupReader`), the charts and the
+  table of the remote addresses each in an action of their own.
 
 ## Disk and time
 
@@ -164,7 +164,7 @@ Measured with `--connections` of the storage benchmark on the development host a
 - The retention periods, the removal walk and the log lines: [Retention and rollups](retention.md).
 - The tables, the indexes and the migration step: [Storage](storage.md).
 - The meaning of a snapshot's fields and how the agent bounds them: [Agent connections](agent-connections.md); the fields of the record: [Wire format records](wire-format-records.md).
-- The network view that will read the result and its gate: planned (#51). Rollups of the `connections` list, local addresses or ports, listeners or users, distinct sockets per program, a minimum per address and percentiles do not exist.
+- The network view that reads the result, its gate, its notes and its deadline: [Network view](web-ui-network-view.md). Rollups of the `connections` list, local addresses or ports, listeners or users, distinct sockets per program, a minimum per address and percentiles do not exist.
 
 ## Implementation
 

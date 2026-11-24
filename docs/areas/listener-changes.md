@@ -7,7 +7,7 @@ report shows them in its section **New listeners**. The agent reports a **new li
 previous run's, held in memory, so the first run after an agent start is a baseline and a listener that opened while the agent was
 stopped (an update, a crash, a reboot with a service that starts at boot) is never reported by the agent ([Agent
 connections](agent-connections.md)). The backend closes that gap when it stores the snapshots (record 0116) and shows the result, with the
-agent's own findings, in the [Forensics report](forensics-report.md). Operators rely on it to spot a takeover of a port.
+agent's own findings, in the [Forensics report](forensics-report.md). The [Network view](web-ui-network-view.md) is a second place that shows new listeners: it compares the listener inventories of two stored connection snapshots a day apart with the same key and port rules, and reads no stored finding. Operators rely on it to spot a takeover of a port.
 
 ## Comparison across agent starts
 
@@ -173,6 +173,7 @@ PID, times and counts are plain text. The backend's log holds no listener, comma
 - The rows `connection_marks` and `listener_comparisons`, when they are written and how many listeners they keep: [Storage
   writing](storage-writing.md), *Listener marks and comparisons*; how they are read: [Storage reading](storage-reading.md), *Listener history*; their schema: [Storage](storage.md).
 - The rest of the report and its formats: [Forensics report](forensics-report.md); the report page: [Report page](web-ui-report-page.md).
+- The panel *Listeners* of the web UI, which marks a listener `new` against the inventory of a snapshot 24 to 48 hours older by `ListenerComparer`: [Network view](web-ui-network-view.md).
 
 ## Implementation
 

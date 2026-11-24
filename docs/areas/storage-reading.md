@@ -155,7 +155,7 @@ no current data and is not returned.
 
 ### History reads
 
-The three reads of the history view ([History view](web-ui-history-view.md)), the snapshot reads also those of the processes view ([Processes view](web-ui-processes-view.md)); each is one reader lease and one or a few seeks of an
+The three reads of the history view ([History view](web-ui-history-view.md)), the snapshot reads also those of the processes view ([Processes view](web-ui-processes-view.md)) and the latest snapshot also those of the network view ([Network view](web-ui-network-view.md)); each is one reader lease and one or a few seeks of an
 existing index, never a scan.
 
 - **Stored metrics** (a limit of 1 to 256, refused otherwise with `store: invalid query: limit must be 1 to 256`): every source and name
@@ -174,6 +174,12 @@ existing index, never a scan.
   `source = $source`, and seeks `records(kind, source, captured_at)`; without one it takes the snapshots of any source, as before. An
   empty source is refused (`store: invalid query: source must not be empty`). The processes view reads the snapshot of the source its
   charts show this way, and the stamp of the other side with the same source, so *Snapshot before this moment* stays within the source.
+- **Latest snapshot stamp in a range** (a kind, a source, `from` and `to`): the ID and capture time of the latest snapshot of the kind and the
+  source captured at or after `from` and before `to`, whatever the length of the range. It takes two seeks of `records(kind, source,
+  captured_at)`: the latest capture time in the range by one descending seek, then the lowest ID at that time. A range with `from` at or after
+  `to` returns nothing, as does a range without a snapshot of the source. The kind must be a snapshot kind (`store: invalid query: kind must be
+  a snapshot kind`), the source not empty (`store: invalid query: source must not be empty`) and both bounds within the storable range
+  (`store: invalid query: at must be within the storable range`), refused before any read. The stamp is read with *Snapshot record*.
 - **Snapshot record**: the record of a stamp, by ID and kind (the kind rule above), read and decoded like a record of the record
   reads, so one payload is decoded. It returns nothing when retention removed the record after the stamp was read.
 - The view reads the stamps of both sides and decodes only the record of the closer one, so no read decodes a snapshot it does not show.
