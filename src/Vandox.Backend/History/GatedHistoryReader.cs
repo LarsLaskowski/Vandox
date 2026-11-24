@@ -57,10 +57,7 @@ public sealed class GatedHistoryReader : IHistoryReader
     /// <inheritdoc/>
     public Task<SnapshotStamp?> LatestSnapshotStampAsync(LatestSnapshotQuery query, CancellationToken cancellationToken)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return _gate.RunAsync(() => _inner.LatestSnapshotStampAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>

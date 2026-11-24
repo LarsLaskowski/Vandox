@@ -1431,10 +1431,9 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <inheritdoc/>
     public Task<SnapshotStamp?> LatestSnapshotStampAsync(LatestSnapshotQuery query, CancellationToken cancellationToken)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        HistoryQueries.ValidateLatest(query);
+
+        return ReadAsync(connection => HistoryQueries.ReadLatestStampAsync(connection, query, cancellationToken), HistoryQueries.Context, cancellationToken);
     }
 
     /// <inheritdoc/>

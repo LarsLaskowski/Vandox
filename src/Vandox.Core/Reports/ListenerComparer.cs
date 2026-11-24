@@ -64,20 +64,6 @@ public static class ListenerComparer
     /// <returns>The comparison.</returns>
     public static ListenerComparison Compare(ConnectionSnapshot? earlier, ConnectionSnapshot later, int newListenerLimit)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
-    }
-
-    /// <summary>
-    /// Compares two connection snapshots.
-    /// </summary>
-    /// <param name="earlier">The earlier snapshot, if any.</param>
-    /// <param name="later">The later snapshot.</param>
-    /// <returns>The comparison.</returns>
-    public static ListenerComparison Compare(ConnectionSnapshot? earlier, ConnectionSnapshot later)
-    {
         if (earlier is null)
         {
             return new ListenerComparison
@@ -110,11 +96,22 @@ public static class ListenerComparer
         return new ListenerComparison
                {
                    Outcome = privilegedOnly ? ListenerOutcome.PrivilegedOnly : ListenerOutcome.AllPorts,
-                   NewListeners = [.. added.Take(MaxNewListeners)],
-                   Omitted = Math.Max(0, added.Count - MaxNewListeners),
+                   NewListeners = [.. added.Take(newListenerLimit)],
+                   Omitted = Math.Max(0, added.Count - newListenerLimit),
                    ChangedListeners = [.. changed.Take(MaxChangedListeners)],
                    ChangedOmitted = Math.Max(0, changed.Count - MaxChangedListeners)
                };
+    }
+
+    /// <summary>
+    /// Compares two connection snapshots.
+    /// </summary>
+    /// <param name="earlier">The earlier snapshot, if any.</param>
+    /// <param name="later">The later snapshot.</param>
+    /// <returns>The comparison.</returns>
+    public static ListenerComparison Compare(ConnectionSnapshot? earlier, ConnectionSnapshot later)
+    {
+        return Compare(earlier, later, MaxNewListeners);
     }
 
     /// <summary>
