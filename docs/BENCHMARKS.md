@@ -7,7 +7,7 @@ from the development host show the order of magnitude.
 
 The reference host of the agent is the monitored server (*Agent footprint*), not the host below.
 
-Reference host: a Synology DS918+ (Intel Celeron J3455, DSM, running `vandoxd` in Docker). It has an SSD volume and a slower HDD volume; the
+Reference host: a NAS (Intel Celeron J3455, running `vandoxd` in Docker). It has an SSD volume and a slower HDD volume; the
 tables say which one a run used. The data directory of the container can be on either volume; the SSD is recommended.
 
 ## Storage write throughput
@@ -55,15 +55,15 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 | Writer | Host | CPU | Date | First batch (ms) | Later batches (ms) | Median of five (ms) |
 | ------ | ---- | --- | ---- | ---------------: | -----------------: | ------------------: |
 | before [0083](decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 499–679 | 277–584 | 309–390 |
-| before 0083 | DS918+ (reference host, Linux 4.4, .NET 10.0.10, SSD volume) | Celeron J3455 | 2026-10-07 | 1480 | 890–1119 | 1085 |
+| before 0083 | Reference host (Linux 4.4, .NET 10.0.10, SSD volume) | Celeron J3455 | 2026-10-07 | 1480 | 890–1119 | 1085 |
 | after 0083 | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 285–329 | 242–368 | 272–320 |
-| after 0083 (cached parameters, synchronous calls) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1043 | 797–1004 | 925 |
-| after 0083 (and writer page cache of 16 MiB) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
-| after 0083 (and writer page cache of 16 MiB) | DS918+ (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
+| after 0083 (cached parameters, synchronous calls) | Reference host (SSD volume) | Celeron J3455 | 2026-10-07 | 1043 | 797–1004 | 925 |
+| after 0083 (and writer page cache of 16 MiB) | Reference host (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
+| after 0083 (and writer page cache of 16 MiB) | Reference host (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
 | after the log templates of [0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) (two runs; metric batches run no template statement) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-12 | 273–386 | 185–402 | 273–282 |
-| `main` at `3e9611b` (published program, three runs; see below) | DS918+ (SSD volume, .NET 10.0.14) | Celeron J3455 | 2026-11-08 | 1,438–1,580 | 852–974 | **906–936** |
+| `main` at `3e9611b` (published program, three runs; see below) | Reference host (SSD volume, .NET 10.0.14) | Celeron J3455 | 2026-11-08 | 1,438–1,580 | 852–974 | **906–936** |
 
-Outcome against the restated criterion on the DS918+: **met on the SSD volume**. The current result is the row of 2026-11-08, measured with the writer of `main` at `3e9611b` (median 906 to 936 ms in three runs, about 10,300 to 11,700 records/s in the later batches); the 783 ms of the row of 2026-10-07 (12,800 records/s in a steady state)
+Outcome against the restated criterion on the reference host: **met on the SSD volume**. The current result is the row of 2026-11-08, measured with the writer of `main` at `3e9611b` (median 906 to 936 ms in three runs, about 10,300 to 11,700 records/s in the later batches); the 783 ms of the row of 2026-10-07 (12,800 records/s in a steady state)
 is from before the agent timeline. The criterion is **not met on the HDD volume** (median 1171 ms, about 8,500 records/s). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
 SSD the writer is CPU-bound, on the HDD the median was about 390 ms higher (1171 against 783 ms, both before the agent timeline) because each commit waits for the disk. The database can be put on
 either volume; the HDD works too, with the slower writes shown here, which is far above what the agent sends (hundreds of records per minute). The
@@ -71,7 +71,7 @@ first batch was about 250 ms slower than the later ones on the SSD before the ag
 made no difference on the development host. The FTS5 remedy of record 0063 (option c) does not apply, because this measurement writes no log lines.
 The development-host rows are not the reference host.
 
-**Run of 2026-11-08 on the DS918+.** The procedure above, with the tool published from `main` at `3e9611b` (`dotnet publish -c Release`, framework-dependent) and run
+**Run of 2026-11-08 on the reference host.** The procedure above, with the tool published from `main` at `3e9611b` (`dotnet publish -c Release`, framework-dependent) and run
 in the `mcr.microsoft.com/dotnet/runtime:10.0` container (Ubuntu 24.04.5 inside, .NET 10.0.14, 4 logical CPUs) with the folder on the SSD volume (two M.2 SSDs used as a normal
 volume, not a cache); a 4 KiB write reached the disk in 9.0 to 10.0 ms (median). Three runs gave medians of five batches of 936, 934 and 906 ms, so the criterion of under 1000 ms
 is met in all three; batches 2 to 5 took 852 to 974 ms and the first batch 1,438 to 1,580 ms. One run with `--warmup` gave a warm-up batch of 1000 records of 368 ms and
@@ -115,7 +115,7 @@ capture times that repeat every hour, so the first batch inserts about 3,600 sam
 The median of five batches rose from 279-304 ms to 319-335 ms (about 12 to 15 per cent), the first batches by about 120 ms: they pay a
 sample-time row and its lookups for each new capture time of a metric, the later ones mostly the stream row and the classification. The criterion
 stays met on the development host with a wide margin. A rise of the same proportion would put the reference host's 783 ms median at about 900 ms, still under one second; the
-run of 2026-11-08 on the DS918+ above measured 897 to 936 ms.
+run of 2026-11-08 on the reference host above measured 897 to 936 ms.
 
 The scenario of the backfill (`--backfill`, option of the same tool: `dotnet run -c Release --project tools/Vandox.StorageBenchmark -- <folder> --backfill [--size N]`)
 is the costly path of the timeline: for each of five agents in one database, a small batch is stored, a small batch far above it opens a sequence gap of
@@ -148,7 +148,7 @@ Publish the tool as above and run it on the reference host, on the volume that h
 dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --retention [--size N]
 ```
 
-The DS918+ has no .NET 11 runtime installed, so the tool is published self-contained there and run without `dotnet`:
+The reference host has no .NET 11 runtime installed, so the tool is published self-contained there and run without `dotnet`:
 
 ```bash
 dotnet publish tools/Vandox.StorageBenchmark -c Release -r linux-x64 --self-contained -p:DebugType=none -o publish-sc
@@ -168,9 +168,9 @@ below the batch.
 | Host | Date | Volume | Size | Median batch | Median fold step | Median removal step | Verdict |
 | ---- | ---- | ------ | ---: | -----------: | ---------------: | ------------------: | ------- |
 | development host (4 logical CPUs, Ubuntu 24.04), not the reference host | 2026-11-14 | local disk | 10,000 | 314 ms | 14 ms | 37 ms | order of magnitude only |
-| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained, branch head 24c76b2) | 2026-11-14 | SSD volume (`/volume2`) | 10,000 | 1246 ms | 88 ms | 246 ms | **AC6 met** |
+| Reference host (Linux 4.4, 4 logical CPUs, .NET 11.0.0 self-contained, branch head 24c76b2) | 2026-11-14 | SSD volume | 10,000 | 1246 ms | 88 ms | 246 ms | **AC6 met** |
 
-The run on the DS918+ SSD volume is recorded above (Product Manager, database below `/volume2/DockerData/Vandox-Tests/ret1`). Batches 1528, 1315, 1231, 1206, 1246 ms
+The run on the reference host SSD volume is recorded above (Product Manager). Batches 1528, 1315, 1231, 1206, 1246 ms
 (median 1246 ms); fold steps 94, 88, 95, 87, 53 ms (median 88 ms, each folding 10,000 values into 37 to 38 buckets); removal steps 246, 187, 339, 281, 222 ms
 (median 246 ms; steps 1 and 2 remove 0 values while they walk past the imported and the held values, steps 3 to 5 remove 5,000 each). The fold step (88 ms) and
 the removal step (246 ms) are at or below the median batch (1246 ms), so AC6 is met.
@@ -184,7 +184,7 @@ reference host counts against the criterion.
 
 ### Procedure
 
-Publish the tool and run it on the reference host as for the retention steps (self-contained on the DS918+):
+Publish the tool and run it on the reference host as for the retention steps (self-contained on the reference host):
 
 ```bash
 dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --query
@@ -219,21 +219,21 @@ setup shorter; the raw values of the last 30 days are written every minute. The 
 | Host | Date | Volume | Median query | Times | Verdict |
 | ---- | ---- | ------ | -----------: | ----- | ------- |
 | development host (4 logical CPUs, Ubuntu 24.04, .NET 11.0.0), not the reference host | 2026-11-14 | local disk | 791 ms | 791, 957, 762, 858, 731 ms | order of magnitude only |
-| DS918+ (reference host), published from the first implementation | 2026-11-15 | SSD volume `/volume2` | **2,386 ms** | 2,394, 2,449, 2,342, 2,386, 2,331 ms | **not met** (limit 1,000 ms) |
+| Reference host, published from the first implementation | 2026-11-15 | SSD volume | **2,386 ms** | 2,394, 2,449, 2,342, 2,386, 2,331 ms | **not met** (limit 1,000 ms) |
 | development host, first implementation | 2026-11-15 | local disk | 717 ms, 624 ms | 608, 618, 778, 782, 717 ms; 866, 905, 624, 522, 518 ms | order of magnitude only |
 | development host, after the first reductions (three runs) | 2026-11-15 | local disk | 468 ms, 306 ms, 382 ms | 472, 404, 425, 468, 513 ms; 297, 306, 291, 316, 346 ms; 355, 266, 399, 384, 382 ms | goal of 250 ms not reached; order of magnitude only |
 | development host, with the covering index (three runs) | 2026-11-15 | local disk | 289 ms, 216 ms, 218 ms | 259, 229, 304, 289, 318 ms; 218, 189, 204, 216, 233 ms; 210, 179, 218, 415, 321 ms | goal of 250 ms reached (median of the three medians 218 ms); order of magnitude only |
-| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained), re-run with the covering index | 2026-11-15 | SSD volume `/volume2` | **795 ms** | 812, 784, 795, 864, 779 ms | **met** (limit 1,000 ms) |
+| Reference host (Linux 4.4, 4 logical CPUs, .NET 11.0.0 self-contained), re-run with the covering index | 2026-11-15 | SSD volume | **795 ms** | 812, 784, 795, 864, 779 ms | **met** (limit 1,000 ms) |
 
-The first DS918+ run of 2026-11-15 (first implementation) wrote 1,219,780 records in 123 s and folded the values in 27 s, and the same database answered the query in 2,386
+The first reference-host run of 2026-11-15 (first implementation) wrote 1,219,780 records in 123 s and folded the values in 27 s, and the same database answered the query in 2,386
 ms: 3.2 times the development host of that day (735 ms), so the reference host does not meet the criterion with the first implementation.
 The development-host runs wrote the same records in 25 to 27 s, folded the values in 7 to 8 s, and answered with a 12-hour step, 730 times,
 15 lines, 1,000 markers (cut) and 1,000 gaps (cut). A run on the development host is a measure of the code, not of the criterion; the
 spread between two runs of the same code is large (the first run after the first reductions took 468 ms, the second 306 ms).
 
-**Breakdown** (median of five runs through the timing reader, in ms; the DS918+ column is the run of 2026-11-15 with the covering index):
+**Breakdown** (median of five runs through the timing reader, in ms; the reference host column is the run of 2026-11-15 with the covering index):
 
-| Part | Calls | First implementation (two runs) | After the first reductions (three runs) | With the covering index (three runs) | DS918+ with the covering index |
+| Part | Calls | First implementation (two runs) | After the first reductions (three runs) | With the covering index (three runs) | Reference host with the covering index |
 | ---- | ----: | -------------------: | --------------------: | --------------------: | --------------: |
 | rollup steps, `cpu_percent` (8 label sets) | 1 | 97, 85 | 37, 46, 45 | 44, 44, 45 | 161.2 |
 | rollup steps, the other seven series | 7 | 101, 79 | 36, 49, 47 | 43, 44, 41 | 152.1 |
@@ -251,8 +251,8 @@ members per record, the last record of each unit is kept in memory, and only the
 the rollup steps are merged in SQL per step, with one prepared statement for all label sets of a series; and the restart and backup checks
 read the boots once instead of once per check (this benchmark makes no boot read: 0 calls).
 
-The goal of the first reductions was a development-host median of at most 250 ms (about 825 ms on the DS918+ at the factor of 3.2). The three runs
-reached 468, 306 and 382 ms, the breakdowns 226 to 295 ms, so the goal is **not reached** and the DS918+ is estimated at about 1.2 s
+The goal of the first reductions was a development-host median of at most 250 ms (about 825 ms on the reference host at the factor of 3.2). The three runs
+reached 468, 306 and 382 ms, the breakdowns 226 to 295 ms, so the goal is **not reached** and the reference host is estimated at about 1.2 s
 (not measured). The remainder is the service changes (about 140 to 170 ms: SQLite fetches and parses 87,600 payloads, about 90 ms in a separate measurement, and
 87,600 rows cross into the program), the rollup steps (about 70 to 95 ms: 15 label sets, each a statement of 4 to 6 ms inside its connection,
 plus the label-set reads and a new reader connection for each call) and the engine. The further options (parallel reads, reader caches or
@@ -263,21 +263,21 @@ pooling, a covering index on `service_state`) were not taken in the first reduct
 expressions, so SQLite answers them from the index without fetching or parsing a payload (`EXPLAIN QUERY PLAN` shows `COVERING INDEX
 records_service_state` for each, pinned by a test). The service changes fell from 137 to 168 ms to 104 to 108 ms; the three runs reached
 289, 216 and 218 ms (the first run of a series after the database is written is the slowest), the goal of at most 250 ms is reached on the
-development host with a median of 218 ms of the three medians (the DS918+ was estimated at about 0.7 s at the factor of 3.2 and measured 795 ms,
+development host with a median of 218 ms of the three medians (the reference host was estimated at about 0.7 s at the factor of 3.2 and measured 795 ms,
 see below). The
 remainder of the service changes is the 87,600 index rows crossing into the program. **Building the index** on this database (87,600 `service_state` records among 1.2 million) took 257, 243 and 282 ms; this is the cost of
 the upgrade of a database at version 14, during which the writer is busy ([Storage](areas/storage.md), *Migration steps*); at the factor
-of 3.2 about 0.8 to 0.9 s on the DS918+ (estimated; measured below at 899 ms).
+of 3.2 about 0.8 to 0.9 s on the reference host (estimated; measured below at 899 ms).
 
-**Re-run on the DS918+ with the covering index** (Product Manager, 2026-11-15, self-contained build of the merged implementation, folder
-`/volume2/DockerData/Vandox-Tests/` on the SSD volume, Linux 4.4.302+, .NET 11.0.0, 4 logical CPUs). The tool wrote 1,219,780 records in 129 s
+**Re-run on the reference host with the covering index** (Product Manager, 2026-11-15, self-contained build of the merged implementation, on the SSD volume,
+Linux 4.4, .NET 11.0.0, 4 logical CPUs). The tool wrote 1,219,780 records in 129 s
 and folded 1,130,400 values in 28 s; the service state index was rebuilt over the 87,600 service records in **899 ms** (the cost of the
 upgrade of a version 14 database on the reference host). The five query times were 812, 784, 795, 864 and 779 ms, median **795 ms**: the
 criterion (under 1,000 ms) is **met**, with a margin of about 20 percent. The earlier row (2,386 ms, not met) stays as the
 record of the first implementation; the run is 3.0 times faster, and 3.6 times the development-host median of 218 ms (the factor of 3.2
 used for the estimate was too low).
 
-The breakdown of the DS918+ (median of five runs, 807 ms in total, in the table above) shows the service changes as the largest part, 396.5
+The breakdown of the reference host (median of five runs, 807 ms in total, in the table above) shows the service changes as the largest part, 396.5
 ms or about half of the query (the read alone took 380.3 ms for 1,738 rows), then the
 rollup steps with 313.3 ms (`cpu_percent` 161.2 ms in one call, the other seven series 152.1 ms in seven calls), the six smaller reads with 60.3 ms and the
 engine with 37.3 ms; no boot read is made (0 calls). The statement alone for the steps of one `cpu_percent` label set took 16.8 ms (730
@@ -314,10 +314,10 @@ dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> 
 | Host | Date | Volume | Median batch | Median fold step | N4: a day (1,440 snapshots) | Year folded | One-year read, median of 5 | Schema step 16 | Worst case | Verdict |
 | ---- | ---- | ------ | -----------: | ---------------: | --------------------------- | ----------- | -------------------------: | -------------: | ---------- | ------- |
 | development host (sandbox, 4 logical CPUs, Ubuntu 24.04, .NET 11), not the reference host | 2026-11-21 | local disk | 517 ms | 125 ms (275 snapshots per step, limited by the 2 MiB budget) | `page_count` 2,996 to 3,699 at 4,096-byte pages (+703 pages, +2,812 KiB); fold 376 ms in 6 steps | 11,382 ms in 32 steps | 382 ms (458, 372, 382, 365, 382 ms) | 21 ms (a version 15 database reverted by hand: the creation of the tables and the index build only) | 10,000 metrics and one 4,096-program snapshot: 35 ms in 1 step; one snapshot of about 16 MiB: 33 ms in 1 step | order of magnitude only |
-| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained linux-x64, branch head 75e433a) | 2026-11-21 | SSD volume | 1,667 ms (3,923, 1,846, 1,537, 1,667, 1,616 ms) | 317 ms (steps 1 to 10: 1,215, 480, 369, 379, 317, 270, 304, 286, 274, 38 ms; 275 snapshots and 60 to 61 program buckets per step) | `page_count` 2,996 to 3,699 at 4,096-byte pages (+2,812 KiB); fold 1,464 ms in 6 steps | 50,399 ms in 32 steps (1,368 to 1,707 ms per step, 550 program buckets each) | 1,270 ms (1,527, 1,257, 1,270, 1,264, 1,284 ms; 1,460 steps, 10 programs) | 62 ms (a version 15 database reverted by hand: the tables and the index build only) | 10,000 metrics and one 4,096-program snapshot: 185 ms in 1 step; one snapshot of about 16 MiB: 103 ms in 1 step | **N2 met** (fold step 317 ms within the median batch of 1,667 ms); **N3 met** (read far within 10 s) |
+| Reference host (Linux 4.4, 4 logical CPUs, .NET 11.0.0 self-contained linux-x64, branch head 75e433a) | 2026-11-21 | SSD volume | 1,667 ms (3,923, 1,846, 1,537, 1,667, 1,616 ms) | 317 ms (steps 1 to 10: 1,215, 480, 369, 379, 317, 270, 304, 286, 274, 38 ms; 275 snapshots and 60 to 61 program buckets per step) | `page_count` 2,996 to 3,699 at 4,096-byte pages (+2,812 KiB); fold 1,464 ms in 6 steps | 50,399 ms in 32 steps (1,368 to 1,707 ms per step, 550 program buckets each) | 1,270 ms (1,527, 1,257, 1,270, 1,264, 1,284 ms; 1,460 steps, 10 programs) | 62 ms (a version 15 database reverted by hand: the tables and the index build only) | 10,000 metrics and one 4,096-program snapshot: 185 ms in 1 step; one snapshot of about 16 MiB: 103 ms in 1 step | **N2 met** (fold step 317 ms within the median batch of 1,667 ms); **N3 met** (read far within 10 s) |
 
 The development-host row shows the order of magnitude: the fold step (125 ms) is at about a quarter of that run's median batch (517 ms),
-and the read is far below the deadline. On the DS918+ the median fold step (317 ms) is about 19 % of the median batch (1,667 ms), which meets
+and the read is far below the deadline. On the reference host the median fold step (317 ms) is about 19 % of the median batch (1,667 ms), which meets
 N2. A step whose snapshots each fall into a bucket of their own, as in the year of hourly snapshots
 (550 program buckets per step), took 1,368 to 1,707 ms: at most about 2 % above the median batch and below the slowest batch (3,923 ms); the first
 fold after an upgrade of an agent's snapshots, taken every minute, resembles the day of N4 instead (1,464 ms in 6 steps). The
@@ -402,7 +402,7 @@ median of five is under 10,000 ms. Only a run on the reference host counts again
 
 ### Procedure
 
-The DS918+ has no .NET 11 runtime installed, so the tool is published self-contained there, as for the retention steps, and run on the
+The reference host has no .NET 11 runtime installed, so the tool is published self-contained there, as for the retention steps, and run on the
 volume that holds the database (the SSD volume):
 
 ```bash
@@ -424,15 +424,15 @@ comparison of two points (10 and 200 days back). It prints the verdict on the cr
 | ---- | ---- | ------ | ----------------------- | ----- | ---- | ----------: | ----------: | -------: | ---------------: | ----------: | -----------------------: | ------- |
 | development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-21 | local disk | stored in 8.5 s, folded in 27.8 s (189 steps) | 30 days | 1 hour | 3 ms | 47 ms | 50 ms | 104 ms | 2 ms | 4 ms | order of magnitude only |
 | development host (as above) | 2026-11-21 | local disk | (same database) | 1 year | 12 hours | 7 ms | 374 ms | 378 ms | 779 ms | | | order of magnitude only |
-| DS918+ (reference host; Linux 4.4.302+, 4 logical CPUs, .NET 11.0.0 self-contained, branch head f913f8d) | 2026-11-22 | SSD volume | stored in 26,428 ms, folded in 104,798 ms (189 steps) | 30 days | 1 hour | 10 ms | 154 ms | 156 ms | 330 ms | 6 ms | 13 ms | **AC10 met** |
-| DS918+ (as above) | 2026-11-22 | SSD volume | (same database) | 1 year | 12 hours | 23 ms | 1,263 ms | 1,293 ms | 2,550 ms | | | **AC10 met** |
+| Reference host (Linux 4.4, 4 logical CPUs, .NET 11.0.0 self-contained, branch head f913f8d) | 2026-11-22 | SSD volume | stored in 26,428 ms, folded in 104,798 ms (189 steps) | 30 days | 1 hour | 10 ms | 154 ms | 156 ms | 330 ms | 6 ms | 13 ms | **AC10 met** |
+| Reference host (as above) | 2026-11-22 | SSD volume | (same database) | 1 year | 12 hours | 23 ms | 1,263 ms | 1,293 ms | 2,550 ms | | | **AC10 met** |
 
 The moment read and the comparison do not depend on the range of the chart; they are listed once, in the 30-day row of each host. The
 whole chart read is the source list and both reads of the top programs, and its figures are their sum within the measuring error (30 days:
-3 + 47 + 50 ms against 104 ms; 1 year: 7 + 374 + 378 ms against 779 ms; DS918+, 30 days: 10 + 154 + 156 ms against 330 ms; 1 year:
+3 + 47 + 50 ms against 104 ms; 1 year: 7 + 374 + 378 ms against 779 ms; reference host, 30 days: 10 + 154 + 156 ms against 330 ms; 1 year:
 23 + 1,263 + 1,293 ms against 2,550 ms). On the development host every median is far below the deadline.
 
-**Outcome on the DS918+ (Product Manager, 2026-11-22): met.** The self-contained build of the branch head `f913f8d` (the NAS has no .NET 11
+**Outcome on the reference host (Product Manager, 2026-11-22): met.** The self-contained build of the branch head `f913f8d` (the NAS has no .NET 11
 runtime) wrote the 8,760 hourly and 43,200 one-minute snapshots in 26,428 ms and folded them in 104,798 ms (189 steps: the 32 steps that fold
 the hourly snapshots took 1,497 to 3,038 ms each with 550 program buckets, the one-minute snapshots 281 to 396 ms each with 60 to 61
 buckets). All ten medians of five are far under the 10,000 ms of the criterion; the largest is the whole chart read of the 1-year range,
@@ -476,7 +476,7 @@ usual-level query on it; and finally the **concentrated case** in a third, fresh
 | Host | CPU | Date | Lines | Write, total | Lines per second | Median batch (ms) | Templates | Template hours | Verdict |
 | ---- | --- | ---- | ----: | -----------: | ---------------: | ----------------: | --------: | -------------: | ------- |
 | development host (4 vCPU, .NET 10.0.12) | Intel Xeon 2.10 GHz | 2026-10-12 | 1,000,000 | 52.6 s | 18,995 | 504 | 2,741 | 153,923 | not the reference host |
-| DS918+ (reference host, SSD volume; Linux 4.4.302+, .NET 10.0.10, 4 CPUs) | Celeron J3455 | 2026-10-12 | 1,000,000 | 195.8 s (3.3 min) | 5,107 | 1,864 | 2,741 | 153,923 | **met** (limit 10 min) |
+| Reference host (SSD volume; Linux 4.4, .NET 10.0.10, 4 CPUs) | Celeron J3455 | 2026-10-12 | 1,000,000 | 195.8 s (3.3 min) | 5,107 | 1,864 | 2,741 | 153,923 | **met** (limit 10 min) |
 
 Normalizing the 1,000,000 messages alone, without the database, took 1.4 s on the development host and 4.1 s on the reference host. The
 usual-level query ran on the same database (range of 744 hours ending after the last line). The statement used to sum the baseline per candidate;
@@ -519,7 +519,7 @@ dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> 
 
 ### Results
 
-Reference host, **run 1** (DS918+, SSD volume `/volume20/HostData`, Linux 4.4.302+, .NET 10.0.10, 4 CPUs; scan bound and cap 12,000, before the changes of
+Reference host, **run 1** (SSD volume, Linux 4.4, .NET 10.0.10, 4 CPUs; scan bound and cap 12,000, before the changes of
 this section; cases 1 to 12; 5,000,000 lines written in 1,087 s, 4,600 lines per second): **criterion not met.** Slowest of three runs, in milliseconds:
 
 | Case | Mode | Result | First run | Slowest |
@@ -578,10 +578,10 @@ third, warm run took 605 ms with the index check finishing in time. Case 15 and 
 
 | Host | Date | Slowest case | Verdict |
 | ---- | ---- | ------------ | ------- |
-| DS918+ (reference host, SSD volume), run 1 | 2026-10-14 | case 12, 2,229 ms | **not met** (cases 9 and 12) |
-| DS918+ (reference host, SSD volume), run 2 | 2026-10-14 | case 9, 1,502 ms | **met** (every case under 2,000 ms) |
+| Reference host (SSD volume), run 1 | 2026-10-14 | case 12, 2,229 ms | **not met** (cases 9 and 12) |
+| Reference host (SSD volume), run 2 | 2026-10-14 | case 9, 1,502 ms | **met** (every case under 2,000 ms) |
 
-Reference host, **run 2** (DS918+, SSD volume `/volume20/HostData`, Linux 4.4.302+, .NET 10.0.10, 4 CPUs; build 38cc9a8 with scan bound 8,000, cap 12,000, probe budget 0.7 s, page
+Reference host, **run 2** (SSD volume, Linux 4.4, .NET 10.0.10, 4 CPUs; build 38cc9a8 with scan bound 8,000, cap 12,000, probe budget 0.7 s, page
 budget 1.5 s; cases 1 to 15; 5,000,000 lines written in 1,147 s, 4,358 lines per second; database 1,983 MiB). Run 1 above missed because of cases 9 (scan bound of 12,000 lines, 2,141 ms) and 12
 (index check of 16 common words, 2,229 ms); this run is the one that counts against the criterion. Times in milliseconds, first run then slowest of three:
 
@@ -641,11 +641,11 @@ work and the memory of one match small. The budgets, the bound, the chunk and th
   `MATCH` with `rowid = ?`, 375 ms for a four-part phrase of a word every line holds, 2.3 s for twenty parts and 8.1 s for sixty (case 15 did not finish in 10 s). The cause is that
   `rowid = …` does not bound the full-text work to one line: an AND of terms or a phrase walks on to the next matching row or the end of the index. The scan now tests every one-part
   word on its own (0.36 ms per line for the 16 words) and the terms of several parts in a private in-memory index of at most 64 examined lines, and its page ends at 1.5 s, so
-  cases 12 and 15 end in under 1 s even when the index check is stopped (0.7 to 0.8 s on the development host; run 2 on the DS918+: 938 and 813 ms).
+  cases 12 and 15 end in under 1 s even when the index check is stopped (0.7 to 0.8 s on the development host; run 2 on the reference host: 938 and 813 ms).
 - **The 234-second run of case 12** was the scan of the earlier build: the index check was stopped at its budget on the cold first run, and the scan then examined 500 lines (8,000 divided by 16)
   at about 470 ms each, about 235 seconds. The benchmark of that moment passed no deadline (`CancellationToken.None`); the 10-second deadline of the page in `SearchBenchmark` was added
   right after, in the next run, which is why the same case 15 then reported "stopped by the 10 s deadline".
-- **Residual:** one `MATCH` in a chunk of the line index runs to its end; crafted messages can keep a chunk busy for about 0.3 s on the development host and about 1.5 s on the DS918+ (an estimate of the
+- **Residual:** one `MATCH` in a chunk of the line index runs to its end; crafted messages can keep a chunk busy for about 0.3 s on the development host and about 1.5 s on the reference host (an estimate of the
   security review), so a page can take up to about 3 s. The benchmark generates no such lines.
 - **Cases 11 and 11b:** the statement summed 374,020 template hours through the index on the hour with a lookup per row (0.65 to 0.9 s warm, up to 1.2 s cold). It now sums over
   the table in key order (`+hour` in the range conditions) and joins the 12,914 templates afterwards: 30 to 43 ms. It reads the whole table whatever the range
@@ -820,7 +820,7 @@ The same two targets, measured on the same production server with the agent send
 
 - Agent `v0.2.0-rc.1` (Go version not recorded), `agent_id` `web`, `backend.url` the backend's tailnet address, the default
   `backend.backfill_bandwidth` of `256KiB`; the host: Ubuntu 22.04, kernel 5.15, 1 core, 1,963 MB, 174 processes.
-- Backend `vandoxd` `v0.2.0-rc.1` (image `networlddev/vandox:0.2.0-rc.1`) in Docker on the Synology DS918+ (Celeron J3455), memory limit 512 MiB, data on the volume of two M.2 SSDs
+- Backend `vandoxd` `v0.2.0-rc.1` (image `networlddev/vandox:0.2.0-rc.1`) in Docker on the NAS (Celeron J3455), memory limit 512 MiB, data on the volume of two M.2 SSDs
   (used as a normal volume, not a cache), reached over Tailscale.
 - The values were read from the unit (`CPUUsageNSec`, `/proc/<pid>/status`, `smaps_rollup`, `/proc/<pid>/io`, `du` of the spool) and, for the backend, from `docker stats`.
   No script is kept in the repository.

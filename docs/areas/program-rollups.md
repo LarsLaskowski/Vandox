@@ -88,8 +88,8 @@ Both reads run on a reader connection under the caller's cancellation ([Storage]
 
 ## Disk and time
 
-Measured with `--programs` of the storage benchmark on the development host and on the DS918+ SSD volume (`docs/BENCHMARKS.md`, *Program
-rollups*); the figures below are those of the DS918+, the development host measured about a quarter to two fifths of them:
+Measured with `--programs` of the storage benchmark on the development host and on the reference host SSD volume (`docs/BENCHMARKS.md`, *Program
+rollups*); the figures below are those of the reference host, the development host measured about a quarter to two fifths of them:
 
 - A day of one snapshot a minute (1,440 snapshots of 80 programs) added 703 pages of 4,096 bytes (2,812 KiB) and folded in 1,464 ms in
   6 steps.
