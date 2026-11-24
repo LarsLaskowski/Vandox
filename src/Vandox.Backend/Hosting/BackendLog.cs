@@ -635,5 +635,13 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 80, Level = LogLevel.Information, Message = "retention removal connection rollups {FiveMinuteRows} {HourlyRows}")]
     internal static partial void RetentionConnectionRollupsRemoved(this ILogger logger, int fiveMinuteRows, int hourlyRows);
 
+    /// <summary>
+    /// Logs that reading the network view failed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The exception of the read</param>
+    [LoggerMessage(EventId = 81, Level = LogLevel.Error, Message = "network view: reading failed")]
+    internal static partial void NetworkReadFailed(this ILogger logger, Exception exception);
+
     #endregion // Methods
 }

@@ -15,6 +15,7 @@ using Vandox.Backend.Incidents;
 using Vandox.Backend.Ingest;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
+using Vandox.Backend.Network;
 using Vandox.Backend.Overview;
 using Vandox.Backend.Processes;
 using Vandox.Backend.Reports;
@@ -254,6 +255,10 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IHistoryReader>(provider => new GatedHistoryReader(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton(provider => new ProcessesChartReader(new GatedProgramRollupReader(store, provider.GetRequiredService<WebReaderGate>()), RetentionService.CreatePolicy(config), provider.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton(provider => new ProcessesMomentReader(provider.GetRequiredService<IHistoryReader>()));
+        builder.Services.AddSingleton<IConnectionRollupReader>(provider => new GatedConnectionRollupReader(store, provider.GetRequiredService<WebReaderGate>()));
+        builder.Services.AddSingleton(provider => new NetworkChartReader(provider.GetRequiredService<IConnectionRollupReader>(), RetentionService.CreatePolicy(config), provider.GetRequiredService<TimeProvider>()));
+        builder.Services.AddSingleton(provider => new NetworkAddressReader(provider.GetRequiredService<IConnectionRollupReader>()));
+        builder.Services.AddSingleton(provider => new NetworkListenerReader(provider.GetRequiredService<IHistoryReader>()));
         builder.Services.AddSingleton<IOverviewReader>(provider => new GatedOverviewReader(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddScoped<CircuitConnection>();
         builder.Services.AddScoped<CircuitHandler>(provider => provider.GetRequiredService<CircuitConnection>());
