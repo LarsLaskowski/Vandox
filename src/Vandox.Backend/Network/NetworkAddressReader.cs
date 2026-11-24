@@ -10,13 +10,10 @@ public sealed class NetworkAddressReader
 {
     #region Fields
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
     /// <summary>
     /// The reader of the rollups.
     /// </summary>
     private readonly IConnectionRollupReader _reader;
-#pragma warning restore S4487
 
     #endregion // Fields
 
@@ -28,6 +25,8 @@ public sealed class NetworkAddressReader
     /// <param name="reader">The reader of the rollups</param>
     public NetworkAddressReader(IConnectionRollupReader reader)
     {
+        ArgumentNullException.ThrowIfNull(reader);
+
         _reader = reader;
     }
 
@@ -35,8 +34,6 @@ public sealed class NetworkAddressReader
 
     #region Methods
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S2325
     /// <summary>
     /// Reads the table of a source and a range.
     /// </summary>
@@ -45,14 +42,25 @@ public sealed class NetworkAddressReader
     /// <param name="step">The length of a step of the charts</param>
     /// <param name="cancellationToken">Cancels the read</param>
     /// <returns>A task that returns the table</returns>
-    public Task<NetworkAddresses> ReadAsync(string source, HistoryRange range, TimeSpan step, CancellationToken cancellationToken)
+    public async Task<NetworkAddresses> ReadAsync(string source, HistoryRange range, TimeSpan step, CancellationToken cancellationToken)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        ArgumentNullException.ThrowIfNull(range);
+
+        var result = await _reader.ConnectionAddressesAsync(new ConnectionRollupQuery
+                                                            {
+                                                                Source = source,
+                                                                From = range.Start,
+                                                                To = range.End,
+                                                                Step = step
+                                                            },
+                                                            cancellationToken).ConfigureAwait(false);
+
+        return new NetworkAddresses
+               {
+                   Table = NetworkChartView.AddressTable(result),
+                   Notes = NetworkChartView.AddressTableNotes(result)
+               };
     }
-#pragma warning restore S2325
 
     #endregion // Methods
 }

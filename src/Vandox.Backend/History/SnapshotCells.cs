@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Vandox.Backend.Logs;
 
 namespace Vandox.Backend.History;
@@ -16,10 +18,7 @@ public static class SnapshotCells
     /// <returns>The runs</returns>
     public static IReadOnlyList<TextRun> Runs(string text)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return LogText.Runs(text, HistoryView.TextChars, HistoryView.TextRuns);
     }
 
     /// <summary>
@@ -29,10 +28,7 @@ public static class SnapshotCells
     /// <returns>The runs</returns>
     public static IReadOnlyList<TextRun> Plain(IFormattable value)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return [new TextRun(value.ToString(null, CultureInfo.InvariantCulture), false)];
     }
 
     /// <summary>
@@ -42,10 +38,7 @@ public static class SnapshotCells
     /// <returns>The runs</returns>
     public static IReadOnlyList<TextRun> Plain(string value)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return [new TextRun(value, false)];
     }
 
     /// <summary>
@@ -55,10 +48,10 @@ public static class SnapshotCells
     /// <returns>The row</returns>
     public static SnapshotRowView Row(params IReadOnlyList<TextRun>[] cells)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return new SnapshotRowView
+               {
+                   Cells = cells
+               };
     }
 
     #endregion // Methods

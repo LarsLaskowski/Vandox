@@ -10,21 +10,15 @@ public sealed class GatedConnectionRollupReader : IConnectionRollupReader
 {
     #region Fields
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
     /// <summary>
     /// The reader to call.
     /// </summary>
     private readonly IConnectionRollupReader _inner;
-#pragma warning restore S4487
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
     /// <summary>
     /// The gate of the reads.
     /// </summary>
     private readonly WebReaderGate _gate;
-#pragma warning restore S4487
 
     #endregion // Fields
 
@@ -37,6 +31,9 @@ public sealed class GatedConnectionRollupReader : IConnectionRollupReader
     /// <param name="gate">The gate of the reads</param>
     public GatedConnectionRollupReader(IConnectionRollupReader inner, WebReaderGate gate)
     {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(gate);
+
         _inner = inner;
         _gate = gate;
     }
@@ -48,28 +45,19 @@ public sealed class GatedConnectionRollupReader : IConnectionRollupReader
     /// <inheritdoc/>
     public Task<ConnectionRollupResult> ConnectionRollupsAsync(ConnectionRollupQuery query, CancellationToken cancellationToken)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return _gate.RunAsync(() => _inner.ConnectionRollupsAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<ConnectionAddressResult> ConnectionAddressesAsync(ConnectionRollupQuery query, CancellationToken cancellationToken)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return _gate.RunAsync(() => _inner.ConnectionAddressesAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<ProgramSourceList> ConnectionSourcesAsync(ProgramSourceQuery query, CancellationToken cancellationToken)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        return _gate.RunAsync(() => _inner.ConnectionSourcesAsync(query, cancellationToken), cancellationToken);
     }
 
     #endregion // IConnectionRollupReader

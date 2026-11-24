@@ -77,14 +77,14 @@ public sealed class ProcessSnapshotView
                               {
                                   Heading = "Programs",
                                   Columns = ["Program", "Processes", "CPU %", programPss ? "Memory (PSS)" : "Memory (RSS)"],
-                                  Rows = [.. programRows.Take(HistoryView.ListRows).Select(program => Row(Runs(program.Program), Plain(program.Count), Cpu(program.CpuPercent), Plain(OverviewText.Size(Memory(program.PssBytes, program.RssBytes, programPss)))))],
+                                  Rows = [.. programRows.Take(HistoryView.ListRows).Select(program => SnapshotCells.Row(SnapshotCells.Runs(program.Program), SnapshotCells.Plain(program.Count), Cpu(program.CpuPercent), SnapshotCells.Plain(OverviewText.Size(Memory(program.PssBytes, program.RssBytes, programPss)))))],
                                   More = More(programRows.Count, "programs")
                               },
                    Processes = new SnapshotTableView
                                {
                                    Heading = "Processes",
                                    Columns = ["PID", "User", "Command", "CPU %", processPss ? "Memory (PSS)" : "Memory (RSS)"],
-                                   Rows = [.. processRows.Take(HistoryView.ListRows).Select(process => Row(Plain(process.Pid), Runs(process.User), Runs(process.Command), Cpu(process.CpuPercent), Plain(OverviewText.Size(Memory(process.PssBytes, process.RssBytes, processPss)))))],
+                                   Rows = [.. processRows.Take(HistoryView.ListRows).Select(process => SnapshotCells.Row(SnapshotCells.Plain(process.Pid), SnapshotCells.Runs(process.User), SnapshotCells.Runs(process.Command), Cpu(process.CpuPercent), SnapshotCells.Plain(OverviewText.Size(Memory(process.PssBytes, process.RssBytes, processPss)))))],
                                    More = More(processRows.Count, "processes")
                                },
                    ListedOfTotal = snapshot.Total is { } total && total > processes.Count ? string.Format(CultureInfo.InvariantCulture, "{0} of {1} processes are listed.", processes.Count, total) : string.Empty,
@@ -116,56 +116,13 @@ public sealed class ProcessSnapshotView
     }
 
     /// <summary>
-    /// Builds a row.
-    /// </summary>
-    /// <param name="cells">The cells</param>
-    /// <returns>The row</returns>
-    private static SnapshotRowView Row(params IReadOnlyList<TextRun>[] cells)
-    {
-        return new SnapshotRowView
-               {
-                   Cells = cells
-               };
-    }
-
-    /// <summary>
-    /// Builds the runs of an external text.
-    /// </summary>
-    /// <param name="text">The text</param>
-    /// <returns>The runs</returns>
-    private static IReadOnlyList<TextRun> Runs(string text)
-    {
-        return LogText.Runs(text, HistoryView.TextChars, HistoryView.TextRuns);
-    }
-
-    /// <summary>
-    /// Builds the runs of a number or of a text of the page.
-    /// </summary>
-    /// <param name="value">The value</param>
-    /// <returns>The runs</returns>
-    private static IReadOnlyList<TextRun> Plain(IFormattable value)
-    {
-        return [new TextRun(value.ToString(null, CultureInfo.InvariantCulture), false)];
-    }
-
-    /// <summary>
-    /// Builds the runs of a text of the page.
-    /// </summary>
-    /// <param name="value">The text</param>
-    /// <returns>The runs</returns>
-    private static IReadOnlyList<TextRun> Plain(string value)
-    {
-        return [new TextRun(value, false)];
-    }
-
-    /// <summary>
     /// Builds the runs of a CPU percentage with one decimal.
     /// </summary>
     /// <param name="percent">The percentage</param>
     /// <returns>The runs</returns>
     private static IReadOnlyList<TextRun> Cpu(double percent)
     {
-        return Plain(percent.ToString("F1", CultureInfo.InvariantCulture));
+        return SnapshotCells.Plain(percent.ToString("F1", CultureInfo.InvariantCulture));
     }
 
     #endregion // Methods

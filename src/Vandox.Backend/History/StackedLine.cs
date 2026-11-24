@@ -1,3 +1,4 @@
+using Vandox.Backend.Logs;
 using Vandox.Storage;
 
 namespace Vandox.Backend.History;
@@ -21,10 +22,19 @@ public static class StackedLine
     /// <returns>The line</returns>
     public static HistoryLine Build(string label, int index, IReadOnlyList<ProgramRollupPoint?>? points, IReadOnlyList<bool> gaps, double factor, IReadOnlyList<double?>? others)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        ArgumentNullException.ThrowIfNull(gaps);
+
+        return new HistoryLine
+               {
+                   Label = LogText.Escape(label, HistoryView.LabelChars),
+                   Scale = 0,
+                   Color = index % HistoryChartView.ColorCount,
+                   Dashed = index >= HistoryChartView.ColorCount,
+                   Values = points is null ? [.. gaps.Select((gap, step) => gap ? null : others?[step] / factor)] : [.. points.Select(point => point?.Average / factor)],
+                   Bridged = [.. gaps.Select(_ => false)],
+                   Minimums = points is null ? [] : [.. points.Select(point => point?.Minimum / factor)],
+                   Maximums = points is null ? [] : [.. points.Select(point => point?.Maximum / factor)]
+               };
     }
 
     #endregion // Methods

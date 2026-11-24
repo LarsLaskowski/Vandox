@@ -215,7 +215,9 @@ public sealed class ProcessesAddress
     /// <returns>The first error, or an empty text</returns>
     private string Read(Dictionary<string, StringValues> values)
     {
-        var error = ReadSource(values);
+        var (error, source) = AddressTimes.ReadName(values, SourceName);
+
+        Source = source;
 
         if (error.Length == 0)
         {
@@ -233,40 +235,6 @@ public sealed class ProcessesAddress
         }
 
         return error.Length > 0 ? error : NeedsMomentError();
-    }
-
-    /// <summary>
-    /// Reads the source.
-    /// </summary>
-    /// <param name="values">The query values</param>
-    /// <returns>The error, or an empty text</returns>
-    private string ReadSource(Dictionary<string, StringValues> values)
-    {
-        if (values.TryGetValue(SourceName, out var found) == false)
-        {
-            return string.Empty;
-        }
-
-        if (found.Count > 1)
-        {
-            return AddressTimes.Repeated(SourceName);
-        }
-
-        var value = found[0] ?? string.Empty;
-
-        if (value.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        if (AddressTimes.IsValidName(value) == false)
-        {
-            return AddressTimes.Invalid(SourceName);
-        }
-
-        Source = value;
-
-        return string.Empty;
     }
 
     /// <summary>

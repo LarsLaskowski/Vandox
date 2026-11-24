@@ -104,10 +104,27 @@ internal sealed partial class AddressTimes
     /// <returns>The error (an empty text for none) and the value, <see langword="null"/> when the parameter is absent or empty</returns>
     internal static ValueTuple<string, string?> ReadName(Dictionary<string, StringValues> values, string name)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        if (values.TryGetValue(name, out var found) == false)
+        {
+            return (string.Empty, null);
+        }
+
+        if (found.Count > 1)
+        {
+            return (Repeated(name), null);
+        }
+
+        var value = found[0] ?? string.Empty;
+
+        if (value.Length == 0)
+        {
+            return (string.Empty, null);
+        }
+
+        return IsValidName(value) ? (string.Empty, value) : (Invalid(name), null);
     }
 
     /// <summary>

@@ -16,10 +16,19 @@ public static class SourceChoice
     /// <returns>The source name, or an empty text when there is none</returns>
     public static string Latest(ProgramSourceList sources)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        ArgumentNullException.ThrowIfNull(sources);
+
+        ProgramSource? latest = null;
+
+        foreach (var candidate in sources.Sources)
+        {
+            if (latest is null || candidate.LatestBucket > latest.LatestBucket)
+            {
+                latest = candidate;
+            }
+        }
+
+        return latest?.Source ?? string.Empty;
     }
 
     #endregion // Methods

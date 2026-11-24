@@ -117,6 +117,41 @@ public static class NetworkView
     /// </summary>
     public const string CapText = "Some periods in this range held more remote addresses than the rollups keep, so an address can read lower there and the count of further addresses is a lower bound.";
 
+    /// <summary>
+    /// The note on the counts of the remote addresses.
+    /// </summary>
+    public const string AddressNoteText = "Each snapshot counts only its 25 most frequent remote addresses and the rollups keep only the most frequent ones; an address outside them counts 0 there.";
+
+    /// <summary>
+    /// The note on the sockets per program.
+    /// </summary>
+    public const string ProgramNoteText = "Each process counts every socket it holds, so a socket shared by several processes (a server's master and its workers) counts once for each, and the stack can exceed the sockets per state; sockets without an owner (such as TIME_WAIT) are not in this chart.";
+
+    /// <summary>
+    /// The label of the programs the chart does not name.
+    /// </summary>
+    public const string OtherPrograms = "Other programs";
+
+    /// <summary>
+    /// The axis of both charts.
+    /// </summary>
+    public const string AxisText = "Sockets";
+
+    /// <summary>
+    /// The format of the line of the rows beyond the table of the addresses.
+    /// </summary>
+    public const string MoreAddressesFormat = "and {0} more addresses";
+
+    /// <summary>
+    /// The format of the line of the rows beyond the table of the listeners.
+    /// </summary>
+    public const string MoreListenersFormat = "and {0} more listeners";
+
+    /// <summary>
+    /// The end of the summary of a comparison of the privileged ports only.
+    /// </summary>
+    public const string PrivilegedOnlySuffix = "(ports 1 to 1023 only)";
+
     #endregion // Constants
 
     #region Methods
@@ -128,10 +163,9 @@ public static class NetworkView
     /// <returns>The link</returns>
     public static string NetworkHref(NetworkAddress address)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        ArgumentNullException.ThrowIfNull(address);
+
+        return "network" + address.ToQuery();
     }
 
     #endregion // Methods

@@ -10,29 +10,20 @@ public sealed class NetworkChartReader
 {
     #region Fields
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
     /// <summary>
     /// The reader of the rollups.
     /// </summary>
     private readonly IConnectionRollupReader _reader;
-#pragma warning restore S4487
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
     /// <summary>
     /// The retention policy.
     /// </summary>
     private readonly RetentionPolicy _policy;
-#pragma warning restore S4487
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S4487
     /// <summary>
     /// The clock.
     /// </summary>
     private readonly TimeProvider _clock;
-#pragma warning restore S4487
 
     #endregion // Fields
 
@@ -46,6 +37,10 @@ public sealed class NetworkChartReader
     /// <param name="clock">The clock</param>
     public NetworkChartReader(IConnectionRollupReader reader, RetentionPolicy policy, TimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(clock);
+
         _reader = reader;
         _policy = policy;
         _clock = clock;
@@ -55,8 +50,6 @@ public sealed class NetworkChartReader
 
     #region Methods
 
-    // Skeleton: removed with the implementation
-#pragma warning disable S2325
     /// <summary>
     /// Reads the sources and the two charts of a range.
     /// </summary>
@@ -65,14 +58,60 @@ public sealed class NetworkChartReader
     /// <param name="chartWidth">The width of the chart in pixels</param>
     /// <param name="cancellationToken">Cancels the read</param>
     /// <returns>A task that returns the charts</returns>
-    public Task<NetworkCharts> ReadAsync(string? source, HistoryRange range, double chartWidth, CancellationToken cancellationToken)
+    public async Task<NetworkCharts> ReadAsync(string? source, HistoryRange range, double chartWidth, CancellationToken cancellationToken)
     {
-        // Skeleton: removed with the implementation
-#pragma warning disable RH2003
-        throw new NotImplementedException();
-#pragma warning restore RH2003
+        ArgumentNullException.ThrowIfNull(range);
+
+        var sources = await _reader.ConnectionSourcesAsync(new ProgramSourceQuery
+                                                           {
+                                                               From = range.Start,
+                                                               To = range.End
+                                                           },
+                                                           cancellationToken).ConfigureAwait(false);
+        var names = sources.Sources.Select(listed => listed.Source).ToList();
+        var chosen = source ?? SourceChoice.Latest(sources);
+
+        if (chosen.Length == 0)
+        {
+            return new NetworkCharts
+                   {
+                       Sources = names,
+                       Notes = [NetworkView.NoDataText]
+                   };
+        }
+
+        var step = SeriesLadder.Choose(range.Start, range.End, _clock.GetUtcNow(), HistoryView.Target(chartWidth), _policy);
+        var rollups = await _reader.ConnectionRollupsAsync(new ConnectionRollupQuery
+                                                           {
+                                                               Source = chosen,
+                                                               From = range.Start,
+                                                               To = range.End,
+                                                               Step = step
+                                                           },
+                                                           cancellationToken).ConfigureAwait(false);
+        var notes = NetworkChartView.ChartNotes(rollups, sources, range, step);
+
+        if (rollups.Times.Count == 0)
+        {
+            return new NetworkCharts
+                   {
+                       Sources = names,
+                       Source = chosen,
+                       Step = step,
+                       Notes = notes
+                   };
+        }
+
+        return new NetworkCharts
+               {
+                   Sources = names,
+                   Source = chosen,
+                   Step = step,
+                   States = NetworkChartView.StateChart(rollups),
+                   Programs = NetworkChartView.ProgramChart(rollups),
+                   Notes = notes
+               };
     }
-#pragma warning restore S2325
 
     #endregion // Methods
 }
