@@ -267,7 +267,7 @@ internal static class MariaDbHistoryQueries
                                                     [IdParameter] = recordId,
                                                     [LimitParameter] = ThreadSnapshot.MaxRows
                                                 },
-                                                reader => reader.GetString(0),
+                                                reader => reader.IsDBNull(0) ? "null" : reader.GetString(0),
                                                 Context,
                                                 cancellationToken).ConfigureAwait(false);
         var header = headers[0];
