@@ -95,7 +95,13 @@ public sealed class TimeSeriesService
                     };
         var data = await SeriesLineReader.ReadAsync(_reader, _policy, series, range, query.StepsOnly, cancellationToken).ConfigureAwait(false);
         var gaps = await SeriesGapReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
-        var markers = await SeriesMarkerReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+        (List<SeriesMarker> Markers, DateTimeOffset? CompleteUntil) markers = ([], null);
+
+        if (query.SkipMarkers == false)
+        {
+            markers = await SeriesMarkerReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+        }
+
         var startsBefore = _policy.HourlyRollups is not null && query.From < now - _policy.HourlyRollups.Value;
 
         if (data.Raw)
@@ -142,12 +148,34 @@ public sealed class TimeSeriesService
     /// <exception cref="InvalidQueryException">The range breaks a rule; nothing was read</exception>
     /// <exception cref="StoreException">A store read fails</exception>
     /// <exception cref="OperationCanceledException">The token was cancelled</exception>
-#pragma warning disable RH2003, S1172, S2325 // Skeleton: removed with the implementation
-    public Task<SeriesMarkerList> RestartsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+    public async Task<SeriesMarkerList> RestartsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        RecordQueries.Require(from < to, "from must be before to");
+        RecordQueries.Require(StorageTime.InStorableRange(from) && StorageTime.InStorableRange(to), "from and to must be within the storable range");
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var now = _clock.GetUtcNow();
+
+        if (from >= now)
+        {
+            return new SeriesMarkerList();
+        }
+
+        var range = new SeriesRange
+                    {
+                        From = from,
+                        End = to < now ? to : now,
+                        Now = now,
+                        Target = 1
+                    };
+        var restarts = await SeriesMarkerReader.ReadRestartsOnlyAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+
+        return new SeriesMarkerList
+               {
+                   Markers = restarts.Markers,
+                   CompleteUntil = restarts.CompleteUntil
+               };
     }
-#pragma warning restore RH2003, S1172, S2325
 
     /// <summary>
     /// Checks a query against the rules of the plan and returns its distinct series.

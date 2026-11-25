@@ -1447,47 +1447,51 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
     #endregion // IHistoryReader
 
-#pragma warning disable RH2003 // Skeleton: removed with the implementation
-
     #region IServiceHistoryReader
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<ServiceAvailabilityResult> ServiceAvailabilityAsync(ServiceAvailabilityQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        ServiceHistoryQueries.Validate(query);
+
+        return ReadAsync(connection => ServiceHistoryQueries.ReadAsync(connection, query, cancellationToken), ServiceHistoryQueries.Context, cancellationToken);
     }
 
     #endregion // IServiceHistoryReader
 
     #region IMariaDbHistoryReader
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<MariaDbStatusResult> MariaDbStatusAsync(MariaDbStatusQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        MariaDbHistoryQueries.ValidateStatus(query);
+
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadStatusAsync(connection, query, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<IReadOnlyList<ThreadSnapshotStamp>> ThreadSnapshotsAsync(ThreadSnapshotQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        MariaDbHistoryQueries.ValidateSnapshots(query);
+
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadStampsAsync(connection, query, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<ThreadSnapshotStamp?> ClosestThreadSnapshotAsync(DateTimeOffset at, TimeSpan window, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        MariaDbHistoryQueries.ValidateClosest(at, window);
+
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadClosestAsync(connection, at, window, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<ThreadSnapshot?> ThreadSnapshotAsync(long recordId, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadSnapshotAsync(connection, recordId, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
     }
 
     #endregion // IMariaDbHistoryReader
-
-#pragma warning restore RH2003
 
     #region IAsyncDisposable
 
