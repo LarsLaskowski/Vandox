@@ -35,6 +35,14 @@ as it refuses one unit's state: up to 8,640 touching gaps a day.
    streams its own collector's gaps and merges overlapping and touching spans before a cap of 1,000 spans (chosen). The collector filter
    runs in C# through the one rule (`SeriesGap`), not as a copy of the collector names in SQL; the merge runs in C# on a bounded sorted
    set, not as a window-function query in SQL, because gap records arrive in capture order, not span order.
+6. **Make the 1-year services read fit the 10-second deadline at 256 units on the reference host by reading the existing records
+   differently.** Rejected: on that host the read takes 13.9 s (2.24 million records), about four times the development host. On the
+   development host, stepping the covering index natively takes 314 ms, reading the needed columns into C# without any fold 1.5 s, and
+   a lean stream (no `id` tie sort, availability as an integer) still 2.4 s against 3.2 s, about 11 s projected on the reference host.
+   SQL variants are slower: `LAG` windows 2.5 s with a new unit-first index and 3.9 s with a sort, a next-record seek per row 4.1 s. A
+   share of records for long ranges is option 2. Parallel reads would take all four reader connections. What remains is to keep state
+   runs at ingest, which changes the write path; that is a follow-up issue. The 1-year range at 256 units shows E12 instead; a year fits
+   the deadline up to about 130 units (the Product Manager's amendment of AC10).
 
 ## Decision
 
@@ -50,5 +58,7 @@ units are evaluated. The rules are in [Services view](../areas/web-ui-services-v
   is a follow-up issue (status values as metrics or rollups).
 - Streaming every gap record of the window costs time with many gaps; the 10-second deadline bounds it, and the benchmark measures a
   month of per-run gaps.
+- The read time grows with the records of the range: at the agent's cap of 256 units a 1-year range passes the 10-second deadline on the
+  reference host (E12, [Benchmarks](../BENCHMARKS.md)); a year fits up to about 130 units.
 - Services are streamed from 1 hour 5 minutes before the range, so a quiet unit's state is carried into a short range without a second
   read.

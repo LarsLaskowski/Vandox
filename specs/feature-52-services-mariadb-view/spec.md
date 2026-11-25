@@ -76,7 +76,8 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - N2: Every store call takes one slot of the views' shared read gate; each section's action runs under a 10-second deadline that
   includes the wait for a slot, and leaving the page cancels all actions.
 - N3: On the reference host, the services, MariaDB and thread snapshot actions of a 30-day and of a 1-year range finish within the
-  deadline, measured with `tools/Vandox.StorageBenchmark` on the benchmark database ([Benchmarks](../../docs/BENCHMARKS.md)) extended by a
+  deadline, except the services action of a 1-year range at 256 units, which may pass it (E12) and whose median is stated with the number
+  of units a year's services read fits within the deadline; measured with `tools/Vandox.StorageBenchmark` on the benchmark database ([Benchmarks](../../docs/BENCHMARKS.md)) extended by a
   new MariaDB workload: 30 days of `mariadb_status` records at 30 seconds (86,400 records), of which one in 100 carries a thread
   snapshot close to the 1 MiB record bound, beside `service_state` records of 256 units (the agent's cap) over a year and the metric workloads.
 - N4: The memory per circuit is bounded by the caps (256 evaluated units, 1,000 restarts, 1,000 gap spans per section, at most 1,000 steps
@@ -116,8 +117,9 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - AC9: The three sections read in separate actions under the shared gate and the 10-second deadline, show E12 and E13 in their own
   place, log only as N1 says, and keep their memory within N4's caps (E12, E13, N1, N2, N4).
 - AC10: The MariaDB workload of N3 is added to the benchmark tool and `docs/BENCHMARKS.md`, and the services, MariaDB and thread
-  snapshot actions of a 30-day and a 1-year range are timed on it, each within the deadline; an index added for it is named there (N3,
-  N5).
+  snapshot actions of a 30-day and a 1-year range are timed on it, each within the deadline except the 1-year services action at 256
+  units, whose measured median, the expected E12 and the number of units a year fits are stated in `docs/BENCHMARKS.md` and the area
+  document; an index added for it is named there (N3, N5).
 
 ## Out of scope
 
@@ -167,3 +169,9 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 Spec fixes while planning (Lead): S4's down share follows AC5's rounding down (0.6 %, not 0.7 %); S5, AC6 and AC7 no longer promise a
 scale from 0, because the history chart fits a scale to its lines outside its stacked mode (`wwwroot/js/charts.js`, `historyScales`);
 E3 names the collectors the time-series query leaves unnamed, so that no gap is hidden.
+
+## Amendments
+
+| Criterion | Change | Reason | Step | Decided by |
+| --------- | ------ | ------ | ---- | ---------- |
+| AC10 (N3) | The 1-year services action at 256 units may pass the 10-second deadline (E12); its median (13,944 ms on the reference host) and the units a year fits (about 130) are documented instead | The reference-host run failed on that row only; no read of the stored records meets it (record 0227) | 7 Manual test | Product Manager |
