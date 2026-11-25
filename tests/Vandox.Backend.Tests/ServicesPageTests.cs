@@ -597,6 +597,65 @@ public class ServicesPageTests
     }
 
     /// <summary>
+    /// <c>Apply</c> writes the range of the fields as a fixed range in a new entry of the history; a field that is not a time shows the text of the history view and writes nothing.
+    /// </summary>
+    /// <param name="from">The text of the start field</param>
+    /// <param name="to">The text of the end field</param>
+    /// <param name="error">The expected error text, empty for a valid range</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [DataRow("2026-10-13T08:00", "2026-10-13T09:30", "")]
+    [DataRow("x", "2026-10-13T09:30", "The address has an invalid value for the parameter from.")]
+    [DataRow("2026-10-13T08:00", "", "The address needs both a start and an end time.")]
+    public async Task ServicesPageApplyWritesFieldsOrShowsError(string from, string to, string error)
+    {
+        // Arrange
+        await using var harness = new ServicesPageHarness(string.Empty);
+
+        await harness.AddAsync();
+        await harness.WaitForLoadedAsync();
+        await harness.EnterAsync(("from", from), ("to", to));
+
+        // Act
+        await harness.PressAsync("Apply");
+
+        // Assert
+        if (error.Length == 0)
+        {
+            Assert.HasCount(1, harness.Navigation.Navigations, "one navigation");
+            Assert.AreEqual(Href(null, new DateTimeOffset(2026, 10, 13, 8, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 10, 13, 9, 30, 0, TimeSpan.Zero), null), harness.Navigation.Navigations[0].Uri, "the address has the fixed range");
+            Assert.IsFalse(harness.Navigation.Navigations[0].Options.ReplaceHistoryEntry, "a new entry of the history");
+        }
+        else
+        {
+            Assert.IsEmpty(harness.Navigation.Navigations, "nothing is written");
+            Assert.Contains(error, harness.Text(), "the text of the error");
+        }
+    }
+
+    /// <summary>
+    /// The list of the restarts and its heading appear only when a restart was found.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC4")]
+    public async Task ServicesPageShowsRestartListOnlyWithRestarts()
+    {
+        // Arrange
+        await using var harness = new ServicesPageHarness(string.Empty);
+
+        harness.Series.Services.Clear();
+
+        // Act
+        await harness.AddAsync();
+        await harness.WaitForLoadedAsync();
+
+        // Assert
+        Assert.DoesNotContain("Service restarts", harness.SubHeadings().ToArray(), "no restart, no list");
+    }
+
+    /// <summary>
     /// Writes the relative address the page writes for a state, as the page does.
     /// </summary>
     /// <param name="preset">The preset, or <see langword="null"/> for none</param>
@@ -672,7 +731,7 @@ public class ServicesPageTests
 
         if (section != ThreadsSection)
         {
-            await harness.WaitForTextAsync("Threads of ");
+            await harness.WaitForTextAsync(ServicesView.SnapshotsHeading);
         }
     }
 

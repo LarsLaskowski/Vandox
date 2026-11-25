@@ -329,7 +329,7 @@ internal sealed class ServicesPageHarness : IAsyncDisposable
     {
         await WaitForTextAsync(ServicesSamples.Nginx);
         await WaitForDrawsAsync(ChartCount);
-        await WaitForTextAsync("Threads of ");
+        await WaitForTextAsync(ServicesView.SnapshotsHeading);
     }
 
     /// <summary>

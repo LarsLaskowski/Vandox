@@ -44,10 +44,9 @@ public class ServicesTableViewTests
         Assert.AreEqual(ServicesView.ServicesHeading, table.Units.Heading, "the caption of the table");
         Assert.AreSequenceEqual(["Unit", "Available", "Not available", "Unknown", "Restarts", "Last restart", "Latest state"], table.Units.Columns.ToArray(), "the columns");
         Assert.AreSequenceEqual([ServicesSamples.Nginx, "99.7 %", "2 h 0 min", "0 s", "0", "none"], nginx.Take(6).ToArray(), "the cells before the latest state");
-        Assert.Contains("failed (failed)", nginx[6], "the latest state with its sub state");
-        Assert.Contains("2026-10-01 08:00:00", nginx[6], "the time of the latest state");
+        Assert.AreEqual("failed (failed), 2026-10-01 08:00:00 UTC", nginx[6], "the latest state with its sub state and its time");
         Assert.AreSequenceEqual(["sshd.service", "100.0 %", "0 s", "0 s", "0", "none"], sshd.Take(6).ToArray(), "no time not available reads 100.0 %");
-        Assert.Contains("active (running)", sshd[6], "the latest state of the other unit");
+        Assert.StartsWith("active (running), ", sshd[6], "the latest state of the other unit");
         Assert.IsFalse(table.Empty, "units are listed");
     }
 
@@ -376,6 +375,24 @@ public class ServicesTableViewTests
 
         // Assert
         Assert.AreEqual(expected, text, "the share rounded down to one decimal");
+    }
+
+    /// <summary>
+    /// A unit without a record time reads <c>unknown</c> as its latest state, and a share of a total of zero reads 0.0 %.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public void ServicesTableViewWritesUnknownLatestStateAndZeroShare()
+    {
+        // Arrange
+        var availability = ServicesSamples.Availability(ServicesSamples.Unit("x.service", TimeSpan.Zero, TimeSpan.Zero, TimeSpan.FromDays(30), string.Empty, string.Empty, null));
+
+        // Act
+        var table = ServicesTableView.Build(availability, new SeriesMarkerList(), _month);
+
+        // Assert
+        Assert.AreEqual("unknown", ServicesSamples.CellTexts(table.Units.Rows[0])[6], "no latest record");
+        Assert.AreEqual("0.0 %", ServicesView.ShareDown(TimeSpan.Zero, TimeSpan.Zero), "a total of zero");
     }
 
     #endregion // Methods

@@ -224,6 +224,7 @@ public class ThreadSnapshotViewTests
         Assert.AreSequenceEqual(["No thread snapshot was stored within 10 minutes of this moment."], atMoment.Notes.ToArray(), "none near the moment");
         Assert.HasCount(1, atMoment.Stamps, "the list of the range stays");
         Assert.IsNull(atMoment.Threads, "no table");
+        Assert.AreEqual(string.Empty, atMoment.Heading, "no heading without a snapshot near the moment");
     }
 
     /// <summary>
@@ -256,6 +257,46 @@ public class ThreadSnapshotViewTests
         Assert.AreEqual("18446744073709551615", HistorySamples.Text(panel.Threads.Rows[0].Cells[0]), "the identifier with all its digits");
         Assert.AreEqual(expected, HistorySamples.Text(panel.Threads.Rows[0].Cells[6]), "the time of the thread");
         Assert.AreEqual(expected, panel.Stamps[0].Longest, "the longest running time of the snapshot");
+    }
+
+    /// <summary>
+    /// A snapshot without a running thread writes <c>none</c> as the longest running time, a snapshot without sleeping connections writes no line about them, and an empty list of the range with
+    /// a moment says that no snapshot is stored in the range.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public void ThreadSnapshotViewWritesNoneSleepingZeroAndEmptyListWithMoment()
+    {
+        // Arrange
+        var shown = ServicesSamples.Snapshot(_at, 1, 1, 0, ServicesSamples.Thread(1, 5, "SELECT 1"));
+
+        // Act
+        var panel = ThreadSnapshotView.Build([ServicesSamples.Stamp(3, _at, 1, 0, null)], shown, null);
+        var empty = ThreadSnapshotView.Build([], null, _at);
+
+        // Assert
+        Assert.AreEqual("none", panel.Stamps[0].Longest, "no running thread, no longest time");
+        Assert.AreEqual(string.Empty, panel.Sleeping, "no sleeping connection, no line");
+        Assert.AreSequenceEqual(["No thread snapshot is stored in this range."], empty.Notes.ToArray(), "an empty range says so also with a moment");
+        Assert.AreEqual(string.Empty, empty.Heading, "no heading");
+    }
+
+    /// <summary>
+    /// The line about more threads counts at least one when the store gave the 101st row although the snapshot counts fewer running threads.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC8")]
+    public void ThreadSnapshotViewCountsAtLeastOneMoreThread()
+    {
+        // Arrange
+        var threads = Enumerable.Range(1, 101).Select(index => ServicesSamples.Thread((ulong)index, 10, "SELECT 1")).ToArray();
+
+        // Act
+        var panel = ThreadSnapshotView.Build([ServicesSamples.Stamp(3, _at, 101, 50, 10)], ServicesSamples.Snapshot(_at, 101, 50, 0, threads), null);
+
+        // Assert
+        Assert.IsNotNull(panel.Threads, "the table");
+        Assert.AreEqual("and 1 more threads", panel.Threads.More, "at least one more");
     }
 
     #endregion // Methods

@@ -155,6 +155,28 @@ public class MariaDbReaderTests
     }
 
     /// <summary>
+    /// A range that starts after now gives a series without a step: the status is not read and the section says that no MariaDB data is stored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task MariaDbReaderReadsNoStatusForAFutureRange()
+    {
+        // Arrange
+        var range = new HistoryRange(_now.AddDays(1), _now.AddDays(2));
+
+        using var series = new ScriptedTimeSeriesReader();
+        using var reader = new FakeMariaDbHistoryReader();
+
+        // Act
+        var charts = await Create(series, reader).ReadAsync(range, 200, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(reader.Calls, "no status read");
+        Assert.Contains(ServicesView.NoMariaDbDataText, charts.Notes.ToArray(), "no MariaDB data");
+    }
+
+    /// <summary>
     /// Creates the reader over a series reader and a MariaDB history reader, with the clock at the time of the tests and the default retention.
     /// </summary>
     /// <param name="series">The reader of the series</param>
