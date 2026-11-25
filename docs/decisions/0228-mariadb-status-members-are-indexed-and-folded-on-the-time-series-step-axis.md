@@ -25,7 +25,10 @@ from the time-series query, on one time axis.
    stored status record once.
 3. **Roll the status values up in the retention job, or have the agent write them as metrics.** This would reach beyond
    `retention.snapshots`, but needs a new fold or an agent and wire change. Rejected for this issue; it is a follow-up issue.
-4. **Draw the status lines at raw resolution when the metric lines are raw.** That needs a second axis rule for the status lines.
+4. **Thread rows as SQL columns (`CAST … AS TEXT` or `AS INTEGER`) into a new storage type.** Rejected: an `id` or `time_seconds` above
+   the largest signed 64-bit integer comes back from `json_extract` as a real, and the type would duplicate `MariaDbThread` of the data
+   model. Each listed thread's JSON object is deserialized into that model type instead (chosen), one object at a time.
+5. **Draw the status lines at raw resolution when the metric lines are raw.** That needs a second axis rule for the status lines.
    Rejected: the view asks the time-series query for steps only (`TimeSeriesQuery.StepsOnly`) and folds the status records on the same
    steps, so every MariaDB chart shares one axis.
 
@@ -33,7 +36,8 @@ from the time-series query, on one time axis.
 
 Schema step 18 adds the covering partial index `records_mariadb_status`, and the status reads of the services view name exactly its
 expressions. The status records are folded in C# while they stream, onto the step axis of the view's time-series query, which skips raw
-resolution and markers for it. The rules are in [Services view](../areas/web-ui-services-view.md) and [Storage](../areas/storage.md).
+resolution and markers for it. The listed threads are read as the data model's `MariaDbThread`, and their seconds are shown capped at 100
+years. The rules are in [Services view](../areas/web-ui-services-view.md) and [Storage](../areas/storage.md).
 
 ## Consequences
 

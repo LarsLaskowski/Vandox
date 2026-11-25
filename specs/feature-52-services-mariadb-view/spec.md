@@ -66,8 +66,8 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - E14: More than 256 distinct units in the range: only the first 256 in ordinal order of
   their names are evaluated and ordered, then `<n> more units are not evaluated.`; more than 100 running threads: `and <n> more
   threads`; more than 50 snapshots in the range: `Older snapshots are not listed; narrow the range.`
-- E15: More than 1,000 gaps concern a section's collector in the range: the first 1,000 by start are read, all time after the last one
-  read counts as unknown, and the section says `Gaps after <time> UTC are not read; the time after it counts as unknown.`
+- E15: More than 1,000 gap spans concern a section's collector in the range (touching or overlapping gaps form one span): the first
+  1,000 by start are read, all time after the last one read counts as unknown, and the section says `Gaps after <time> UTC are not read; the time after it counts as unknown.`
 
 ## Non-functional requirements
 
@@ -78,8 +78,8 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - N3: On the reference host, the services, MariaDB and thread snapshot actions of a 30-day and of a 1-year range finish within the
   deadline, measured with `tools/Vandox.StorageBenchmark` on the benchmark database ([Benchmarks](../../docs/BENCHMARKS.md)) extended by a
   new MariaDB workload: 30 days of `mariadb_status` records at 30 seconds (86,400 records), of which one in 100 carries a thread
-  snapshot close to the 1 MiB record bound, beside the existing `service_state` and metric workloads.
-- N4: The memory per circuit is bounded by the caps (256 evaluated units, 1,000 restarts, 1,000 gaps per section, at most 1,000 steps
+  snapshot close to the 1 MiB record bound, beside `service_state` records of 256 units (the agent's cap) over a year and the metric workloads.
+- N4: The memory per circuit is bounded by the caps (256 evaluated units, 1,000 restarts, 1,000 gap spans per section, at most 1,000 steps
   per chart line, 50 snapshots, 100 thread rows, one decoded status record) and never grows with the number of stored records in the range.
 - N5: No agent, wire format or configuration change; a new index (with its migration step) is allowed where the measurement of N3 needs
   one, otherwise existing databases are read as they are.
@@ -137,7 +137,6 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - What is a restart? Answered: record 0215, as computed for the history view's markers.
 - When does a thread snapshot exist? Answered: only for runs with `Threads_running` above 10 or in memory pressure mode
   ([Agent MariaDB collector](../../docs/areas/agent-mariadb.md), *What a run does*); AC8 says so on the page.
-- One page or two? Answered: the Lead's choice, one page, as the issue names one view; MariaDB is one of the tracked services.
 
 ## Area documents
 
