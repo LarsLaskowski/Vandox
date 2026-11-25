@@ -10,6 +10,12 @@ namespace Vandox.Backend.Tests;
 [TestClass]
 public class GatedHistoryReaderTests
 {
+    #region Constants
+
+    private const int LatestMember = 3;
+
+    #endregion // Constants
+
     #region Fields
 
     private static readonly SnapshotQuery _query = new()
@@ -19,6 +25,14 @@ public class GatedHistoryReaderTests
                                                        Window = TimeSpan.FromMinutes(10),
                                                        Side = SnapshotSide.After
                                                    };
+
+    private static readonly LatestSnapshotQuery _latestQuery = new()
+                                                               {
+                                                                   Kind = "process_snapshot",
+                                                                   Source = "agent",
+                                                                   From = HistorySamples.Base,
+                                                                   To = HistorySamples.Base.AddMinutes(10)
+                                                               };
 
     private static readonly SnapshotStamp _stamp = HistorySamples.Stamp(7, "process_snapshot", HistorySamples.Base.AddMinutes(1));
 
@@ -32,7 +46,8 @@ public class GatedHistoryReaderTests
     private static readonly string[] _memberNames = [
                                                         nameof(IHistoryReader.StoredMetricsAsync),
                                                         nameof(IHistoryReader.SnapshotStampAsync),
-                                                        nameof(IHistoryReader.SnapshotAsync)
+                                                        nameof(IHistoryReader.SnapshotAsync),
+                                                        nameof(IHistoryReader.LatestSnapshotStampAsync)
                                                     ];
 
     #endregion // Fields
@@ -60,10 +75,28 @@ public class GatedHistoryReaderTests
         var problems = new List<string>();
 
         // Act
-        for (var member = 0; member < _memberNames.Length; member++)
+        for (var member = 0; member < LatestMember; member++)
         {
             await CheckMemberAsync(member, problems);
         }
+
+        // Assert
+        Assert.IsEmpty(problems, string.Join("; ", problems));
+    }
+
+    /// <summary>
+    /// The latest snapshot stamp read takes one slot of the gate while it runs, so a second call waits; it passes its query and token to the inner reader, returns its answer and frees the slot.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC9")]
+    public async Task GatedHistoryReaderLatestSnapshotStampTakesSlot()
+    {
+        // Arrange
+        var problems = new List<string>();
+
+        // Act
+        await CheckMemberAsync(LatestMember, problems);
 
         // Assert
         Assert.IsEmpty(problems, string.Join("; ", problems));
@@ -96,6 +129,7 @@ public class GatedHistoryReaderTests
                {
                    0 => await reader.StoredMetricsAsync(StorageLimits.MaxStoredMetrics, cancellationToken),
                    1 => await reader.SnapshotStampAsync(_query, cancellationToken),
+                   LatestMember => await reader.LatestSnapshotStampAsync(_latestQuery, cancellationToken),
                    _ => await reader.SnapshotAsync(_stamp, cancellationToken)
                };
     }
@@ -111,6 +145,7 @@ public class GatedHistoryReaderTests
                {
                    0 => StorageLimits.MaxStoredMetrics,
                    1 => _query,
+                   LatestMember => _latestQuery,
                    _ => _stamp
                };
     }
@@ -126,6 +161,7 @@ public class GatedHistoryReaderTests
                {
                    0 => _list,
                    1 => _stamp,
+                   LatestMember => _stamp,
                    _ => _record
                };
     }

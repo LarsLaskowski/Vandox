@@ -55,6 +55,12 @@ public sealed class GatedHistoryReader : IHistoryReader
     }
 
     /// <inheritdoc/>
+    public Task<SnapshotStamp?> LatestSnapshotStampAsync(LatestSnapshotQuery query, CancellationToken cancellationToken)
+    {
+        return _gate.RunAsync(() => _inner.LatestSnapshotStampAsync(query, cancellationToken), cancellationToken);
+    }
+
+    /// <inheritdoc/>
     public Task<StoredRecord?> SnapshotAsync(SnapshotStamp stamp, CancellationToken cancellationToken)
     {
         return _gate.RunAsync(() => _inner.SnapshotAsync(stamp, cancellationToken), cancellationToken);

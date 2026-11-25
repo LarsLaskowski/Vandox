@@ -26,6 +26,15 @@ public interface IHistoryReader
     Task<SnapshotStamp?> SnapshotStampAsync(SnapshotQuery query, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Returns the ID and capture time of the latest snapshot of a kind and source inside a time range.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the stamp, or <see langword="null"/> when there is none</returns>
+    /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
+    Task<SnapshotStamp?> LatestSnapshotStampAsync(LatestSnapshotQuery query, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Returns the record of a snapshot stamp.
     /// </summary>
     /// <param name="stamp">The stamp</param>

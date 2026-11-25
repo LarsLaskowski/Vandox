@@ -45,7 +45,7 @@ Implemented unless marked planned. Reuse them before writing a new one, and add 
 | MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock`, `DisposeFailingClock`, `RefreshProbe` (Backend tests), `CountingClock` (Storage tests) | the clock |
-| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader`, `FakeProgramRollupReader`, `ListLogger` (Backend tests) | store, readers |
+| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader`, `FakeProgramRollupReader`, `FakeConnectionRollupReader`, `ListLogger` (Backend tests) | store, readers |
 | retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
 | time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests); `ProbeTimeSeriesReader`, `ScriptedTimeSeriesReader` (Backend tests) | `ITimeSeriesReader` |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |

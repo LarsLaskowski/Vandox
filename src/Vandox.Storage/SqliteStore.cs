@@ -1429,6 +1429,14 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <inheritdoc/>
+    public Task<SnapshotStamp?> LatestSnapshotStampAsync(LatestSnapshotQuery query, CancellationToken cancellationToken)
+    {
+        HistoryQueries.ValidateLatest(query);
+
+        return ReadAsync(connection => HistoryQueries.ReadLatestStampAsync(connection, query, cancellationToken), HistoryQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
     public Task<StoredRecord?> SnapshotAsync(SnapshotStamp stamp, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stamp);

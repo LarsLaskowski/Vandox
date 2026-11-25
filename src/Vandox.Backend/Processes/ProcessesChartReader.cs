@@ -65,7 +65,7 @@ public sealed class ProcessesChartReader
                                                         },
                                                         cancellationToken).ConfigureAwait(false);
         var names = sources.Sources.Select(listed => listed.Source).ToList();
-        var chosen = source ?? Latest(sources);
+        var chosen = source ?? SourceChoice.Latest(sources);
 
         if (chosen.Length == 0)
         {
@@ -102,26 +102,6 @@ public sealed class ProcessesChartReader
                    MemoryNote = memoryView.Notes.Count > 0 ? memoryView.Notes[0] : string.Empty,
                    Notes = notes
                };
-    }
-
-    /// <summary>
-    /// Gives the source with the latest bucket, the first listed on a tie.
-    /// </summary>
-    /// <param name="sources">The sources</param>
-    /// <returns>The source, or an empty text when there is none</returns>
-    private static string Latest(ProgramSourceList sources)
-    {
-        ProgramSource? latest = null;
-
-        foreach (var candidate in sources.Sources)
-        {
-            if (latest is null || candidate.LatestBucket > latest.LatestBucket)
-            {
-                latest = candidate;
-            }
-        }
-
-        return latest?.Source ?? string.Empty;
     }
 
     /// <summary>

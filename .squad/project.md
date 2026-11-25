@@ -53,7 +53,7 @@ A plan lists each area it touches under *Security areas touched*, so Security re
     allocation or hang. `internal/` (every reader of external input); `src/Vandox.Core/` (`Wire`, `Configuration`,
     `LogParsing`, `Signatures`, `Templates`, `Incidents`, `Reports`), `src/Vandox.Import/`, the log search of
     `src/Vandox.Storage/`, the addresses of `/logs`, `/report`, `/history` (`HistoryAddress`) and `/processes`
-    (`ProcessesAddress`), `HistoryChartEvents`, `vandoxd` flags, `install.sh` inputs; later Telegram commands —
+    (`ProcessesAddress`), `/network` (`NetworkAddress`), `HistoryChartEvents`, `vandoxd` flags, `install.sh` inputs; later Telegram commands —
     the `wire-format*.md`, `configuration-*.md`, `agent*.md`, `log-*.md` and `web-ui-*.md` documents,
     [incidents](../docs/areas/incidents.md), [forensics-report](../docs/areas/forensics-report.md),
     [storage-reading](../docs/areas/storage-reading.md), [ingest-endpoint](../docs/areas/ingest-endpoint.md).
@@ -68,7 +68,7 @@ A plan lists each area it touches under *Security areas touched*, so Security re
     [notification-and-remote-actions](../docs/areas/notification-and-remote-actions.md).
 12. **Logging and display of external data** — external text cannot inject into logs, pages, reports or Telegram.
     `src/Vandox.Backend/Logging/`, the components and security headers of `src/Vandox.Backend/` (among them
-    `HistoryPage`, `HistoryChart` and `ProcessesPage`), `vandoxd` output, the agent's logger (`internal/agent`) —
+    `HistoryPage`, `HistoryChart`, `ProcessesPage` and `NetworkPage`), `vandoxd` output, the agent's logger (`internal/agent`) —
     [web-ui](../docs/areas/web-ui.md) (*External text*) and its `web-ui-*.md` views,
     [forensics-report](../docs/areas/forensics-report.md), [listener-changes](../docs/areas/listener-changes.md),
     [incidents](../docs/areas/incidents.md), [log-templates](../docs/areas/log-templates.md),

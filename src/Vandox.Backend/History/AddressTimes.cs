@@ -97,6 +97,37 @@ internal sealed partial class AddressTimes
     }
 
     /// <summary>
+    /// Reads a single-valued name parameter such as the source.
+    /// </summary>
+    /// <param name="values">The query values</param>
+    /// <param name="name">The name of the parameter</param>
+    /// <returns>The error (an empty text for none) and the value, <see langword="null"/> when the parameter is absent or empty</returns>
+    internal static ValueTuple<string, string?> ReadName(Dictionary<string, StringValues> values, string name)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        if (values.TryGetValue(name, out var found) == false)
+        {
+            return (string.Empty, null);
+        }
+
+        if (found.Count > 1)
+        {
+            return (Repeated(name), null);
+        }
+
+        var value = found[0] ?? string.Empty;
+
+        if (value.Length == 0)
+        {
+            return (string.Empty, null);
+        }
+
+        return IsValidName(value) ? (string.Empty, value) : (Invalid(name), null);
+    }
+
+    /// <summary>
     /// Reads the parameters range, from, to and at, then checks how the range goes together.
     /// </summary>
     /// <param name="values">The query values</param>
@@ -192,6 +223,39 @@ internal sealed partial class AddressTimes
         {
             parts.Add($"{AtName}={LogsAddress.FormatTime(At.Value)}");
         }
+    }
+
+    /// <summary>
+    /// Writes an address as a query string: the source, the times and an optional last parameter.
+    /// </summary>
+    /// <param name="error">The error found by the checks of the address, empty when there is none</param>
+    /// <param name="sourceName">The name of the source parameter</param>
+    /// <param name="source">The source, or <c>null</c> for the default</param>
+    /// <param name="last">The parameter written after the times, or <c>null</c> for none</param>
+    /// <returns>The query string, empty for the default address</returns>
+    /// <exception cref="InvalidOperationException">The address has an error</exception>
+    internal string ToQuery(string error, string sourceName, string? source, string? last)
+    {
+        if (error.Length > 0)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        var parts = new List<string>();
+
+        if (source is not null)
+        {
+            parts.Add($"{sourceName}={Uri.EscapeDataString(source)}");
+        }
+
+        AppendTo(parts);
+
+        if (last is not null)
+        {
+            parts.Add(last);
+        }
+
+        return parts.Count == 0 ? string.Empty : "?" + string.Join('&', parts);
     }
 
     /// <summary>

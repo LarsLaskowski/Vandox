@@ -68,25 +68,25 @@ public sealed class ConnectionSnapshotView
         return new ConnectionSnapshotView
                {
                    CapturedAt = record.Record.CapturedAt,
-                   Source = Runs(record.Record.Source),
+                   Source = SnapshotCells.Runs(record.Record.Source),
                    States = new SnapshotTableView
                             {
                                 Heading = "Connection states",
                                 Columns = ["Protocol", "State", "Connections"],
-                                Rows = [.. states.Select(state => Row(Runs(state.Proto), Runs(state.State), Plain(state.Count)))]
+                                Rows = [.. states.Select(state => SnapshotCells.Row(SnapshotCells.Runs(state.Proto), SnapshotCells.Runs(state.State), SnapshotCells.Plain(state.Count)))]
                             },
                    Processes = new SnapshotTableView
                                {
                                    Heading = "Processes with the most connections",
                                    Columns = ["PID", "Command", "Connections"],
-                                   Rows = [.. processes.Take(HistoryView.ListRows).Select(process => Row(Plain(process.Pid), Runs(process.Command), Plain(process.Count)))],
+                                   Rows = [.. processes.Take(HistoryView.ListRows).Select(process => SnapshotCells.Row(SnapshotCells.Plain(process.Pid), SnapshotCells.Runs(process.Command), SnapshotCells.Plain(process.Count)))],
                                    More = More(processes.Count)
                                },
                    Remotes = new SnapshotTableView
                              {
                                  Heading = snapshot.AggregatesOnly ? HistoryView.RemotesCountsOnlyHeading : "Remote addresses with the most connections",
                                  Columns = ["Address", "Connections"],
-                                 Rows = [.. remotes.Take(HistoryView.ListRows).Select(remote => Row(Runs(remote.Address), Plain(remote.Count)))],
+                                 Rows = [.. remotes.Take(HistoryView.ListRows).Select(remote => SnapshotCells.Row(SnapshotCells.Runs(remote.Address), SnapshotCells.Plain(remote.Count)))],
                                  More = More(remotes.Count)
                              },
                    Note = snapshot.AggregatesIncomplete ? HistoryView.IncompleteConnectionsText : string.Empty
@@ -101,39 +101,6 @@ public sealed class ConnectionSnapshotView
     private static string More(int count)
     {
         return count > HistoryView.ListRows ? string.Create(CultureInfo.InvariantCulture, $"and {count - HistoryView.ListRows} more") : string.Empty;
-    }
-
-    /// <summary>
-    /// Builds a row.
-    /// </summary>
-    /// <param name="cells">The cells</param>
-    /// <returns>The row</returns>
-    private static SnapshotRowView Row(params IReadOnlyList<TextRun>[] cells)
-    {
-        return new SnapshotRowView
-               {
-                   Cells = cells
-               };
-    }
-
-    /// <summary>
-    /// Builds the runs of an external text.
-    /// </summary>
-    /// <param name="text">The text</param>
-    /// <returns>The runs</returns>
-    private static IReadOnlyList<TextRun> Runs(string text)
-    {
-        return LogText.Runs(text, HistoryView.TextChars, HistoryView.TextRuns);
-    }
-
-    /// <summary>
-    /// Builds the runs of a number.
-    /// </summary>
-    /// <param name="value">The number</param>
-    /// <returns>The runs</returns>
-    private static IReadOnlyList<TextRun> Plain(IFormattable value)
-    {
-        return [new TextRun(value.ToString(null, CultureInfo.InvariantCulture), false)];
     }
 
     #endregion // Methods

@@ -67,11 +67,7 @@ internal static class ProcessesViewBenchmark
                 await MeasureChartsAsync(store, 365, medians, cancellationToken).ConfigureAwait(false);
                 await MeasureMomentAsync(store, medians, cancellationToken).ConfigureAwait(false);
 
-                var over = medians.Where(entry => entry.Median >= CriterionMilliseconds).Select(entry => entry.Name).ToList();
-
-                Console.WriteLine(over.Count == 0
-                                      ? string.Create(CultureInfo.InvariantCulture, $"AC10: all {medians.Count} medians are under {CriterionMilliseconds:F0} ms: criterion met")
-                                      : string.Create(CultureInfo.InvariantCulture, $"AC10: {over.Count} of {medians.Count} medians reach {CriterionMilliseconds:F0} ms ({string.Join(", ", over)}): criterion NOT met"));
+                ProgramBenchmark.Verdict("AC10", medians, CriterionMilliseconds);
             }
         }
         finally
@@ -128,22 +124,22 @@ internal static class ProcessesViewBenchmark
 
         for (var read = 0; read < Reads; read++)
         {
-            sources.Add(await TimeAsync(() => store.ProgramSourcesAsync(new ProgramSourceQuery
-                                                                        {
-                                                                            From = range.Start,
-                                                                            To = range.End
-                                                                        },
-                                                                        cancellationToken)).ConfigureAwait(false));
-            memory.Add(await TimeAsync(async () => result = await store.ProgramRollupsAsync(Query(range, step, ProgramMeasure.Memory), cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
-            cpu.Add(await TimeAsync(() => store.ProgramRollupsAsync(Query(range, step, ProgramMeasure.Cpu), cancellationToken)).ConfigureAwait(false));
-            page.Add(await TimeAsync(async () => charts = await reader.ReadAsync(null, range, ChartWidth, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
+            sources.Add(await ProgramBenchmark.TimeAsync(() => store.ProgramSourcesAsync(new ProgramSourceQuery
+                                                                                         {
+                                                                                             From = range.Start,
+                                                                                             To = range.End
+                                                                                         },
+                                                                                         cancellationToken)).ConfigureAwait(false));
+            memory.Add(await ProgramBenchmark.TimeAsync(async () => result = await store.ProgramRollupsAsync(Query(range, step, ProgramMeasure.Memory), cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
+            cpu.Add(await ProgramBenchmark.TimeAsync(() => store.ProgramRollupsAsync(Query(range, step, ProgramMeasure.Cpu), cancellationToken)).ConfigureAwait(false));
+            page.Add(await ProgramBenchmark.TimeAsync(async () => charts = await reader.ReadAsync(null, range, ChartWidth, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
         }
 
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{label}, step {step}, width {ChartWidth}: {result?.Times.Count} steps, {result?.Programs.Count} programs, charts {(charts?.Memory is null ? "missing" : "built")}"));
-        Report($"{label}: source list", sources, medians);
-        Report($"{label}: memory read", memory, medians);
-        Report($"{label}: CPU read", cpu, medians);
-        Report($"{label}: page read (ProcessesChartReader)", page, medians);
+        ProgramBenchmark.Report($"{label}: source list", sources, medians);
+        ProgramBenchmark.Report($"{label}: memory read", memory, medians);
+        ProgramBenchmark.Report($"{label}: CPU read", cpu, medians);
+        ProgramBenchmark.Report($"{label}: page read (ProcessesChartReader)", page, medians);
     }
 
     /// <summary>
@@ -164,13 +160,13 @@ internal static class ProcessesViewBenchmark
 
         for (var index = 0; index < Reads; index++)
         {
-            moment.Add(await TimeAsync(async () => read = await reader.MomentAsync(Source, now.AddDays(-MomentDaysAgo).AddMinutes(index), cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
-            comparison.Add(await TimeAsync(async () => compared = await reader.CompareAsync(Source, now.AddDays(-MomentDaysAgo).AddMinutes(index), now.AddDays(-ComparisonDaysAgo).AddMinutes(index), cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
+            moment.Add(await ProgramBenchmark.TimeAsync(async () => read = await reader.MomentAsync(Source, now.AddDays(-MomentDaysAgo).AddMinutes(index), cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
+            comparison.Add(await ProgramBenchmark.TimeAsync(async () => compared = await reader.CompareAsync(Source, now.AddDays(-MomentDaysAgo).AddMinutes(index), now.AddDays(-ComparisonDaysAgo).AddMinutes(index), cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
         }
 
         Console.WriteLine($"moment found: {read?.Process is not null}; comparison: {(compared is null ? "none" : "read")}");
-        Report("moment read (10 days back)", moment, medians);
-        Report("comparison of two points (10 and 200 days back)", comparison, medians);
+        ProgramBenchmark.Report("moment read (10 days back)", moment, medians);
+        ProgramBenchmark.Report("comparison of two points (10 and 200 days back)", comparison, medians);
     }
 
     /// <summary>
@@ -191,35 +187,6 @@ internal static class ProcessesViewBenchmark
                    Measure = measure,
                    Count = ProcessesView.Programs
                };
-    }
-
-    /// <summary>
-    /// Runs an action and returns its duration.
-    /// </summary>
-    /// <param name="action">The action</param>
-    /// <returns>A task that returns the duration in milliseconds</returns>
-    private static async Task<double> TimeAsync(Func<Task> action)
-    {
-        var watch = Stopwatch.StartNew();
-
-        await action().ConfigureAwait(false);
-        watch.Stop();
-
-        return watch.Elapsed.TotalMilliseconds;
-    }
-
-    /// <summary>
-    /// Prints the five times and the median of a read and adds the median to the list.
-    /// </summary>
-    /// <param name="name">The name of the read</param>
-    /// <param name="times">The times in milliseconds</param>
-    /// <param name="medians">Receives the median</param>
-    private static void Report(string name, List<double> times, List<(string Name, double Median)> medians)
-    {
-        var median = ProgramBenchmark.Median(times);
-
-        medians.Add((name, median));
-        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{name}: median {median:F0} ms of {string.Join(", ", times.Select(time => time.ToString("F0", CultureInfo.InvariantCulture)))}"));
     }
 
     #endregion // Methods

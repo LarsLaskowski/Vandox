@@ -90,7 +90,7 @@ internal sealed class FakeHistoryReader : IHistoryReader, IDisposable
     }
 
     /// <summary>
-    /// Gets the call sequence as <c>StoredMetrics</c>, <c>Stamp &lt;kind&gt; &lt;side&gt;</c> and <c>Snapshot &lt;id&gt;</c>.
+    /// Gets the call sequence as <c>StoredMetrics</c>, <c>Stamp &lt;kind&gt; &lt;side&gt;</c>, <c>LatestStamp &lt;kind&gt;</c> and <c>Snapshot &lt;id&gt;</c>.
     /// </summary>
     internal IReadOnlyList<string> Sequence
     {
@@ -201,6 +201,24 @@ internal sealed class FakeHistoryReader : IHistoryReader, IDisposable
     }
 
     /// <summary>
+    /// Chooses the stamp a store gives for a latest read: the latest of the kind and source with <c>From &lt;= captured &lt; To</c>, the lower ID on equal times.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <returns>The stamp, or <c>null</c></returns>
+    private SnapshotStamp? ChooseLatest(LatestSnapshotQuery query)
+    {
+        if (query.From >= query.To)
+        {
+            return null;
+        }
+
+        return Stamps.Where(stamp => stamp.Kind == query.Kind && IsOfSource(stamp, query.Source) && stamp.CapturedAt >= query.From && stamp.CapturedAt < query.To)
+                     .OrderByDescending(stamp => stamp.CapturedAt)
+                     .ThenBy(stamp => stamp.Id)
+                     .FirstOrDefault();
+    }
+
+    /// <summary>
     /// Tells whether a stamp belongs to a source, as the stored record of the stamp says.
     /// </summary>
     /// <param name="stamp">The stamp</param>
@@ -225,6 +243,12 @@ internal sealed class FakeHistoryReader : IHistoryReader, IDisposable
     public Task<SnapshotStamp?> SnapshotStampAsync(SnapshotQuery query, CancellationToken cancellationToken)
     {
         return RunAsync(nameof(SnapshotStampAsync), query, $"Stamp {query.Kind} {query.Side}", () => Choose(query), cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<SnapshotStamp?> LatestSnapshotStampAsync(LatestSnapshotQuery query, CancellationToken cancellationToken)
+    {
+        return RunAsync(nameof(LatestSnapshotStampAsync), query, $"LatestStamp {query.Kind}", () => ChooseLatest(query), cancellationToken);
     }
 
     /// <inheritdoc/>

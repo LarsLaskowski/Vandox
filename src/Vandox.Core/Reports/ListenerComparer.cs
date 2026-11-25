@@ -56,12 +56,13 @@ public static class ListenerComparer
     #region Methods
 
     /// <summary>
-    /// Compares two connection snapshots.
+    /// Compares two connection snapshots and keeps a given number of new listeners.
     /// </summary>
     /// <param name="earlier">The earlier snapshot, if any.</param>
     /// <param name="later">The later snapshot.</param>
+    /// <param name="newListenerLimit">The most new listeners to keep.</param>
     /// <returns>The comparison.</returns>
-    public static ListenerComparison Compare(ConnectionSnapshot? earlier, ConnectionSnapshot later)
+    public static ListenerComparison Compare(ConnectionSnapshot? earlier, ConnectionSnapshot later, int newListenerLimit)
     {
         if (earlier is null)
         {
@@ -95,11 +96,22 @@ public static class ListenerComparer
         return new ListenerComparison
                {
                    Outcome = privilegedOnly ? ListenerOutcome.PrivilegedOnly : ListenerOutcome.AllPorts,
-                   NewListeners = [.. added.Take(MaxNewListeners)],
-                   Omitted = Math.Max(0, added.Count - MaxNewListeners),
+                   NewListeners = [.. added.Take(newListenerLimit)],
+                   Omitted = Math.Max(0, added.Count - newListenerLimit),
                    ChangedListeners = [.. changed.Take(MaxChangedListeners)],
                    ChangedOmitted = Math.Max(0, changed.Count - MaxChangedListeners)
                };
+    }
+
+    /// <summary>
+    /// Compares two connection snapshots.
+    /// </summary>
+    /// <param name="earlier">The earlier snapshot, if any.</param>
+    /// <param name="later">The later snapshot.</param>
+    /// <returns>The comparison.</returns>
+    public static ListenerComparison Compare(ConnectionSnapshot? earlier, ConnectionSnapshot later)
+    {
+        return Compare(earlier, later, MaxNewListeners);
     }
 
     /// <summary>

@@ -8,6 +8,14 @@ tag lists the merged pull requests in detail.
 
 ### Added
 
+- **Network view** (issue #51): the new page *Network* (`/network`) shows, for a range (the presets *1 h* to *1 y* or *From* and *To*,
+  in UTC) and one source, two stacked charts, *Connections per state* (every TCP state and `UDP`) and *Sockets held per program* (the 10
+  programs with the highest average and the rest as `Other programs`), and the table *Top remote addresses* (the 20 addresses with the
+  highest average), all drawn from the connection rollups so that they reach back as far as `retention.rollups_1h`. The panel *Listeners*
+  shows the listeners of the source's latest connection snapshot in the range, or of the one closest to a clicked moment, and marks a
+  listener `new` that the source's snapshot 24 to 48 hours older lacks. A drag zooms into a period; source, range and moment are in the
+  address. The table is read in an action of its own, so that a range of 1,095 days stays within the 10-second deadline. The storage
+  benchmark gains `--network-view`. There is no new option or listener.
 - **Rollups of connection snapshots** (issue #486): the retention job now folds every connection snapshot, once, into 5-minute and
   hourly buckets per source: the sockets per TCP state and `UDP`, per program and per remote address (each as minimum, average and
   maximum or highest count), so the sockets of a server outlive `retention.snapshots`; a connection snapshot is removed only after it was

@@ -438,6 +438,47 @@ the hourly snapshots took 1,497 to 3,038 ms each with 550 program buckets, the o
 buckets). All ten medians of five are far under the 10,000 ms of the criterion; the largest is the whole chart read of the 1-year range,
 2,550 ms. The moment read (10 days back) took 6 ms and the comparison of two points (10 and 200 days back) 13 ms (first reads 66 and 130 ms).
 
+## Network view
+
+Criterion (issue #51, N4 and AC10): the chart action (the source list and the read of the states and programs) and, separately, the address
+action (the table *Top remote addresses*) of a 30-day, a 1-year and a 1,095-day range, over one source with 1,095 days of hourly buckets at
+the trimmed size and 30 days of 5-minute buckets, each finish within the views' 10-second deadline ([Network view](areas/web-ui-network-view.md),
+*Limits and errors*). The two rollup reads of 1,095 days took 4,251 and 8,022 ms together on the reference host (*Connection rollups*), past one
+deadline, which is why the page reads the table in an action of its own. Measured with the `--network-view` scenario of the storage benchmark. The
+tool prints whether every median of five is under 10,000 ms. Only a run on the reference host counts against the criterion.
+
+### Procedure
+
+Publish the tool self-contained as for the retention steps and run it on the reference host, on the volume that holds the database (the SSD
+volume):
+
+```bash
+dotnet publish tools/Vandox.StorageBenchmark -c Release -r linux-x64 --self-contained -p:DebugType=none -o publish-sc
+publish-sc/Vandox.StorageBenchmark <existing folder on the data volume> --network-view
+```
+
+On a host with the .NET 11 runtime the tool runs as `dotnet publish/Vandox.StorageBenchmark.dll <existing folder> --network-view`.
+`--network-view` takes no other option. Under a fixed clock (2026-12-01 12:00 UTC) and the default periods it writes, into a fresh database
+and directly by SQL (not folded; the time of the write is printed), 1,095 days of hourly buckets at the trimmed size (26,280 buckets of 100
+addresses, 13 states and 15 programs) and 30 days of 5-minute buckets (8,640 buckets of 50 addresses, 13 states and 15 programs), and two
+regular connection snapshots with an inventory (one hour and 25 hours back) for the panel. For a range of 30 days, one of 365 days and one of 1,095 days ending
+at the clock, at the step the page chooses for a chart 1,000 pixels wide (1 hour, 12 hours and 2 days), it times, each as the median of five:
+the chart action (`NetworkChartReader`) and the address action (`NetworkAddressReader`) with the reads of the panel (`NetworkListenerReader`)
+running beside it. It prints the verdict on the criterion. The database is deleted at the end.
+
+### Results
+
+| Host | Date | Volume | Data set | Range | Step | Chart action | Address action (beside the panel) | Panel reads | Verdict |
+| ---- | ---- | ------ | -------- | ----- | ---- | -----------: | --------------------------------: | ----------: | ------- |
+| development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-24 | local disk | written by SQL in 11,247 ms (3,363,840 hourly and 673,920 5-minute rows) | 30 days | 1 hour | 71 ms | 52 ms | 3 ms | order of magnitude only |
+| development host (as above) | 2026-11-24 | local disk | (same database) | 1 year | 12 hours | 347 ms | 671 ms | 3 ms | order of magnitude only |
+| development host (as above) | 2026-11-24 | local disk | (same database) | 1,095 days | 2 days | 962 ms | 1,958 ms | 3 ms | order of magnitude only |
+| Reference host | pending | SSD volume | | 30 days, 1 year, 1,095 days | 1 hour, 12 hours, 2 days | **not yet measured** | **not yet measured** | **not yet measured** | **pending: run by the Product Manager** |
+
+The development-host medians are of five reads each (30 days: chart action 131, 72, 56, 58, 71 ms, address action 79, 52, 51, 52, 57 ms, panel reads 5, 3, 3, 3, 3 ms; 1 year:
+375, 347, 359, 339, 342 ms, 641, 692, 695, 643, 671 ms and 4, 3, 3, 3, 3 ms; 1,095 days: 982, 955, 960, 963, 962 ms, 1,943, 1,958, 1,961, 1,896, 2,038 ms and 3, 3, 4, 3, 2 ms). The panel reads ran the path with the comparison snapshot (the tool prints "panel read: 4 store calls (2 snapshots decoded), comparison snapshot read" before the timings and stops if the comparison is not read). The tool printed that all 6 medians are under 10,000 ms. The
+reference-host row stays pending until the run of the Product Manager is recorded here; until then N4 is not shown on the reference host.
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):

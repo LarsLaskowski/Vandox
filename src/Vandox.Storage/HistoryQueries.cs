@@ -69,6 +69,16 @@ internal static class HistoryQueries
     internal const string StampOfSourceAfter = "SELECT id, captured_at FROM records WHERE kind = $kind AND source = $source AND captured_at > $at AND captured_at <= $to ORDER BY captured_at, id LIMIT 1";
 
     /// <summary>
+    /// The latest capture time of a kind and source in a range, start inclusive and end exclusive.
+    /// </summary>
+    internal const string LatestStampTime = "SELECT max(captured_at) FROM records WHERE kind = $kind AND source = $source AND captured_at >= $from AND captured_at < $to";
+
+    /// <summary>
+    /// The lowest ID of a kind and source captured at one time.
+    /// </summary>
+    internal const string LatestStampId = "SELECT min(id) FROM records WHERE kind = $kind AND source = $source AND captured_at = $at";
+
+    /// <summary>
     /// The first name of a source of <c>metrics</c>.
     /// </summary>
     internal const string MetricsFirstName = "SELECT min(name) FROM metrics WHERE source = $source";
@@ -123,6 +133,19 @@ internal static class HistoryQueries
         RecordQueries.Require(query.Window > TimeSpan.Zero && query.Window <= TimeSpan.FromDays(1), "window must be positive and at most one day");
         RecordQueries.Require(StorageTime.InStorableRange(query.At), "at must be within the storable range");
         RecordQueries.Require(query.Source is null || query.Source.Length > 0, "source must not be empty");
+    }
+
+    /// <summary>
+    /// Checks a latest stamp read.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
+    internal static void ValidateLatest(LatestSnapshotQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidateKind(query.Kind);
+        RecordQueries.Require(string.IsNullOrEmpty(query.Source) == false, "source must not be empty");
+        RecordQueries.Require(StorageTime.InStorableRange(query.From) && StorageTime.InStorableRange(query.To), "at must be within the storable range");
     }
 
     /// <summary>
@@ -220,6 +243,67 @@ internal static class HistoryQueries
                                                cancellationToken).ConfigureAwait(false);
 
         return rows.Count > 0 ? rows[0] : null;
+    }
+
+    /// <summary>
+    /// Reads the stamp of the latest snapshot of a kind and source in a range: the latest capture time, then the lowest ID at it.
+    /// </summary>
+    /// <param name="connection">The open reader connection</param>
+    /// <param name="query">The checked query</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the stamp, or <see langword="null"/> when the range holds none</returns>
+    internal static async Task<SnapshotStamp?> ReadLatestStampAsync(SqliteConnection connection, LatestSnapshotQuery query, CancellationToken cancellationToken)
+    {
+        var from = StorageTime.ToNanoseconds(query.From);
+        var to = StorageTime.ToNanoseconds(query.To);
+
+        if (from >= to)
+        {
+            return null;
+        }
+
+        var parameters = new Dictionary<string, object>
+                         {
+                             ["$kind"] = query.Kind,
+                             ["$source"] = query.Source,
+                             ["$from"] = from,
+                             ["$to"] = to
+                         };
+
+        var times = await ReaderQuery.ReadAsync(connection,
+                                                LatestStampTime,
+                                                parameters,
+                                                reader => reader.IsDBNull(0) ? (long?)null : reader.GetInt64(0),
+                                                Context,
+                                                cancellationToken).ConfigureAwait(false);
+
+        if (times[0] is not { } latest)
+        {
+            return null;
+        }
+
+        parameters.Remove("$from");
+        parameters.Remove("$to");
+        parameters["$at"] = latest;
+
+        var ids = await ReaderQuery.ReadAsync(connection,
+                                              LatestStampId,
+                                              parameters,
+                                              reader => reader.IsDBNull(0) ? (long?)null : reader.GetInt64(0),
+                                              Context,
+                                              cancellationToken).ConfigureAwait(false);
+
+        if (ids[0] is not { } id)
+        {
+            return null;
+        }
+
+        return new SnapshotStamp
+               {
+                   Id = id,
+                   Kind = query.Kind,
+                   CapturedAt = StorageTime.FromNanoseconds(latest)
+               };
     }
 
     /// <summary>
