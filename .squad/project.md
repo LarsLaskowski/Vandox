@@ -53,7 +53,7 @@ A plan lists each area it touches under *Security areas touched*, so Security re
     allocation or hang. `internal/` (every reader of external input); `src/Vandox.Core/` (`Wire`, `Configuration`,
     `LogParsing`, `Signatures`, `Templates`, `Incidents`, `Reports`), `src/Vandox.Import/`, the log search of
     `src/Vandox.Storage/`, the addresses of `/logs`, `/report`, `/history` (`HistoryAddress`) and `/processes`
-    (`ProcessesAddress`), `/network` (`NetworkAddress`), `/services` (`ServicesAddress`; the stored agent JSON that its reads take apart with `json_extract` and `json_each`), `HistoryChartEvents`, `vandoxd` flags, `install.sh` inputs; later Telegram commands —
+    (`ProcessesAddress`), `/network` (`NetworkAddress`), `/services` (`ServicesAddress`; stored agent JSON), `HistoryChartEvents`, `vandoxd` flags, `install.sh` inputs; later Telegram commands —
     the `wire-format*.md`, `configuration-*.md`, `agent*.md`, `log-*.md` and `web-ui-*.md` documents,
     [incidents](../docs/areas/incidents.md), [forensics-report](../docs/areas/forensics-report.md),
     [storage-reading](../docs/areas/storage-reading.md), [ingest-endpoint](../docs/areas/ingest-endpoint.md).
