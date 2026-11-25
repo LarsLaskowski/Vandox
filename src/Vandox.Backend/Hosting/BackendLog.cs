@@ -643,5 +643,13 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 81, Level = LogLevel.Error, Message = "network view: reading failed")]
     internal static partial void NetworkReadFailed(this ILogger logger, Exception exception);
 
+    /// <summary>
+    /// Logs that reading the services view failed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The exception of the read</param>
+    [LoggerMessage(EventId = 82, Level = LogLevel.Error, Message = "services view: reading failed")]
+    internal static partial void ServicesReadFailed(this ILogger logger, Exception exception);
+
     #endregion // Methods
 }

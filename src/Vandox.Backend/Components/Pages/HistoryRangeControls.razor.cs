@@ -27,6 +27,12 @@ public sealed partial class HistoryRangeControls : ComponentBase
     public HistoryPreset? Preset { get; set; }
 
     /// <summary>
+    /// Gets or sets the preset that is current when the address has no fixed range.
+    /// </summary>
+    [Parameter]
+    public HistoryPreset DefaultPreset { get; set; } = HistoryPreset.OneDay;
+
+    /// <summary>
     /// Gets or sets whether the address has no fixed range, so that the default preset is the current one.
     /// </summary>
     [Parameter]

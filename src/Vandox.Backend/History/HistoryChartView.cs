@@ -110,6 +110,23 @@ public sealed class HistoryChartView
     }
 
     /// <summary>
+    /// Builds the line of a label and its points.
+    /// </summary>
+    /// <param name="label">The label, already escaped</param>
+    /// <param name="scale">The index of the metric, which gives the vertical scale</param>
+    /// <param name="index">The place of the line</param>
+    /// <param name="points">The points</param>
+    /// <param name="step">Whether the points are steps</param>
+    /// <param name="factor">The factor every value is multiplied by</param>
+    /// <returns>The line</returns>
+#pragma warning disable RH2003 // Skeleton: removed with the implementation
+    internal static HistoryLine Line(string label, int scale, int index, IReadOnlyList<SeriesPoint> points, bool step, double factor)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003 // Skeleton: removed with the implementation
+
+    /// <summary>
     /// Gives the same view with another moment, sharing its times and lines, so that the chart only moves its mark.
     /// </summary>
     /// <param name="moment">The moment; it is marked only inside the range</param>

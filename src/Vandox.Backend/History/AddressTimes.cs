@@ -274,6 +274,19 @@ internal sealed partial class AddressTimes
     }
 
     /// <summary>
+    /// Gives the range: the fixed one, else a preset up to now.
+    /// </summary>
+    /// <param name="now">The current time</param>
+    /// <param name="fallback">The preset of an address without a range</param>
+    /// <returns>The range</returns>
+#pragma warning disable S2325, RH2003 // Skeleton: removed with the implementation
+    internal HistoryRange Range(DateTimeOffset now, HistoryPreset fallback)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore S2325, RH2003 // Skeleton: removed with the implementation
+
+    /// <summary>
     /// Checks whether another set has the same preset, start and end.
     /// </summary>
     /// <param name="other">The other set</param>
