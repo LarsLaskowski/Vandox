@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-24
-- **Area:** Web UI
+- **Area:** Network view
 - **Source:** Issue #51
 - **Supersedes:** —
 
