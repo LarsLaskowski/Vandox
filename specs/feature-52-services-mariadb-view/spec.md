@@ -7,9 +7,8 @@ Status: Draft
 
 The administrator of the monitored server wants to see at a glance how available each tracked service and MariaDB were over a month
 or longer, how often each service restarted, whether MariaDB's configured memory can exceed the RAM, and which queries ran long. Today
-the overview shows only the latest state, restart counter and memory figure ([Overview page](../../docs/areas/web-ui-overview.md)); the
-history view marks service restarts and charts single `mariadb_*` metrics, but gives no count per service, no availability, no memory
-budget and no thread snapshot ([History view](../../docs/areas/web-ui-history-view.md)). The data is stored: `service_state` records
+the overview shows only latest values and the history view marks restarts and charts single metrics, with no count per service,
+availability, memory budget or thread snapshot. The data is stored: `service_state` records
 for `retention.events` (1,095 days by default), the `mariadb_*` metrics with their rollups, and `mariadb_status` records (availability,
 status values, thread snapshots) for `retention.snapshots` (30 days by default; [Retention and rollups](../../docs/areas/retention.md)).
 
@@ -39,15 +38,18 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - E2: A range that begins at or after now shows `This range lies in the future.` and reads nothing.
 - E3: The agent was offline or the `systemd` collector failed: time inside a recorded gap whose collector is `systemd` or none, and time
   more than 1 hour 5 minutes after a unit's record without a next one, counts as *Unknown*, never as available (record 0028). The same
-  holds for MariaDB with the collector `mariadb` and 2 minutes.
+  holds for MariaDB with the collector `mariadb` and 2 minutes. A gap of the `systemd` collector concerns every unit, also the gap the
+  collector writes on every run while it refuses one unit's state ([Agent services](../../docs/areas/agent-services.md)), so whenever
+  such a gap overlaps the range the table is preceded by `The systemd collector recorded gaps in this range (it failed, or it refused a
+  unit's state); that time counts as unknown for every unit.`
 - E4: A unit without a record before the range counts as *Unknown* until its first record in the range; a unit without any known time
   reads *Available* `unknown`.
 - E5: The restart read reached its cap or could not decide a restart (the time-series query's boot rule): the list and the counts end
   with `Restarts after <time> UTC are not counted.`
 - E6: No `service_state` record of the range: `No service state is stored in this range.`; no MariaDB status or metric in the range (the
   collector disabled): `No MariaDB data is stored in this range.`, in place of the section's content.
-- E7: The range starts before the oldest stored status record: `MariaDB's status is kept for a shorter period; availability, memory in
-  use and connections begin at <time> UTC.`
+- E7: Only when `retention.snapshots` is not `unlimited` and now minus that period lies after the range's start: `MariaDB's status is
+  kept for <period>; availability, memory in use and connections begin at <time> UTC.` with the oldest status record's time.
 - E8: A figure of the memory budget the range lacks reads `unknown`, never 0, and the comparison with the RAM is left out.
 - E9: Steps without a value (MariaDB not `up`, a gap, no record) are gaps in the charts, never drawn across; the time-series query's
   notes (rollups, values not complete) appear above the charts as in the history view.
@@ -61,8 +63,11 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - E13: A store error: `The services could not be read. The service log has the details.`, `MariaDB's data could not be read. The
   service log has the details.` or `The thread snapshot could not be read. The service log has the details.`; each fails only its own
   section.
-- E14: More than 256 units: the first 256 in the table's order, then `and <n> more units`; more than 100 running threads: `and <n> more
+- E14: More than 256 distinct units in the range: only the first 256 in ordinal order of
+  their names are evaluated and ordered, then `<n> more units are not evaluated.`; more than 100 running threads: `and <n> more
   threads`; more than 50 snapshots in the range: `Older snapshots are not listed; narrow the range.`
+- E15: More than 1,000 gaps concern a section's collector in the range: the first 1,000 by start are read, all time after the last one
+  read counts as unknown, and the section says `Gaps after <time> UTC are not read; the time after it counts as unknown.`
 
 ## Non-functional requirements
 
@@ -70,11 +75,14 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
   log line: a failure is logged as `services view: reading failed` (error level) with the exception only.
 - N2: Every store call takes one slot of the views' shared read gate; each section's action runs under a 10-second deadline that
   includes the wait for a slot, and leaving the page cancels all actions.
-- N3: On the reference host and the benchmark database ([Benchmarks](../../docs/BENCHMARKS.md)), the services and the MariaDB actions of
-  a 30-day and of a 1-year range finish within the deadline, measured with the storage benchmark tool.
-- N4: The memory per circuit is bounded by the caps (256 units, 1,000 restarts, at most 1,000 steps per chart line, 50 snapshots, 100
-  thread rows, one decoded status record) and never grows with the number of stored records in the range.
-- N5: No agent, wire format, configuration or schema change beyond indexes; existing databases are read as they are.
+- N3: On the reference host, the services, MariaDB and thread snapshot actions of a 30-day and of a 1-year range finish within the
+  deadline, measured with `tools/Vandox.StorageBenchmark` on the benchmark database ([Benchmarks](../../docs/BENCHMARKS.md)) extended by a
+  new MariaDB workload: 30 days of `mariadb_status` records at 30 seconds (86,400 records), of which one in 100 carries a thread
+  snapshot close to the 1 MiB record bound, beside the existing `service_state` and metric workloads.
+- N4: The memory per circuit is bounded by the caps (256 evaluated units, 1,000 restarts, 1,000 gaps per section, at most 1,000 steps
+  per chart line, 50 snapshots, 100 thread rows, one decoded status record) and never grows with the number of stored records in the range.
+- N5: No agent, wire format or configuration change; a new index (with its migration step) is allowed where the measurement of N3 needs
+  one, otherwise existing databases are read as they are.
 
 ## Acceptance criteria
 
@@ -84,15 +92,15 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - AC2: The table *Services* has one row per unit with a record in the range or a state carried into it, with the columns *Unit*,
   *Available*, *Not available*, *Unknown*, *Restarts*, *Last restart* and *Latest state* (`<active_state> (<sub_state>)` with its time);
   rows with restarts or not-available time come first, by restarts and then not-available time descending, then by unit in ordinal order;
-  at most 256 (S1, E6, E14).
+  at most 256 evaluated units by E14 (S1, E6, E14).
 - AC3: A unit's state holds from its record to its next record; *Available* is the share of the known time in `active`, `reloading` or
-  `refreshing` with one decimal, *Not available* the known time in any other state, and *Unknown* the rest of the range by E3 and E4;
-  the three durations add up to the range up to now (S2, E3, E4).
+  `refreshing`, rounded down to one decimal (so `100.0 %` only without time not available), *Not available* the known time in any other state, and *Unknown* the rest of the range by E3 and E4;
+  the three durations add up to the range up to now; a unit's gaps follow E15 (S2, E3, E4, E15).
 - AC4: *Restarts* counts each unit's restarts in the range by record 0215's rule, the same as the history view's markers; *Last
   restart* is the latest or `none`; the list *Service restarts* holds time and unit, in time order, at most 1,000, with E5's text when
   incomplete (S3, E5).
 - AC5: *MariaDB* shows the summary line of S4 and the chart *Availability* (`Up` in percent of each step's known time) from the status
-  records, with E3's unknown rule, E6 and E7 (S4, S6, E6, E7).
+  records, the shares rounded down to one decimal, with E3's unknown rule, E6, E7 and E15 (S4, S6, E6, E7, E15).
 - AC6: *Memory budget* shows the line of S5 from the latest values of the range, `The theoretical maximum exceeds the RAM by <size>.`
   exactly when the maximum is above the RAM, and a chart of `Theoretical maximum` (`mariadb_memory_max_bytes`), `RAM` (`mem_total_bytes`
   of source `system`) and `In use` (the status value `Memory_used`, as on the overview) on one scale from 0 (S5, E8, E9).
@@ -100,14 +108,16 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
   (`Used` and `Read hit`, percent from 0 to 100) share the range and time axis of the other MariaDB charts, with the history chart's
   legend, step text, gaps and notes (S6, E9).
 - AC8: *Long-running queries* states `The agent records MariaDB's threads only in a run in which more than 10 threads are running or the
-  server is under memory pressure.`, lists the range's snapshots newest first (*Time*, *Threads*, *Running*, *Longest running*; at most
-  50), and the panel shows the latest snapshot of the range, or with `at` the closest within 10 minutes by the history view's rule: the
+  server is under memory pressure.`, lists the range's snapshots newest first (*Time*, *Threads recorded*, *Running*, *Longest running*;
+  at most 50; the agent keeps at most 4,096 threads and may drop sleepers to fit its record, so the counts are of recorded threads), and the panel shows the latest snapshot of the range, or with `at` the closest within 10 minutes by the history view's rule: the
   threads whose command is not `Sleep` in the agent's order (*Id*, *User*, *Host*, *Database*, *Command*, *State*, *Time*, *Statement*;
-  at most 100), `[statement shortened by the agent]` where `truncated` is set, and `<n> sleeping connections are not listed.` (S7, E10,
+  at most 100), `[statement shortened by the agent]` where `truncated` is set, and `<n> sleeping connections recorded, not listed.` (S7, E10,
   E11, E14).
 - AC9: The three sections read in separate actions under the shared gate and the 10-second deadline, show E12 and E13 in their own
   place, log only as N1 says, and keep their memory within N4's caps (E12, E13, N1, N2, N4).
-- AC10: The benchmark of N3 is run and recorded, each action within the deadline (N3, N5).
+- AC10: The MariaDB workload of N3 is added to the benchmark tool and `docs/BENCHMARKS.md`, and the services, MariaDB and thread
+  snapshot actions of a 30-day and a 1-year range are timed on it, each within the deadline; an index added for it is named there (N3,
+  N5).
 
 ## Out of scope
 
@@ -115,8 +125,8 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
   follow-up issue).
 - Status values (availability, `Memory_used`, `Threads_connected`) beyond `retention.snapshots`: they are no metrics and have no rollups
   (a follow-up issue).
-- Exposed listeners, slow queries, aborted connections and the other selected status values; event markers on the charts (the history
-  view charts every metric with its markers); a chart per service; alerts; automatic refresh; selection by touch; ending a query.
+- Other status values and metrics, event markers on the charts (the history view has both), a chart per service, alerts, automatic
+  refresh, selection by touch, ending a query.
 
 ## Open questions
 
@@ -137,3 +147,20 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - `docs/areas/storage-reading.md`: the new reads (service states over a range, status steps, snapshot list and record) with their limits.
 - `docs/areas/time-series-query.md`: only a pointer, if the restart rule becomes a helper both use.
 - `docs/areas/README.md`: the index row of the new document.
+
+## Challenge
+
+- MAJOR 1 (N3/AC10 can pass without timing the status reads) — accepted: N3 names the new MariaDB workload (86,400 status records of 30
+  days at 30 seconds, one in 100 with a thread snapshot near 1 MiB), AC10 adds it to the benchmark tool and times the MariaDB and thread
+  snapshot actions on it, and N5 allows an index with its migration step when the measurement needs one.
+- MAJOR 2 (the 256 cap cannot bound memory) — accepted: E14 evaluates only the first 256 distinct units in ordinal order of their names
+  and says `<n> more units are not evaluated.`; the ordering of AC2 applies to those; N4 names the cap.
+- MINOR 3 (gaps uncapped) — accepted: E15 reads at most 1,000 gaps per section, counts all time after the last one read as unknown and
+  says so; N4 names the cap.
+- MINOR 4 (one refused unit blanks the table) — accepted: E3 states that a `systemd` gap concerns every unit, also the one written while
+  a unit's state is refused, and the page shows a note whenever such a gap overlaps the range. The gap does not tell a refusal from a
+  failure, so the note names both.
+- MINOR 5 (E7 on a fresh install) — accepted: E7 appears only when `retention.snapshots` is limited and its cut lies after the range's
+  start, and names the period.
+- MINOR 6 (rounding, recorded threads) — accepted: shares are rounded down to one decimal in AC3 and AC5; AC8 names the column
+  *Threads recorded*, explains the agent's caps and reads `<n> sleeping connections recorded, not listed.`
