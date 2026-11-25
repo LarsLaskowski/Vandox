@@ -1,6 +1,6 @@
 # 0227: Availability is the time a recorded state holds, up to a cap, and gap time is unknown
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-25
 - **Area:** Services view
 - **Source:** Issue #52

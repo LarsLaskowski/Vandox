@@ -1,6 +1,6 @@
 # 0228: MariaDB status members are kept in a covering partial index and folded on the time-series step axis
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-25
 - **Area:** Services view
 - **Source:** Issue #52
