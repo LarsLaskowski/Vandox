@@ -506,7 +506,7 @@ public class ServicesPageTests
     public async Task ServicesPageLogsOnlyException(string section, bool invalid)
     {
         // Arrange
-        StoreException failure = invalid ? new InvalidQueryException("secret detail of the query") : new StoreException("secret detail of the store");
+        var failure = invalid ? new InvalidQueryException("secret detail of the query") : new StoreException("secret detail of the store");
 
         await using var harness = new ServicesPageHarness("?at=2026-10-13T11:00");
 
