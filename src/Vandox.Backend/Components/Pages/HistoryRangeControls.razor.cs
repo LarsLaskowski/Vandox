@@ -27,6 +27,12 @@ public sealed partial class HistoryRangeControls : ComponentBase
     public HistoryPreset? Preset { get; set; }
 
     /// <summary>
+    /// Gets or sets the preset that is current when the address has no fixed range.
+    /// </summary>
+    [Parameter]
+    public HistoryPreset DefaultPreset { get; set; } = HistoryPreset.OneDay;
+
+    /// <summary>
     /// Gets or sets whether the address has no fixed range, so that the default preset is the current one.
     /// </summary>
     [Parameter]
@@ -95,7 +101,7 @@ public sealed partial class HistoryRangeControls : ComponentBase
     /// <returns>The class, <see langword="null"/> for none</returns>
     private string? PresetClass(HistoryPreset preset)
     {
-        var current = Preset ?? (Unbounded ? HistoryPreset.OneDay : (HistoryPreset?)null);
+        var current = Preset ?? (Unbounded ? DefaultPreset : (HistoryPreset?)null);
 
         return current == preset ? "active" : null;
     }

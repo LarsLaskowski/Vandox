@@ -37,6 +37,35 @@ internal static class SeriesMarkerReader
 
         DecideBackups(backups.Checks, boots, range, items);
 
+        return Finish(items, bound);
+    }
+
+    /// <summary>
+    /// Reads the service restarts of the range, at most <see cref="TimeSeriesService.MaxMarkers"/>, with the restart checks of <see cref="ReadAsync"/> and no other marker.
+    /// </summary>
+    /// <param name="reader">The store reads</param>
+    /// <param name="range">The range</param>
+    /// <param name="cancellationToken">Cancels the reads</param>
+    /// <returns>A task that returns the restarts in time order and the time up to which the list is complete, <c>null</c> when it is complete</returns>
+    internal static async Task<(List<SeriesMarker> Markers, DateTimeOffset? CompleteUntil)> ReadRestartsOnlyAsync(ITimeSeriesReader reader, SeriesRange range, CancellationToken cancellationToken)
+    {
+        var items = new List<(SeriesMarker Marker, long Id)>();
+        var restarts = await ReadRestartsAsync(reader, range, items, cancellationToken).ConfigureAwait(false);
+        var starts = restarts.Checks.Select(check => check.Before.CapturedAt).ToList();
+        var boots = await SeriesBootIndex.ReadAsync(reader, starts, SeriesTime.Add(range.Now, TimeSpan.FromTicks(1)), cancellationToken).ConfigureAwait(false);
+        var bound = SeriesTime.Earlier(restarts.Bound, DecideRestarts(restarts.Checks, boots, range, items));
+
+        return Finish(items, bound);
+    }
+
+    /// <summary>
+    /// Sorts the markers in time order and cuts them at <see cref="TimeSeriesService.MaxMarkers"/>.
+    /// </summary>
+    /// <param name="items">The markers with their record IDs</param>
+    /// <param name="bound">The time up to which the markers are complete so far</param>
+    /// <returns>The markers in time order and the time up to which the list is complete, <c>null</c> when it is complete</returns>
+    private static (List<SeriesMarker> Markers, DateTimeOffset? CompleteUntil) Finish(List<(SeriesMarker Marker, long Id)> items, DateTimeOffset? bound)
+    {
         var sorted = items.OrderBy(item => item.Marker.At).ThenBy(item => item.Marker.Kind).ThenBy(item => item.Id).Select(item => item.Marker).ToList();
 
         if (sorted.Count > TimeSeriesService.MaxMarkers)

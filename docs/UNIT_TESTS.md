@@ -45,7 +45,7 @@ Implemented unless marked planned. Reuse them before writing a new one, and add 
 | MariaDB socket | replaying fake server, `...FromDocs` builders (`internal/mariadb`) | the server |
 | ingest port | `sender.BatchSender` fakes (`internal/sender`, `internal/agent`), `httptest` server | the backend |
 | time | Go: injected clock, `testing/synctest` (0062); C#: `FakeTimeProvider`, `TimerSignalingClock`, `DisposeFailingClock`, `RefreshProbe` (Backend tests), `CountingClock` (Storage tests) | the clock |
-| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader`, `FakeProgramRollupReader`, `FakeConnectionRollupReader`, `ListLogger` (Backend tests) | store, readers |
+| database (C#) | real `SqliteStore` in `TempDirectory`; `FakeImportStore` (Import tests); `Recording*`, `Repeating*`, `Scripted*`, `*IncidentStore`, `FakeIncidentBrowser`, `FakeOverviewReader`, `FakeHistoryReader`, `FakeProgramRollupReader`, `FakeConnectionRollupReader`, `FakeServiceHistoryReader`, `FakeMariaDbHistoryReader`, `ListLogger` (Backend tests) | store, readers |
 | retention store (C#) | `ScriptedRetentionStore`, `AgentRecords` (Backend tests) | `IRetentionStore`, agent records |
 | time-series reads (C#) | `CountingTimeSeriesReader` (Storage tests); `ProbeTimeSeriesReader`, `ScriptedTimeSeriesReader` (Backend tests) | `ITimeSeriesReader` |
 | log parsers (C#) | `FakeParser`, `*Emitter`, `*Samples`, lazy streams (Core tests); `LineParser`, `ProbeParser` (Import tests) | parsers, input |
@@ -59,6 +59,8 @@ Implemented unless marked planned. Reuse them before writing a new one, and add 
   response stream starts the response on any flush, not only when a byte is written (`StartingResponseBody` is the
   reference). The ingest tests' `CountingBodyStream` is the one exception: it accepts synchronous reads, because the
   endpoint reads only asynchronously and answers with a status and headers only.
+- `FakeServiceHistoryReader` and `FakeMariaDbHistoryReader` fake the `Vandox.Storage` readers: `Hold` and
+  `Failure` (the MariaDB fake also per member: `HoldFor`, `FailFor`) and `Calls`; the answers are set as properties.
 - Any other claim about server behavior that a double encodes is checked once against real Kestrel
   (`.squad/team.md`, *Test doubles that model a real component*): the header handling the ingest doubles encode
   (whitespace and duplicates, invalid bytes, `Content-Length`) is checked against the running service by

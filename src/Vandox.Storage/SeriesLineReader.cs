@@ -14,11 +14,12 @@ internal static class SeriesLineReader
     /// <param name="policy">The retention policy</param>
     /// <param name="series">The distinct series in query order</param>
     /// <param name="range">The range</param>
+    /// <param name="stepsOnly">Whether raw resolution is skipped</param>
     /// <param name="cancellationToken">Cancels the reads</param>
     /// <returns>A task that returns the lines</returns>
-    internal static async Task<SeriesData> ReadAsync(ITimeSeriesReader reader, RetentionPolicy policy, IReadOnlyList<SeriesKey> series, SeriesRange range, CancellationToken cancellationToken)
+    internal static async Task<SeriesData> ReadAsync(ITimeSeriesReader reader, RetentionPolicy policy, IReadOnlyList<SeriesKey> series, SeriesRange range, bool stepsOnly, CancellationToken cancellationToken)
     {
-        if (policy.Raw is null || range.From >= range.Now - policy.Raw.Value)
+        if (stepsOnly == false && (policy.Raw is null || range.From >= range.Now - policy.Raw.Value))
         {
             var raw = await TryRawAsync(reader, series, range, cancellationToken).ConfigureAwait(false);
 

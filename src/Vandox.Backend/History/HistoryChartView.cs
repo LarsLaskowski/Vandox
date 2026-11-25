@@ -110,6 +110,31 @@ public sealed class HistoryChartView
     }
 
     /// <summary>
+    /// Builds the line of a label and its points.
+    /// </summary>
+    /// <param name="label">The label, already escaped</param>
+    /// <param name="scale">The index of the metric, which gives the vertical scale</param>
+    /// <param name="index">The place of the line</param>
+    /// <param name="points">The points</param>
+    /// <param name="step">Whether the points are steps</param>
+    /// <param name="factor">The factor every value is multiplied by</param>
+    /// <returns>The line</returns>
+    internal static HistoryLine Line(string label, int scale, int index, IReadOnlyList<SeriesPoint> points, bool step, double factor)
+    {
+        return new HistoryLine
+               {
+                   Label = label,
+                   Scale = scale,
+                   Color = index % ColorCount,
+                   Dashed = index >= ColorCount,
+                   Values = [.. points.Select(point => point.State == PointState.Value ? point.Average * factor : (double?)null)],
+                   Bridged = [.. points.Select(point => point.State == PointState.BetweenSamples)],
+                   Minimums = step ? [.. points.Select(point => point.State == PointState.Value ? point.Minimum * factor : (double?)null)] : [],
+                   Maximums = step ? [.. points.Select(point => point.State == PointState.Value ? point.Maximum * factor : (double?)null)] : []
+               };
+    }
+
+    /// <summary>
     /// Gives the same view with another moment, sharing its times and lines, so that the chart only moves its mark.
     /// </summary>
     /// <param name="moment">The moment; it is marked only inside the range</param>
@@ -157,17 +182,7 @@ public sealed class HistoryChartView
 
         var name = line.Labels.Length == 0 ? $"{line.Source} {line.Name}" : $"{line.Source} {line.Name} {line.Labels}";
 
-        return new HistoryLine
-               {
-                   Label = LogText.Escape(name, HistoryView.LabelChars),
-                   Scale = scale,
-                   Color = index % ColorCount,
-                   Dashed = index >= ColorCount,
-                   Values = [.. line.Points.Select(point => point.State == PointState.Value ? point.Average : (double?)null)],
-                   Bridged = [.. line.Points.Select(point => point.State == PointState.BetweenSamples)],
-                   Minimums = step ? [.. line.Points.Select(point => point.State == PointState.Value ? point.Minimum : (double?)null)] : [],
-                   Maximums = step ? [.. line.Points.Select(point => point.State == PointState.Value ? point.Maximum : (double?)null)] : []
-               };
+        return Line(LogText.Escape(name, HistoryView.LabelChars), scale, index, line.Points, step, 1);
     }
 
     /// <summary>

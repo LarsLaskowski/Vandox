@@ -28,6 +28,21 @@ internal static class SchemaMigrator
                                                          kind) WHERE kind = 'service_state'
                                                        """;
 
+    /// <summary>
+    /// The statement of schema step 18 (record 0228): the covering partial index over the members of <c>mariadb_status</c> records that the services view reads, with <c>kind</c> as its last column
+    /// for the reason of <see cref="ServiceStateIndexStatement"/>. The reads of the services view use exactly these expressions.
+    /// </summary>
+    internal const string MariaDbStatusIndexStatement = """
+                                                        CREATE INDEX records_mariadb_status ON records(
+                                                          captured_at,
+                                                          source,
+                                                          json_extract(data, '$.availability'),
+                                                          json_extract(data, '$.status.Memory_used'),
+                                                          json_extract(data, '$.status.Threads_connected'),
+                                                          json_array_length(data, '$.threads'),
+                                                          kind) WHERE kind = 'mariadb_status'
+                                                        """;
+
     #endregion // Constants
 
     #region Fields
@@ -473,7 +488,8 @@ internal static class SchemaMigrator
                                                               c => c.CommandText = "CREATE INDEX connection_rollup_totals_1h_bucket ON connection_rollup_totals_1h(bucket)",
                                                               c => c.CommandText = "CREATE INDEX connection_rollup_totals_1h_trim ON connection_rollup_totals_1h(bucket) WHERE addresses > 100",
                                                               c => c.CommandText = "CREATE INDEX records_connection_fold ON records(id) WHERE kind = 'connection_snapshot'"
-                                                          ])
+                                                          ]),
+                                                      new(18, [c => c.CommandText = MariaDbStatusIndexStatement])
                                                   ];
 
     #endregion // Fields

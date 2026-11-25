@@ -1,0 +1,197 @@
+@page "/services"
+@using Vandox.Backend.ServiceHealth
+
+<PageTitle>Services and MariaDB</PageTitle>
+
+<h1>@ServicesView.Heading</h1>
+
+<HistoryRangeControls Preset="_address.Times.Preset" DefaultPreset="HistoryPreset.ThirtyDays" Unbounded="_address.Times.From is null && _address.Times.To is null" @bind-From="_from" @bind-To="_to" PresetChosen="ApplyPreset" ApplyPressed="Apply" />
+
+@if (_error.Length > 0)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else
+{
+    @if (_controlError.Length > 0)
+    {
+        <p class="error" role="alert">@_controlError</p>
+    }
+
+    @if (RendererInfo.IsInteractive == false)
+    {
+        <p>@ServicesView.LoadingText</p>
+    }
+    else if (_future)
+    {
+        <p class="note">@HistoryView.FutureRangeText</p>
+    }
+    else
+    {
+        <h2>@ServicesView.ServicesHeading</h2>
+
+        @if (_servicesFailure.Length > 0)
+        {
+            <p class="error" role="alert">@_servicesFailure</p>
+        }
+        else if (_services is null)
+        {
+            <p>@ServicesView.LoadingText</p>
+        }
+        else
+        {
+            @foreach (var note in _services.Notes)
+            {
+                <p class="note">@note</p>
+            }
+
+            @if (_services.Empty)
+            {
+                <p>@ServicesView.NoServiceStateText</p>
+            }
+            else
+            {
+                <HistorySnapshotTable Table="_services.Units" />
+
+                @if (_services.Restarts.Rows.Count > 0)
+                {
+                    <h3>@ServicesView.RestartsHeading</h3>
+
+                    <HistorySnapshotTable Table="_services.Restarts" />
+                }
+            }
+        }
+
+        <h2>@ServicesView.MariaDbHeading</h2>
+
+        @if (_mariaDbFailure.Length > 0)
+        {
+            <p class="error" role="alert">@_mariaDbFailure</p>
+        }
+        else if (_mariaDb is null)
+        {
+            <p>@ServicesView.LoadingText</p>
+
+            @if (_widthKnown == false)
+            {
+                <HistoryChart @attributes="ChartParameters(ServicesView.MariaDbHeading, null)" />
+            }
+        }
+        else
+        {
+            @foreach (var note in _mariaDb.Notes)
+            {
+                <p class="note">@note</p>
+            }
+
+            @if (_mariaDb.Availability is { } availability)
+            {
+                <p>@_mariaDb.Summary</p>
+
+                @if (availability.StepNote.Length > 0)
+                {
+                    <p class="note">@availability.StepNote</p>
+                }
+
+                <h3>@ServicesView.AvailabilityHeading</h3>
+
+                <HistoryChart @attributes="ChartParameters(ServicesView.AvailabilityHeading, _availabilityView)" />
+
+                <h3>@ServicesView.MemoryHeading</h3>
+
+                <p>@_mariaDb.Budget</p>
+
+                @if (_mariaDb.BudgetExceeded.Length > 0)
+                {
+                    <p>@_mariaDb.BudgetExceeded</p>
+                }
+
+                <HistoryChart @attributes="ChartParameters(ServicesView.MemoryHeading, _memoryView)" />
+
+                <h3>@ServicesView.ConnectionsHeading</h3>
+
+                <HistoryChart @attributes="ChartParameters(ServicesView.ConnectionsHeading, _connectionsView)" />
+
+                <h3>@ServicesView.QueriesHeading</h3>
+
+                <HistoryChart @attributes="ChartParameters(ServicesView.QueriesHeading, _queriesView)" />
+
+                <h3>@ServicesView.BufferPoolHeading</h3>
+
+                <HistoryChart @attributes="ChartParameters(ServicesView.BufferPoolHeading, _bufferPoolView)" />
+            }
+        }
+
+        <section class="history-moment" aria-label="@ServicesView.ThreadsHeading">
+            <h2>@ServicesView.ThreadsHeading</h2>
+
+            <p>@ServicesView.AgentNoteText</p>
+
+            @if (_threadsFailure.Length > 0)
+            {
+                <p class="error" role="alert">@_threadsFailure</p>
+            }
+            else if (_panel is null)
+            {
+                <p>@ServicesView.LoadingText</p>
+            }
+            else
+            {
+                @if (_panel.Stamps.Count > 0)
+                {
+                    <h3>@ServicesView.SnapshotsHeading</h3>
+
+                    <div class="table-scroll">
+                    <table class="snapshot">
+                        <caption>@ServicesView.SnapshotsHeading</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Time</th>
+                                <th scope="col">Threads recorded</th>
+                                <th scope="col">Running</th>
+                                <th scope="col">Longest running</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var stamp in _panel.Stamps)
+                            {
+                                <tr>
+                                    <td><button type="button" class="link" @onclick="() => SetMoment(stamp.At)">@stamp.Time</button></td>
+                                    <td>@stamp.Threads</td>
+                                    <td>@stamp.Running</td>
+                                    <td>@stamp.Longest</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    </div>
+
+                    @if (_panel.More.Length > 0)
+                    {
+                        <p class="note">@_panel.More</p>
+                    }
+                }
+
+                @if (_panel.Heading.Length > 0)
+                {
+                    <h3>@_panel.Heading</h3>
+                }
+
+                @foreach (var note in _panel.Notes)
+                {
+                    <p class="note">@note</p>
+                }
+
+                @if (_panel.Threads is not null)
+                {
+                    <HistorySnapshotTable Table="_panel.Threads" />
+
+                    @if (_panel.Sleeping.Length > 0)
+                    {
+                        <p>@_panel.Sleeping</p>
+                    }
+                }
+            }
+        </section>
+    }
+}

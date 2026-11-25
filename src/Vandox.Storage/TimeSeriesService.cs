@@ -93,9 +93,15 @@ public sealed class TimeSeriesService
                         Now = now,
                         Target = query.Target
                     };
-        var data = await SeriesLineReader.ReadAsync(_reader, _policy, series, range, cancellationToken).ConfigureAwait(false);
+        var data = await SeriesLineReader.ReadAsync(_reader, _policy, series, range, query.StepsOnly, cancellationToken).ConfigureAwait(false);
         var gaps = await SeriesGapReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
-        var markers = await SeriesMarkerReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+        (List<SeriesMarker> Markers, DateTimeOffset? CompleteUntil) markers = ([], null);
+
+        if (query.SkipMarkers == false)
+        {
+            markers = await SeriesMarkerReader.ReadAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+        }
+
         var startsBefore = _policy.HourlyRollups is not null && query.From < now - _policy.HourlyRollups.Value;
 
         if (data.Raw)
@@ -129,6 +135,45 @@ public sealed class TimeSeriesService
                    MarkersCompleteUntil = markers.CompleteUntil,
                    Gaps = gaps.Gaps,
                    Markers = markers.Markers
+               };
+    }
+
+    /// <summary>
+    /// Reads the service restarts of a range with the rule of the time-series markers, without a series.
+    /// </summary>
+    /// <param name="from">The start of the range</param>
+    /// <param name="to">The end of the range; clamped to the query time</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the restarts in time order, at most <see cref="MaxMarkers"/>, and the time up to which the list is complete</returns>
+    /// <exception cref="InvalidQueryException">The range breaks a rule; nothing was read</exception>
+    /// <exception cref="StoreException">A store read fails</exception>
+    /// <exception cref="OperationCanceledException">The token was cancelled</exception>
+    public async Task<SeriesMarkerList> RestartsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+    {
+        RecordQueries.Require(from < to, "from must be before to");
+        RecordQueries.Require(StorageTime.InStorableRange(from) && StorageTime.InStorableRange(to), "from and to must be within the storable range");
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var now = _clock.GetUtcNow();
+
+        if (from >= now)
+        {
+            return new SeriesMarkerList();
+        }
+
+        var range = new SeriesRange
+                    {
+                        From = from,
+                        End = to < now ? to : now,
+                        Now = now,
+                        Target = 1
+                    };
+        var restarts = await SeriesMarkerReader.ReadRestartsOnlyAsync(_reader, range, cancellationToken).ConfigureAwait(false);
+
+        return new SeriesMarkerList
+               {
+                   Markers = restarts.Markers,
+                   CompleteUntil = restarts.CompleteUntil
                };
     }
 

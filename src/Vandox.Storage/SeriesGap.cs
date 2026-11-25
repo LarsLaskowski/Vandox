@@ -12,6 +12,8 @@ public sealed class SeriesGap
     private const string FilesystemPrefix = "filesystem_";
     private const string ClockPrefix = "clock_";
 
+    private static readonly HashSet<string> _namedCollectors = ["self", "mariadb", "filesystem", "clock", "system", "processes", "connections", "systemd", "kernel", "logs", "backups"];
+
     #endregion // Constants
 
     #region Properties
@@ -73,6 +75,16 @@ public sealed class SeriesGap
                    "processes" or "connections" or "systemd" or "kernel" or "logs" or "backups" => false,
                    _ => true
                };
+    }
+
+    /// <summary>
+    /// Returns whether the gap concerns a collector: it names the collector, or it names none or one the time-series query leaves unnamed.
+    /// </summary>
+    /// <param name="collector">The collector</param>
+    /// <returns><see langword="true"/> when the gap concerns the collector</returns>
+    public bool ConcernsCollector(string collector)
+    {
+        return Collector == collector || Collector is "" || _namedCollectors.Contains(Collector) == false;
     }
 
     #endregion // Methods
