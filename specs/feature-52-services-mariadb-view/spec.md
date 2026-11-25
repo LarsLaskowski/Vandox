@@ -1,14 +1,14 @@
 # Spec: Services and MariaDB view
 
 Source: Issue #52
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
 The administrator of the monitored server wants to see at a glance how available each tracked service and MariaDB were over a month
-or longer, how often each service restarted, whether MariaDB's configured memory can exceed the RAM, and which queries ran long. Today
+or longer, how often each service restarted, whether MariaDB's memory can exceed the RAM, and which queries ran long. Today
 the overview shows only latest values and the history view marks restarts and charts single metrics, with no count per service,
-availability, memory budget or thread snapshot. The data is stored: `service_state` records
+availability, memory budget or thread snapshot. Stored are `service_state` records
 for `retention.events` (1,095 days by default), the `mariadb_*` metrics with their rollups, and `mariadb_status` records (availability,
 status values, thread snapshots) for `retention.snapshots` (30 days by default; [Retention and rollups](../../docs/areas/retention.md)).
 
@@ -22,10 +22,10 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 - S3: Given `php-fpm.service` restarted three times in the range (record 0215's rule), when the page shows the range, then its row reads
   *Restarts* `3` with the time of the latest, and the list *Service restarts* names the three with time and unit.
 - S4: Given MariaDB was `down` for 10 minutes of the last 24 hours, when the user picks *24 h*, then the line above the chart reads
-  `Up 99.3 %, down 0.7 %, not answering 0.0 %, unknown 0.0 % of this range.` and the chart *Availability* drops in those steps.
+  `Up 99.3 %, down 0.6 %, not answering 0.0 %, unknown 0.0 % of this range.` and the chart *Availability* drops in those steps.
 - S5: Given the theoretical maximum (`mariadb_memory_max_bytes`) is 6.0 GiB and the RAM (`mem_total_bytes`) 4.0 GiB, when the page shows
   the range, then *Memory budget* reads `In use 1.2 GiB of a theoretical maximum of 6.0 GiB; RAM 4.0 GiB.`, adds `The theoretical maximum
-  exceeds the RAM by 2.0 GiB.`, and its chart draws the lines `Theoretical maximum`, `RAM` and `In use` on one scale from 0.
+  exceeds the RAM by 2.0 GiB.`, and its chart draws the lines `Theoretical maximum`, `RAM` and `In use` on one scale in GiB.
 - S6: Given a year of data, when the user picks *1 y*, then the services and the charts of the metrics cover the year, and the lines
   read from status records (availability, `In use`, *Connections*) begin at the oldest stored status record, with the note of E7.
 - S7: Given the agent recorded threads at 03:12:40, when the user chooses that time in the list *Snapshots* or clicks a chart within 10
@@ -34,9 +34,9 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
 
 ## Errors and edge cases
 
-- E1: An invalid address shows the heading, the range controls and the history view's error text, and reads nothing.
-- E2: A range that begins at or after now shows `This range lies in the future.` and reads nothing.
-- E3: The agent was offline or the `systemd` collector failed: time inside a recorded gap whose collector is `systemd` or none, and time
+- E1: An invalid address shows the heading, the controls and the history view's error text, and reads nothing.
+- E2: A range beginning at or after now shows `This range lies in the future.` and reads nothing.
+- E3: The agent was offline or the `systemd` collector failed: time inside a recorded gap whose collector is `systemd`, none or one the time-series query leaves unnamed, and time
   more than 1 hour 5 minutes after a unit's record without a next one, counts as *Unknown*, never as available (record 0028). The same
   holds for MariaDB with the collector `mariadb` and 2 minutes. A gap of the `systemd` collector concerns every unit, also the gap the
   collector writes on every run while it refuses one unit's state ([Agent services](../../docs/areas/agent-services.md)), so whenever
@@ -103,9 +103,9 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
   records, the shares rounded down to one decimal, with E3's unknown rule, E6, E7 and E15 (S4, S6, E6, E7, E15).
 - AC6: *Memory budget* shows the line of S5 from the latest values of the range, `The theoretical maximum exceeds the RAM by <size>.`
   exactly when the maximum is above the RAM, and a chart of `Theoretical maximum` (`mariadb_memory_max_bytes`), `RAM` (`mem_total_bytes`
-  of source `system`) and `In use` (the status value `Memory_used`, as on the overview) on one scale from 0 (S5, E8, E9).
+  of source `system`) and `In use` (the status value `Memory_used`, as on the overview) on one scale in GiB (S5, E8, E9).
 - AC7: The charts *Connections* (`Threads_connected`), *Queries per second* (`mariadb_questions_per_second`) and *InnoDB buffer pool*
-  (`Used` and `Read hit`, percent from 0 to 100) share the range and time axis of the other MariaDB charts, with the history chart's
+  (`Used` and `Read hit`, in percent) share the range and time axis of the other MariaDB charts, with the history chart's
   legend, step text, gaps and notes (S6, E9).
 - AC8: *Long-running queries* states `The agent records MariaDB's threads only in a run in which more than 10 threads are running or the
   server is under memory pressure.`, lists the range's snapshots newest first (*Time*, *Threads recorded*, *Running*, *Longest running*;
@@ -164,3 +164,7 @@ status values, thread snapshots) for `retention.snapshots` (30 days by default; 
   start, and names the period.
 - MINOR 6 (rounding, recorded threads) — accepted: shares are rounded down to one decimal in AC3 and AC5; AC8 names the column
   *Threads recorded*, explains the agent's caps and reads `<n> sleeping connections recorded, not listed.`
+
+Spec fixes while planning (Lead): S4's down share follows AC5's rounding down (0.6 %, not 0.7 %); S5, AC6 and AC7 no longer promise a
+scale from 0, because the history chart fits a scale to its lines outside its stacked mode (`wwwroot/js/charts.js`, `historyScales`);
+E3 names the collectors the time-series query leaves unnamed, so that no gap is hidden.

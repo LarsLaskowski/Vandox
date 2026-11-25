@@ -263,4 +263,6 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0224 | The processes view stacks program rollups on the history chart and compares programs of one source | Accepted | 2026-11-21 |
 | 0225 | Connection snapshots are folded into per-state, per-program and per-address buckets, and ended buckets keep their top addresses | Accepted | 2026-11-23 |
 | 0226 | The network view stacks connection rollups and marks listeners new against an inventory a day older | Accepted | 2026-11-24 |
+| 0227 | Availability is the time a recorded state holds, up to a cap, and gap time is unknown | Proposed | 2026-11-25 |
+| 0228 | MariaDB status members are kept in a covering partial index and folded on the time-series step axis | Proposed | 2026-11-25 |
 <!-- project:end index -->
