@@ -129,5 +129,51 @@ public class AddressTimesTests
         Assert.AreEqual("other", thrown.ParamName, "the parameter of the refusal");
     }
 
+    /// <summary>
+    /// A range without a preset or times is the span of the fallback preset up to now, a preset of the address wins over the fallback, and a fixed range keeps its times.
+    /// </summary>
+    /// <param name="preset">The preset of the address, or an empty text for none</param>
+    /// <param name="fallback">The fallback preset</param>
+    /// <param name="days">The days of the expected range up to now, or 0 for the fixed range</param>
+    [TestMethod]
+    [TestCategory("AC1")]
+    [DataRow("", HistoryPreset.ThirtyDays, 30)]
+    [DataRow("", HistoryPreset.OneYear, 365)]
+    [DataRow("", HistoryPreset.SevenDays, 7)]
+    [DataRow("7d", HistoryPreset.ThirtyDays, 7)]
+    [DataRow("1y", HistoryPreset.OneDay, 365)]
+    [DataRow("fixed", HistoryPreset.ThirtyDays, 0)]
+    public void AddressTimesRangeUsesFallbackPreset(string preset, HistoryPreset fallback, int days)
+    {
+        // Arrange
+        var now = new DateTimeOffset(2026, 10, 5, 12, 34, 56, TimeSpan.Zero);
+        var times = new AddressTimes();
+
+        if (preset == "fixed")
+        {
+            times.From = new DateTimeOffset(2026, 10, 1, 10, 0, 0, TimeSpan.Zero);
+            times.To = new DateTimeOffset(2026, 10, 2, 11, 30, 15, TimeSpan.Zero);
+        }
+        else if (preset.Length > 0)
+        {
+            times.Preset = preset == "7d" ? HistoryPreset.SevenDays : HistoryPreset.OneYear;
+        }
+
+        // Act
+        var range = times.Range(now, fallback);
+
+        // Assert
+        if (days == 0)
+        {
+            Assert.AreEqual(new DateTimeOffset(2026, 10, 1, 10, 0, 0, TimeSpan.Zero), range.Start, "a fixed range keeps its start");
+            Assert.AreEqual(new DateTimeOffset(2026, 10, 2, 11, 30, 15, TimeSpan.Zero), range.End, "a fixed range keeps its end");
+
+            return;
+        }
+
+        Assert.AreEqual(now.AddDays(-days), range.Start, "the range starts the days of its preset before now");
+        Assert.AreEqual(now, range.End, "the range ends now");
+    }
+
     #endregion // Methods
 }
