@@ -119,6 +119,50 @@ internal static class ProgramBenchmark
     }
 
     /// <summary>
+    /// Runs an action and returns its duration.
+    /// </summary>
+    /// <param name="action">The action</param>
+    /// <returns>A task that returns the duration in milliseconds</returns>
+    internal static async Task<double> TimeAsync(Func<Task> action)
+    {
+        var watch = Stopwatch.StartNew();
+
+        await action().ConfigureAwait(false);
+        watch.Stop();
+
+        return watch.Elapsed.TotalMilliseconds;
+    }
+
+    /// <summary>
+    /// Prints the times and the median of a read and adds the median to the list.
+    /// </summary>
+    /// <param name="name">The name of the read</param>
+    /// <param name="times">The times in milliseconds</param>
+    /// <param name="medians">Receives the median</param>
+    internal static void Report(string name, List<double> times, List<(string Name, double Median)> medians)
+    {
+        var median = Median(times);
+
+        medians.Add((name, median));
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{name}: median {median:F0} ms of {string.Join(", ", times.Select(time => time.ToString("F0", CultureInfo.InvariantCulture)))}"));
+    }
+
+    /// <summary>
+    /// Prints the verdict of a criterion over the medians of a measurement.
+    /// </summary>
+    /// <param name="id">The id of the criterion</param>
+    /// <param name="medians">The medians</param>
+    /// <param name="limit">The limit in milliseconds</param>
+    internal static void Verdict(string id, List<(string Name, double Median)> medians, double limit)
+    {
+        var over = medians.Where(entry => entry.Median >= limit).Select(entry => entry.Name).ToList();
+
+        Console.WriteLine(over.Count == 0
+                              ? string.Create(CultureInfo.InvariantCulture, $"{id}: all {medians.Count} medians are under {limit:F0} ms: criterion met")
+                              : string.Create(CultureInfo.InvariantCulture, $"{id}: {over.Count} of {medians.Count} medians reach {limit:F0} ms ({string.Join(", ", over)}): criterion NOT met"));
+    }
+
+    /// <summary>
     /// Returns the median of the times.
     /// </summary>
     /// <param name="times">The times in milliseconds</param>

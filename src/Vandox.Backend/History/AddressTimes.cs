@@ -226,6 +226,39 @@ internal sealed partial class AddressTimes
     }
 
     /// <summary>
+    /// Writes an address as a query string: the source, the times and an optional last parameter.
+    /// </summary>
+    /// <param name="error">The error found by the checks of the address, empty when there is none</param>
+    /// <param name="sourceName">The name of the source parameter</param>
+    /// <param name="source">The source, or <c>null</c> for the default</param>
+    /// <param name="last">The parameter written after the times, or <c>null</c> for none</param>
+    /// <returns>The query string, empty for the default address</returns>
+    /// <exception cref="InvalidOperationException">The address has an error</exception>
+    internal string ToQuery(string error, string sourceName, string? source, string? last)
+    {
+        if (error.Length > 0)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        var parts = new List<string>();
+
+        if (source is not null)
+        {
+            parts.Add($"{sourceName}={Uri.EscapeDataString(source)}");
+        }
+
+        AppendTo(parts);
+
+        if (last is not null)
+        {
+            parts.Add(last);
+        }
+
+        return parts.Count == 0 ? string.Empty : "?" + string.Join('&', parts);
+    }
+
+    /// <summary>
     /// Gives the range: the fixed one, else the preset up to now.
     /// </summary>
     /// <param name="now">The current time</param>

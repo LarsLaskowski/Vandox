@@ -137,28 +137,7 @@ public sealed class ProcessesAddress
     /// <exception cref="InvalidOperationException">The address has an error or a value the checks refuse</exception>
     public string ToQuery()
     {
-        var error = Validate();
-
-        if (error.Length > 0)
-        {
-            throw new InvalidOperationException(error);
-        }
-
-        var parts = new List<string>();
-
-        if (Source is not null)
-        {
-            parts.Add($"{SourceName}={Uri.EscapeDataString(Source)}");
-        }
-
-        _times.AppendTo(parts);
-
-        if (Compare is not null)
-        {
-            parts.Add($"{CompareName}={LogsAddress.FormatTime(Compare.Value)}");
-        }
-
-        return parts.Count == 0 ? string.Empty : "?" + string.Join('&', parts);
+        return _times.ToQuery(Validate(), SourceName, Source, Compare is null ? null : $"{CompareName}={LogsAddress.FormatTime(Compare.Value)}");
     }
 
     /// <summary>

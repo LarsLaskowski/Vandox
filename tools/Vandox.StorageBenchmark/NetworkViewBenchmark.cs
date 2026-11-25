@@ -95,11 +95,7 @@ internal static class NetworkViewBenchmark
                     await MeasureAsync(store, days, medians, cancellationToken).ConfigureAwait(false);
                 }
 
-                var over = medians.Where(entry => entry.Median >= CriterionMilliseconds).Select(entry => entry.Name).ToList();
-
-                Console.WriteLine(over.Count == 0
-                                      ? string.Create(CultureInfo.InvariantCulture, $"N4: all {medians.Count} medians are under {CriterionMilliseconds:F0} ms: criterion met")
-                                      : string.Create(CultureInfo.InvariantCulture, $"N4: {over.Count} of {medians.Count} medians reach {CriterionMilliseconds:F0} ms ({string.Join(", ", over)}): criterion NOT met"));
+                ProgramBenchmark.Verdict("N4", medians, CriterionMilliseconds);
             }
         }
         finally
@@ -158,50 +154,21 @@ internal static class NetworkViewBenchmark
 
         for (var read = 0; read < Reads; read++)
         {
-            charts.Add(await TimeAsync(async () => chartResult = await chartReader.ReadAsync(ConnectionBenchmark.Source, range, ChartWidth, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
+            charts.Add(await ProgramBenchmark.TimeAsync(async () => chartResult = await chartReader.ReadAsync(ConnectionBenchmark.Source, range, ChartWidth, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
 
             var step = chartResult?.Step ?? TimeSpan.FromDays(1);
-            var beside = TimeAsync(() => panelReader.ReadAsync(ConnectionBenchmark.Source, range, null, cancellationToken));
+            var beside = ProgramBenchmark.TimeAsync(() => panelReader.ReadAsync(ConnectionBenchmark.Source, range, null, cancellationToken));
 
-            addresses.Add(await TimeAsync(async () => addressResult = await addressReader.ReadAsync(ConnectionBenchmark.Source, range, step, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
+            addresses.Add(await ProgramBenchmark.TimeAsync(async () => addressResult = await addressReader.ReadAsync(ConnectionBenchmark.Source, range, step, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false));
             panel.Add(await beside.ConfigureAwait(false));
         }
 
         var label = $"{days}-day range";
 
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{label}, step {chartResult?.Step}, width {ChartWidth}: {chartResult?.States?.Times.Count} steps, {chartResult?.States?.Lines.Count} states, {chartResult?.Programs?.Lines.Count} program lines, {addressResult?.Table.Rows.Count} addresses shown"));
-        Report($"{label}: chart action (sources, states, programs)", charts, medians);
-        Report($"{label}: address action (beside the panel)", addresses, medians);
+        ProgramBenchmark.Report($"{label}: chart action (sources, states, programs)", charts, medians);
+        ProgramBenchmark.Report($"{label}: address action (beside the panel)", addresses, medians);
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{label}: panel reads beside the address action: median {ProgramBenchmark.Median(panel):F0} ms of {string.Join(", ", panel.Select(time => time.ToString("F0", CultureInfo.InvariantCulture)))}"));
-    }
-
-    /// <summary>
-    /// Runs an action and returns its duration.
-    /// </summary>
-    /// <param name="action">The action</param>
-    /// <returns>A task that returns the duration in milliseconds</returns>
-    private static async Task<double> TimeAsync(Func<Task> action)
-    {
-        var watch = Stopwatch.StartNew();
-
-        await action().ConfigureAwait(false);
-        watch.Stop();
-
-        return watch.Elapsed.TotalMilliseconds;
-    }
-
-    /// <summary>
-    /// Prints the five times and the median of an action and adds the median to the list.
-    /// </summary>
-    /// <param name="name">The name of the action</param>
-    /// <param name="times">The times in milliseconds</param>
-    /// <param name="medians">Receives the median</param>
-    private static void Report(string name, List<double> times, List<(string Name, double Median)> medians)
-    {
-        var median = ProgramBenchmark.Median(times);
-
-        medians.Add((name, median));
-        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{name}: median {median:F0} ms of {string.Join(", ", times.Select(time => time.ToString("F0", CultureInfo.InvariantCulture)))}"));
     }
 
     #endregion // Methods
