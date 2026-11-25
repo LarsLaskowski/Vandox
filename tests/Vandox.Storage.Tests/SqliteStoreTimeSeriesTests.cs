@@ -1229,7 +1229,7 @@ public class SqliteStoreTimeSeriesTests
             before = await DescribeServiceReadsAsync(first);
         }
 
-        await RetentionSamples.ExecuteAsync(directory.Path, $"{RetentionSamples.UndoStepSeventeen}; {RetentionSamples.UndoStepSixteen}; {RetentionSamples.UndoStepFifteen}; UPDATE meta SET value = '14' WHERE key = 'schema_version'", TestContext.CancellationToken);
+        await RetentionSamples.ExecuteAsync(directory.Path, $"{RetentionSamples.UndoStepEighteen}; {RetentionSamples.UndoStepSeventeen}; {RetentionSamples.UndoStepSixteen}; {RetentionSamples.UndoStepFifteen}; UPDATE meta SET value = '14' WHERE key = 'schema_version'", TestContext.CancellationToken);
 
         var indexAtVersion14 = await TimeSeriesSamples.TextAsync(directory.Path, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'records_service_state'", TestContext.CancellationToken);
 
@@ -1240,7 +1240,7 @@ public class SqliteStoreTimeSeriesTests
 
         // Assert
         Assert.AreEqual("0", indexAtVersion14, "the arranged database has no index, as at version 14");
-        Assert.AreEqual("17", await TimeSeriesSamples.TextAsync(directory.Path, "SELECT value FROM meta WHERE key = 'schema_version'", TestContext.CancellationToken), "the database is migrated to version 17");
+        Assert.AreEqual("18", await TimeSeriesSamples.TextAsync(directory.Path, "SELECT value FROM meta WHERE key = 'schema_version'", TestContext.CancellationToken), "the database is migrated to version 18");
         Assert.AreEqual("1", await TimeSeriesSamples.TextAsync(directory.Path, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'records_service_state'", TestContext.CancellationToken), "step 15 created the index");
         Assert.AreEqual("4", await TimeSeriesSamples.TextAsync(directory.Path, "SELECT count(*) FROM records WHERE kind = 'service_state'", TestContext.CancellationToken), "the stored records are kept, also the one without a unit");
         Assert.AreEqual(before, after, "the service reads return the same rows after the migration");
