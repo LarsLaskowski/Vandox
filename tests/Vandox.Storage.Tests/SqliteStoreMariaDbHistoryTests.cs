@@ -192,6 +192,29 @@ public class SqliteStoreMariaDbHistoryTests
     }
 
     /// <summary>
+    /// A status record whose availability is none of the three known values counts as no state.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    public async Task SqliteStoreMariaDbStatusIgnoresRecordOfUnknownAvailability()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await ServiceHistorySamples.InsertForgedStatusAsync(directory.Path, At(0), "{\"availability\":\"weird\"}", TestContext.CancellationToken);
+
+        // Act
+        var result = await store.MariaDbStatusAsync(Query(0, 30, 10), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(TimeSpan.Zero, result.UpTime, "no time is up");
+        Assert.AreEqual(TimeSpan.Zero, result.DownTime, "no time is down");
+        Assert.AreEqual(TimeSpan.Zero, result.NotAnsweringTime, "no time is not answering");
+    }
+
+    /// <summary>
     /// A query that breaks a rule is refused with the texts of the time-series query and the two rules of the steps.
     /// </summary>
     /// <param name="scenario">The broken rule</param>
@@ -295,6 +318,44 @@ public class SqliteStoreMariaDbHistoryTests
                       "oldest" => "SELECT min(captured_at) FROM records INDEXED BY records_mariadb_status WHERE kind = 'mariadb_status' AND source = 'mariadb'",
                       _ => "SELECT id, captured_at, json_array_length(data, '$.threads') FROM records INDEXED BY records_mariadb_status "
                            + "WHERE kind = 'mariadb_status' AND source = 'mariadb' AND captured_at >= $from AND captured_at < $to AND json_array_length(data, '$.threads') > 0 ORDER BY captured_at DESC LIMIT $limit"
+                  };
+
+        // Act
+        var plan = await ServiceHistorySamples.PlanAsync(directory.Path, sql, TestContext.CancellationToken);
+
+        // Assert
+        Assert.Contains("COVERING INDEX records_mariadb_status", plan, $"the {shape} statement reads the covering index: {plan}");
+        Assert.IsFalse(plan.Split('\n').Contains("SCAN records"), $"the {shape} statement does not scan the table: {plan}");
+    }
+
+    /// <summary>
+    /// The statements of the MariaDB reads, as the store runs them, are answered from the covering index of the status members alone.
+    /// </summary>
+    /// <param name="shape">The name of the statement constant</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC5")]
+    [TestCategory("AC8")]
+    [DataRow("StatusStream")]
+    [DataRow("StatusOldest")]
+    [DataRow("SnapshotStamps")]
+    [DataRow("SnapshotAtOrBefore")]
+    [DataRow("SnapshotAfter")]
+    public async Task SqliteStoreMariaDbStatusReadStatementsUseCoveringIndex(string shape)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await ServiceHistorySamples.InsertStatusRunAsync(directory.Path, Samples.Base, 300, TimeSpan.FromSeconds(30), "up", TestContext.CancellationToken);
+
+        var sql = shape switch
+                  {
+                      "StatusStream" => MariaDbHistoryQueries.StatusStream,
+                      "StatusOldest" => MariaDbHistoryQueries.StatusOldest,
+                      "SnapshotStamps" => MariaDbHistoryQueries.SnapshotStamps,
+                      "SnapshotAtOrBefore" => MariaDbHistoryQueries.SnapshotAtOrBefore,
+                      _ => MariaDbHistoryQueries.SnapshotAfter
                   };
 
         // Act

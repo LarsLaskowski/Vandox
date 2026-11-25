@@ -320,6 +320,30 @@ public class SqliteStoreServiceHistoryTests
     }
 
     /// <summary>
+    /// The state stream and the distinct-unit count of the view, as the store runs them, are answered from the covering index of the service state members alone.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public async Task SqliteStoreServiceAvailabilityReadStatementUsesCoveringIndex()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await ServiceHistorySamples.InsertUnitsAsync(directory.Path, 300, Samples.Base, false, TestContext.CancellationToken);
+
+        // Act
+        var streamPlan = await ServiceHistorySamples.PlanAsync(directory.Path, ServiceHistoryQueries.StateStream, TestContext.CancellationToken);
+        var distinctPlan = await ServiceHistorySamples.PlanAsync(directory.Path, ServiceHistoryQueries.DistinctUnits, TestContext.CancellationToken);
+
+        // Assert
+        Assert.Contains("COVERING INDEX records_service_state", streamPlan, $"the stream reads the covering index: {streamPlan}");
+        Assert.IsFalse(streamPlan.Split('\n').Contains("SCAN records"), $"the stream does not scan the table: {streamPlan}");
+        Assert.Contains("COVERING INDEX records_service_state", distinctPlan, $"the unit count reads the covering index: {distinctPlan}");
+    }
+
+    /// <summary>
     /// 2,880 touching gap records of the <c>systemd</c> collector over a day, one per 30-second run, merge into one unknown span that covers the day, with every gap read and the note flag set.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -384,6 +408,56 @@ public class SqliteStoreServiceHistoryTests
         Assert.AreEqual(TimeSpan.FromMinutes(300), result.Units[0].Available, "the rest, the closed row and the row after the range do not count");
         Assert.IsFalse(result.SystemdGaps, "no kept gap names the systemd collector");
         Assert.IsNull(result.GapsCompleteUntil, "all gaps are read");
+    }
+
+    /// <summary>
+    /// A gap record whose span does not parse or lacks a bound makes no time unknown.
+    /// </summary>
+    /// <param name="data">The payload of the gap record</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC3")]
+    [DataRow("{\"from\":\"not a time\",\"to\":\"2026-01-01T00:00:00Z\",\"collector\":\"systemd\"}")]
+    [DataRow("{\"from\":\"2026-01-01T00:00:00Z\",\"to\":\"not a time\",\"collector\":\"systemd\"}")]
+    [DataRow("{\"to\":\"2026-01-01T00:00:00Z\",\"collector\":\"systemd\"}")]
+    [DataRow("{\"from\":\"2026-01-01T00:00:00Z\",\"collector\":\"systemd\"}")]
+    public async Task SqliteStoreServiceAvailabilityIgnoresGapRecordWithUnreadableSpan(string data)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await InsertAsync(directory, "a.service", "active", "running", 0);
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "gap", At(10), data, TestContext.CancellationToken);
+
+        // Act
+        var result = await store.ServiceAvailabilityAsync(Query(0, 60), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, result.Units, "one unit");
+        Assert.AreEqual(TimeSpan.Zero, result.Units[0].Unknown, "an unreadable span makes nothing unknown");
+        Assert.AreEqual(TimeSpan.FromMinutes(60), result.Units[0].Available, "the unit is available the whole range");
+    }
+
+    /// <summary>
+    /// A service record without a unit is skipped, and a range with such records only has no units and reads no sub state.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC2")]
+    public async Task SqliteStoreServiceAvailabilitySkipsRecordWithoutUnit()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await TimeSeriesSamples.InsertRecordAsync(directory.Path, "service_state", At(10), "{\"active_state\":\"active\"}", TestContext.CancellationToken);
+
+        // Act
+        var result = await store.ServiceAvailabilityAsync(Query(0, 60), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(result.Units, "a record without a unit makes no unit");
     }
 
     /// <summary>

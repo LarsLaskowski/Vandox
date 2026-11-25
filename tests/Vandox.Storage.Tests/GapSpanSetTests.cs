@@ -152,6 +152,25 @@ public class GapSpanSetTests
     }
 
     /// <summary>
+    /// A span that is empty or runs backwards is ignored.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("AC3")]
+    public void GapSpanSetIgnoresEmptyAndBackwardsSpans()
+    {
+        // Arrange
+        var set = new GapSpanSet();
+
+        // Act
+        set.Add(At(10), At(10));
+        set.Add(At(20), At(15));
+
+        // Assert
+        Assert.IsEmpty(set.Spans, "no span was added");
+        Assert.IsNull(set.CompleteUntil, "nothing was dropped");
+    }
+
+    /// <summary>
     /// Gets an instant a number of seconds after <see cref="Samples.Base"/>.
     /// </summary>
     /// <param name="seconds">The seconds</param>
