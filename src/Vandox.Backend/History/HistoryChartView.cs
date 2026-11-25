@@ -119,12 +119,20 @@ public sealed class HistoryChartView
     /// <param name="step">Whether the points are steps</param>
     /// <param name="factor">The factor every value is multiplied by</param>
     /// <returns>The line</returns>
-#pragma warning disable RH2003 // Skeleton: removed with the implementation
     internal static HistoryLine Line(string label, int scale, int index, IReadOnlyList<SeriesPoint> points, bool step, double factor)
     {
-        throw new NotImplementedException();
+        return new HistoryLine
+               {
+                   Label = label,
+                   Scale = scale,
+                   Color = index % ColorCount,
+                   Dashed = index >= ColorCount,
+                   Values = [.. points.Select(point => point.State == PointState.Value ? point.Average * factor : (double?)null)],
+                   Bridged = [.. points.Select(point => point.State == PointState.BetweenSamples)],
+                   Minimums = step ? [.. points.Select(point => point.State == PointState.Value ? point.Minimum * factor : (double?)null)] : [],
+                   Maximums = step ? [.. points.Select(point => point.State == PointState.Value ? point.Maximum * factor : (double?)null)] : []
+               };
     }
-#pragma warning restore RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Gives the same view with another moment, sharing its times and lines, so that the chart only moves its mark.
@@ -174,17 +182,7 @@ public sealed class HistoryChartView
 
         var name = line.Labels.Length == 0 ? $"{line.Source} {line.Name}" : $"{line.Source} {line.Name} {line.Labels}";
 
-        return new HistoryLine
-               {
-                   Label = LogText.Escape(name, HistoryView.LabelChars),
-                   Scale = scale,
-                   Color = index % ColorCount,
-                   Dashed = index >= ColorCount,
-                   Values = [.. line.Points.Select(point => point.State == PointState.Value ? point.Average : (double?)null)],
-                   Bridged = [.. line.Points.Select(point => point.State == PointState.BetweenSamples)],
-                   Minimums = step ? [.. line.Points.Select(point => point.State == PointState.Value ? point.Minimum : (double?)null)] : [],
-                   Maximums = step ? [.. line.Points.Select(point => point.State == PointState.Value ? point.Maximum : (double?)null)] : []
-               };
+        return Line(LogText.Escape(name, HistoryView.LabelChars), scale, index, line.Points, step, 1);
     }
 
     /// <summary>

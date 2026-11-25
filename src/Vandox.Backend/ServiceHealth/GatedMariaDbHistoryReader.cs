@@ -3,7 +3,6 @@ using Vandox.Storage;
 
 namespace Vandox.Backend.ServiceHealth;
 
-#pragma warning disable S4487, RH2003 // Skeleton: removed with the implementation
 /// <summary>
 /// Reads the MariaDB history through the shared gate of the web views, one gate slot per call.
 /// </summary>
@@ -32,6 +31,9 @@ public sealed class GatedMariaDbHistoryReader : IMariaDbHistoryReader
     /// <param name="gate">The gate of the reads</param>
     public GatedMariaDbHistoryReader(IMariaDbHistoryReader inner, WebReaderGate gate)
     {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(gate);
+
         _inner = inner;
         _gate = gate;
     }
@@ -43,27 +45,26 @@ public sealed class GatedMariaDbHistoryReader : IMariaDbHistoryReader
     /// <inheritdoc/>
     public Task<MariaDbStatusResult> MariaDbStatusAsync(MariaDbStatusQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.MariaDbStatusAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<ThreadSnapshotStamp>> ThreadSnapshotsAsync(ThreadSnapshotQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.ThreadSnapshotsAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<ThreadSnapshotStamp?> ClosestThreadSnapshotAsync(DateTimeOffset at, TimeSpan window, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.ClosestThreadSnapshotAsync(at, window, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc/>
     public Task<ThreadSnapshot?> ThreadSnapshotAsync(long recordId, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.ThreadSnapshotAsync(recordId, cancellationToken), cancellationToken);
     }
 
     #endregion // IMariaDbHistoryReader
 }
-#pragma warning restore S4487, RH2003 // Skeleton: removed with the implementation

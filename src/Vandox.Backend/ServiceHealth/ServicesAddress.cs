@@ -19,7 +19,7 @@ public sealed class ServicesAddress
     /// <summary>
     /// Gets the range and the moment.
     /// </summary>
-    internal AddressTimes Times { get; } = new();
+    internal AddressTimes Times { get; private init; } = new();
 
     #endregion // Properties
 
@@ -30,58 +30,61 @@ public sealed class ServicesAddress
     /// </summary>
     /// <param name="query">The query string</param>
     /// <returns>The address; its error names the first invalid parameter</returns>
-#pragma warning disable RH2003 // Skeleton: removed with the implementation
     public static ServicesAddress Parse(string query)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(query);
+
+        var address = new ServicesAddress();
+
+        address.Error = address.Times.ReadParameters(QueryHelpers.ParseQuery(query));
+
+        return address;
     }
-#pragma warning restore RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Copies the address.
     /// </summary>
     /// <returns>The copy</returns>
-#pragma warning disable S2325, RH2003 // Skeleton: removed with the implementation
     public ServicesAddress Copy()
     {
-        throw new NotImplementedException();
+        return new ServicesAddress
+               {
+                   Times = Times.Copy(),
+                   Error = Error
+               };
     }
-#pragma warning restore S2325, RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Gives the range: the fixed one, else the last 30 days up to now.
     /// </summary>
     /// <param name="now">The current time</param>
     /// <returns>The range</returns>
-#pragma warning disable S2325, RH2003 // Skeleton: removed with the implementation
     public HistoryRange Range(DateTimeOffset now)
     {
-        throw new NotImplementedException();
+        return Times.Range(now, HistoryPreset.ThirtyDays);
     }
-#pragma warning restore S2325, RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Writes the address as a query string after checking every value again.
     /// </summary>
     /// <returns>The query string, empty for the default address</returns>
-#pragma warning disable S2325, RH2003 // Skeleton: removed with the implementation
+    /// <exception cref="InvalidOperationException">The address has an error or a value the checks refuse</exception>
     public string ToQuery()
     {
-        throw new NotImplementedException();
+        return Times.ToQuery(Error.Length > 0 ? Error : Times.Validate(), string.Empty, null, null);
     }
-#pragma warning restore S2325, RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Checks whether another address has the same preset, start and end.
     /// </summary>
     /// <param name="other">The other address</param>
     /// <returns><c>true</c> when the ranges are the same</returns>
-#pragma warning disable S2325, RH2003 // Skeleton: removed with the implementation
     public bool SameRange(ServicesAddress other)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(other);
+
+        return Times.SameRange(other.Times);
     }
-#pragma warning restore S2325, RH2003 // Skeleton: removed with the implementation
 
     #endregion // Methods
 }

@@ -101,7 +101,7 @@ public sealed partial class HistoryRangeControls : ComponentBase
     /// <returns>The class, <see langword="null"/> for none</returns>
     private string? PresetClass(HistoryPreset preset)
     {
-        var current = Preset ?? (Unbounded ? HistoryPreset.OneDay : (HistoryPreset?)null);
+        var current = Preset ?? (Unbounded ? DefaultPreset : (HistoryPreset?)null);
 
         return current == preset ? "active" : null;
     }

@@ -265,12 +265,7 @@ internal sealed partial class AddressTimes
     /// <returns>The range</returns>
     internal HistoryRange Range(DateTimeOffset now)
     {
-        if (From is not null && To is not null)
-        {
-            return new HistoryRange(From.Value, To.Value);
-        }
-
-        return new HistoryRange(now - HistoryView.PresetSpan(Preset ?? HistoryPreset.OneDay), now);
+        return Range(now, HistoryPreset.OneDay);
     }
 
     /// <summary>
@@ -279,12 +274,15 @@ internal sealed partial class AddressTimes
     /// <param name="now">The current time</param>
     /// <param name="fallback">The preset of an address without a range</param>
     /// <returns>The range</returns>
-#pragma warning disable S2325, RH2003 // Skeleton: removed with the implementation
     internal HistoryRange Range(DateTimeOffset now, HistoryPreset fallback)
     {
-        throw new NotImplementedException();
+        if (From is not null && To is not null)
+        {
+            return new HistoryRange(From.Value, To.Value);
+        }
+
+        return new HistoryRange(now - HistoryView.PresetSpan(Preset ?? fallback), now);
     }
-#pragma warning restore S2325, RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Checks whether another set has the same preset, start and end.

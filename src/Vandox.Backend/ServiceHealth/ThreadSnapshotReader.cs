@@ -3,7 +3,6 @@ using Vandox.Storage;
 
 namespace Vandox.Backend.ServiceHealth;
 
-#pragma warning disable S4487, S2325, RH2003 // Skeleton: removed with the implementation
 /// <summary>
 /// Reads the section Long-running queries.
 /// </summary>
@@ -26,6 +25,8 @@ public sealed class ThreadSnapshotReader
     /// <param name="reader">The reader of the thread snapshots</param>
     public ThreadSnapshotReader(IMariaDbHistoryReader reader)
     {
+        ArgumentNullException.ThrowIfNull(reader);
+
         _reader = reader;
     }
 
@@ -34,17 +35,29 @@ public sealed class ThreadSnapshotReader
     #region Methods
 
     /// <summary>
-    /// Reads the panel of a range.
+    /// Reads the panel of a range: the list of the snapshots and the snapshot of the moment, else the latest one.
     /// </summary>
     /// <param name="range">The range</param>
     /// <param name="at">The moment of the address, <see langword="null"/> for the latest snapshot</param>
     /// <param name="cancellationToken">Cancels the read</param>
     /// <returns>A task that returns the panel</returns>
-    public Task<ThreadPanel> ReadAsync(HistoryRange range, DateTimeOffset? at, CancellationToken cancellationToken)
+    public async Task<ThreadPanel> ReadAsync(HistoryRange range, DateTimeOffset? at, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(range);
+
+        var stamps = await _reader.ThreadSnapshotsAsync(new ThreadSnapshotQuery
+                                                        {
+                                                            From = range.Start,
+                                                            To = range.End,
+                                                            Limit = ThreadSnapshotQuery.MaxLimit
+                                                        },
+                                                        cancellationToken).ConfigureAwait(false);
+        var latest = stamps.Count > 0 ? stamps[0] : null;
+        var stamp = at is { } moment ? await _reader.ClosestThreadSnapshotAsync(moment, HistoryView.MomentWindow, cancellationToken).ConfigureAwait(false) : latest;
+        var shown = stamp is null ? null : await _reader.ThreadSnapshotAsync(stamp.RecordId, cancellationToken).ConfigureAwait(false);
+
+        return ThreadSnapshotView.Build(stamps, shown, at);
     }
 
     #endregion // Methods
 }
-#pragma warning restore S4487, S2325, RH2003 // Skeleton: removed with the implementation

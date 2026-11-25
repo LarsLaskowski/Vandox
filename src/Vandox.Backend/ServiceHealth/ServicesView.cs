@@ -1,3 +1,9 @@
+using System.Globalization;
+
+using Vandox.Backend.History;
+using Vandox.Backend.Overview;
+using Vandox.Storage;
+
 namespace Vandox.Backend.ServiceHealth;
 
 /// <summary>
@@ -172,6 +178,13 @@ public static class ServicesView
     /// </summary>
     public const string ShortenedText = "[statement shortened by the agent]";
 
+    /// <summary>
+    /// The text of a time of 36,500 days or more.
+    /// </summary>
+    private const string CappedSecondsText = "36500 d 0 h or more";
+
+    private const int PerMille = 1000;
+
     #endregion // Constants
 
     #region Methods
@@ -182,24 +195,34 @@ public static class ServicesView
     /// <param name="part">The part</param>
     /// <param name="total">The total</param>
     /// <returns>The text</returns>
-#pragma warning disable RH2003 // Skeleton: removed with the implementation
     public static string ShareDown(TimeSpan part, TimeSpan total)
     {
-        throw new NotImplementedException();
+        var tenths = total.Ticks <= 0 || part.Ticks <= 0 ? 0 : (long)((Int128)part.Ticks * PerMille / total.Ticks);
+
+        tenths = Math.Min(tenths, PerMille);
+
+        return string.Create(CultureInfo.InvariantCulture, $"{tenths / 10}.{tenths % 10} %");
     }
-#pragma warning restore RH2003 // Skeleton: removed with the implementation
 
     /// <summary>
     /// Writes a number of seconds of a thread, capped at <see cref="Vandox.Storage.ThreadSnapshot.MaxSeconds"/>.
     /// </summary>
     /// <param name="seconds">The seconds</param>
     /// <returns>The text</returns>
-#pragma warning disable RH2003 // Skeleton: removed with the implementation
     public static string Seconds(ulong seconds)
     {
-        throw new NotImplementedException();
+        return seconds >= (ulong)ThreadSnapshot.MaxSeconds ? CappedSecondsText : OverviewText.Age(TimeSpan.FromSeconds(seconds));
     }
-#pragma warning restore RH2003 // Skeleton: removed with the implementation
+
+    /// <summary>
+    /// Formats a time as <c>yyyy-MM-dd HH:mm:ss</c>, UTC.
+    /// </summary>
+    /// <param name="time">The time</param>
+    /// <returns>The text</returns>
+    internal static string FormatTime(DateTimeOffset time)
+    {
+        return HistoryChartView.FormatTime(time);
+    }
 
     #endregion // Methods
 }
