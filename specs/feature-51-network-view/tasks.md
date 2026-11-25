@@ -16,5 +16,5 @@ Plan: [plan.md](plan.md)
 | 10 | G3 | `--network-view` scenario of the storage benchmark: chart and address action each timed at 30 days, a year and 1,095 days | `tools/Vandox.StorageBenchmark/` | AC10 | 9 | Dev | [ ] |
 | 11 | G3 | Documentation updates of the plan: area documents and index, `docs/ARCHITECTURE.md`, `README.md`, `CHANGELOG.md`, `docs/BENCHMARKS.md` (figures after task 13), the reported text for `.squad/project.md` | `docs/areas/`, `docs/ARCHITECTURE.md`, `README.md`, `CHANGELOG.md`, `docs/BENCHMARKS.md` | AC1–AC10 | 9, 10 | Dev | [ ] |
 | 12 | G3 | *Test doubles* row for `FakeConnectionRollupReader` (reported text) | `.squad/project.md` | AC9 | 5 | Tester | [ ] |
-| 13 | PM | Run `--network-view` on the reference host and check drag, click and the stacked charts in a browser | — | AC10 | 10 | Product Manager | [ ] |
+| 13 | PM | Run `--network-view` on the reference host and check drag, click and the stacked charts in a browser (moved by the Lead in step 9 to a linked verification issue after merge) | — | AC10 | 10 | Product Manager | [ ] |
 | 14 | PM | Record 0226: `Area:` to *Network view* once the index row exists | `docs/decisions/0226-the-network-view-stacks-connection-rollups-and-marks-listeners-new-against-an-inventory-a-day-older.md` | — | 11 | Lead | [ ] |

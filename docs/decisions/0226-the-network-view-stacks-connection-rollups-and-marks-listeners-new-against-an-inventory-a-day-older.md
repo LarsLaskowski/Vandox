@@ -1,6 +1,6 @@
 # 0226: The network view stacks connection rollups and marks listeners new against an inventory a day older
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-24
 - **Area:** Network view
 - **Source:** Issue #51
