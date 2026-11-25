@@ -15,7 +15,8 @@ namespace Vandox.StorageBenchmark;
 /// Measures the three actions of the services view (feature 52, <c>docs/BENCHMARKS.md</c>) on a database written directly into the tables: 30 days of <c>mariadb_status</c> records at 30 seconds
 /// (86,400; every 100th carries 60 threads with 16 KiB statements, about 1 MiB), the five metrics of the MariaDB charts as 30 days of raw values at 30 seconds beside the 5-minute and hourly rollups,
 /// 256 units (the agent's cap) with an hourly <c>service_state</c> record over a year and a restart per unit per day, and a refused unit's <c>systemd</c> gap per 30-second run over the last
-/// 30 days. It times the build of the index of schema step 18 once, then each action of a 30-day and of a 1-year range as the median of five, and prints the verdict against 10 seconds.
+/// 30 days. It times the build of the index of schema step 18 once, then each action of a 30-day and of a 1-year range as the median of five, and prints the verdict against 10 seconds over seven of the eight medians: the 1-year services action at 256 units is printed
+/// and left out (E12, amended AC10).
 /// </summary>
 [ExcludeFromCodeCoverage]
 internal static class ServicesViewBenchmark
@@ -300,7 +301,20 @@ internal static class ServicesViewBenchmark
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{label}: services table {table?.Units.Rows.Count} rows, {table?.Restarts.Rows.Count} restarts listed, {table?.Notes.Count} notes ({string.Join(" | ", table?.Notes ?? [])})"));
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{label}: MariaDB {charts?.Notes.Count} notes, summary '{charts?.Summary}', {(charts?.Memory is null ? "no" : "a")} memory chart"));
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{label}: thread panel {panel?.Stamps.Count} snapshots listed, {panel?.Threads?.Rows.Count} thread rows; at a moment {panelAt?.Threads?.Rows.Count} thread rows"));
-        ProgramBenchmark.Report($"{label}: services action", services, medians);
+
+        if (days == UnitDays)
+        {
+            // E12 (amended AC10): the 1-year services action at the agent's 256 units may pass the deadline, so it is printed and left out of the verdict.
+            var excluded = new List<(string Name, double Median)>();
+
+            ProgramBenchmark.Report($"{label}: services action", services, excluded);
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{label}: services action at {Units} units {excluded[0].Median:F0} ms: may pass {CriterionMilliseconds:F0} ms (E12, amended AC10)"));
+        }
+        else
+        {
+            ProgramBenchmark.Report($"{label}: services action", services, medians);
+        }
+
         ProgramBenchmark.Report($"{label}: MariaDB action", mariaDb, medians);
         ProgramBenchmark.Report($"{label}: thread snapshot action (latest)", threads, medians);
         ProgramBenchmark.Report($"{label}: thread snapshot action (at a moment)", threadsAt, medians);

@@ -486,7 +486,7 @@ MariaDB action (the five metric lines, the status steps and their folds) and the
 of a 1-year range finish within the views' 10-second deadline ([Services view](areas/web-ui-services-view.md), *Calls and deadline*). The workload
 is the one of N3: 30 days of `mariadb_status` records at 30 seconds (86,400 records), of which one in 100 carries a thread snapshot close to the 1 MiB record
 bound, beside `service_state` records of 256 units (the agent's cap) over a year and the metric workloads. Measured with the `--services-view`
-scenario of the storage benchmark. The tool prints whether every median of five is under 10,000 ms. Only a run on the reference host counts against the criterion.
+scenario of the storage benchmark. The tool prints whether every median of five but one is under 10,000 ms: the 1-year services action at 256 units is printed and left out (E12, amended AC10). Only a run on the reference host counts against the criterion.
 
 ### Procedure
 
@@ -523,12 +523,13 @@ steps*). For a range of 30 days and one of 365 days ending at the clock, with th
 | ---- | ---- | ------ | -------- | ----- | --------------: | -------------: | -------------------------------------------: | ------- |
 | development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-25 | local disk | written by SQL in 24 s, 2,208 MiB; index built in 1,044 ms | 30 days | 673 ms | 369 ms | 125 ms, 148 ms | order of magnitude only |
 | development host (as above) | 2026-11-25 | local disk | (same database) | 1 year | 3,448 ms | 398 ms | 118 ms, 129 ms | order of magnitude only |
-| Reference host | pending | SSD volume | | 30 days and 1 year | **not yet measured** | **not yet measured** | **not yet measured** | **pending: run by the Product Manager** |
+| Reference host (4 logical CPUs, .NET 11.0.0) | run by the Product Manager | SSD volume | written by SQL in 110 s, 2,208 MiB; index built in 3,277 ms | 30 days | 2,798 ms | 1,557 ms | 380 ms, 418 ms | under 10,000 ms |
+| Reference host (as above) | run by the Product Manager | SSD volume | (same database) | 1 year | 13,944 ms (E12) | 1,598 ms | 377 ms, 414 ms | services action may pass 10,000 ms (E12, amended AC10); the other three under |
 
 The development-host medians are of five reads each (30 days: services action 1,161, 770, 665, 673, 659 ms, MariaDB action 727, 369, 409, 323, 326 ms, thread snapshot action
 183, 130, 125, 123, 123 ms and at a moment 156, 148, 147, 235, 148 ms; 1 year: 3,565, 3,257, 3,448, 3,371, 3,483 ms, 404, 262, 438, 398, 365 ms, 172, 96, 137, 118, 118 ms and 157, 102, 132, 127, 129 ms). Two earlier runs of the same
 tool on the same host gave 3,401 and 3,576 ms for the 1-year services action, 673 and 840 ms for the 30-day one, and 1,134 and 1,055 ms for the index.
-The tool printed that all 8 medians are under 10,000 ms. Both ranges list 256 units and 1,000 restarts (the cap) and print two notes (the `systemd` gaps, and `Restarts after <time> UTC are not counted.`); the thread panel lists 50 snapshots and 40 threads. The 1-year MariaDB action reads the same 30 days of status records, so it is as fast as the 30-day one and
+The tool (before the change of the verdict described below) printed that all 8 medians are under 10,000 ms. Both ranges list 256 units and 1,000 restarts (the cap) and print two notes (the `systemd` gaps, and `Restarts after <time> UTC are not counted.`); the thread panel lists 50 snapshots and 40 threads. The 1-year MariaDB action reads the same 30 days of status records, so it is as fast as the 30-day one and
 says `unknown 91.7 %` of the range.
 
 What the figures say, on this host only:
@@ -537,13 +538,18 @@ What the figures say, on this host only:
   `mariadb_status` records once, including the snapshots; the write cost is one index entry per stored status record.
 - **The services action is the largest read**: it streams the `service_state` records of the range through the covering index `records_service_state` (2.24 million rows in the 1-year range)
   and merges a month of per-run gaps (86,400 records) into one span, and it grows with the records of the range, not with the 256 units. At 3.4 to 3.6 s for a year it has a factor of 2.8 to 2.9 to the deadline here.
-- **E12 at the cap.** Earlier runs on the reference host took 3.2 to 3.3 times as long as on the development host for index reads of this kind (*Processes view*: 104 and 779 ms here, 330 and 2,550 ms there). The same
-  factor would put the 1-year services action at 256 units at about 11 s on the reference host, past the deadline, and the 30-day one at about 2.2 s. This is a projection, not a measurement: **E12 (`Reading the services took longer
-  than 10 seconds and was stopped. Narrow the range.`) is to be expected for a 1-year range of a server whose agent reports its full 256 units, and not for 30 days**, until the run of the Product Manager shows otherwise. A host with fewer
-  units records proportionally fewer rows (the unit count is the main factor: one record per unit and hour).
-- The thread snapshot actions read at most 51 snapshots' counts and 101 thread rows of one snapshot, about 0.1 s whatever the range; the `at` variant adds two index seeks.
+- The thread snapshot actions read at most 51 snapshots' counts and 101 thread rows of one snapshot, about 0.1 s on the development host and about 0.4 s on the reference host, whatever the range; the `at` variant adds two index seeks.
 
-The reference-host row stays pending until the run of the Product Manager is recorded here; until then N3 is not shown on the reference host.
+The reference-host medians (30 days: services action 2,798 ms, MariaDB action 1,557 ms, thread snapshot action 380 ms for the latest snapshot and 418 ms at a moment; 1 year: 13,944 ms, 1,598 ms, 377 ms and 414 ms; index of schema step 18 built in 3,277 ms
+over 86,400 status records; the workload written in 110 s, the database 2,208 MiB) are of the run of the Product Manager on the reference host, 4 logical CPUs under .NET 11.0.0.
+
+- **E12 at the cap, measured.** **The 1-year services action at the agent's 256 units took 13,944 ms on the reference host, past the 10-second deadline: E12 (`Reading the services took longer than 10 seconds and was stopped.
+  Narrow the range.`) is expected for a 1-year range of a server whose agent reports its full 256 units**, and not for 30 days (2,798 ms). The action grows with the records of the range, about 1.8 s plus 5.4 µs per `service_state` record on the reference host
+  (one record per unit and hour), so a year fits within the 10 seconds with about 20 % margin only up to about 130 units. N3 and AC10 were amended accordingly (the Amendments of the feature's `spec.md`): the other seven medians are under 10,000 ms.
+  Why availability is computed this way and what a faster one would take: [0227](decisions/0227-availability-is-the-time-a-recorded-state-holds-up-to-a-cap-and-gaps-are-unknown.md), option 6; the exact service availability
+  over long ranges is the follow-up issue #503.
+- **The tool's verdict.** The 365-day services action at 256 units is not in the list the tool compares with 10,000 ms: it prints `365-day range: services action at 256 units <median> ms: may pass 10000 ms (E12, amended AC10)`, and the
+  verdict (`criterion met`, or `NOT met` only when one of the other seven medians reaches 10,000 ms) covers the other seven.
 
 ## Log templates
 

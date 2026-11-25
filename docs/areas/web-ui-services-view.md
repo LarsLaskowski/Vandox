@@ -153,9 +153,11 @@ markup is shown as text, a unit name or a thread cell is cut at 256 characters a
   (`from must be before to`, `from and to must be within the storable range`, `at must be within the storable range`, `step must be positive`, `at most 2001 steps`, `limit must be 1 to 51`,
   `window must be positive and at most one day`; [Storage reading](storage-reading.md)). A stored thread that does not parse is a store error.
 - **Time.** The three actions of a 30-day and of a 1-year range on the benchmark workload (256 units hourly over a year, 30 days of status records at 30 seconds with a snapshot of about 1 MiB in every 100th, and a month of
-  per-run `systemd` gaps) finished within the deadline on the development host, the services action of a year in about 3.4 s and every other action in under 0.5 s: [Benchmarks](../BENCHMARKS.md), *Services view*, has the
-  figures and the host. **The reference-host run (task 12 of the feature) is pending**; scaled by the factor earlier runs showed, the 1-year services action at the agent's full 256 units can
-  pass the deadline there (`Reading the services took longer than 10 seconds …`), which a 30-day range and a server with fewer units should not. The index of schema step 18 took about 1 s to build on 30 days of status records
+  per-run `systemd` gaps) finished within the deadline on the development host, the services action of a year in about 3.4 s and every other action in under 0.5 s. On the reference host (median of five) the 30-day services action took 2,798 ms,
+  the MariaDB action 1,557 ms and the thread snapshot action 380 ms (latest) and 418 ms (at a moment); for a year the MariaDB action took 1,598 ms and the thread snapshot action 377 and 414 ms, and
+  **the services action 13,944 ms, past the deadline**: [Benchmarks](../BENCHMARKS.md), *Services view*, has the figures. **E12 (`Reading the services took longer than 10 seconds …`) is therefore expected for a 1-year range of a server
+  whose agent reports its full 256 units** and not for 30 days; the action takes about 1.8 s plus 5.4 µs per `service_state` record on the reference host, so a year fits within 10 s with about 20 % margin only up to about 130 units
+  (N3 and AC10 amended, [0227](../decisions/0227-availability-is-the-time-a-recorded-state-holds-up-to-a-cap-and-gaps-are-unknown.md), option 6; exact service availability over long ranges: issue #503). The index of schema step 18 took about 1 s to build on 30 days of status records on the development host and 3,277 ms on the reference host
   ([Storage](storage.md), *Migration steps*).
 - A browser script cannot call anything but the two instance methods of the chart's reference (selection and click); both drop a value that is not finite or outside the storable range.
   A drag and a click cannot be tested without a browser; the script is read in review and tried by hand.
