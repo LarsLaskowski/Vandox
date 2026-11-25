@@ -66,7 +66,6 @@ public static class ThreadSnapshotView
                    {
                        Stamps = rows,
                        More = more,
-                       Heading = at is { } moment ? HistoryView.Fill(ServicesView.ThreadsAtFormat, ServicesView.FormatTime(moment)) : string.Empty,
                        Notes = [stamps.Count == 0 || at is null ? ServicesView.NoSnapshotInRangeText : ServicesView.NoSnapshotAtText]
                    };
         }
