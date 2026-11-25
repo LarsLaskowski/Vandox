@@ -435,7 +435,7 @@ Everything is in the address, so a view can be bookmarked and shared. The page a
 
 The web UI shows the tracked services and MariaDB over a period under *Services* (`/services`). All times are **UTC**. The page opens on the last 30 days; choose another
 range with the presets *1 h* to *1 y* or *From* and *To*. The table *Services* lists every unit with the share of the time it was available, the time it was not available and the time
-nobody knows (the agent was offline, or the unit's record is older than an hour), how often it restarted and its latest state; below it the restarts are listed with their time. *MariaDB*
+nobody knows (the agent was offline, or the unit's record is older than 1 hour 5 minutes), how often it restarted and its latest state; below it the restarts are listed with their time. *MariaDB*
 shows how long the server was up, down or not answering, how much memory it uses against the theoretical maximum of its settings and the RAM (and by how much the maximum exceeds
 the RAM), and charts of its connections, queries per second and InnoDB buffer pool. MariaDB's status is kept only as long as `retention.snapshots` says (30 days by default), so a longer
 range shows its availability only for that time. *Long-running queries* lists the thread snapshots the agent recorded (it records them only while more than 10 threads are running or the server

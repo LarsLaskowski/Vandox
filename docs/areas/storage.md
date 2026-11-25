@@ -148,8 +148,7 @@ What each step after the first adds, and how data stored before it reads:
   one entry per stored `mariadb_status` record with the capture time, the source, the availability, `Memory_used`, `Threads_connected` and the number of threads read from the payload, and the kind (in the
   index for the reason given for step 15). The reads of the services view name the same expressions with `INDEXED BY`, so the status values and the list of thread snapshots are answered from the index without
   a payload ([Storage reading](storage-reading.md), *Services view reads*). **Write cost:** one index entry is computed per stored status record (a record of any other kind only checks its `kind`), and the
-  entry holds no payload. **Build:** the step reads every stored `mariadb_status` record once while the writer is busy, the snapshots near 1 MiB included: 1,044 ms on the development host for 86,400 status
-  records of 30 days at 30 seconds, one in 100 with a thread snapshot of about 1 MiB (1,055 to 1,134 ms in three runs; `docs/BENCHMARKS.md`, *Services view*); the run on the reference host is pending. A
+  entry holds no payload. **Build:** the step reads every stored `mariadb_status` record once while the writer is busy, the snapshots near 1 MiB included: 1,044 ms on the development host and 3,277 ms on the SSD volume of the reference host for 86,400 status records of 30 days at 30 seconds, one in 100 with a thread snapshot of about 1 MiB (1,055 to 1,134 ms in three runs on the development host; `docs/BENCHMARKS.md`, *Services view*). A
   `mariadb_status` payload that is not valid JSON would fail the step (`store: migration 18: …`, rolled back, version 17 kept) and its insert; the backend only stores payloads it serialized itself.
 
 ### Migrations

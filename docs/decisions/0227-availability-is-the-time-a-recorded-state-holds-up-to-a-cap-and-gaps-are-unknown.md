@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-25
-- **Area:** Web UI
+- **Area:** Services view
 - **Source:** Issue #52
 - **Supersedes:** —
 
@@ -47,8 +47,7 @@ as it refuses one unit's state: up to 8,640 touching gaps a day.
 ## Decision
 
 The services view computes availability as the time each recorded state holds, up to the cap of its collector, minus the time of the
-gaps that concern that collector, merged into spans and capped at 1,000 spans per read. The rest of the range is unknown. One folding helper serves services and MariaDB, and at most 256
-units are evaluated. The rules are in [Services view](../areas/web-ui-services-view.md).
+gaps that concern that collector, merged into spans and capped at 1,000 spans per read. The rest of the range is unknown. Services and MariaDB each have their own fold over one shared reader of the collector's gaps and their unknown time, and at most 256 units are evaluated. The rules are in [Services view](../areas/web-ui-services-view.md).
 
 ## Consequences
 

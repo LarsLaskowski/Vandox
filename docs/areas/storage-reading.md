@@ -187,8 +187,7 @@ existing index, never a scan.
 ### Services view reads
 
 The reads of the services view ([Services view](web-ui-services-view.md)): `ServiceAvailabilityAsync` (`IServiceHistoryReader`), `MariaDbStatusAsync`, `ThreadSnapshotsAsync`,
-`ClosestThreadSnapshotAsync` and `ThreadSnapshotAsync` (`IMariaDbHistoryReader`), and `TimeSeriesService.RestartsAsync` ([Time-series queries](time-series-query.md)). Each is one reader lease with constant
-statements and bound parameters. Each refuses a broken query before any read with an invalid-query error: `store: invalid query: from must be before to`, `store: invalid query: from and to must be within the
+`ClosestThreadSnapshotAsync` and `ThreadSnapshotAsync` (`IMariaDbHistoryReader`), and `TimeSeriesService.RestartsAsync` ([Time-series queries](time-series-query.md)). Each of the five store reads is one reader lease with constant statements and bound parameters; `RestartsAsync` makes the time-series query's store calls, each in its own lease. Each refuses a broken query before any read with an invalid-query error: `store: invalid query: from must be before to`, `store: invalid query: from and to must be within the
 storable range`, `store: invalid query: at must be within the storable range`; every lead-in and window edge that a read derives is clamped to the storable range.
 
 - **Collector gaps** (records [0227](../decisions/0227-availability-is-the-time-a-recorded-state-holds-up-to-a-cap-and-gaps-are-unknown.md)): the availability and the status read each read the gaps of their own collector (`systemd`, `mariadb`) in their lease,

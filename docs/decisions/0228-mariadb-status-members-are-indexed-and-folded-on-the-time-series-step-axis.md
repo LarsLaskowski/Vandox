@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-25
-- **Area:** Web UI
+- **Area:** Services view
 - **Source:** Issue #52
 - **Supersedes:** —
 
