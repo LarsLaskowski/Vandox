@@ -8,6 +8,15 @@ tag lists the merged pull requests in detail.
 
 ### Added
 
+- **Services and MariaDB view** (issue #52): the new page *Services* (`/services`), between *Network* and *Logs*, shows for a range (the presets
+  *1 h* to *1 y* or *From* and *To*, in UTC; 30 days by default) the table of the tracked services with their availability (the time a recorded
+  state holds, up to 1 hour 5 minutes; time in a gap or beyond that counts as unknown), not-available time, restarts and latest state, and
+  the list of the restarts. The section *MariaDB* shows its availability from the status records, its memory in use against the theoretical
+  maximum and the RAM, and charts of the connections, the queries per second and the InnoDB buffer pool; *Long-running queries* lists the
+  thread snapshots the agent recorded and shows the running threads of one with their statements. A drag zooms into a period, a click or
+  a snapshot picks a moment; range and moment are in the address. The three sections are read in actions of their own. The database is
+  migrated to schema version 18, which adds the index `records_mariadb_status` over the members of the status records (built in about one second
+  for 30 days of them). There is no new option or listener; the storage benchmark gains `--services-view`.
 - **Network view** (issue #51): the new page *Network* (`/network`) shows, for a range (the presets *1 h* to *1 y* or *From* and *To*,
   in UTC) and one source, two stacked charts, *Connections per state* (every TCP state and `UDP`) and *Sockets held per program* (the 10
   programs with the highest average and the rest as `Other programs`), and the table *Top remote addresses* (the 20 addresses with the

@@ -479,6 +479,72 @@ The development-host medians are of five reads each (30 days: chart action 131, 
 375, 347, 359, 339, 342 ms, 641, 692, 695, 643, 671 ms and 4, 3, 3, 3, 3 ms; 1,095 days: 982, 955, 960, 963, 962 ms, 1,943, 1,958, 1,961, 1,896, 2,038 ms and 3, 3, 4, 3, 2 ms). The panel reads ran the path with the comparison snapshot (the tool prints "panel read: 4 store calls (2 snapshots decoded), comparison snapshot read" before the timings and stops if the comparison is not read). The tool printed that all 6 medians are under 10,000 ms. The
 reference-host row stays pending until the run of the Product Manager is recorded here; until then N4 is not shown on the reference host.
 
+## Services view
+
+Criterion (issue #52, N3 and AC10): the three actions of the services view, the services action (the restarts and the availability of the units), the
+MariaDB action (the five metric lines, the status steps and their folds) and the thread snapshot action (the list of snapshots, then the snapshot shown), of a 30-day and
+of a 1-year range finish within the views' 10-second deadline ([Services view](areas/web-ui-services-view.md), *Calls and deadline*). The workload
+is the one of N3: 30 days of `mariadb_status` records at 30 seconds (86,400 records), of which one in 100 carries a thread snapshot close to the 1 MiB record
+bound, beside `service_state` records of 256 units (the agent's cap) over a year and the metric workloads. Measured with the `--services-view`
+scenario of the storage benchmark. The tool prints whether every median of five is under 10,000 ms. Only a run on the reference host counts against the criterion.
+
+### Procedure
+
+Publish the tool self-contained as for the retention steps and run it on the reference host, on the volume that holds the database (the SSD
+volume):
+
+```bash
+dotnet publish tools/Vandox.StorageBenchmark -c Release -r linux-x64 --self-contained -p:DebugType=none -o publish-sc
+publish-sc/Vandox.StorageBenchmark <existing folder on the data volume> --services-view
+```
+
+On a host with the .NET 11 runtime the tool runs as `dotnet publish/Vandox.StorageBenchmark.dll <existing folder> --services-view`.
+`--services-view` takes no other option and needs about 2.2 GiB of free space on the volume. Under a fixed clock (2026-12-01 12:00 UTC) and the default periods it
+creates the schema, drops the index `records_mariadb_status` of schema step 18 and writes, directly by SQL into the tables (the time of the write is printed):
+
+- 2,242,560 `service_state` records, one per hour for each of 256 units over 365 days, with a restart per unit per day (so more than the 1,000 restarts the
+  view reads in either range) and unit `unit001.service` failed for two hours a day;
+- 86,400 `mariadb_status` records, one every 30 seconds for 30 days, `down` for 20 samples in every 24 hours, 864 of them (every 100th) with 60
+  threads (two thirds not sleeping) of 16 KiB statements, the largest record 990,955 bytes;
+- 86,400 `gap` records of the collector `systemd`, one per 30-second run of the last 30 days, each from the run's start over the interval, so that they touch edge to
+  edge (the gap the collector writes on every run while it refuses one unit's state, [Agent services](areas/agent-services.md));
+- the five metrics of the charts (`mariadb_memory_max_bytes`, `mem_total_bytes`, `mariadb_questions_per_second`, `mariadb_innodb_buffer_pool_used_percent`,
+  `mariadb_innodb_buffer_pool_read_hit_percent`) as 432,000 raw values of the last 30 days at 30 seconds, their 5-minute rollups of those 30 days and their hourly rollups of the year, with the
+  rollup watermark at the last raw value.
+
+It then builds the index `records_mariadb_status` once over the stored status records and prints the time (schema step 18, [Storage](areas/storage.md), *Migration
+steps*). For a range of 30 days and one of 365 days ending at the clock, with the chart width of 1,000 pixels, it times, each as the median of five: the services action
+(`ServicesReader`), the MariaDB action (`MariaDbReader`), the thread snapshot action for the latest snapshot of the range and the thread snapshot action for a moment
+(`ThreadSnapshotReader`, a moment one day back). It prints the verdict on the criterion. The database is deleted at the end.
+
+### Results
+
+| Host | Date | Volume | Data set | Range | Services action | MariaDB action | Thread snapshot action (latest, at a moment) | Verdict |
+| ---- | ---- | ------ | -------- | ----- | --------------: | -------------: | -------------------------------------------: | ------- |
+| development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-25 | local disk | written by SQL in 24 s, 2,208 MiB; index built in 1,044 ms | 30 days | 673 ms | 369 ms | 125 ms, 148 ms | order of magnitude only |
+| development host (as above) | 2026-11-25 | local disk | (same database) | 1 year | 3,448 ms | 398 ms | 118 ms, 129 ms | order of magnitude only |
+| Reference host | pending | SSD volume | | 30 days and 1 year | **not yet measured** | **not yet measured** | **not yet measured** | **pending: run by the Product Manager** |
+
+The development-host medians are of five reads each (30 days: services action 1,161, 770, 665, 673, 659 ms, MariaDB action 727, 369, 409, 323, 326 ms, thread snapshot action
+183, 130, 125, 123, 123 ms and at a moment 156, 148, 147, 235, 148 ms; 1 year: 3,565, 3,257, 3,448, 3,371, 3,483 ms, 404, 262, 438, 398, 365 ms, 172, 96, 137, 118, 118 ms and 157, 102, 132, 127, 129 ms). Two earlier runs of the same
+tool on the same host gave 3,401 and 3,576 ms for the 1-year services action, 673 and 840 ms for the 30-day one, and 1,134 and 1,055 ms for the index.
+The tool printed that all 8 medians are under 10,000 ms. Both ranges list 256 units and 1,000 restarts (the cap) and print two notes (the `systemd` gaps, and `Restarts after <time> UTC are not counted.`); the thread panel lists 50 snapshots and 40 threads. The 1-year MariaDB action reads the same 30 days of status records, so it is as fast as the 30-day one and
+says `unknown 91.7 %` of the range.
+
+What the figures say, on this host only:
+
+- **Schema step 18** (the index over 86,400 status records of 30 days, 864 of them near 1 MiB) took 1,044 ms (1,055 to 1,134 ms in three runs): seconds, not minutes (fact 19 of the plan). The step scans the
+  `mariadb_status` records once, including the snapshots; the write cost is one index entry per stored status record.
+- **The services action is the largest read**: it streams the `service_state` records of the range through the covering index `records_service_state` (2.24 million rows in the 1-year range)
+  and merges a month of per-run gaps (86,400 records) into one span, and it grows with the records of the range, not with the 256 units. At 3.4 to 3.6 s for a year it has a factor of 2.8 to 2.9 to the deadline here.
+- **E12 at the cap.** Earlier runs on the reference host took 3.2 to 3.3 times as long as on the development host for index reads of this kind (*Processes view*: 104 and 779 ms here, 330 and 2,550 ms there). The same
+  factor would put the 1-year services action at 256 units at about 11 s on the reference host, past the deadline, and the 30-day one at about 2.2 s. This is a projection, not a measurement: **E12 (`Reading the services took longer
+  than 10 seconds and was stopped. Narrow the range.`) is to be expected for a 1-year range of a server whose agent reports its full 256 units, and not for 30 days**, until the run of the Product Manager shows otherwise. A host with fewer
+  units records proportionally fewer rows (the unit count is the main factor: one record per unit and hour).
+- The thread snapshot actions read at most 51 snapshots' counts and 101 thread rows of one snapshot, about 0.1 s whatever the range; the `at` variant adds two index seeks.
+
+The reference-host row stays pending until the run of the Product Manager is recorded here; until then N3 is not shown on the reference host.
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):

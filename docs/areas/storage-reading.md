@@ -3,7 +3,7 @@
 ## Scope
 
 How stored data is read from the backend's database ([Storage](storage.md)): record series and kinds, incidents and their notes,
-template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the reads of the overview page, the reads of the history view (the stored metrics and the snapshot closest to a moment), the per-program and the connection rollups; the log search and exploration of the logs view are in [Log search and exploration](log-exploration.md). `vandoxd incidents`, `vandoxd report` and the web UI's views rely on it. Every read runs on
+template statistics, rollups, the time-series reads, listener history, the agent timeline (live flag, gaps, clock), the reads of the overview page, the reads of the history view (the stored metrics and the snapshot closest to a moment), the per-program and the connection rollups, the reads of the services view (service availability, MariaDB status steps, thread snapshots); the log search and exploration of the logs view are in [Log search and exploration](log-exploration.md). `vandoxd incidents`, `vandoxd report` and the web UI's views rely on it. Every read runs on
 a reader connection and is interrupted by a cancelled token or a passed deadline ([Storage](storage.md), *Database file and connections*).
 
 ## Behavior
@@ -184,6 +184,38 @@ existing index, never a scan.
   reads, so one payload is decoded. It returns nothing when retention removed the record after the stamp was read.
 - The view reads the stamps of both sides and decodes only the record of the closer one, so no read decodes a snapshot it does not show.
 
+### Services view reads
+
+The reads of the services view ([Services view](web-ui-services-view.md)): `ServiceAvailabilityAsync` (`IServiceHistoryReader`), `MariaDbStatusAsync`, `ThreadSnapshotsAsync`,
+`ClosestThreadSnapshotAsync` and `ThreadSnapshotAsync` (`IMariaDbHistoryReader`), and `TimeSeriesService.RestartsAsync` ([Time-series queries](time-series-query.md)). Each is one reader lease with constant
+statements and bound parameters. Each refuses a broken query before any read with an invalid-query error: `store: invalid query: from must be before to`, `store: invalid query: from and to must be within the
+storable range`, `store: invalid query: at must be within the storable range`; every lead-in and window edge that a read derives is clamped to the storable range.
+
+- **Collector gaps** (records [0227](../decisions/0227-availability-is-the-time-a-recorded-state-holds-up-to-a-cap-and-gaps-are-unknown.md)): the availability and the status read each read the gaps of their own collector (`systemd`, `mariadb`) in their lease,
+  and not through the time-series query's gap list. They stream, without pages, the stateful gap rows that are not closed and overlap `[from, to)` (they concern every collector) and the `gap` records captured from
+  1 hour before `from` to 7 days after `to`, and skip a record whose span does not parse or does not overlap the range, and one whose collector the read's collector does not concern: a gap concerns a collector when
+  it names it, names none, or names one the time-series query does not name. Each span is clipped to the range and merged with the overlapping and touching spans already read, in any order, so a month of per-run
+  gaps of 2,880 a day is one span. At most **1,000 merged spans** are kept; past them the latest-starting span is dropped, the result's `GapsCompleteUntil` is lowered to its start and every later span is ignored.
+  The result also says whether a kept record names exactly the collector (`SystemdGaps`).
+- **Service availability** (`ServiceAvailabilityQuery`: `from`, `to`): one stream over the covering index `records_service_state` of the window `(from - 65 minutes, to)` in capture order (the start is excluded, so every streamed record lies
+  in the range or carries its state into it), each with its unit and active state, folded per unit: a state holds from its record to the unit's next record, at most 65 minutes, minus the gap spans and the time after
+  `GapsCompleteUntil`; *available* are `active`, `reloading` and `refreshing`; *unknown* is the range less the available and the not available time. At most **256 units** are kept, the first by ordinal name; a
+  name above the largest kept is skipped, one below it evicts the largest, which does not return. Only when a name was skipped or evicted a second statement, `count(DISTINCT` over the same window and index, gives `UnitCount`,
+  else it is the number of rows. It keeps a **temporary b-tree** of the window's unit names in SQLite's temporary storage (the `/tmp` of the container is a tmpfs), bounded by the 10-second interrupt of the read, not by the 256
+  cap. Then the sub-state of the latest record of each kept unit is read by ID (`json_each` over at most 256 IDs). No payload is read for the stream.
+- **MariaDB status** (`MariaDbStatusQuery`: `from`, `to`, `step`): the index `records_mariadb_status` (schema step 18, [Storage](storage.md), named with `INDEXED BY`) is streamed over `[from - 2 minutes, to)` for the source `mariadb`,
+  reading capture time, availability, `Memory_used` and `Threads_connected` without the payload, and folded onto the steps (the multiples of the step since the epoch that overlap the range): a record holds from its capture time to the next
+  record, at most 2 minutes, minus the gap spans of the collector `mariadb`; per step the share of the up time in the known time, and the minimum, average and maximum of `Memory_used` and `Threads_connected` over the `up` records,
+  read as doubles (a value above the largest signed 64-bit integer comes back as a real); the totals of up, down and not answering time, the unknown time, the latest `Memory_used` with its time, the number of records in the range, and the oldest
+  status record (`min(captured_at)` through the index). Also refused: `store: invalid query: step must be positive` and `store: invalid query: at most 2001 steps`.
+- **Thread snapshots** (`ThreadSnapshotQuery`: `from`, `to`, `limit`): the status records of the range with `json_array_length(data, '$.threads') > 0` through the index, newest first by capture time and then ID, at most *limit*
+  (`store: invalid query: limit must be 1 to 51`); per stamp the number of recorded threads, the *running* threads (command not `Sleep`) and the longest running time, the greatest `time_seconds` of those capped in SQL at
+  3,153,600,000 so that no stored number reaches a `TimeSpan` (a value above the largest signed 64-bit integer reads as that cap). **Closest** (`at`, `window`): the latest snapshot at or before `at` within the window and the earliest after
+  it within the window, the nearer one, the earlier on a tie, the lower ID within one capture time; the window must be positive and at most one day (`store: invalid query: window must be positive and at most one day`).
+  **Snapshot record** (`recordId`): the header (capture time, number of threads and running threads) and the thread objects of the record in array order whose command is not `Sleep`, at most **101**, each deserialized into
+  the data model's `MariaDbThread` (`id` and `time_seconds` keep their full unsigned value); a thread object that does not deserialize is a store error. It returns nothing when the record has no threads or retention removed it.
+- **Restarts** (`RestartsAsync(from, to)`): the markers of the time-series query reduced to the service restarts, without a series; see [Time-series queries](time-series-query.md).
+
 ## Limits and errors
 
 - The exact error texts are stated with each read above.
@@ -196,6 +228,8 @@ existing index, never a scan.
 - [0223](../decisions/0223-process-snapshots-are-folded-into-per-program-buckets-beside-a-source-total.md) — why the per-program rollups have their own read.
 - [0222](../decisions/0222-the-history-view-reads-the-moments-snapshots-and-the-metric-list-through-its-own-bounded-reads.md) — why the history view has its own metric list and snapshot reads.
 - [0225](../decisions/0225-connection-snapshots-are-folded-into-per-state-program-and-address-buckets-ended-buckets-trimmed.md) — why the connection rollups have their own read.
+- [0227](../decisions/0227-availability-is-the-time-a-recorded-state-holds-up-to-a-cap-and-gaps-are-unknown.md) — why the services view reads the gaps of its own collector, merged before their cap, and folds the state time itself.
+- [0228](../decisions/0228-mariadb-status-members-are-indexed-and-folded-on-the-time-series-step-axis.md) — why the status members are read through a covering index and the thread rows through the data model's type.
 - [0224](../decisions/0224-the-processes-view-stacks-program-rollups-on-the-history-chart-and-compares-programs-of-one-source.md) — why the snapshot stamp read can be narrowed to one source.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored.md) — why the listener history reads the narrow derived
@@ -216,7 +250,7 @@ existing index, never a scan.
 
 `Vandox.Storage`: `SqliteStore` implements the interfaces the callers depend on (`IRecordReader` with `RecordQuery.AfterId`,
 `ILogTemplateReader`, `IIncidentBrowser` with `IncidentSummariesAsync`, `IncidentAsync` and
-`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IOverviewReader` (`OverviewQueries`, `LabelSetTally`), `IProgramRollupReader` (`ProgramRollupQueries`), `IConnectionRollupReader` (`ConnectionRollupQueries`), `IHistoryReader` (`HistoryQueries`, `SkipCursor`; `StoredMetricList`, `SnapshotQuery`, `SnapshotStamp`, `SnapshotSide`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
+`IncidentNotesAsync`, `ITimeSeriesReader` (the reads above, with `TimeSeriesQueries`), `IOverviewReader` (`OverviewQueries`, `LabelSetTally`), `IProgramRollupReader` (`ProgramRollupQueries`), `IConnectionRollupReader` (`ConnectionRollupQueries`), `IHistoryReader` (`HistoryQueries`, `SkipCursor`; `StoredMetricList`, `SnapshotQuery`, `SnapshotStamp`, `SnapshotSide`), `IServiceHistoryReader` (`ServiceHistoryQueries`, `ServiceAvailabilityFolder`) and `IMariaDbHistoryReader` (`MariaDbHistoryQueries`, `MariaDbStatusFolder`; with `CollectorGapReader`, `GapSpanSet`, `UnknownSpans`), `IListenerHistoryReader` with `ListenerTalliesAsync` and `ListenerFindingsAsync` (kinds `AgentStart`, `Agent`,
 `AgentUidChanges`), `IAgentTimelineReader` with `GapsAsync` and `ClockAsync`, and the record writer, incident store and import tracker of
 [Storage writing](storage-writing.md)). The reads are `ReaderQuery`, `TemplateQueries`, `ListenerQueries`, `AgentTimelineQueries`, `IncidentRepository` and `IncidentNoteRepository`. A
 broken rule is an `InvalidQueryException`, a cancellation an `OperationCanceledException`, a missing string an `ArgumentNullException`.
