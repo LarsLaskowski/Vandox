@@ -841,6 +841,30 @@ public class SqliteStoreMariaDbHistoryTests
     }
 
     /// <summary>
+    /// A thread entry that is JSON null is a store error that names the read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [TestCategory("AC8")]
+    [TestCategory("AC9")]
+    public async Task SqliteStoreThreadSnapshotThreadEntryThatIsNullIsStoreError()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await ServiceHistorySamples.InsertForgedStatusAsync(directory.Path, At(10), "{\"availability\":\"up\",\"threads\":[null]}", TestContext.CancellationToken);
+
+        var stamps = await store.ThreadSnapshotsAsync(Threads(0, 20, 5), TestContext.CancellationToken);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.ThreadSnapshotAsync(stamps[0].RecordId, TestContext.CancellationToken), "the entry is not a thread");
+
+        // Assert
+        Assert.StartsWith("store: reading mariadb status", exception.Message, "the error names the read");
+    }
+
+    /// <summary>
     /// A snapshot list query that breaks a rule is refused.
     /// </summary>
     /// <param name="scenario">The broken rule</param>
