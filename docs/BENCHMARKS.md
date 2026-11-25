@@ -473,21 +473,21 @@ running beside it. It prints the verdict on the criterion. The database is delet
 | development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-24 | local disk | written by SQL in 11,247 ms (3,363,840 hourly and 673,920 5-minute rows) | 30 days | 1 hour | 71 ms | 52 ms | 3 ms | order of magnitude only |
 | development host (as above) | 2026-11-24 | local disk | (same database) | 1 year | 12 hours | 347 ms | 671 ms | 3 ms | order of magnitude only |
 | development host (as above) | 2026-11-24 | local disk | (same database) | 1,095 days | 2 days | 962 ms | 1,958 ms | 3 ms | order of magnitude only |
-| Reference host (Linux 4.4.302+, .NET 11.0.0, 4 logical CPUs) | 2026-11-25 | data volume `/volume/data` | written by SQL in 67,114 ms (3,363,840 hourly and 673,920 5-minute rows) | 30 days | 1 hour | 314 ms | 211 ms | 19 ms | **N4 met** |
-| Reference host (as above) | 2026-11-25 | data volume `/volume/data` | (same database) | 1 year | 12 hours | 1,458 ms | 2,666 ms | 11 ms | **N4 met** |
-| Reference host (as above) | 2026-11-25 | data volume `/volume/data` | (same database) | 1,095 days | 2 days | 4,214 ms | 8,034 ms | 10 ms | **N4 met** |
+| Reference host (Linux 4.4.302+, .NET 11.0.0, 4 logical CPUs) | 2026-11-25 | SSD volume `/volume/data` | written by SQL in 67,114 ms (3,363,840 hourly and 673,920 5-minute rows) | 30 days | 1 hour | 314 ms | 211 ms | 19 ms | **N4 met** |
+| Reference host (as above) | 2026-11-25 | SSD volume `/volume/data` | (same database) | 1 year | 12 hours | 1,458 ms | 2,666 ms | 11 ms | **N4 met** |
+| Reference host (as above) | 2026-11-25 | SSD volume `/volume/data` | (same database) | 1,095 days | 2 days | 4,214 ms | 8,034 ms | 10 ms | **N4 met** |
 
 The development-host medians are of five reads each (30 days: chart action 131, 72, 56, 58, 71 ms, address action 79, 52, 51, 52, 57 ms, panel reads 5, 3, 3, 3, 3 ms; 1 year:
 375, 347, 359, 339, 342 ms, 641, 692, 695, 643, 671 ms and 4, 3, 3, 3, 3 ms; 1,095 days: 982, 955, 960, 963, 962 ms, 1,943, 1,958, 1,961, 1,896, 2,038 ms and 3, 3, 4, 3, 2 ms). The panel reads ran the path with the comparison snapshot (the tool prints "panel read: 4 store calls (2 snapshots decoded), comparison snapshot read" before the timings and stops if the comparison is not read). The tool printed that all 6 medians are under 10,000 ms.
 
 **Outcome on the reference host (Product Manager, 2026-11-25): N4 met.** The run, under one fixed clock and the default periods with the
-database below `/volume/data/bench/496/`, wrote the 26,280 hourly and 8,640 5-minute buckets directly into the tables (3,363,840 and 673,920
+database below `/volume/data/bench/496/` on the SSD volume, wrote the 26,280 hourly and 8,640 5-minute buckets directly into the tables (3,363,840 and 673,920
 rows, not folded) in 67,114 ms and printed "panel read: 4 store calls (2 snapshots decoded), comparison snapshot read". At a width of 1,000
 the three ranges had 720, 730 and 549 steps, each with 13 states, 11 program lines and 20 addresses shown. The medians are of five reads
 each (30 days: chart action 628, 373, 314, 195, 203 ms, address action 275, 215, 206, 206, 211 ms, panel reads 21, 19, 19, 39, 11 ms; 1 year:
 1,458, 1,533, 1,455, 1,463, 1,450 ms, 2,680, 2,643, 2,685, 2,659, 2,666 ms and 10, 11, 10, 11, 12 ms; 1,095 days: 4,250, 4,244, 4,166, 4,196,
 4,214 ms, 8,028, 8,485, 8,065, 8,019, 8,034 ms and 10, 10, 10, 10, 11 ms). The tool printed that all 6 medians are under 10,000 ms, criterion
-met; the largest is the address action of the 1,095-day range, 8,034 ms. The browser check on `/network` by the Product Manager: "everything works".
+met; the largest is the address action of the 1,095-day range, 8,034 ms. The browser check on `/network` by the Product Manager covered all of the issue's checks (a dragged range zooms both stacked charts, a click loads the listener panel for that moment, the per-state and per-program charts stack correctly with a working legend); the Product Manager reported that everything works, so AC10 is met as well.
 
 ## Log templates
 
