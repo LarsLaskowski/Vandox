@@ -75,8 +75,18 @@ internal static class NetworkViewBenchmark
             {
                 var now = ProgramBenchmark.Now;
 
-                await ConnectionBenchmark.WriteRegularAsync(store, 1, now.AddHours(-1), TimeSpan.FromMinutes(1), 0, cancellationToken).ConfigureAwait(false);
-                await ConnectionBenchmark.WriteRegularAsync(store, 1, now.AddHours(-PanelSnapshotHours), TimeSpan.FromMinutes(1), 1, cancellationToken).ConfigureAwait(false);
+                await ConnectionBenchmark.WriteRegularAsync(store, 1, now.AddHours(-1), TimeSpan.FromMinutes(1), 0, cancellationToken, "all").ConfigureAwait(false);
+                await ConnectionBenchmark.WriteRegularAsync(store, 1, now.AddHours(-PanelSnapshotHours), TimeSpan.FromMinutes(1), 1, cancellationToken, "all").ConfigureAwait(false);
+
+                var counter = new CountingHistoryReader(store);
+
+                await new NetworkListenerReader(counter).ReadAsync(ConnectionBenchmark.Source, new HistoryRange(now.AddDays(-30), now), null, cancellationToken).ConfigureAwait(false);
+                Console.WriteLine($"panel read: {counter.Calls} store calls ({counter.Snapshots} snapshots decoded), comparison snapshot {(counter.Snapshots == 2 ? "read" : "NOT read")}");
+
+                if (counter.Snapshots != 2)
+                {
+                    throw new InvalidOperationException("The panel reads did not reach the comparison snapshot.");
+                }
 
                 var medians = new List<(string Name, double Median)>();
 

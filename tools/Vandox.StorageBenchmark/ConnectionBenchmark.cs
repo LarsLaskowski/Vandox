@@ -131,14 +131,15 @@ internal static class ConnectionBenchmark
     /// <param name="interval">The time between two snapshots</param>
     /// <param name="firstIndex">The index of the first snapshot, which decides its addresses</param>
     /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <param name="inventory">The inventory state of the snapshots, <see langword="null"/> for none</param>
     /// <returns>A task that completes when everything is stored</returns>
-    internal static async Task WriteRegularAsync(SqliteStore store, int count, DateTimeOffset first, TimeSpan interval, int firstIndex, CancellationToken cancellationToken)
+    internal static async Task WriteRegularAsync(SqliteStore store, int count, DateTimeOffset first, TimeSpan interval, int firstIndex, CancellationToken cancellationToken, string? inventory = null)
     {
         for (var start = 0; start < count; start += WriteChunk)
         {
             var size = Math.Min(WriteChunk, count - start);
 
-            await store.WriteBatchAsync(RegularBatch(size, first + (start * interval), interval, firstIndex + start), cancellationToken).ConfigureAwait(false);
+            await store.WriteBatchAsync(RegularBatch(size, first + (start * interval), interval, firstIndex + start, inventory), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -538,14 +539,15 @@ internal static class ConnectionBenchmark
     /// <param name="first">The capture time of the first snapshot</param>
     /// <param name="interval">The time between two snapshots</param>
     /// <param name="firstIndex">The index of the first snapshot</param>
+    /// <param name="inventory">The inventory state of the snapshots, <see langword="null"/> for none</param>
     /// <returns>The batch</returns>
-    private static RecordBatch RegularBatch(int size, DateTimeOffset first, TimeSpan interval, int firstIndex)
+    private static RecordBatch RegularBatch(int size, DateTimeOffset first, TimeSpan interval, int firstIndex, string? inventory = null)
     {
         var records = new DataRecord[size];
 
         for (var index = 0; index < size; index++)
         {
-            records[index] = Record(first + (index * interval), RegularSnapshot(firstIndex + index));
+            records[index] = Record(first + (index * interval), RegularSnapshot(firstIndex + index, inventory));
         }
 
         return Batch(records);
@@ -555,8 +557,9 @@ internal static class ConnectionBenchmark
     /// Builds a regular snapshot of the agent: aggregates and the listener inventory, 25 remote addresses no other snapshot names.
     /// </summary>
     /// <param name="index">The index of the snapshot</param>
+    /// <param name="inventory">The inventory state of the snapshot, <see langword="null"/> for none</param>
     /// <returns>The snapshot</returns>
-    private static ConnectionSnapshot RegularSnapshot(int index)
+    private static ConnectionSnapshot RegularSnapshot(int index, string? inventory = null)
     {
         var states = new List<StateCount>();
 
@@ -596,7 +599,8 @@ internal static class ConnectionBenchmark
                                                                                                  Count = (uint)(1 + ((index + remote) % 5))
                                                                                              })
                              ],
-                   Listeners = Listeners()
+                   Listeners = Listeners(),
+                   Inventory = inventory
                };
     }
 

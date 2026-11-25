@@ -461,7 +461,7 @@ On a host with the .NET 11 runtime the tool runs as `dotnet publish/Vandox.Stora
 `--network-view` takes no other option. Under a fixed clock (2026-12-01 12:00 UTC) and the default periods it writes, into a fresh database
 and directly by SQL (not folded; the time of the write is printed), 1,095 days of hourly buckets at the trimmed size (26,280 buckets of 100
 addresses, 13 states and 15 programs) and 30 days of 5-minute buckets (8,640 buckets of 50 addresses, 13 states and 15 programs), and two
-regular connection snapshots (one hour and 25 hours back) for the panel. For a range of 30 days, one of 365 days and one of 1,095 days ending
+regular connection snapshots with an inventory (one hour and 25 hours back) for the panel. For a range of 30 days, one of 365 days and one of 1,095 days ending
 at the clock, at the step the page chooses for a chart 1,000 pixels wide (1 hour, 12 hours and 2 days), it times, each as the median of five:
 the chart action (`NetworkChartReader`) and the address action (`NetworkAddressReader`) with the reads of the panel (`NetworkListenerReader`)
 running beside it. It prints the verdict on the criterion. The database is deleted at the end.
@@ -470,13 +470,13 @@ running beside it. It prints the verdict on the criterion. The database is delet
 
 | Host | Date | Volume | Data set | Range | Step | Chart action | Address action (beside the panel) | Panel reads | Verdict |
 | ---- | ---- | ------ | -------- | ----- | ---- | -----------: | --------------------------------: | ----------: | ------- |
-| development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-24 | local disk | written by SQL in 13,389 ms (3,363,840 hourly and 673,920 5-minute rows) | 30 days | 1 hour | 76 ms | 63 ms | 3 ms | order of magnitude only |
-| development host (as above) | 2026-11-24 | local disk | (same database) | 1 year | 12 hours | 451 ms | 852 ms | 2 ms | order of magnitude only |
-| development host (as above) | 2026-11-24 | local disk | (same database) | 1,095 days | 2 days | 1,243 ms | 2,425 ms | 2 ms | order of magnitude only |
+| development host (sandbox, Ubuntu 24.04, .NET 11, 4 logical CPUs), not the reference host | 2026-11-24 | local disk | written by SQL in 11,247 ms (3,363,840 hourly and 673,920 5-minute rows) | 30 days | 1 hour | 71 ms | 52 ms | 3 ms | order of magnitude only |
+| development host (as above) | 2026-11-24 | local disk | (same database) | 1 year | 12 hours | 347 ms | 671 ms | 3 ms | order of magnitude only |
+| development host (as above) | 2026-11-24 | local disk | (same database) | 1,095 days | 2 days | 962 ms | 1,958 ms | 3 ms | order of magnitude only |
 | Reference host | pending | SSD volume | | 30 days, 1 year, 1,095 days | 1 hour, 12 hours, 2 days | **not yet measured** | **not yet measured** | **not yet measured** | **pending: run by the Product Manager** |
 
-The development-host medians are of five reads each (30 days: chart action 178, 92, 67, 74, 76 ms, address action 101, 63, 62, 63, 63 ms; 1 year:
-451, 495, 498, 439, 432 ms and 819, 852, 896, 894, 791 ms; 1,095 days: 1,243, 1,284, 1,259, 1,204, 1,240 ms and 2,469, 2,368, 2,374, 2,425, 2,799 ms). The tool printed that all 6 medians are under 10,000 ms. The
+The development-host medians are of five reads each (30 days: chart action 131, 72, 56, 58, 71 ms, address action 79, 52, 51, 52, 57 ms, panel reads 5, 3, 3, 3, 3 ms; 1 year:
+375, 347, 359, 339, 342 ms, 641, 692, 695, 643, 671 ms and 4, 3, 3, 3, 3 ms; 1,095 days: 982, 955, 960, 963, 962 ms, 1,943, 1,958, 1,961, 1,896, 2,038 ms and 3, 3, 4, 3, 2 ms). The panel reads ran the path with the comparison snapshot (the tool prints "panel read: 4 store calls (2 snapshots decoded), comparison snapshot read" before the timings and stops if the comparison is not read). The tool printed that all 6 medians are under 10,000 ms. The
 reference-host row stays pending until the run of the Product Manager is recorded here; until then N4 is not shown on the reference host.
 
 ## Log templates
