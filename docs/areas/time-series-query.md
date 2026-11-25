@@ -4,7 +4,7 @@
 
 The in-process query of metric lines for a range: which resolution it answers at, the time axis, the state of every point, the list of
 gaps and their mapping to lines, the markers (kills, boots, service restarts, backup runs), up to when the points are complete, the caps,
-the errors and the performance criterion. The history view of the web UI ([History view](web-ui-history-view.md)) calls it in process;
+the errors and the performance criterion. The history view of the web UI ([History view](web-ui-history-view.md)) and, with two options and a restart-only entry point, the [Services view](web-ui-services-view.md) call it in process;
 no HTTP route, page, option or listener belongs to it.
 
 ## Behavior
@@ -41,6 +41,13 @@ no HTTP route, page, option or listener belongs to it.
   to the axis there where the axis has none, at most one per interval between two neighbouring times of the original axis, so the axis
   holds at most 2 x target - 1 times. A time inside a concerning gap is a gap also before the first and after the last value of the line.
 - Rows of one line at one time merge as buckets do. A sum is clamped to the range of a double.
+
+### Services view options
+
+- `TimeSeriesQuery.StepsOnly` skips raw resolution: the query answers at a step even when the range lies in the raw period, so the lines share the step axis of the services view's status steps. `SkipMarkers` reads no markers and
+  returns neither markers nor a time up to which they are complete.
+- `RestartsAsync(from, to)` returns only the service restarts of the range, by the rule of *Markers* and without a series: the same restart checks with their own boot read, the cap of 1,000 and the same completeness time. It refuses a
+  range with `store: invalid query: from must be before to` or `store: invalid query: from and to must be within the storable range`, clamps the end to now and returns an empty list for a range that does not begin before now.
 
 ### Gaps
 
@@ -134,11 +141,11 @@ collectors are external text from the agent, returned as stored; a view shows th
 - The store reads and their limits: [Storage reading](storage-reading.md), *Time-series reads*.
 - The fold into rollups, the periods and the watermark: [Retention and rollups](retention.md).
 - The chart, its between-samples state and the shared gate: [Web UI](web-ui.md).
-- The view that calls the query: [History view](web-ui-history-view.md).
+- The views that call the query: [History view](web-ui-history-view.md), [Services view](web-ui-services-view.md).
 
 ## Implementation
 
-`Vandox.Storage`: `TimeSeriesService` (`QueryAsync`; `TimeSeriesQuery`, `SeriesKey`, `TimeSeriesResult` with `SeriesLine`, `SeriesPoint`,
+`Vandox.Storage`: `TimeSeriesService` (`QueryAsync`, `RestartsAsync`; `TimeSeriesQuery`, `SeriesKey`, `TimeSeriesResult` with `SeriesLine`, `SeriesPoint`,
 `SeriesGap`, `SeriesMarker`) over `ITimeSeriesReader`, which `SqliteStore` implements with `TimeSeriesQueries`. `Vandox.Backend`:
 `GatedTimeSeriesReader`, registered once with the service in `Hosting/ServeCommand`. The measurement is `--query` of
 `tools/Vandox.StorageBenchmark`.

@@ -42,7 +42,7 @@ import tracks files on top of this store in [Log import](log-import.md).
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is **17**. Times are Unix nanoseconds in `INTEGER` columns.
+The schema version is stored in `meta.schema_version`; the current version is **18**. Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
@@ -82,7 +82,7 @@ agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, ag
 (`connection_marks_changes`, the findings with changes only); `listener_comparisons(captured_at DESC, agent_id, seq DESC)` where
 `finding = 1` (`listener_comparisons_findings`); `gaps(agent_id, first_seq)` where `kind = 'sequence'` and `state <> 'closed'`
 (`gaps_seq`) and, apart, where `state = 'open'` (`gaps_seq_open`); `gaps(agent_id, from_at)`, unique, where `kind = 'time'` and
-`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader); `metric_rollups_5m(bucket)` and `metric_rollups_1h(bucket)`; `bucket` of each of the four program rollup tables (`program_rollups_5m_bucket`, `program_rollup_totals_5m_bucket`, `program_rollups_1h_bucket`, `program_rollup_totals_1h_bucket`); `bucket` of each of the four connection rollup tables (`connection_rollups_5m_bucket`, `connection_rollup_totals_5m_bucket`, `connection_rollups_1h_bucket`, `connection_rollup_totals_1h_bucket`); `connection_rollup_totals_5m(bucket)` where `addresses > 50` (`connection_rollup_totals_5m_trim`) and `connection_rollup_totals_1h(bucket)` where `addresses > 100` (`connection_rollup_totals_1h_trim`), the buckets the trim looks at; `records(id)` where `kind = 'process_snapshot'` (`records_process_fold`, below) and where `kind = 'connection_snapshot'` (`records_connection_fold`, below); `retention_holds(started_at)`; `records(kind, captured_at)` where `origin <> 'import'` (`records_removable`, the walk of a removal step); `gaps(to_at)` (`gaps_to_at`); the covering partial index `records_service_state` on `records(captured_at, json_extract(data, '$.unit'), json_extract(data, '$.restarts'), json_extract(data, '$.active_enter_at'), json_extract(data, '$.active_state'), boot_id, kind)` where `kind = 'service_state'`.
+`state <> 'closed'` (`gaps_time`); `gaps(agent_id, id)` (`gaps_agent`, the pages of the gap reader); `metric_rollups_5m(bucket)` and `metric_rollups_1h(bucket)`; `bucket` of each of the four program rollup tables (`program_rollups_5m_bucket`, `program_rollup_totals_5m_bucket`, `program_rollups_1h_bucket`, `program_rollup_totals_1h_bucket`); `bucket` of each of the four connection rollup tables (`connection_rollups_5m_bucket`, `connection_rollup_totals_5m_bucket`, `connection_rollups_1h_bucket`, `connection_rollup_totals_1h_bucket`); `connection_rollup_totals_5m(bucket)` where `addresses > 50` (`connection_rollup_totals_5m_trim`) and `connection_rollup_totals_1h(bucket)` where `addresses > 100` (`connection_rollup_totals_1h_trim`), the buckets the trim looks at; `records(id)` where `kind = 'process_snapshot'` (`records_process_fold`, below) and where `kind = 'connection_snapshot'` (`records_connection_fold`, below); `retention_holds(started_at)`; `records(kind, captured_at)` where `origin <> 'import'` (`records_removable`, the walk of a removal step); `gaps(to_at)` (`gaps_to_at`); the covering partial index `records_service_state` on `records(captured_at, json_extract(data, '$.unit'), json_extract(data, '$.restarts'), json_extract(data, '$.active_enter_at'), json_extract(data, '$.active_state'), boot_id, kind)` where `kind = 'service_state'`; the covering partial index `records_mariadb_status` on `records(captured_at, source, json_extract(data, '$.availability'), json_extract(data, '$.status.Memory_used'), json_extract(data, '$.status.Threads_connected'), json_array_length(data, '$.threads'), kind)` where `kind = 'mariadb_status'`.
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -144,6 +144,13 @@ What each step after the first adds, and how data stored before it reads:
   `kind`. **Build:** the step scans `records` once while the writer is busy: 11 ms on the development host and 47 ms on the SSD volume of the reference host for a database of 8,760
   hourly connection snapshots (`docs/BENCHMARKS.md`, *Connection rollups*).
 
+- **18** adds the index `records_mariadb_status` (record [0228](../decisions/0228-mariadb-status-members-are-indexed-and-folded-on-the-time-series-step-axis.md)):
+  one entry per stored `mariadb_status` record with the capture time, the source, the availability, `Memory_used`, `Threads_connected` and the number of threads read from the payload, and the kind (in the
+  index for the reason given for step 15). The reads of the services view name the same expressions with `INDEXED BY`, so the status values and the list of thread snapshots are answered from the index without
+  a payload ([Storage reading](storage-reading.md), *Services view reads*). **Write cost:** one index entry is computed per stored status record (a record of any other kind only checks its `kind`), and the
+  entry holds no payload. **Build:** the step reads every stored `mariadb_status` record once while the writer is busy, the snapshots near 1 MiB included: 1,044 ms on the development host and 3,277 ms on the SSD volume of the reference host for 86,400 status records of 30 days at 30 seconds, one in 100 with a thread snapshot of about 1 MiB (1,055 to 1,134 ms in three runs on the development host; `docs/BENCHMARKS.md`, *Services view*). A
+  `mariadb_status` payload that is not valid JSON would fail the step (`store: migration 18: …`, rolled back, version 17 kept) and its insert; the backend only stores payloads it serialized itself.
+
 ### Migrations
 
 - Migrations are an ordered list of steps. A step runs in its own write transaction that first re-reads the version, skips itself if
@@ -196,6 +203,7 @@ stored once") is tested against the real store; fakes for other consumers only r
   watermark of process snapshots and the index `records_process_fold` exist.
 - [0225](../decisions/0225-connection-snapshots-are-folded-into-per-state-program-and-address-buckets-ended-buckets-trimmed.md) — why the connection rollup tables,
   the watermark of connection snapshots, the trim indexes and the index `records_connection_fold` exist.
+- [0228](../decisions/0228-mariadb-status-members-are-indexed-and-folded-on-the-time-series-step-axis.md) — why the index `records_mariadb_status` exists.
 - [0204](../decisions/0204-sql-command-text-meets-ca2100-through-justified-suppressions-at-the-command-helpers.md) — why a helper that takes
   the statement text suppresses CA2100 with a reason instead of the callers assigning it.
 

@@ -265,12 +265,23 @@ internal sealed partial class AddressTimes
     /// <returns>The range</returns>
     internal HistoryRange Range(DateTimeOffset now)
     {
+        return Range(now, HistoryPreset.OneDay);
+    }
+
+    /// <summary>
+    /// Gives the range: the fixed one, else a preset up to now.
+    /// </summary>
+    /// <param name="now">The current time</param>
+    /// <param name="fallback">The preset of an address without a range</param>
+    /// <returns>The range</returns>
+    internal HistoryRange Range(DateTimeOffset now, HistoryPreset fallback)
+    {
         if (From is not null && To is not null)
         {
             return new HistoryRange(From.Value, To.Value);
         }
 
-        return new HistoryRange(now - HistoryView.PresetSpan(Preset ?? HistoryPreset.OneDay), now);
+        return new HistoryRange(now - HistoryView.PresetSpan(Preset ?? fallback), now);
     }
 
     /// <summary>

@@ -62,5 +62,39 @@ public class SeriesGapTests
         Assert.AreEqual(expected, concerns, $"collector '{collector}' against the line {source}/{name}");
     }
 
+    /// <summary>
+    /// A gap concerns a collector when it names the collector, names none, or names one the time-series query leaves unnamed; a gap of another named collector concerns it not.
+    /// </summary>
+    /// <param name="gapCollector">The collector of the gap</param>
+    /// <param name="collector">The collector asked about</param>
+    /// <param name="expected">Whether the gap concerns the collector</param>
+    [TestMethod]
+    [TestCategory("AC3")]
+    [TestCategory("AC5")]
+    [DataRow("systemd", "systemd", true)]
+    [DataRow("mariadb", "mariadb", true)]
+    [DataRow("", "systemd", true)]
+    [DataRow("", "mariadb", true)]
+    [DataRow("future", "systemd", true)]
+    [DataRow("future", "mariadb", true)]
+    [DataRow("mariadb", "systemd", false)]
+    [DataRow("systemd", "mariadb", false)]
+    [DataRow("filesystem", "systemd", false)]
+    [DataRow("logs", "mariadb", false)]
+    public void SeriesGapConcernsCollector(string gapCollector, string collector, bool expected)
+    {
+        // Arrange
+        var gap = new SeriesGap
+                  {
+                      Collector = gapCollector
+                  };
+
+        // Act
+        var concerns = gap.ConcernsCollector(collector);
+
+        // Assert
+        Assert.AreEqual(expected, concerns, $"gap of collector '{gapCollector}' against the collector '{collector}'");
+    }
+
     #endregion // Methods
 }

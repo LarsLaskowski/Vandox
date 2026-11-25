@@ -12,6 +12,11 @@ internal static class RetentionSamples
     #region Constants
 
     /// <summary>
+    /// Undoes schema step 18: the covering partial index of the <c>mariadb_status</c> members.
+    /// </summary>
+    internal const string UndoStepEighteen = "DROP INDEX records_mariadb_status";
+
+    /// <summary>
     /// Undoes schema step 17: the four connection rollup tables with their indexes, the connection snapshot fold index and the meta key of the connection fold.
     /// </summary>
     internal const string UndoStepSeventeen = "DROP INDEX records_connection_fold; DROP TABLE connection_rollups_5m; DROP TABLE connection_rollup_totals_5m; DROP TABLE connection_rollups_1h; DROP TABLE connection_rollup_totals_1h; DELETE FROM meta WHERE key = 'connection_rollup_after_id'";

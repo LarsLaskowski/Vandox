@@ -11,7 +11,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IProgramRollupReader, IConnectionRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IAgentTimelineReader, IImportTracker, IRetentionStore, IRollupReader, IProgramRollupReader, IConnectionRollupReader, ITimeSeriesReader, IOverviewReader, IHistoryReader, IServiceHistoryReader, IMariaDbHistoryReader, IAsyncDisposable
 {
     #region Constants
 
@@ -1446,6 +1446,52 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IHistoryReader
+
+    #region IServiceHistoryReader
+
+    /// <inheritdoc/>
+    public Task<ServiceAvailabilityResult> ServiceAvailabilityAsync(ServiceAvailabilityQuery query, CancellationToken cancellationToken)
+    {
+        ServiceHistoryQueries.Validate(query);
+
+        return ReadAsync(connection => ServiceHistoryQueries.ReadAsync(connection, query, cancellationToken), ServiceHistoryQueries.Context, cancellationToken);
+    }
+
+    #endregion // IServiceHistoryReader
+
+    #region IMariaDbHistoryReader
+
+    /// <inheritdoc/>
+    public Task<MariaDbStatusResult> MariaDbStatusAsync(MariaDbStatusQuery query, CancellationToken cancellationToken)
+    {
+        MariaDbHistoryQueries.ValidateStatus(query);
+
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadStatusAsync(connection, query, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<ThreadSnapshotStamp>> ThreadSnapshotsAsync(ThreadSnapshotQuery query, CancellationToken cancellationToken)
+    {
+        MariaDbHistoryQueries.ValidateSnapshots(query);
+
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadStampsAsync(connection, query, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ThreadSnapshotStamp?> ClosestThreadSnapshotAsync(DateTimeOffset at, TimeSpan window, CancellationToken cancellationToken)
+    {
+        MariaDbHistoryQueries.ValidateClosest(at, window);
+
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadClosestAsync(connection, at, window, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<ThreadSnapshot?> ThreadSnapshotAsync(long recordId, CancellationToken cancellationToken)
+    {
+        return ReadAsync(connection => MariaDbHistoryQueries.ReadSnapshotAsync(connection, recordId, cancellationToken), MariaDbHistoryQueries.Context, cancellationToken);
+    }
+
+    #endregion // IMariaDbHistoryReader
 
     #region IAsyncDisposable
 

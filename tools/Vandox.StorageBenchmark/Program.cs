@@ -32,7 +32,7 @@ public static class Program
     /// <summary>
     /// Runs the measurement.
     /// </summary>
-    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c>, or <c>--log-lines N</c> or <c>--search-lines N</c> with optionally <c>--size N</c>, or <c>--backfill</c> or <c>--retention</c> with optionally <c>--size N</c>, or <c>--query</c> or <c>--programs</c> or <c>--connections</c> or <c>--processes-view</c> or <c>--network-view</c></param>
+    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c>, or <c>--log-lines N</c> or <c>--search-lines N</c> with optionally <c>--size N</c>, or <c>--backfill</c> or <c>--retention</c> with optionally <c>--size N</c>, or <c>--query</c> or <c>--programs</c> or <c>--connections</c> or <c>--processes-view</c> or <c>--network-view</c> or <c>--services-view</c></param>
     /// <returns>The exit code: 0 on success, 1 on a failure, 2 on a usage error</returns>
     public static async Task<int> Main(string[] args)
     {
@@ -84,7 +84,7 @@ public static class Program
             }
         }
 
-        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> [--batches N] [--size N] [--warmup] | --log-lines N [--size N] | --search-lines N [--size N] | --backfill [--size N] | --retention [--size N] | --query | --programs | --connections | --processes-view | --network-view").ConfigureAwait(false);
+        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> [--batches N] [--size N] [--warmup] | --log-lines N [--size N] | --search-lines N [--size N] | --backfill [--size N] | --retention [--size N] | --query | --programs | --connections | --processes-view | --network-view | --services-view").ConfigureAwait(false);
 
         return UsageError;
     }
@@ -142,6 +142,7 @@ public static class Program
                    ProgramBenchmark.Option => RunProgramsAsync,
                    QueryBenchmark.Option => RunQueryAsync,
                    RetentionBenchmark.Option => RunRetentionAsync,
+                   ServicesViewBenchmark.Option => RunServicesViewAsync,
                    _ => null
                };
     }
@@ -232,6 +233,36 @@ public static class Program
         }
 
         await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> --network-view").ConfigureAwait(false);
+
+        return UsageError;
+    }
+
+    /// <summary>
+    /// Runs the services view measurement: <c>&lt;directory&gt; --services-view</c>.
+    /// </summary>
+    /// <param name="args">The arguments</param>
+    /// <returns>The exit code: 0 on success, 1 on a failure, 2 on a usage error</returns>
+    private static async Task<int> RunServicesViewAsync(string[] args)
+    {
+        if (Directory.Exists(args[0]) && args.Length == 2)
+        {
+            using var stop = new CancellationTokenSource();
+
+            try
+            {
+                await ServicesViewBenchmark.RunAsync(args[0], stop.Token).ConfigureAwait(false);
+
+                return 0;
+            }
+            catch (Exception exception) when (exception is IOException or StoreException or UnauthorizedAccessException)
+            {
+                await Console.Error.WriteLineAsync($"failed: {exception.GetType().Name}: {exception.Message}").ConfigureAwait(false);
+
+                return 1;
+            }
+        }
+
+        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> --services-view").ConfigureAwait(false);
 
         return UsageError;
     }

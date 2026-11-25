@@ -56,6 +56,11 @@ internal sealed class ScriptedTimeSeriesReader : ITimeSeriesReader, IDisposable
     internal List<KernelEventRow> Kernel { get; } = [];
 
     /// <summary>
+    /// Gets the service state records the reads of the service changes answer from, in the range of the query and in the order of their capture.
+    /// </summary>
+    internal List<ServiceStateRow> Services { get; } = [];
+
+    /// <summary>
     /// Gets the recorded calls: the member name, its argument and its token.
     /// </summary>
     internal IReadOnlyList<(string Name, object? Argument, CancellationToken Token)> Calls
@@ -204,6 +209,16 @@ internal sealed class ScriptedTimeSeriesReader : ITimeSeriesReader, IDisposable
     }
 
     /// <summary>
+    /// Gets the scripted service state records of a range in the order of their capture, up to the limit of the query.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <returns>The rows</returns>
+    private IReadOnlyList<ServiceStateRow> ServiceChangesOf(TimeRangeQuery query)
+    {
+        return [.. Services.Where(row => row.CapturedAt >= query.From && row.CapturedAt <= query.To).OrderBy(row => row.CapturedAt).Take(query.Limit)];
+    }
+
+    /// <summary>
     /// Gets the scripted kernel events of a range in the order of the store.
     /// </summary>
     /// <param name="query">The query</param>
@@ -244,7 +259,7 @@ internal sealed class ScriptedTimeSeriesReader : ITimeSeriesReader, IDisposable
     /// <inheritdoc />
     public Task<IReadOnlyList<ServiceStateRow>> ServiceChangesAsync(TimeRangeQuery query, CancellationToken cancellationToken)
     {
-        return RunAsync<IReadOnlyList<ServiceStateRow>>(nameof(ServiceChangesAsync), query, () => [], cancellationToken);
+        return RunAsync<IReadOnlyList<ServiceStateRow>>(nameof(ServiceChangesAsync), query, () => ServiceChangesOf(query), cancellationToken);
     }
 
     /// <inheritdoc />
