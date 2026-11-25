@@ -49,6 +49,20 @@ internal static class SeriesMarkerReader
     }
 
     /// <summary>
+    /// Reads the service restarts of the range, at most <see cref="TimeSeriesService.MaxMarkers"/>, with the restart checks of <see cref="ReadAsync"/> and no other marker.
+    /// </summary>
+    /// <param name="reader">The store reads</param>
+    /// <param name="range">The range</param>
+    /// <param name="cancellationToken">Cancels the reads</param>
+    /// <returns>A task that returns the restarts in time order and the time up to which the list is complete, <c>null</c> when it is complete</returns>
+#pragma warning disable RH2003, S1172 // Skeleton: removed with the implementation
+    internal static Task<(List<SeriesMarker> Markers, DateTimeOffset? CompleteUntil)> ReadRestartsOnlyAsync(ITimeSeriesReader reader, SeriesRange range, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S1172
+
+    /// <summary>
     /// Adds the OOM kills, once per boot ID, kernel time and process ID, and the boots, once per boot ID.
     /// </summary>
     /// <param name="reader">The store reads</param>

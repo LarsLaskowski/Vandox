@@ -14,9 +14,11 @@ internal static class SeriesLineReader
     /// <param name="policy">The retention policy</param>
     /// <param name="series">The distinct series in query order</param>
     /// <param name="range">The range</param>
+    /// <param name="stepsOnly">Whether raw resolution is skipped</param>
     /// <param name="cancellationToken">Cancels the reads</param>
     /// <returns>A task that returns the lines</returns>
-    internal static async Task<SeriesData> ReadAsync(ITimeSeriesReader reader, RetentionPolicy policy, IReadOnlyList<SeriesKey> series, SeriesRange range, CancellationToken cancellationToken)
+#pragma warning disable S1172 // Skeleton: removed with the implementation
+    internal static async Task<SeriesData> ReadAsync(ITimeSeriesReader reader, RetentionPolicy policy, IReadOnlyList<SeriesKey> series, SeriesRange range, bool stepsOnly, CancellationToken cancellationToken)
     {
         if (policy.Raw is null || range.From >= range.Now - policy.Raw.Value)
         {
@@ -30,6 +32,7 @@ internal static class SeriesLineReader
 
         return await ReadStepsAsync(reader, series, range, SeriesLadder.Choose(range, policy), cancellationToken).ConfigureAwait(false);
     }
+#pragma warning restore S1172
 
     /// <summary>
     /// Reads the raw values of every series, one distinct time more than the target at most, and gives up when the union of the times exceeds the target.

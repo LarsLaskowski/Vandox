@@ -27,5 +27,15 @@ public sealed class TimeSeriesQuery
     /// </summary>
     public int Target { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether raw resolution is skipped and the lines are read from the rollup steps.
+    /// </summary>
+    public bool StepsOnly { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether no markers are read.
+    /// </summary>
+    public bool SkipMarkers { get; init; }
+
     #endregion // Properties
 }
